@@ -138,7 +138,7 @@ test('seats follow membership: viewers are free and changes resync the subscript
  expect(await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org})).toBe('https://checkout.stripe.com/c/pay/cs_1');
  const session=new URLSearchParams(calls[1].body);
  // The untouched 14-day trial carries into the subscription, so the card is not charged until it ends.
- expect(Object.fromEntries(session)).toMatchObject({mode:'subscription',customer:'cus_1',client_reference_id:org,integration_identifier:expect.stringMatching(/^openreview-starter-seats-[a-z]{8}$/),'line_items[0][price]':'price_seat','line_items[0][quantity]':'2','subscription_data[metadata][organizationId]':org,'subscription_data[trial_end]':String(Math.floor((Date.now()+14*86400000)/1000)),success_url:'https://review.example.com/dashboard/settings/billing?checkout=success',cancel_url:'https://review.example.com/dashboard/settings/billing?checkout=cancelled'});
+ expect(Object.fromEntries(session)).toMatchObject({mode:'subscription',customer:'cus_1',client_reference_id:org,integration_identifier:expect.stringMatching(/^openreview-starter-seats-[a-z]{8}$/),allow_promotion_codes:'true','line_items[0][price]':'price_seat','line_items[0][quantity]':'2','subscription_data[metadata][organizationId]':org,'subscription_data[trial_end]':String(Math.floor((Date.now()+14*86400000)/1000)),success_url:'https://review.example.com/dashboard/settings/billing?checkout=success',cancel_url:'https://review.example.com/dashboard/settings/billing?checkout=cancelled'});
  expect(session.has('payment_method_types')).toBe(false);
  // From guided setup, Checkout returns to the plan step.
  await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org,returnTo:'onboarding'});
