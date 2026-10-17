@@ -55,6 +55,19 @@ function fixture(
     },
   };
 }
+// Several changed files, each [before or null for a new file, after], as one pull request.
+function pullRequestReplica(id: string, category: string, path: string, terms: string[], changes: Record<string, [string | null, string]>, context: Record<string, string>, title: string, description: string): Fixture {
+  const lines = (text: string, mark: string) => text.split("\n").map((l) => mark + l).join("\n");
+  return {
+    id,
+    expected: { path, category, terms },
+    input: {
+      repository: `evaluation/${id}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), title, description, mode: "standard", rules: [],
+      diff: Object.entries(changes).map(([file, [before, after]]) => ({ path: file, status: before === null ? "added" : "modified", patch: `@@ -${before === null ? "0,0" : "1," + before.split("\n").length} +1,${after.split("\n").length} @@\n` + (before === null ? "" : lines(before, "-") + "\n") + lines(after, "+") })),
+      files: [...Object.entries(changes).map(([file, [, after]]) => ({ path: file, content: after, sha: "b" })), ...Object.entries(context).map(([file, content]) => ({ path: file, content, sha: "c" }))],
+    },
+  };
+}
 export const fixtures: Fixture[] = [
   multiHop(
     "multi-hop-currency",
@@ -243,5 +256,21 @@ export const fixtures: Fixture[] = [
     ),
     "PAY-7",
     "# PAY-7: Add the plan to the customer export\n\nAcceptance criteria:\n- The CSV export includes each customer's plan.\n- Soft-deleted customers (deletedAt set) must never appear in the export.\n",
+  ),
+  // A replica of a live pull request (2026-10-16): shipping documents "$50.00 or more" but compares
+  // "> 50", next to two louder checkout defects in another file. The review reported only the two
+  // checkout defects; the expected finding here is the shipping boundary.
+  pullRequestReplica(
+    "contract-boundary",
+    "correctness",
+    "src/shipping.ts",
+    ["boundary", "inclusive", "exactly", "or more", ">="],
+    {
+      "src/shipping.ts": [null, 'import { cartTotal, type Item } from "./cart";\n\n/** Orders of $50.00 or more ship free; anything smaller pays a flat $5.99. Returns dollars. */\nexport function shippingCost(items: Item[]): number {\n  return cartTotal(items) > 50 ? 0 : 5.99;\n}'],
+      "src/checkout.ts": ['import { cartTotal, type Item } from "./cart";\n\n/** Amount to charge, in cents, for a non-empty cart. */\nexport function amountDue(items: Item[]): number {\n  if (items.length === 0) throw new Error("Cart is empty");\n  return Math.round(cartTotal(items) * 100);\n}', 'import { cartTotal, type Item } from "./cart";\nimport { shippingCost } from "./shipping";\n\n/**\n * Amount to charge, in cents, for a non-empty cart: the items, less an optional\n * percentage coupon (0–100) that applies to the items only, plus shipping.\n */\nexport function amountDue(items: Item[], couponPercent = 0): number {\n  if (items.length === 0) throw new Error("Cart is empty");\n  const items$ = cartTotal(items) - couponPercent;\n  return Math.round(items$ + shippingCost(items) * 100);\n}'],
+    },
+    { "src/cart.ts": "export type Item = { name: string; price: number; quantity: number };\n\n/** Sum of price × quantity for every item in the cart. */\nexport function cartTotal(items: Item[]): number {\n  let total = 0;\n  for (const item of items) total += item.price * item.quantity;\n  return total;\n}" },
+    "Add shipping costs and percentage coupons at checkout",
+    "Adds a flat shipping fee with free shipping from $50, and an optional percentage coupon that applies to the items (not shipping).",
   ),
 ];
