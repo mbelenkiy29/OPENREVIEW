@@ -3,6 +3,8 @@
 ## Unreleased — October 2026
 
 ### Pull request reviews
+- Reviews catch boundaries that contradict their own documentation, such as a comment saying "$50.00 or more" over code that compares `> 50`.
+- Findings are no longer dropped when the model attaches a made-up rule ID. Only custom-rule findings need a real rule.
 - On GitHub the review summary now goes at the end of the pull request description and is replaced on every review. The author's own text is kept, and reviews never read the block back. Choose "one comment" under Settings → Review to keep the previous behavior.
 - A more compact summary on GitHub:
   - The verdict, the confidence score and its reason come first.
