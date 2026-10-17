@@ -19,8 +19,9 @@ export const checkout = action({ args: { token: v.string(), organizationId: v.id
     await ctx.runMutation(internal.billing.linkCustomer, { organizationId: a.organizationId, customerId: customer });
   }
   // The card is collected now; any remaining trial carries over, so the first charge waits for it.
+  // Checkout also takes a promotion code (for example a single-use code for a free month; docs/billing.md).
   const back = appOrigin() + returnPaths[a.returnTo ?? "settings"], trialEnd = checkoutTrialEnd(context.trialEndsAt, Date.now());
-  const session = await stripe<{ url: string }>("/v1/checkout/sessions", { mode: "subscription", customer, client_reference_id: a.organizationId, integration_identifier: integrationIdentifier, line_items: [{ price, quantity: context.seats }], subscription_data: { metadata: { organizationId: a.organizationId }, ...(trialEnd ? { trial_end: trialEnd } : {}) }, success_url: `${back}?checkout=success`, cancel_url: `${back}?checkout=cancelled` }, key);
+  const session = await stripe<{ url: string }>("/v1/checkout/sessions", { mode: "subscription", customer, client_reference_id: a.organizationId, integration_identifier: integrationIdentifier, allow_promotion_codes: true, line_items: [{ price, quantity: context.seats }], subscription_data: { metadata: { organizationId: a.organizationId }, ...(trialEnd ? { trial_end: trialEnd } : {}) }, success_url: `${back}?checkout=success`, cancel_url: `${back}?checkout=cancelled` }, key);
   return session.url;
 } });
 export const portal = action({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<string> => {

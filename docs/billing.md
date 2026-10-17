@@ -25,6 +25,18 @@ Checkout carries any remaining trial into the subscription (`subscription_data.t
 
 When a review is blocked, it is recorded as failed with a `Billing:` reason, visible on the pull request's review page. Blocked reviews are also counted on **Settings → Billing**.
 
+## Discounts and free months
+
+Checkout shows an **Add promotion code** box. To give a prospect a free month:
+1. **Coupon:** create one in Stripe (Product catalog → Coupons): 100% off, duration **Multiple months** = 1, limited to the Starter product.
+2. **Promotion code:** give the coupon a single-use code (limit 1 redemption, with an expiry date) and send that code to the prospect. Reuse the coupon and create one code per prospect.
+
+The prospect enters the code at Checkout, from the setup plan step or Settings → Billing. Their first billed month is free for every seat. Any remaining trial still comes first, so the first charge falls one month after the trial ends, or one month after Checkout if the trial is over.
+
+**Existing subscriptions:** in the Stripe Dashboard, open the subscription and choose **Actions → Update subscription → Add coupon**. The discount applies from the next invoice.
+
+**Deactivating:** archive a promotion code to stop new redemptions. Deleting a coupon also stops them, and keeps the discounts already applied.
+
 ## Setup (operator)
 
 1. **Sandbox:** use a Stripe sandbox (or test mode) for setup and testing.

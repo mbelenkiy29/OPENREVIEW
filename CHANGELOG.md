@@ -34,6 +34,7 @@
 - When billing is on, guided setup ends with a plan step: add a payment method through Stripe Checkout without being charged before the trial ends, or continue on the trial.
 - The 14-day trial now starts with a workspace's first review instead of its creation date.
 - Restricted Stripe keys (`rk_…`) are accepted, and Stripe requests pin an API version.
+- Stripe Checkout accepts promotion codes, so a prospect can redeem a single-use code for a free month.
 
 ### Site
 - Privacy Policy and Terms of Service pages for the hosted service, linked from the footer and the sign-in buttons.
