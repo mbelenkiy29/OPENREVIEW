@@ -18,3 +18,12 @@ export async function semanticHits(ctx: ActionCtx, repositoryId: Id<"repositorie
   const scores = new Map(matches.map((m) => [m._id, m._score]));
   return (await ctx.runQuery(internal.embeddings.chunkHits, { ids: matches.map((m) => m._id), repositoryId })).map((h) => ({ path: h.path, startLine: h.startLine, endLine: h.endLine, score: scores.get(h.id) ?? 0, reason: h.symbol }));
 }
+// Review context: a failing embedding endpoint degrades to graph and text retrieval with a coverage
+// note, instead of failing the whole review.
+export async function reviewSemanticHits(ctx: ActionCtx, repositoryId: Id<"repositories">, text: string, limit = 16, search = semanticHits): Promise<{ hits: RankedHit[]; note?: string }> {
+  try { return { hits: await search(ctx, repositoryId, text, limit) }; }
+  catch (error) {
+    console.error(JSON.stringify({ event: "review.semantic_search_failed", repositoryId, error: redact(error instanceof Error ? error.message : "failed").slice(0, 200) }));
+    return { hits: [], note: "Semantic code search was unavailable for this review; related code came from the code graph and text search only." };
+  }
+}

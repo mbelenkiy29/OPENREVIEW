@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { SiteFooter, SiteHeader, sourceRepository } from "./site-chrome";
 import { AgentReplica, AnalyticsReplica, ChatReplica, FindingReplica, ReviewReplica, SummaryReplica } from "./landing/replicas";
 import { Copy } from "./dashboard/live";
+import { ScrollTable } from "./dashboard/scroll-table";
 import { billingConfig } from "../src/billing";
 import { homeStructuredData, jsonLd } from "../src/structured-data";
 
@@ -54,7 +55,7 @@ export default function Home() {
           <Link className="button primary large" href="/signup">Get started</Link>
           <Link className="button large" href="/login">Sign in</Link>
         </div>
-        {billing.enabled && <p className="hero-note">{billing.trialDays} days free, no card required.</p>}
+        {billing.enabled && <p className="hero-note">{billing.trialDays} days free. Cancel anytime before the trial ends.</p>}
         <p className="hero-links"><Link href="/docs/quickstart">Read the quickstart →</Link><Link href="/docs/self-hosting">Self-host it →</Link></p>
       </section>
       <div className="stage"><ReviewReplica /><p className="stage-hint">Live demo with sample data. Click around.</p></div>
@@ -93,24 +94,24 @@ export default function Home() {
         </div>
         <div className="terminal">
           <div className="terminal-bar"><span>Terminal</span><Copy value={commands.join("\n")} label="Copy" /></div>
-          <pre>{commands.map((c) => <code key={c}><span>$ </span>{c}{"\n"}</code>)}</pre>
+          <pre tabIndex={0} aria-label="Commands to run OpenReview locally">{commands.map((c) => <code key={c}><span>$ </span>{c}{"\n"}</code>)}</pre>
         </div>
       </section>
 
       <section className="compare-band" aria-labelledby="deploy-heading">
         <h2 id="deploy-heading">Self-hosted or cloud</h2>
-        <div className="table-scroll"><table className="compare"><thead><tr><th><span className="sr-only">Aspect</span></th><th>Self-hosted</th><th>Cloud</th></tr></thead><tbody>
+        <ScrollTable label="Self-hosted or cloud comparison" className="table-scroll"><table className="compare"><thead><tr><th><span className="sr-only">Aspect</span></th><th>Self-hosted</th><th>Cloud</th></tr></thead><tbody>
           <tr><th scope="row">Where it runs</th><td>Your Next.js host and Convex backend</td><td>A hosted OpenReview deployment</td></tr>
           <tr><th scope="row">Model and keys</th><td>Yours, with your own budget</td><td>Provided by the operator</td></tr>
           <tr><th scope="row">Review limits</th><td>None</td><td>Plan quota per seat</td></tr>
           <tr><th scope="row">Setup</th><td><Link href="/docs/self-hosting">Self-hosting guide</Link></td><td>Sign in and install the app</td></tr>
-        </tbody></table></div>
+        </tbody></table></ScrollTable>
       </section>
 
       {billing.enabled && <section id="pricing" className="pricing" aria-labelledby="pricing-heading">
         <h2 id="pricing-heading">Pricing</h2>
         <div className="feature-grid two">
-          <article className="feature-card"><h3>Trial</h3><p className="price">Free for {billing.trialDays} days</p><p>Up to {billing.trialReviews} reviews a month, with every feature included. No card required.</p><p className="pricing-action"><Link className="button primary" href="/signup">Start free trial</Link></p></article>
+          <article className="feature-card"><h3>Free trial</h3><p className="price">Free for {billing.trialDays} days</p><p>Everything in Starter. Add a card when you set up your workspace; nothing is charged until the trial ends, and you can cancel before then.</p><p className="pricing-action"><Link className="button primary" href="/signup">Start free trial</Link></p></article>
           <article className="feature-card"><h3>Starter</h3><p className="price">{process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>Unlimited reviews, with a fair-use limit of {billing.reviewsPerSeat} per seat each month. Owners, admins and members are seats; viewers are free.</p><p className="pricing-action"><Link className="button" href="/signup">Choose Starter</Link></p></article>
         </div>
       </section>}

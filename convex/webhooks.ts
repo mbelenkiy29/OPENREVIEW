@@ -1,9 +1,10 @@
 import { effectiveSettings } from "./scopes";
-import { autoEnableNewRepository } from "./repositoryOnboarding";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import {disableRepository} from "./repositories";
+import {disableRepository,restoreRepository,upsertInstallationRepository} from "./repositories";
+import { audit } from "./auth";
+import { providerGroupValidator } from "./schema";
 import {cancelReview} from "./reviewLifecycle";
 
 export const receive = internalMutation({
@@ -145,11 +146,14 @@ export const installationEvent = internalMutation({
   args: {
     installationId: v.number(),
     action: v.string(),
+    permissions: v.optional(v.record(v.string(), v.string())),
     repositories: v.array(
       v.object({
         id: v.number(),
         fullName: v.string(),
-        defaultBranch: v.string(),
+        // Absent when the webhook payload does not carry it; existing rows keep theirs.
+        defaultBranch: v.optional(v.string()),
+        group: v.optional(providerGroupValidator),
       }),
     ),
   },
@@ -161,6 +165,7 @@ export const installationEvent = internalMutation({
       )
       .unique();
     if (!install) return; // Installation callbacks bind a verified owner to a workspace before webhook processing can access it.
+    if (args.permissions) await ctx.db.patch(install._id, { permissions: args.permissions, permissionsCheckedAt: Date.now() });
     if (["deleted", "suspend"].includes(args.action)) {
       await ctx.db.patch(install._id, { active: false });
       for (const repo of await ctx.db
@@ -168,34 +173,36 @@ export const installationEvent = internalMutation({
         .withIndex("by_installation", (q) =>
           q.eq("installationId", args.installationId),
         )
-        .collect())
+        .collect()) {
+        // Only repositories that were on are marked, so restoring never turns on ones an admin disabled.
+        if (repo.enabled) await ctx.db.patch(repo._id, { disabledBy: args.action === "suspend" ? "suspend" : "uninstall" });
         await disableRepository(ctx,repo);
+      }
+      await audit(ctx, install.organizationId, undefined, `github.installation_${args.action === "suspend" ? "suspended" : "deleted"}`, String(args.installationId));
       return;
     }
-    if (args.action === "unsuspend")
+    if (args.action === "unsuspend") {
       await ctx.db.patch(install._id, { active: true });
+      for (const repo of await ctx.db.query("repositories").withIndex("by_installation", (q) => q.eq("installationId", args.installationId)).collect())
+        if (repo.disabledBy === "suspend") await restoreRepository(ctx, repo._id);
+      await audit(ctx, install.organizationId, undefined, "github.installation_unsuspended", String(args.installationId));
+    }
     for (const r of args.repositories) {
-      const existing = await ctx.db
-        .query("repositories")
-        .withIndex("by_github", (q) => q.eq("githubId", r.id))
-        .unique();
       if (args.action === "removed") {
-        if (existing?.organizationId === install.organizationId)
+        const existing = await ctx.db
+          .query("repositories")
+          .withIndex("by_github", (q) => q.eq("githubId", r.id))
+          .unique();
+        if (existing?.organizationId === install.organizationId) {
+          // Access removed on GitHub: adding it back restores the repository if it was on.
+          if (existing.enabled) await ctx.db.patch(existing._id, { disabledBy: "uninstall" });
           await disableRepository(ctx,existing);
+        }
         continue;
       }
-      if (!existing)
-        // Newly installed: disabled unless the workspace (or team) turned on auto-enable.
-        await autoEnableNewRepository(ctx, await ctx.db.insert("repositories", {
-          organizationId: install.organizationId,
-          installationId: install.installationId,
-          githubId: r.id,
-          fullName: r.fullName,
-          defaultBranch: r.defaultBranch,
-          enabled: false,
-          indexStatus: "not_indexed",
-          createdAt: Date.now(),
-        }));
+      // Newly installed rows are disabled unless the workspace (or team) turned on auto-enable; they
+      // get settings and a team exactly as through the install callback.
+      await upsertInstallationRepository(ctx, { organizationId: install.organizationId, installationId: install.installationId, repository: r });
     }
   },
 });

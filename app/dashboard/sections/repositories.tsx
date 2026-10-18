@@ -1,4 +1,5 @@
 import { providerDisplay } from "../../../src/provider-display";
+import { installHref, linkHref } from "../../../src/github-install";
 import Link from "next/link";
 
 import { configureRepository, reindex } from "../actions";
@@ -16,12 +17,17 @@ export function RepositoriesSection({ ctx }: { ctx: DashboardContext }) {
                 pull requests.
               </p>
               {isAdmin && (
-                <a
-                  className="button primary"
-                  href={`/api/github/install?organization=${organization._id}`}
-                >
-                  Connect GitHub App
-                </a>
+                <span className="row">
+                  <a
+                    className="button primary"
+                    href={installHref(organization._id, "/dashboard/repositories")}
+                  >
+                    Connect GitHub App
+                  </a>
+                  <Link href={linkHref(organization._id, "/dashboard/repositories")}>
+                    Link an existing installation
+                  </Link>
+                </span>
               )}
             </div>
             {!data.repositories.length && (

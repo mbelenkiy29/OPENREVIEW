@@ -6,6 +6,9 @@ import { notFound } from "next/navigation";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { docBySlug, docPages, resolveDocLink } from "../../../src/docs-manifest";
+import { docHeadings, type DocsEntry } from "../../../src/docs-search";
+import { DocsSearch } from "../docs-search";
+import { ScrollTable } from "../../dashboard/scroll-table";
 import { SiteFooter, SiteHeader } from "../../site-chrome";
 
 // Public documentation, rendered at build time from Markdown in docs/.
@@ -16,6 +19,10 @@ export async function generateMetadata({ params }: { params: Promise<{ slug?: st
   const page = pageFor((await params).slug);
   return page ? { title: page.title, description: page.description, alternates: { canonical: `/docs/${page.slug}` } } : {};
 }
+// The search index: each page's title, section, description and headings, read once per build.
+let searchIndex: Promise<DocsEntry[]> | undefined;
+const docsIndex = () => (searchIndex ??= Promise.all(docPages.map(async (d) => ({ slug: d.slug, title: d.title, section: d.section, description: d.description,
+  headings: docHeadings(await fs.readFile(path.join(process.cwd(), "docs", d.file), "utf8")) }))));
 export default async function DocsPage({ params }: { params: Promise<{ slug?: string[] }> }) {
   const page = pageFor((await params).slug);
   if (!page) notFound();
@@ -23,11 +30,12 @@ export default async function DocsPage({ params }: { params: Promise<{ slug?: st
   const sections = [...new Set(docPages.map((d) => d.section))];
   return <div className="docs-layout">
     <SiteHeader current="docs" />
-    <aside className="docs-nav" aria-label="Documentation">{sections.map((s) => <div key={s}><h2>{s}</h2><ul>{docPages.filter((d) => d.section === s).map((d) => <li key={d.slug}><Link href={`/docs/${d.slug}`} aria-current={d.slug === page.slug ? "page" : undefined}>{d.title}</Link></li>)}</ul></div>)}</aside>
+    <aside className="docs-nav" aria-label="Documentation"><DocsSearch index={await docsIndex()}>{sections.map((s) => <div key={s}><h2>{s}</h2><ul>{docPages.filter((d) => d.section === s).map((d) => <li key={d.slug}><Link href={`/docs/${d.slug}`} aria-current={d.slug === page.slug ? "page" : undefined}>{d.title}</Link></li>)}</ul></div>)}</DocsSearch></aside>
     <main className="docs-content review-markdown">
       <Markdown remarkPlugins={[remarkGfm]} skipHtml disallowedElements={["img"]} components={{
         a: ({ href, children }) => { const link = resolveDocLink(page.file, href ?? ""); return link.kind === "external" ? <a href={link.url} target="_blank" rel="noopener noreferrer">{children}</a> : link.kind === "text" || !link.url ? <span>{children}</span> : <Link href={link.url}>{children}</Link>; },
-        table: ({ children }) => <div className="table-scroll"><table>{children}</table></div>,
+        pre: ({ children }) => <pre tabIndex={0}>{children}</pre>,
+        table: ({ children }) => <ScrollTable label="Table" className="table-scroll"><table>{children}</table></ScrollTable>,
       }}>{source}</Markdown>
     </main>
     <SiteFooter />

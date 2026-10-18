@@ -7,6 +7,7 @@
 import { createElement, useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { DiffFiles, type DiffFile, type DiffFinding } from "../dashboard/diff-files";
 import { PortalDisclosure } from "../dashboard/portal-disclosure";
+import { ScrollTable } from "../dashboard/scroll-table";
 import { priority, status } from "../dashboard/sections/shared";
 import { reviewVerdict, verdictLabels } from "../../src/verdict";
 import { LineChart } from "../ui/charts";
@@ -64,10 +65,10 @@ function useAutoplay(frame: RefObject<HTMLElement | null>, play?: () => void) {
 // Headings keep the app's look but stay out of the landing page's outline.
 const H = ({ level = 2, children }: { level?: 1 | 2 | 3; children: ReactNode }) => createElement(`h${level}`, { role: "presentation" }, children);
 
-function Window({ title, caption, size, frame, children }: { title: string; caption: string; size?: "tall" | "short"; frame?: RefObject<HTMLElement | null>; children: ReactNode }) {
+function Window({ title, label = `${title} demo`, caption, size, frame, children }: { title: string; label?: string; caption: string; size?: "tall" | "short"; frame?: RefObject<HTMLElement | null>; children: ReactNode }) {
   return <figure className="replica" ref={frame}>
     <div className="replica-bar" aria-hidden="true"><i /><i /><i /><span>{title}</span><em>Demo</em></div>
-    <div className={`replica-screen${size ? ` ${size}` : ""}`}>{children}</div>
+    <div className={`replica-screen${size ? ` ${size}` : ""}`} role="region" aria-label={label} tabIndex={0}>{children}</div>
     <figcaption className="sr-only">Interactive demo with sample data. {caption}</figcaption>
   </figure>;
 }
@@ -85,7 +86,7 @@ function Chrome({ active, onTab, secondary, children }: { active: Tab; onTab: (t
       </div>
       <nav className="primary-nav" aria-label="Demo sections">{tabs.map((t) => <button key={t} type="button" aria-current={t === active ? "page" : undefined} onClick={() => onTab(t)}>{t}</button>)}</nav>
     </div>
-    {secondary && <aside className="secondary-nav"><nav aria-label={`${active} pages`}>{secondary.map(([label, current, open]) => <button key={label} type="button" aria-current={current ? "page" : undefined} onClick={open}>{label}</button>)}</nav></aside>}
+    {secondary && <div className="secondary-nav"><nav aria-label={`${active} pages`}>{secondary.map(([label, current, open]) => <button key={label} type="button" aria-current={current ? "page" : undefined} onClick={open}>{label}</button>)}</nav></div>}
     <div className="content">{children}</div>
   </div>;
 }
@@ -100,12 +101,12 @@ const pulls: Pull[] = [
 type PullsView = "list" | "findings" | number;
 
 function PullTable({ open }: { open: (n: number) => void }) {
-  return <section><div className="table-scroll"><table><thead><tr><th>Pull request</th><th>Author</th><th>Latest review</th><th>Findings</th><th>Score</th></tr></thead><tbody>
+  return <section><ScrollTable label="Pull requests" className="table-scroll"><table><thead><tr><th>Pull request</th><th>Author</th><th>Latest review</th><th>Findings</th><th>Score</th></tr></thead><tbody>
     {pulls.map((p) => <tr key={p.number}>
       <td><button type="button" className="pull-link" onClick={() => open(p.number)}><span>{pull.repo} #{p.number}</span><small>{p.title}</small></button></td>
       <td>@{p.author}</td><td>{status(p.state)}</td><td>{p.score ? p.found.length : "—"}</td><td>{p.score ? `${p.score.value}/5` : "—"}</td>
     </tr>)}
-  </tbody></table></div></section>;
+  </tbody></table></ScrollTable></section>;
 }
 
 function PullDetail({ p }: { p: Pull }) {
@@ -172,9 +173,9 @@ function FindingCard({ f, full }: { f: Finding; full?: boolean }) {
 function SourceView({ path, line }: { path: string; line: number }) {
   return <div className="source-view">
     <p className="muted">{path} at {pull.head.slice(0, 12)} · line {line} matches the quote</p>
-    <div className="table-scroll"><table className="diff-table"><tbody>
+    <ScrollTable label={`${path} at the reviewed revision`} className="table-scroll"><table className="diff-table"><tbody>
       {(sources[path] ?? []).map((text, i) => <tr key={i} className={i + 1 === line ? "source-quoted" : undefined}><td className="diff-num">{i + 1}</td><td><code>{text || " "}</code></td></tr>)}
-    </tbody></table></div>
+    </tbody></table></ScrollTable>
   </div>;
 }
 
@@ -240,10 +241,10 @@ function ChatPane({ answers, autoplay }: { answers: ReactNode[]; autoplay?: { fr
   };
   useAutoplay(autoplay?.frame ?? root, autoplay && (() => ask(autoplay.question)));
   return <div className="chat-layout" ref={root}>
-    <aside className="chat-threads" aria-label="Chat threads">
+    <nav className="chat-threads" aria-label="Chat threads">
       <button type="button" className="button" onClick={() => setCurrent(null)}>New chat</button>
       <ul>{threads.map((t) => <li key={t.id}><button type="button" aria-current={t.id === current ? "page" : undefined} onClick={() => setCurrent(t.id)}>{t.title}</button></li>)}</ul>
-    </aside>
+    </nav>
     <div className="chat-main">
       {thread ? <section aria-label="Conversation">{thread.messages.map((m) => <article key={m.id} className={`chat-message ${m.role}`}>
         <p className="muted">{m.role === "user" ? "You" : "OpenReview"} · {m.at}{!m.done && <> · <span className="badge running">running</span></>}</p>
@@ -362,7 +363,7 @@ export function AppDemo({ answers, previews }: { answers: ReactNode[]; previews:
     Settings: <SettingsPane view={settingsView} previews={previews} />,
   };
   const title = tab === "Pull Requests" ? (detail ? `Pull Requests · ${pull.repo} #${detail.number}` : pullsView === "findings" ? "Pull Requests · Findings" : "Pull Requests") : tab;
-  return <Window title={title} size="tall" caption={`The OpenReview dashboard for a sample workspace, open at ${pull.repo} #${pull.number}: the reviewed diff with a P0 finding inline at the changed line, a "Needs changes" verdict and a confidence score of ${score.value} out of 5. Use the section buttons to open Analytics, Chat, Memory and Settings.`}>
+  return <Window title={title} label="Dashboard demo" size="tall" caption={`The OpenReview dashboard for a sample workspace, open at ${pull.repo} #${pull.number}: the reviewed diff with a P0 finding inline at the changed line, a "Needs changes" verdict and a confidence score of ${score.value} out of 5. Use the section buttons to open Analytics, Chat, Memory and Settings.`}>
     <Chrome active={tab} onTab={open} secondary={secondary[tab]}>
       <PageHeader title={tab} />
       {tabs.filter((t) => visited.includes(t)).map((t) => <div key={t} className="demo-pane" hidden={t !== tab}>{panes[t]}</div>)}

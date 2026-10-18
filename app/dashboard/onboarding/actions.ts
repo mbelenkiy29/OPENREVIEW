@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { isCloudAgent, localAgents } from "../../../src/fix-agents";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { backend, current } from "../../../src/server";
@@ -20,7 +21,7 @@ export async function createSetupWorkspace(_state: Result, form: FormData): Prom
     id = await backend().mutation(api.users.createOrganization, { token, name: text(form, "name") });
   } catch (error) { return failure(error, "Could not create the workspace"); }
   (await cookies()).set("openreview_workspace", id, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/" });
-  redirect("/dashboard/onboarding/connect");
+  redirect("/dashboard/onboarding");
 }
 
 // Save the repository selection and start indexing; automatic reviews wait for the triggers step.
@@ -44,7 +45,10 @@ export async function saveSetupStep(_state: Result, form: FormData): Promise<Res
     const { token } = await current(), organizationId = organizationOf(form);
     const { defaults } = await backend().query(api.onboarding.status, { token, organizationId });
     await backend().mutation(api.onboarding.saveDefaults, { token, organizationId, step, settings: stepSettingsFromForm(step, form, defaults) });
-    if (step === "tools" && form.get("agent")) await backend().mutation(api.bridge.saveWorkspaceAgent, { token, organizationId, agent: z.enum(["codex", "claude", "cursor"]).parse(text(form, "agent")) });
+    if (step === "tools" && form.get("agent")) {
+      const handoff = text(form, "handoff"), cloudAgent = text(form, "cloudAgent");
+      await backend().mutation(api.bridge.saveWorkspaceAgent, { token, organizationId, agent: z.enum(localAgents).parse(text(form, "agent")), ...(handoff ? { handoff: z.enum(["bridge", "cloud"]).parse(handoff) } : {}), ...(cloudAgent ? { cloudAgent: z.string().refine(isCloudAgent).parse(cloudAgent) } : {}) });
+    }
   } catch (error) { return failure(error, "Could not save these settings"); }
   revalidatePath("/dashboard", "layout");
   redirect(`/dashboard/onboarding/${nextStep(step, false)}`);

@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { scheduleSeatSync } from "./billing";
+import { billingConfig } from "../src/billing";
 import { linkIdentity } from "./identity";
 import { v } from "convex/values";
 import { authenticated, authorize, service, audit } from "./auth";
@@ -58,6 +59,8 @@ export const createOrganization = mutation({
     const organizationId = await ctx.db.insert("organizations", {
       name: args.name.trim(),
       onboarding: { startedAt: Date.now() },
+      // On billing deployments a new workspace chooses a plan before anything else runs.
+      ...(billingConfig().enabled ? { planRequired: true } : {}),
       createdAt: Date.now(),
     });
     await ctx.db.insert("organizationMembers", {

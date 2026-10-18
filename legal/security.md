@@ -39,10 +39,11 @@ On the hosted service the AI model provider is OpenAI. Data is processed and sto
 Before files are stored, and before code or pull request text is sent to a model or shown in chat, OpenReview replaces values that look like secrets. These include:
 
 - private key blocks;
-- GitHub tokens;
-- `sk-` style API keys;
-- AWS access key IDs;
-- quoted values assigned to names like `password`, `secret`, `api_key` or `access_token`.
+- tokens from GitHub, GitLab, Slack and Stripe, Google API keys and `sk-` style API keys;
+- AWS access key IDs, and AWS secret access keys assigned to `aws_secret_access_key`;
+- JSON Web Tokens;
+- quoted values assigned to names like `password`, `secret`, `api_key`, `access_token` or `private_key`, in code and in JSON;
+- values of secret-named settings in `.env`-style lines, such as `DB_PASSWORD=…` or `export GITHUB_TOKEN=…`.
 
 This matching is based on patterns, so it cannot recognize every secret format. Keep secrets out of source code, and rotate any secret that was ever committed.
 
@@ -65,6 +66,7 @@ This matching is based on patterns, so it cannot recognize every secret format. 
 ## Credentials and encryption
 
 - **In transit:** all traffic uses HTTPS, and browsers are told to always use HTTPS for openreview.tech.
+- **In the browser:** OpenReview pages refuse to load inside a frame, which blocks clickjacking. Browsers are also told not to guess file types, and not to send full page addresses to other sites.
 - **Connected-service credentials:** OpenReview encrypts them with AES-256-GCM before storing them. This covers code-host credentials, webhook secrets, Slack, Linear, Atlassian and Notion tokens, and single sign-on client secrets.
 - **Hashed only:** API keys, session IDs and worker tokens.
 - **GitHub App key:** the private key is kept only in the server environment, never in the database. The short-lived tokens GitHub issues for each installation are not stored.
@@ -90,7 +92,7 @@ Reviews, chat, sign-in emails and other actions are rate-limited. Webhook and re
 
 ## Retention and deletion
 
-- **GitHub webhook payloads** are deleted 14 days after they are processed.
+- **Webhook payloads:** the event data your code host sends is kept as received, then deleted 14 days after it was last processed, whether processing succeeded or failed. For code hosts other than GitHub, a record of each delivery stays until the workspace is deleted, so the same delivery is never processed twice. It holds the delivery's type, status and time, not its data.
 - **Review history and chat transcripts** are kept for as long as you choose, from 7 days to 10 years, under **Settings → Data & deletion**.
 - **Deleting a workspace:** owners can delete it under **Settings → Data & deletion**. Its data is erased after a grace period you set (7 days by default, up to 90).
 - **Removing a repository or uninstalling the app:** this stops reviews but does not erase the data already stored. Email us to erase it, or to delete your account. We delete data within 30 days, and backups within 90 days, as the [Privacy Policy](/privacy) describes.

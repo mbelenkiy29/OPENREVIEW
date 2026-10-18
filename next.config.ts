@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs/config';
 import { posthogHosts, posthogProxyPath, posthogToken, sentryDsn, sentryTunnelPath } from './src/telemetry';
+import { securityHeaders } from './src/security-headers';
 
 const config: NextConfig = {
   output: 'standalone',
@@ -8,6 +9,9 @@ const config: NextConfig = {
   poweredByHeader: false,
   // PostHog proxying needs exact paths, only when analytics is configured (src/telemetry.ts).
   ...(posthogToken ? { skipTrailingSlashRedirect: true } : {}),
+  async headers() {
+    return [{ source: '/:path*', headers: securityHeaders }];
+  },
   async redirects() {
     // Sign-in results used to land on the home page; older links and bookmarks now go to the sign-in
     // page with their query string. Redirecting here, not in app/page.tsx, keeps the home page static.

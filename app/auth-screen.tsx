@@ -35,7 +35,7 @@ export function AuthScreen({ mode, query }: { mode: AuthMode; query: AuthQuery }
         <p className="auth-switch">{mode === "login"
           ? <>New to OpenReview? <Link href={`/signup${carry}`}>Create an account</Link></>
           : <>Already have an account? <Link href={`/login${carry}`}>Sign in</Link></>}</p>
-        {mode === "signup" && billing.enabled && <p className="auth-note">Free for {billing.trialDays} days, starting with your first review. No card needed.</p>}
+        {mode === "signup" && billing.enabled && <p className="auth-note">Free for {billing.trialDays} days. You add a card when you set up your workspace, and nothing is charged until the trial ends.</p>}
         {message && <p role={message.tone} className={message.tone === "alert" ? "error" : "auth-status"}>{message.text}</p>}
         <SignInOptions next={next} mode={mode} />
       </div>
