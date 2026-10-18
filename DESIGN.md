@@ -120,6 +120,8 @@ All of these are global classes in `app/globals.css`.
 
 - Text colours meet WCAG AA against the surfaces they sit on. `--text-ter` is never used for meaningful text.
 - Focus is always visible: a 2px ember outline, or a 3px ring on inputs.
+- Anything that scrolls on its own can take keyboard focus: tables use `ScrollTable` (`app/dashboard/scroll-table.tsx`), and other scroll areas get `tabIndex={0}` with a label.
+- Links inside running text on public pages are underlined, so they don't rely on colour alone.
 - Status is never shown by colour alone: badges always carry their text.
 - Layouts hold at 390px without horizontal page scroll in both themes. Wide tables and diffs scroll inside their own containers. `pnpm test:e2e` checks this.
 - `prefers-reduced-motion` turns off transitions, the skeleton pulse and every guided-setup animation.
