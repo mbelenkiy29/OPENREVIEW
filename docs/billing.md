@@ -4,7 +4,8 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 
 ## Plans
 
-- **Trial:** a workspace gets a free trial of `BILLING_TRIAL_DAYS` days (default 14). The trial clock starts at the workspace's first review or first Checkout, not at workspace creation, so workspaces created before billing was turned on still get the full trial. It includes `BILLING_TRIAL_REVIEWS` reviews per calendar month (UTC, default 200).
+- **Choosing a plan (new workspaces):** a workspace created while billing is on (`organizations.planRequired`) must choose a plan before anything else. Setup goes workspace → **Choose your plan** → connect. The plan step starts Stripe Checkout for the Starter plan with a `BILLING_TRIAL_DAYS` (default 14) day trial, and the card is always collected (`payment_method_collection: always`). The choice is recorded (`organizations.planSelectedAt`, `plan`, audit `billing.plan_selected`) only when Stripe confirms it: `checkout.session.completed` with a subscription, or a subscription that is trialing, active or past due. Until then the dashboard sends everyone to the plan step (Billing and Account settings stay open), and the server refuses indexing, reviews, advancing and finishing setup.
+- **Trial (older workspaces):** workspaces from before plans were required have no `planRequired` flag and keep the app-level trial: `BILLING_TRIAL_DAYS` days, starting at the first review or first Checkout, with no card.
 - **Starter (per seat):**
   - A Stripe subscription whose quantity is the number of active seats. Owners, admins and members are seats; viewers are free.
   - Reviews are unlimited under a monthly fair-use limit of seats × `BILLING_REVIEWS_PER_SEAT` (default 500).
@@ -24,6 +25,18 @@ When billing is on, guided setup adds a **Choose your plan** step after inviting
 Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
 
 When a review is blocked, it is recorded as failed with a `Billing:` reason, visible on the pull request's review page. Blocked reviews are also counted on **Settings → Billing**.
+
+## Discounts and free months
+
+Checkout shows an **Add promotion code** box. To give a prospect a free month:
+1. **Coupon:** create one in Stripe (Product catalog → Coupons): 100% off, duration **Multiple months** = 1, limited to the Starter product.
+2. **Promotion code:** give the coupon a single-use code (limit 1 redemption, with an expiry date) and send that code to the prospect. Reuse the coupon and create one code per prospect.
+
+The prospect enters the code at Checkout, from the setup plan step or Settings → Billing. Their first billed month is free for every seat. Any remaining trial still comes first, so the first charge falls one month after the trial ends, or one month after Checkout if the trial is over.
+
+**Existing subscriptions:** in the Stripe Dashboard, open the subscription and choose **Actions → Update subscription → Add coupon**. The discount applies from the next invoice.
+
+**Deactivating:** archive a promotion code to stop new redemptions. Deleting a coupon also stops them, and keeps the discounts already applied.
 
 ## Setup (operator)
 

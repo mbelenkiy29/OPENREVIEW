@@ -1,4 +1,5 @@
 import {changeMetadataSchema,catalogPageSize,validateChangePage,type ChangeMetadata,type ChangePage} from "./change-metadata";
+import { fixHandoffLink } from "./fix-command";
 import { reviewLinks } from "./review-summary";
 import { z } from "zod";
 import { repositorySourceUrl } from "./source-url";
@@ -19,7 +20,7 @@ const reviewSchema=z.object({id:z.string().min(1),author:actor,body:z.string().d
 const approvalReviewSchema=reviewSchema.extend({submittedAt:z.string().datetime({offset:true}).optional()});
 const approvalMarker=/^<!-- openreview:approval:[a-zA-Z0-9_-]+ -->$/;
 const approvalBody=(marker:string)=>"OpenReview approved this exact native version after all configured approval gates passed. No merge was performed.\n\n"+marker;
-function inlineBody(f:Finding,style:string,marker:string){return findingComment(f,style)+"\n\n<!-- openreview-review:"+marker+" -->"+(process.env.APP_URL?"\n\n[Fix with your agent]("+process.env.APP_URL+"/fix/"+marker+"?finding="+f.fingerprint+")":"");}
+function inlineBody(f:Finding,style:string,marker:string){return findingComment(f,style)+"\n\n<!-- openreview-review:"+marker+" -->"+fixHandoffLink(process.env.APP_URL,marker,f.fingerprint);}
 function sameThread(a:z.infer<typeof commentSchema>["thread"],b:z.infer<typeof commentSchema>["thread"]){return a.id===b.id&&a.version.number===b.version.number&&a.version.headSha===b.version.headSha&&a.version.baseSha===b.version.baseSha&&a.path===b.path&&a.side===b.side&&a.startLine===b.startLine&&(a.endLine||a.startLine)===(b.endLine||b.startLine);}
 export class OriginApiError extends Error {constructor(public status:number,endpoint:string){super("Origin "+status+" at "+endpoint.split("?")[0]);this.name="OriginApiError";}}
 export class Origin implements Scm {

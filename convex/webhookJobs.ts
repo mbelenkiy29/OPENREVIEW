@@ -5,12 +5,12 @@ import { v } from "convex/values";
 import { z } from "zod";
 import { Github } from "../src/github";
 import { pullRequestTrigger } from "../src/triggers";
-import { wantsAnswer } from "../src/thread-replies";
+import { isAgentHandoff, wantsAnswer } from "../src/thread-replies";
 import { labelTier, tiers } from "../src/review-tier";
 
 const payloadSchema = z.object({
   action: z.string().optional(),
-  installation: z.object({ id: z.number() }).optional(),
+  installation: z.object({ id: z.number(), permissions: z.record(z.string()).optional() }).optional(),
   repository: z
     .object({
       id: z.number(),
@@ -108,18 +108,25 @@ export const process = internalAction({
         delivery.event === "installation_repositories"
       ) {
         if (payload.installation) {
+          const listed = payload.repositories ?? payload.repositories_added ?? [];
+          // Installation payloads omit default branches and owners. Read them once from GitHub so new
+          // repositories index the right branch and map to their organization's team.
+          const details = new Map<number, { defaultBranch: string; group?: { externalId: string; name: string } }>();
+          if (listed.some((r) => !r.default_branch) && !["deleted", "suspend"].includes(payload.action ?? ""))
+            try {
+              for (const r of await (await Github.installation(payload.installation.id)).repositories())
+                details.set(r.id, { defaultBranch: r.default_branch, ...(r.owner.type === "Organization" && r.owner.id ? { group: { externalId: String(r.owner.id), name: r.owner.login.slice(0, 100) } } : {}) });
+            } catch (error) {
+              console.error(JSON.stringify({ event: "github.installation_repositories_unavailable", installationId: payload.installation.id, error: error instanceof Error ? error.message.slice(0, 200) : "failed" }));
+            }
           await ctx.runMutation(internal.webhooks.installationEvent, {
             installationId: payload.installation.id,
             action: payload.action ?? "",
-            repositories: (
-              payload.repositories ??
-              payload.repositories_added ??
-              []
-            ).map((r) => ({
-              id: r.id,
-              fullName: r.full_name,
-              defaultBranch: r.default_branch ?? "main",
-            })),
+            ...(delivery.event === "installation" && payload.installation.permissions ? { permissions: payload.installation.permissions } : {}),
+            repositories: listed.map((r) => {
+              const known = details.get(r.id), defaultBranch = r.default_branch ?? known?.defaultBranch;
+              return { id: r.id, fullName: r.full_name, ...(defaultBranch ? { defaultBranch } : {}), ...(known?.group ? { group: known.group } : {}) };
+            }),
           });
           if (payload.repositories_removed?.length)
             await ctx.runMutation(internal.webhooks.installationEvent, {
@@ -128,7 +135,6 @@ export const process = internalAction({
               repositories: payload.repositories_removed.map((r) => ({
                 id: r.id,
                 fullName: r.full_name,
-                defaultBranch: r.default_branch ?? "main",
               })),
             });
         }
@@ -202,6 +208,7 @@ export const process = internalAction({
             ["created", "edited", "submitted"].includes(payload.action ?? "") &&
             comment &&
             comment.user.type !== "Bot" &&
+            !isAgentHandoff(comment.body) &&
             (/@openreview\b/i.test(comment.body) ||
               // A human reply in a review thread: answered without a mention (or, for a bare
               // acknowledgement, given a 👍) only in OpenReview's own threads.

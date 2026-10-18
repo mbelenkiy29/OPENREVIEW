@@ -11,7 +11,8 @@ import { z } from "zod";
 import { provider } from "./scm";
 import { fileInventory, indexedFiles } from "./fileReads";
 import { reviewAgentHooks, reviewToolbox } from "./agentToolbox";
-import { semanticHits } from "./semanticSearch";
+import { reviewSemanticHits } from "./semanticSearch";
+import { indexWaitExpired } from "./reviews";
 import { Github } from "../src/github";
 import { Gitlab } from "../src/gitlab";
 import type { Scm } from "../src/gitlab";
@@ -330,21 +331,13 @@ export const review = internalAction({
     const indexState = await ctx.runQuery(internal.repositories.data, {
       repositoryId: state.review.repositoryId,
     });
-    if (
-      !indexState.repo.indexedSha &&
-      indexState.repo.indexStatus !== "failed"
-    ) {
-      if (indexState.repo.indexStatus !== "indexing")
-        await ctx.runAction(internal.jobs.index, {
-          repositoryId: state.review.repositoryId,
-        });
-      await ctx.scheduler.runAfter(3000, internal.jobs.review, args);
-      return;
-    }
     if (!indexState.repo.indexedSha) {
+      // The first review of a repository waits for its first index, with backoff and a time limit.
+      const wait = await ctx.runMutation(internal.reviews.awaitIndex, args);
+      if (wait === "waiting" || wait === "done") return;
       await ctx.runMutation(internal.reviews.finished, {
         ...args,
-        error: "Repository indexing failed; re-index before reviewing",
+        error: wait === "failed" ? "Repository indexing failed; re-index before reviewing" : indexWaitExpired,
       });
       return;
     }
@@ -412,7 +405,7 @@ export const review = internalAction({
           settings.commentStyle,
           state.review.revisionKey,
           result.findings.length+(result.metadata?.carriedForward?.length??0),
-          { placement: settings.summaryPlacement === "comment" ? "comment" : "description" },
+          { placement: settings.summaryPlacement === "comment" ? "comment" : "description", fixLabel: await ctx.runQuery(internal.repositories.fixLabel, { repositoryId: state.review.repositoryId }) },
         );
         if(result.repositoryContext)await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:result.repositoryContext});
         await ctx.runMutation(internal.reviews.finished, {
@@ -516,7 +509,7 @@ export const review = internalAction({
       // Hybrid retrieval: chunk vectors (when configured) + full-text identifiers + graph proximity.
       const identifiers = [...new Set(pr.diff.flatMap((f) => f.patch.match(/^\+.*$/gm)?.join("\n").match(/[A-Za-z_]\w{3,}/g) ?? []))].slice(0, 6);
       const textHits = (await Promise.all(identifiers.map((identifier) => ctx.runQuery(internal.agentTools.search, { repositoryId: repo._id, query: identifier })))).flatMap((hits) => hits.map((hit, rank) => ({ path: hit.path, score: 1 / (1 + rank), startLine: hit.line })));
-      const vectorHits = await semanticHits(ctx, repo._id, pr.title + "\n" + pr.diff.map((f) => f.path + "\n" + f.patch.slice(0, 3000)).join("\n"), 24);
+      const semantic = await reviewSemanticHits(ctx, repo._id, pr.title + "\n" + pr.diff.map((f) => f.path + "\n" + f.patch.slice(0, 3000)).join("\n"), 24), vectorHits = semantic.hits;
       const hybrid = hybridRank({ vector: vectorHits, text: textHits, graph: neighbors.map((n) => ({ path: n.path, score: n.score })) }, 20);
       const semanticPaths = hybrid.filter((hit) => hit.reason.includes("semantic")).map((hit) => hit.path);
       const paths = [
@@ -627,7 +620,7 @@ export const review = internalAction({
       const result = {...await reviewChange(
         {
           repository: repo.fullName,
-          coverageLimits:[...(scope.note?[scope.note]:[]),...configNotes,...requirements.coverage,...cross.coverage,...(state.findings.some(f=>!hasCurrentRepositoryEvidence(f,cross.files))?["Some prior cross-repository findings were withheld because their exact pinned evidence was not fetched in the current authorized context; they remain unresolved."]:[])],
+          coverageLimits:[...(scope.note?[scope.note]:[]),...(semantic.note?[semantic.note]:[]),...configNotes,...requirements.coverage,...cross.coverage,...(state.findings.some(f=>!hasCurrentRepositoryEvidence(f,cross.files))?["Some prior cross-repository findings were withheld because their exact pinned evidence was not fetched in the current authorized context; they remain unresolved."]:[])],
           baseSha: pr.base.sha,
           headSha: pr.head.sha,
           title: pr.title,
@@ -735,7 +728,7 @@ export const review = internalAction({
         effective.commentStyle,
           state.review.revisionKey,
           result.findings.length+(result.metadata.carriedForward?.length??0),
-          { placement: settings.summaryPlacement === "comment" ? "comment" : "description" },
+          { placement: settings.summaryPlacement === "comment" ? "comment" : "description", fixLabel: await ctx.runQuery(internal.repositories.fixLabel, { repositoryId: state.review.repositoryId }) },
       );
       if(result.repositoryContext)await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:result.repositoryContext});
       await ctx.runMutation(internal.reviews.finished, {

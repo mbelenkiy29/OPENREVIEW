@@ -5,12 +5,15 @@ import { CookieSettings } from "./consent";
 import { ThemePicker } from "./theme";
 import { Mark } from "./ui/logo";
 
+/** The public source repository, linked from the site header, footer and self-hosting section. */
+export const sourceRepository = "https://github.com/mbelenkiy29/OPENREVIEW";
+
 // Public-site header and footer shared by the landing page, docs, changelog and feedback board. On
 // the landing page links are in-page anchors; elsewhere they point back to the landing sections.
 export function SiteHeader({ home = false, current }: { home?: boolean; current?: "docs" | "changelog" | "roadmap" | "feedback" }) {
   const base = home ? "" : "/";
-  // Pricing lives on the landing page; statically built pages skip it so the link never
-  // depends on the build environment.
+  // Pricing lives on the landing page, which shows it when billing is enabled at build time; other
+  // pages skip the link.
   const pricing = home && billingConfig().enabled, feedback = Boolean(userJotConfig());
   return <header className="site-header">
     <Link className="brand" href="/"><Mark /> OpenReview</Link>
@@ -21,6 +24,7 @@ export function SiteHeader({ home = false, current }: { home?: boolean; current?
       <Link href="/docs/quickstart" aria-current={current === "docs" ? "page" : undefined}>Docs</Link>
       <Link href="/changelog" aria-current={current === "changelog" ? "page" : undefined}>Changelog</Link>
       {feedback && <><Link href="/feedback/roadmap" aria-current={current === "roadmap" ? "page" : undefined}>Roadmap</Link><Link href="/feedback" aria-current={current === "feedback" ? "page" : undefined}>Feedback</Link></>}
+      <a href={sourceRepository}>GitHub</a>
     </nav>
     <div className="site-actions">
       {home ? <Link href="/login">Sign in</Link> : <Link href="/dashboard">Dashboard</Link>}
@@ -57,7 +61,7 @@ export function SiteFooter({ home = false }: { home?: boolean }) {
       </nav>)}
     </div>
     <div className="footer-base">
-      <span>OpenReview · MIT licensed · <Link href="/privacy">Privacy</Link> · <Link href="/terms">Terms</Link><CookieSettings /></span>
+      <span>OpenReview · <a href={`${sourceRepository}/blob/main/LICENSE`}>MIT licensed</a> · <a href={sourceRepository}>Source on GitHub</a> · <Link href="/security">Security</Link> · <Link href="/privacy">Privacy</Link> · <Link href="/terms">Terms</Link><CookieSettings /></span>
       <ThemePicker />
     </div>
   </footer>;

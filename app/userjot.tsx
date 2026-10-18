@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, type MouseEvent, type ReactNode } from "react";
-import { useTheme, type Theme } from "./theme";
+import type { Theme } from "../src/theme";
+import { useTheme } from "./theme";
 
 // UserJot widget v3 (https://userjot.com/docs/widget-v3-reference): feature requests, bug reports,
 // the roadmap and updates. Loaded once from the root layout when src/userjot.ts is configured.

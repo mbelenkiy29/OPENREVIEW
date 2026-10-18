@@ -7,17 +7,18 @@ import { api } from "../convex/_generated/api";
 import { billingConfig } from "../src/billing";
 import { safeNext } from "../src/identity";
 import { backend } from "../src/server";
-import { authMessage, type AuthMode } from "../src/auth-pages";
+import { authMessage, keepsAuthPage, type AuthMode } from "../src/auth-pages";
 import { IndexGraph } from "./dashboard/onboarding/art";
 import { SignInOptions } from "./sign-in";
 import { Mark } from "./ui/logo";
 
 export type AuthQuery = { next?: string; error?: string; email?: string; signedout?: string };
 
-/** Signed-in visitors skip the page and go where they were headed. */
-export async function redirectIfSignedIn(next?: string) {
+/** Signed-in visitors skip the page and go where they were headed, unless it shows a result. */
+export async function redirectIfSignedIn(query: AuthQuery) {
+  if (keepsAuthPage(query)) return;
   const token = (await cookies()).get("openreview_session")?.value;
-  if (token && await backend().query(api.identity.sessionValid, { token }).catch(() => false)) redirect(safeNext(next));
+  if (token && await backend().query(api.identity.sessionValid, { token }).catch(() => false)) redirect(safeNext(query.next));
 }
 
 // A small, fixed sample of a repository so the drawing reads as real files and references.
@@ -34,7 +35,7 @@ export function AuthScreen({ mode, query }: { mode: AuthMode; query: AuthQuery }
         <p className="auth-switch">{mode === "login"
           ? <>New to OpenReview? <Link href={`/signup${carry}`}>Create an account</Link></>
           : <>Already have an account? <Link href={`/login${carry}`}>Sign in</Link></>}</p>
-        {mode === "signup" && billing.enabled && <p className="auth-note">Free for {billing.trialDays} days, starting with your first review. No card needed.</p>}
+        {mode === "signup" && billing.enabled && <p className="auth-note">Free for {billing.trialDays} days. You add a card when you set up your workspace, and nothing is charged until the trial ends.</p>}
         {message && <p role={message.tone} className={message.tone === "alert" ? "error" : "auth-status"}>{message.text}</p>}
         <SignInOptions next={next} mode={mode} />
       </div>

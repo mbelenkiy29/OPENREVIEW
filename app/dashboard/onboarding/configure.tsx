@@ -8,6 +8,7 @@ import { findingComment } from "../../../src/review-summary";
 import { ReviewMarkdown } from "../markdown";
 import { example, exampleSummary } from "../summary-example";
 import { Stage } from "./art";
+import { cloudAgentIds, cloudAgents, defaultLocalAgent, isCloudAgent, localAgentLabels, localAgents, type CloudAgent } from "../../../src/fix-agents";
 import { StepForm } from "./wizard-client";
 
 type Settings = { summarySections?: string[]; commentStyle: string; severityThreshold: string; minimumConfidence: number; maxComments: number; strictness?: number; categories: string[];
@@ -138,24 +139,29 @@ export function TriggersStep(props: Props) {
   </>;
 }
 
-const agents = [["claude", "Claude Code"], ["codex", "Codex"], ["cursor", "Cursor"]] as const;
-export function ToolsStep(props: Props & { agent?: string }) {
+const agents = localAgents.map((a) => [a, localAgentLabels[a]] as const);
+export function ToolsStep(props: Props & { agent?: string; handoff?: string; cloudAgent?: string }) {
   const d = props.defaults;
-  const [security, setSecurity] = useState(d.securityScan ?? true), [fixPrs, setFixPrs] = useState(d.fixPullRequests ?? false), [agent, setAgent] = useState(props.agent ?? "claude"), [mode, setMode] = useState(d.mode);
-  const agentName = agents.find(([v]) => v === agent)?.[1] ?? "your agent";
+  const [security, setSecurity] = useState(d.securityScan ?? true), [fixPrs, setFixPrs] = useState(d.fixPullRequests ?? false), [agent, setAgent] = useState(props.agent ?? defaultLocalAgent), [mode, setMode] = useState(d.mode);
+  const [handoff, setHandoff] = useState(props.handoff === "cloud" ? "cloud" : "bridge"), [cloud, setCloud] = useState<CloudAgent>(isCloudAgent(props.cloudAgent) ? props.cloudAgent : "claude");
+  const agentName = handoff === "cloud" ? cloudAgents[cloud].label : agents.find(([v]) => v === agent)?.[1] ?? "your agent";
   return <>
     <Shell {...props} step="tools">
-      <label>Default coding agent<select name="agent" value={agent} onChange={(e) => setAgent(e.target.value)}>{agents.map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select></label>
+      <label>How fixes start<select name="handoff" value={handoff} onChange={(e) => setHandoff(e.target.value)}><option value="bridge">Local agent on the developer’s machine</option><option value="cloud">Cloud agent on the pull request</option></select></label>
+      {handoff === "cloud"
+        ? <label>Cloud agent<select name="cloudAgent" value={cloud} onChange={(e) => setCloud(e.target.value as CloudAgent)}>{cloudAgentIds.map((a) => <option key={a} value={a}>{cloudAgents[a].label}</option>)}</select><span className="muted">{cloudAgents[cloud].setup}</span></label>
+        : <input type="hidden" name="cloudAgent" value={cloud} />}
+      <label>Default local agent<select name="agent" value={agent} onChange={(e) => setAgent(e.target.value)}>{agents.map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select></label>
       <ul className="wizard-toggles">
         <Toggle name="securityScan" label="Security checks" hint="Pattern checks on added lines and advisory lookups for changed dependencies." checked={security} onChange={setSecurity} />
-        <Toggle name="fixPullRequests" label="Fix pull requests" hint="“@openreview fix this in a new PR” opens a branch. Needs the App’s Contents: write permission." checked={fixPrs} onChange={setFixPrs} />
+        <Toggle name="fixPullRequests" label="Fix pull requests" hint="OpenReview opens a fix pull request on a new branch, from a finding’s Fix page or “@openreview fix this in a new PR”. Needs the App’s Contents: write permission." checked={fixPrs} onChange={setFixPrs} />
       </ul>
       <label>Review depth<select name="mode" value={mode} onChange={(e) => setMode(e.target.value)}><option value="fast">Fast</option><option value="standard">Standard</option><option value="deep">Deep</option></select></label>
     </Shell>
     <Stage caption={`fix with ${agentName}${security ? " · security checks on" : ""}${fixPrs ? " · fix pull requests on" : ""}`}>
       <Window title="src/total.ts · finding">
         <div className="preview-comment inline"><p className="preview-author"><span className="badge high">P1</span> Keep totals in integer cents</p><Bars widths={[88, 52]} />
-          <p className="preview-actions"><span className="button small primary">Fix with {agentName}</span><span className="button small">Copy prompt</span></p></div>
+          <p className="preview-actions"><span className="button small primary">Fix with {agentName}</span><span className="button small">Open a fix PR</span></p></div>
         <Block on={security}><div className="preview-comment inline"><p className="preview-author"><span className="badge medium">security</span> <span className="mono">package.json</span></p><p className="mono muted">example advisory · upgrade to the fixed version</p></div></Block>
         <Block on={fixPrs}><div className="preview-thread"><p><span className="mono">@dev</span> @openreview fix this in a new PR</p><p><strong>OpenReview</strong> opened <span className="mono">openreview/fix-integer-cents</span></p></div></Block>
       </Window>

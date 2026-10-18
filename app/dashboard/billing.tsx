@@ -19,7 +19,7 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
       <h2 id="plan-heading">{subscribed ? "Starter plan" : "Free trial"}</h2>
       <dl className="facts">
         <dt>Status</dt><dd><span className={`badge ${s.status}`}>{s.status.replaceAll("_", " ")}</span></dd>
-        {!subscribed && <><dt>Trial ends</dt><dd>{s.trialStarted ? day(s.trialEndsAt) : `${s.trialDays} days after the first review`}</dd></>}
+        {!subscribed && <><dt>Trial ends</dt><dd>{s.trialStarted ? day(s.trialEndsAt) : s.planRequired ? `${s.trialDays} days after you add a card` : `${s.trialDays} days after the first review`}</dd></>}
         {s.currentPeriodEnd && <><dt>Current period ends</dt><dd>{day(s.currentPeriodEnd)}</dd></>}
         {s.pastDueSince && <><dt>Past due since</dt><dd>{day(s.pastDueSince)} · reviews pause after {s.graceDays} days</dd></>}
         <dt>Reviews this month</dt><dd>{subscribed ? `${s.used} · unlimited (fair use: ${s.limit})` : `${s.used} of ${s.limit ?? "unlimited"}`}{s.blocked ? ` · ${s.blocked} blocked` : ""}</dd>
