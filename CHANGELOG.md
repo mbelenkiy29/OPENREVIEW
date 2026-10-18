@@ -22,6 +22,7 @@
 ### Setup
 - Guided workspace setup: connect a provider, choose repositories, watch the code graph build, then shape the summary, comment scope, triggers and tools with live previews, and invite your team. Automatic reviews wait until you choose when reviews run.
 - Installing the GitHub App now works from any signed-in session (email, Google or GitLab) and returns you to setup.
+- Fixed: after choosing repositories, setup could stay on "Starting indexing…" until the next click, even though indexing had started. The cause was a bug in the React version bundled with Next.js 15.5, which could also stall other page changes in the dashboard. OpenReview now includes React's fix.
 
 ### Sign in
 - Sign-in and sign-up pages (`/login`, `/signup`): continue with GitHub, Google or GitLab, or get an emailed sign-in link, showing only the methods the deployment has configured. Errors and sign-in results now land on the sign-in page instead of the home page.

@@ -204,7 +204,7 @@ try {
     organizationId,
   });
   await page.goto(`${url}/dashboard/settings?repository=${repository._id}`);
-  await page.getByLabel("Minimum confidence").fill("0.92");
+  await page.getByLabel("Minimum confidence", { exact: true }).fill("0.92");
   await page.getByRole("button", { name: "Save review settings" }).click();
   await page.waitForTimeout(500);
   assert.equal(
