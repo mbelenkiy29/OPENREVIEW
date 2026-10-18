@@ -30,7 +30,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning data-userjot={userJot ? "" : undefined}>
       <head><script dangerouslySetInnerHTML={{__html:themeScript}} /></head>
-      <body><ThemeProvider>{children}<ConsentBanner />{userJot&&<UserJot projectId={userJot.projectId} />}</ThemeProvider></body>
+      <body><ThemeProvider>{children}<ConsentBanner />{userJot&&<UserJot projectId={userJot.projectId} boardUrl={userJot.boardUrl} />}</ThemeProvider></body>
     </html>
   );
 }

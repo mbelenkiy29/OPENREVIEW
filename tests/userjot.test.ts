@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { decodeJwt, jwtVerify } from "jose";
 import { userJotConfig, userJotIdentity, userJotToken } from "../src/userjot";
+import { boardTitle, boardView, withoutEmbedTheme } from "../src/userjot-board";
 
 const secret = "userjot-project-secret-for-tests";
 const me = { user: { _id: "u123", login: "ada", avatar: "https://avatars.example/ada.png" }, email: "ada@example.com" };
@@ -37,4 +38,25 @@ test("the widget identity is signed when a secret is set and unsigned otherwise"
   assert.deepEqual(signed.user, user);
   assert.equal(decodeJwt(signed.token!).sub, "u123");
   assert.deepEqual(await userJotIdentity({ user: { _id: "u9", login: "bob", avatar: "" } }, { projectId: "proj" }), { user: { id: "u9", firstName: "bob" } }, "no email or empty avatar is left out, never sent blank");
+});
+
+test("board paths map to the roadmap or the board, and nothing else does", () => {
+  assert.equal(boardView("/feedback"), "feedback");
+  assert.equal(boardView("/feedback/"), "feedback", "the embed writes a trailing slash");
+  assert.equal(boardView("/feedback/board/p/dark-mode"), "feedback");
+  assert.equal(boardView("/feedback/roadmap"), "roadmap");
+  assert.equal(boardView("/feedback/roadmap/"), "roadmap");
+  assert.equal(boardView("/feedback/roadmapping"), "feedback");
+  assert.equal(boardView("/feedbacks"), null);
+  assert.equal(boardView("/docs/quickstart"), null);
+  assert.equal(boardTitle("/feedback/roadmap"), "Roadmap");
+  assert.equal(boardTitle("/feedback/board/p/dark-mode"), "Feedback");
+});
+
+test("the embed's theme parameter is removed and every other parameter kept", () => {
+  assert.equal(withoutEmbedTheme("https://openreview.tech/feedback"), null);
+  assert.equal(withoutEmbedTheme("https://openreview.tech/feedback/?cursor=1&order=top"), null);
+  assert.equal(withoutEmbedTheme("https://openreview.tech/feedback?theme=dark"), "https://openreview.tech/feedback");
+  assert.equal(withoutEmbedTheme("https://openreview.tech/feedback/?cursor=1&order=top&limit=10&theme=dark"), "https://openreview.tech/feedback/?cursor=1&order=top&limit=10");
+  assert.equal(withoutEmbedTheme("https://openreview.tech/feedback/roadmap?theme=light#planned"), "https://openreview.tech/feedback/roadmap#planned");
 });
