@@ -1,15 +1,23 @@
 "use client";
 import * as Sentry from "@sentry/nextjs";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import type { Milestone } from "../convex/analyticsMilestones";
 import { withLoadedAnalytics } from "../src/analytics-loader";
 import { analyticsStartedEvent } from "../src/consent";
 import { sentryDsn } from "../src/telemetry";
+import { reportMilestones } from "./telemetry-actions";
 
-/** Ties analytics and error reports to the signed-in user and active workspace, by internal id only. */
-export function TelemetryIdentity({ userId, workspaceId }: { userId: string; workspaceId?: string }) {
+/** Ties analytics and error reports to the signed-in user and active workspace, by internal id only,
+ *  and sends product milestones not yet reported. */
+export function TelemetryIdentity({ userId, workspaceId, milestones = [] }: { userId: string; workspaceId?: string; milestones?: Milestone[] }) {
+  const sent = useRef(""), keys = milestones.map((m) => m.key).join(",");
   useEffect(() => {
-    // PostHog runs only after analytics consent, which may come later on this same page.
-    const identify = () => withLoadedAnalytics((a) => a.identifyAnalytics(userId, workspaceId));
+    // PostHog runs only after analytics consent, which may come later on this same page. Milestones
+    // are marked reported only once PostHog has actually sent them.
+    const identify = () => withLoadedAnalytics((a) => {
+      a.identifyAnalytics(userId, workspaceId);
+      if (keys && sent.current !== keys && a.captureMilestones(milestones)) { sent.current = keys; void reportMilestones(milestones.map((m) => m.key)); }
+    });
     identify();
     window.addEventListener(analyticsStartedEvent, identify);
     if (sentryDsn) {
@@ -17,7 +25,8 @@ export function TelemetryIdentity({ userId, workspaceId }: { userId: string; wor
       Sentry.setTag("workspace_id", workspaceId ?? "none");
     }
     return () => window.removeEventListener(analyticsStartedEvent, identify);
-  }, [userId, workspaceId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `keys` stands for `milestones`.
+  }, [userId, workspaceId, keys]);
   return null;
 }
 
