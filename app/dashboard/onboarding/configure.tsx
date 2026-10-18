@@ -154,7 +154,7 @@ export function ToolsStep(props: Props & { agent?: string; handoff?: string; clo
       <label>Default local agent<select name="agent" value={agent} onChange={(e) => setAgent(e.target.value)}>{agents.map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select></label>
       <ul className="wizard-toggles">
         <Toggle name="securityScan" label="Security checks" hint="Pattern checks on added lines and advisory lookups for changed dependencies." checked={security} onChange={setSecurity} />
-        <Toggle name="fixPullRequests" label="Fix pull requests" hint="“@openreview fix this in a new PR” opens a branch. Needs the App’s Contents: write permission." checked={fixPrs} onChange={setFixPrs} />
+        <Toggle name="fixPullRequests" label="Fix pull requests" hint="OpenReview opens a fix pull request on a new branch, from a finding’s Fix page or “@openreview fix this in a new PR”. Needs the App’s Contents: write permission." checked={fixPrs} onChange={setFixPrs} />
       </ul>
       <label>Review depth<select name="mode" value={mode} onChange={(e) => setMode(e.target.value)}><option value="fast">Fast</option><option value="standard">Standard</option><option value="deep">Deep</option></select></label>
     </Shell>
