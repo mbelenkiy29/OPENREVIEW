@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/openreview-mark-reversed.svg">
+    <img src="brand/openreview-mark.svg" alt="OpenReview logo" width="96" height="96">
+  </picture>
+</p>
+
 # OpenReview
 
 OpenReview is an open-source, self-hostable, repository-aware AI pull request reviewer. It uses a GitHub App, Convex for durable application state and jobs, Next.js for the dashboard, and your model credentials. The same TypeScript review engine powers GitHub and the local CLI.

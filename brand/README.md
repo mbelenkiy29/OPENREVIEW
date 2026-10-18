@@ -10,5 +10,7 @@ Four lines of code with an ember dot pinned to the third: a finding on a line. D
 | `openreview-favicon.svg` | 16 px drawing on an ink tile, built into `app/favicon.ico` (16/32/48) |
 | `*-mono.svg` | One colour, for print or places the ember can't be reproduced |
 | `*-reversed.svg` | Light lines (thinned 1 unit) with the ember dot, for static artwork on ink |
+| `openreview-app-icon.svg`, `-512.png` | Reversed mark on a square ink tile: the GitHub App and UserJot logos |
+| `openreview-social-preview.png` | 1280×640 GitHub social preview for the repository |
 
 Colours: ink `#26251e`, light ink `#edecec`, ember `#f54e00`. See the Brand section of `DESIGN.md` for usage rules.
