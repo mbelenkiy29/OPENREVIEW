@@ -5,7 +5,7 @@ import { v } from "convex/values";
 import { z } from "zod";
 import { Github } from "../src/github";
 import { pullRequestTrigger } from "../src/triggers";
-import { wantsAnswer } from "../src/thread-replies";
+import { isAgentHandoff, wantsAnswer } from "../src/thread-replies";
 import { labelTier, tiers } from "../src/review-tier";
 
 const payloadSchema = z.object({
@@ -208,6 +208,7 @@ export const process = internalAction({
             ["created", "edited", "submitted"].includes(payload.action ?? "") &&
             comment &&
             comment.user.type !== "Bot" &&
+            !isAgentHandoff(comment.body) &&
             (/@openreview\b/i.test(comment.body) ||
               // A human reply in a review thread: answered without a mention (or, for a bare
               // acknowledgement, given a 👍) only in OpenReview's own threads.

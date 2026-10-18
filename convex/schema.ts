@@ -6,6 +6,9 @@ const org = v.id("organizations"),
   repo = v.id("repositories"),
   review = v.id("reviews");
 export const codingAgentValidator=v.union(v.literal("codex"),v.literal("claude"),v.literal("cursor"));
+// Cloud agents started by an @mention comment posted as the developer (src/fix-agents.ts).
+export const cloudAgentValidator=v.union(v.literal("claude"),v.literal("codex"),v.literal("copilot"),v.literal("cursor"));
+export const handoffValidator=v.union(v.literal("bridge"),v.literal("cloud"));
 export const providerGroupValidator=v.object({externalId:v.string(),name:v.string()});
 export const nativeDepotIndexValidator=v.object({requestedBy:v.id("users"),connectionId:v.id("providerConnections"),credentialDigest:v.string()});
 export const p4PollingReference=v.object({id:v.id("p4Polls"),generation:v.number()});
@@ -127,9 +130,9 @@ export default defineSchema({
   // A developer's own third-party agent credentials (Devin), encrypted by the web server with
   // CREDENTIAL_ENCRYPTION_KEY under the scope `<userId>:<kind>`; Convex never sees the plain value.
   personalCredentials: defineTable({ userId: v.id("users"), kind: v.string(), ciphertext: v.string(), updatedAt: v.number() }).index("by_user_kind", ["userId", "kind"]),
-  personalSettings: defineTable({ userId: v.id("users"), agent: v.union(v.literal("codex"), v.literal("claude"), v.literal("cursor")), updatedAt: v.number() }).index("by_user", ["userId"]),
+  personalSettings: defineTable({ userId: v.id("users"), agent: v.optional(v.union(v.literal("codex"), v.literal("claude"), v.literal("cursor"))), handoff: v.optional(handoffValidator), cloudAgent: v.optional(cloudAgentValidator), updatedAt: v.number() }).index("by_user", ["userId"]),
   bridgeDevices: defineTable({ tokenHash: v.string(), code: v.string(), userId: v.optional(v.id("users")), organizationId: v.optional(org), name: v.string(), expiresAt: v.number(), revoked: v.boolean(), createdAt: v.number(), lastSeen: v.optional(v.number()) }).index("by_hash", ["tokenHash"]).index("by_code", ["code"]).index("by_user", ["userId"]),
-  fixRequests: defineTable({ userId: v.id("users"), organizationId: org, repositoryId: repo, reviewId: review, headSha: v.string(), findingIds: v.optional(v.array(v.id("findings"))), agent: v.string(), prompt: v.string(), status: v.string(), error: v.optional(v.string()), deviceId: v.optional(v.id("bridgeDevices")), expiresAt: v.number(), createdAt: v.number(), updatedAt: v.number() }).index("by_user", ["userId"]).index("by_review", ["reviewId"]),
+  fixRequests: defineTable({ userId: v.id("users"), organizationId: org, repositoryId: repo, reviewId: review, headSha: v.string(), findingIds: v.optional(v.array(v.id("findings"))), agent: v.string(), prompt: v.string(), status: v.string(), error: v.optional(v.string()), deviceId: v.optional(v.id("bridgeDevices")), expiresAt: v.number(), createdAt: v.number(), updatedAt: v.number(), /* cloud agent handoffs (kind "cloud"): intent → posting → posted | failed */ kind: v.optional(v.string()), commentUrl: v.optional(v.string()), postedAs: v.optional(v.string()) }).index("by_user", ["userId"]).index("by_review", ["reviewId"]),
   rateLimits: defineTable({
     key: v.string(),
     window: v.number(),
@@ -262,7 +265,7 @@ export default defineSchema({
   loginTokens: defineTable({ email: v.string(), tokenHash: v.string(), expiresAt: v.number(), usedAt: v.optional(v.number()), createdAt: v.number() }).index("by_token", ["tokenHash"]),
   // onboarding: guided setup progress for workspaces created with it (absent on older workspaces,
   // which are never sent to setup). reviewsPaused marks automatic reviews held off while indexing.
-  organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), createdAt: v.number() }),
+  organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), defaultHandoff:v.optional(handoffValidator), defaultCloudAgent:v.optional(cloudAgentValidator), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), createdAt: v.number() }),
   // Workspace deletion receipts (M3): survive the purge; step + cursor make the purge resumable.
   workspaceDeletions: defineTable({ organizationId: org, name: v.string(), requestedBy: v.id("users"), requestedAt: v.number(), scheduledFor: v.number(), scheduledId: v.optional(v.id("_scheduled_functions")), status: v.string() /* scheduled | cancelled | purging | done */, step: v.number(), cursor: v.optional(v.string()), counts: v.record(v.string(), v.number()), startedAt: v.optional(v.number()), cancelledAt: v.optional(v.number()), completedAt: v.optional(v.number()) }).index("by_org", ["organizationId"]),
   // Daily analytics rollup per (repository, UTC day, PR author), recomputed from raw tables for

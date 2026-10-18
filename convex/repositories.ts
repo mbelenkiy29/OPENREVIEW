@@ -18,6 +18,7 @@ import {p4SubmittedRevision} from "../src/p4-revision";
 import { defaults,validSummarySections,validReviewEngine,validCheckFailureSeverity,validTriggerSettings,validPublicationSettings } from "../src/review-settings";
 import { applicableRules } from "../src/rule-scopes";
 import { categories } from "../src/engine/types";
+import { workspaceFixLabel } from "../src/fix-agents";
 export { defaults } from "../src/review-settings";
 import { effectiveSettings,providerTeam } from "./scopes";
 import type {QueryCtx,MutationCtx} from "./_generated/server";
@@ -260,6 +261,11 @@ export async function scheduleIndexIfIdle(ctx: MutationCtx, repo: Doc<"repositor
   await ctx.db.patch(repo._id, { indexStatus: "queued", error: undefined, indexScheduledId });
   return true;
 }
+// The "Fix with …" link text under inline findings, from the workspace's default fix agent.
+export const fixLabel = internalQuery({ args: { repositoryId: v.id("repositories") }, handler: async (ctx, a) => {
+  const repo = await ctx.db.get(a.repositoryId);
+  return workspaceFixLabel(repo ? await ctx.db.get(repo.organizationId) : null);
+} });
 // Bounded configuration for a review/index step. File inventories are read on demand through
 // filesByPath / filePage / filesUnder so large repositories never exceed transaction read limits.
 export const data = internalQuery({

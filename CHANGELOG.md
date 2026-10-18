@@ -38,6 +38,7 @@
 - Saving your coding agent confirms with a message, and shows the error if saving fails.
 - **Open a fix PR** on a finding's Fix page: OpenReview commits its validated suggestion to a new `openreview/fix-*` branch and opens a pull request against your branch, checked against your own GitHub write access. It needs the repository's Fix pull requests setting and the App's Contents: Read and write permission; the page says which one is missing.
 - Settings → Code providers shows, for each GitHub installation, whether it granted Contents and Checks write access.
+- **Cloud agents.** Hand a finding to Claude, Codex, Copilot or Cursor from its Fix page. OpenReview posts a comment as you that mentions the agent, so it starts in its own cloud: Claude replies in the finding's thread, the others in the pull request conversation. Choose your agent, or the workspace default, under Settings → Agents, which also lists what each agent needs. When cloud agents are the workspace default, the link under each finding reads, for example, **Fix with Claude**. See [Fix with agents](docs/public/fix-with-agents.md).
 - On Gitea, fix pull request requests now say the feature isn't available there, instead of mentioning GitHub permissions.
 
 ### Sign in

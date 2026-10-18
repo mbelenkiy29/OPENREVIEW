@@ -405,7 +405,7 @@ export const review = internalAction({
           settings.commentStyle,
           state.review.revisionKey,
           result.findings.length+(result.metadata?.carriedForward?.length??0),
-          { placement: settings.summaryPlacement === "comment" ? "comment" : "description" },
+          { placement: settings.summaryPlacement === "comment" ? "comment" : "description", fixLabel: await ctx.runQuery(internal.repositories.fixLabel, { repositoryId: state.review.repositoryId }) },
         );
         if(result.repositoryContext)await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:result.repositoryContext});
         await ctx.runMutation(internal.reviews.finished, {
@@ -728,7 +728,7 @@ export const review = internalAction({
         effective.commentStyle,
           state.review.revisionKey,
           result.findings.length+(result.metadata.carriedForward?.length??0),
-          { placement: settings.summaryPlacement === "comment" ? "comment" : "description" },
+          { placement: settings.summaryPlacement === "comment" ? "comment" : "description", fixLabel: await ctx.runQuery(internal.repositories.fixLabel, { repositoryId: state.review.repositoryId }) },
       );
       if(result.repositoryContext)await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:result.repositoryContext});
       await ctx.runMutation(internal.reviews.finished, {

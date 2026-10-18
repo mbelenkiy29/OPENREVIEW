@@ -84,7 +84,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
   if (step === "summary" || step === "comments" || step === "triggers" || step === "tools") {
     const props = { action: saveSetupStep, organizationId, defaults: status.defaults, admin, progress: <ConfigureProgress step={step} />, heading: <><Heading step={step}>{ledes[step]}</Heading><ReadOnlyNote admin={admin} /></> };
     return <WizardFrame step={step} {...frame} nextLabel={step === "tools" ? "Save and continue" : "Next"}>
-      {step === "summary" ? <SummaryStep {...props} /> : step === "comments" ? <CommentsStep {...props} /> : step === "triggers" ? <TriggersStep {...props} /> : <ToolsStep {...props} agent={organization.defaultAgent} />}
+      {step === "summary" ? <SummaryStep {...props} /> : step === "comments" ? <CommentsStep {...props} /> : step === "triggers" ? <TriggersStep {...props} /> : <ToolsStep {...props} agent={organization.defaultAgent} handoff={organization.defaultHandoff} cloudAgent={organization.defaultCloudAgent} />}
     </WizardFrame>;
   }
 

@@ -7,9 +7,9 @@ import { z } from "zod";
 import { randomBytes, createHash } from "node:crypto";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { backend, current } from "../../src/server";
+import { backend, cookieOptions, current, seal } from "../../src/server";
 import { notify } from "../../src/toast";
-import { localAgents } from "../../src/fix-agents";
+import { agentIntentCookie, isCloudAgent, localAgents } from "../../src/fix-agents";
 import { githubCredentials, linkInstallation } from "../../src/github-link";
 import { installReturnPath, linkHref } from "../../src/github-install";
 import { decryptCredential, encryptCredential } from "../../src/credentials";
@@ -568,13 +568,14 @@ export async function reviewBridgePair(_state:{error?:string;code?:string;saved?
   return {code,preview:await backend().mutation(api.bridge.previewPair,{token,organizationId,code})};
  }catch{return {code,error:"Pairing could not be reviewed or approved. Check workspace access and the current code, then review it again. Expired, revoked or already paired codes cannot be used."};}
 }
+const handoffChoice=(f:FormData)=>{const handoff=text(f,"handoff"),cloudAgent=text(f,"cloudAgent");return {...(handoff?{handoff:z.enum(["bridge","cloud"]).parse(handoff)}:{}),...(cloudAgent?{cloudAgent:z.string().refine(isCloudAgent).parse(cloudAgent)}:{})};};
 export async function saveAgent(form:FormData) {
- try{const {token}=await current();const agent=text(form,"agent");await backend().mutation(api.bridge.savePersonal,{token,...(agent?{agent:z.enum(localAgents).parse(agent)}:{})});await notify("Coding agent saved");}
+ try{const {token}=await current();const agent=text(form,"agent");await backend().mutation(api.bridge.savePersonal,{token,...(agent?{agent:z.enum(localAgents).parse(agent)}:{}),...handoffChoice(form)});await notify("Fix agent saved");}
  catch(error){await notify(`Couldn’t save your agent: ${error instanceof Error?error.message:"please try again"}`,"error");}
  revalidatePath("/dashboard", "layout");
 }
 export async function saveWorkspaceAgent(form:FormData){
- try{const {token}=await current();await backend().mutation(api.bridge.saveWorkspaceAgent,{token,organizationId:text(form,"organizationId") as Id<"organizations">,agent:z.enum(localAgents).parse(text(form,"agent"))});await notify("Workspace agent saved");}
+ try{const {token}=await current();await backend().mutation(api.bridge.saveWorkspaceAgent,{token,organizationId:text(form,"organizationId") as Id<"organizations">,agent:z.enum(localAgents).parse(text(form,"agent")),...handoffChoice(form)});await notify("Workspace fix agent saved");}
  catch(error){await notify(`Couldn’t save the workspace agent: ${error instanceof Error?error.message:"please try again"}`,"error");}
  revalidatePath("/dashboard", "layout");
 }
@@ -584,6 +585,18 @@ export async function revokeBridge(form:FormData) {
 export async function launchFix(_previous:{url?:string;error?:string},form:FormData):Promise<{url?:string;error?:string}> {
  try {const {token}=await current(); const id=await backend().mutation(api.bridge.createFix,{token,reviewId:text(form,"reviewId") as Id<"reviews">,...(text(form,"findingId")?{findingId:text(form,"findingId") as Id<"findings">}:{}),agent:z.enum(localAgents).parse(text(form,"agent"))});return {url:`openreview://fix?request=${id}`};}
  catch(error){return {error:error instanceof Error ? error.message.slice(0,500):"Unable to create fix request"};}
+}
+// Cloud agents: prepare the hand-off, bind it to this browser, then post the comment as the user
+// (app/api/fixes/agent), re-authorizing GitHub first when no fresh token is at hand.
+export async function startCloudFix(form:FormData) {
+ const {token,user}=await current();
+ const reviewId=text(form,"reviewId"),findingId=text(form,"findingId"),finding=text(form,"finding");
+ const agent=z.string().refine(isCloudAgent).parse(text(form,"agent"));
+ let requestId:string;
+ try{requestId=await backend().mutation(api.cloudHandoff.prepare,{token,reviewId:reviewId as Id<"reviews">,...(findingId?{findingId:findingId as Id<"findings">}:{}),agent});}
+ catch(error){redirect(`/fix/${encodeURIComponent(reviewId)}?${new URLSearchParams({...(finding?{finding}:{}),error:error instanceof Error?error.message.replace(/^.*Uncaught Error: /s,"").split("\n")[0].slice(0,300):"Could not start the hand-off"})}`);}
+ (await cookies()).set(agentIntentCookie,await seal({requestId,userId:user._id,reviewId,...(finding?{finding}:{})},"10m"),{...cookieOptions,maxAge:600});
+ redirect(`/api/fixes/agent?request=${encodeURIComponent(requestId)}`);
 }
 // "Open a fix PR": OpenReview opens a pull request with its validated suggestion on a new branch.
 export async function openFixPullRequest(_previous:{url?:string;reused?:boolean;note?:string;error?:string},form:FormData):Promise<{url?:string;reused?:boolean;note?:string;error?:string}> {

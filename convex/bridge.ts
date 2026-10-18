@@ -3,13 +3,13 @@ import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import {requireContextReader,requireFindingReader} from "./repositoryContext";
 import { authenticated, authorize, authorizeRepository, repositoryAccess, service, audit } from "./auth";
-import { codingAgentValidator } from "./schema";
+import { cloudAgentValidator, codingAgentValidator, handoffValidator } from "./schema";
 import { effectiveSettings } from "./scopes";
 import { rateLimit } from "./rateLimit";
 import { fixPrompt, eligibleFixFinding } from "../src/fix-prompt";
 import {p4FixAuthority} from "./p4FixAuthority";
 import { findingSchema } from "../src/engine/types";
-import { resolveLocalAgent } from "../src/fix-agents";
+import { resolveAgentChoice } from "../src/fix-agents";
 
 async function device(ctx: MutationCtx, hash: string) {
   const d=await ctx.db.query("bridgeDevices").withIndex("by_hash",q=>q.eq("tokenHash",hash)).unique();
@@ -56,17 +56,22 @@ export const personal = query({args:{token:v.string(),organizationId:v.optional(
   const workspace=a.organizationId?await ctx.db.get(a.organizationId):null;
   const preference=await ctx.db.query("personalSettings").withIndex("by_user",q=>q.eq("userId",u._id)).unique();
   const githubLinked=Boolean(u.githubId)||Boolean(await ctx.db.query("identities").withIndex("by_user",q=>q.eq("userId",u._id)).filter(q=>q.eq(q.field("provider"),"github")).first());
-  return {account:u.login,githubLinked,agent:resolveLocalAgent(preference?.agent,workspace?.defaultAgent),personalAgent:preference?.agent,workspaceAgent:resolveLocalAgent(workspace?.defaultAgent),canPair:!!identity&&identity.member.role!=="viewer",canManageWorkspace:!!identity&&["owner","admin"].includes(identity.member.role),devices:devices.filter(d=>!a.organizationId||d.organizationId===a.organizationId).map(d=>({_id:d._id,name:d.name,expiresAt:d.expiresAt,revoked:d.revoked,lastSeen:d.lastSeen}))};
+  const choice=resolveAgentChoice(preference,workspace),workspaceChoice=resolveAgentChoice(null,workspace);
+  return {account:u.login,githubLinked,agent:choice.localAgent,handoff:choice.handoff,cloudAgent:choice.cloudAgent,personalAgent:preference?.agent,personalHandoff:preference?.handoff,personalCloudAgent:preference?.cloudAgent,workspaceAgent:workspaceChoice.localAgent,workspaceHandoff:workspaceChoice.handoff,workspaceCloudAgent:workspaceChoice.cloudAgent,canPair:!!identity&&identity.member.role!=="viewer",canManageWorkspace:!!identity&&["owner","admin"].includes(identity.member.role),devices:devices.filter(d=>!a.organizationId||d.organizationId===a.organizationId).map(d=>({_id:d._id,name:d.name,expiresAt:d.expiresAt,revoked:d.revoked,lastSeen:d.lastSeen}))};
 }});
-export const savePersonal = mutation({args:{token:v.string(),agent:v.optional(codingAgentValidator)},handler:async(ctx,a)=>{
+// Personal choices apply across workspaces; an omitted value inherits the workspace default. Saving
+// with nothing chosen removes the row.
+export const savePersonal = mutation({args:{token:v.string(),agent:v.optional(codingAgentValidator),handoff:v.optional(handoffValidator),cloudAgent:v.optional(cloudAgentValidator)},handler:async(ctx,a)=>{
  const u=await authenticated(ctx,a.token);const old=await ctx.db.query("personalSettings").withIndex("by_user",q=>q.eq("userId",u._id)).unique();
- if(!a.agent){if(old)await ctx.db.delete(old._id);return;}
- if(old) await ctx.db.patch(old._id,{agent:a.agent,updatedAt:Date.now()});else await ctx.db.insert("personalSettings",{userId:u._id,agent:a.agent,updatedAt:Date.now()});
+ const value={agent:a.agent,handoff:a.handoff,cloudAgent:a.cloudAgent,updatedAt:Date.now()};
+ if(!a.agent&&!a.handoff&&!a.cloudAgent){if(old)await ctx.db.delete(old._id);return;}
+ if(old) await ctx.db.patch(old._id,value);else await ctx.db.insert("personalSettings",{userId:u._id,...value});
 }});
-export const saveWorkspaceAgent=mutation({args:{token:v.string(),organizationId:v.id("organizations"),agent:codingAgentValidator},handler:async(ctx,a)=>{
+export const saveWorkspaceAgent=mutation({args:{token:v.string(),organizationId:v.id("organizations"),agent:codingAgentValidator,handoff:v.optional(handoffValidator),cloudAgent:v.optional(cloudAgentValidator)},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true);
- await ctx.db.patch(a.organizationId,{defaultAgent:a.agent});
+ await ctx.db.patch(a.organizationId,{defaultAgent:a.agent,...(a.handoff?{defaultHandoff:a.handoff}:{}),...(a.cloudAgent?{defaultCloudAgent:a.cloudAgent}:{})});
  await audit(ctx,a.organizationId,user._id,"agent.default_changed",a.agent);
+ if(a.handoff||a.cloudAgent)await audit(ctx,a.organizationId,user._id,"agent.handoff_default_changed",`${a.handoff??"unchanged"}:${a.cloudAgent??"unchanged"}`);
 }});
 export const revoke = mutation({args:{token:v.string(),deviceId:v.id("bridgeDevices")},handler:async(ctx,a)=>{
  const u=await authenticated(ctx,a.token);const d=await ctx.db.get(a.deviceId);if(d?.userId!==u._id) throw new Error("Device not accessible");await ctx.db.patch(d._id,{revoked:true});

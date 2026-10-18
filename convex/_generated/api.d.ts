@@ -27,6 +27,7 @@ import type * as budgetModel from "../budgetModel.js";
 import type * as cache from "../cache.js";
 import type * as chat from "../chat.js";
 import type * as chatJobs from "../chatJobs.js";
+import type * as cloudHandoff from "../cloudHandoff.js";
 import type * as commitSignals from "../commitSignals.js";
 import type * as context from "../context.js";
 import type * as conventionJobs from "../conventionJobs.js";
@@ -143,6 +144,7 @@ declare const fullApi: ApiFromModules<{
   cache: typeof cache;
   chat: typeof chat;
   chatJobs: typeof chatJobs;
+  cloudHandoff: typeof cloudHandoff;
   commitSignals: typeof commitSignals;
   context: typeof context;
   conventionJobs: typeof conventionJobs;
