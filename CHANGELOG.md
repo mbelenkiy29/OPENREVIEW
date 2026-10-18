@@ -26,6 +26,7 @@
 - Installing the GitHub App now works from any signed-in session (email, Google or GitLab) and returns you to setup.
 - Installing the GitHub App no longer ends on an error page when it takes more than ten minutes on GitHub. OpenReview re-authorizes once and finishes linking, for up to 30 minutes. Problems show as a message on the page you started from.
 - **Link an existing installation** connects an App installation made directly on github.com, or one that never returned to OpenReview, and refreshes the repository list of a linked one.
+- When the GitHub account you pick already has the App for another OpenReview workspace, setup now says so and explains what to do, instead of leaving you on GitHub. Choosing repositories for that account on GitHub changes the other workspace.
 - Reinstalling the GitHub App keeps your repositories: they follow the new installation and the ones that were on come back on. Unsuspending an installation does the same, and repositories whose access was removed and given back are restored.
 - Repositories added on GitHub get their real default branch, settings and team, the same as at install time.
 - The first review of a new repository waits for its first index with backoff, and if indexing hasn't finished after 30 minutes it fails with a clear message instead of waiting forever.

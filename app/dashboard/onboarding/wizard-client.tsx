@@ -75,6 +75,7 @@ export function ConnectStep({ action, organizationId, repositories, accounts, gi
                 <a className="button" href={providersHref}>Other providers</a>
               </div>
               {linkHref && <p className="muted"><a href={linkHref}>Already installed the App on GitHub? Link an existing installation.</a></p>}
+              {githubHref && <p className="muted">Each GitHub account or organization belongs to one OpenReview workspace. If GitHub shows <strong>Configure</strong> instead of <strong>Install</strong> for an account, the App is already installed there; pick another account, or link it with the option above.</p>}
             </div>
           </li>
           <li data-state={state(2)}>

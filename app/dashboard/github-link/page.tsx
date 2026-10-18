@@ -47,6 +47,7 @@ export default async function GithubLink({ searchParams }: { searchParams: Promi
       </form>;
     })}
     {!error && !installations.length && <p className="muted">No OpenReview installations are visible to your GitHub user yet.</p>}
+    {installations.some((i) => ownership[String(i.id)] === "elsewhere") && <p className="muted">An account marked “linked elsewhere” already belongs to another OpenReview workspace. Choosing repositories for it on GitHub changes that workspace, not this one. To review its repositories here, use the workspace it is linked to, or install the App on a different account or organization.</p>}
     <p className="row"><a className="button" href={installHref(organizationId, returnTo)}>Install on another account</a> <Link href={returnTo}>Back</Link></p>
   </main>;
 }

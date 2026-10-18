@@ -36,9 +36,14 @@ export async function userInstallations(token: string): Promise<UserInstallation
   const appId = Number(process.env.GITHUB_APP_ID);
   return Number.isInteger(appId) && appId > 0 ? found.filter((i) => i.app_id === undefined || i.app_id === appId) : found;
 }
+export const alreadyLinkedMessage = (account: string) => `OpenReview is already installed on ${account} for another OpenReview workspace, and each GitHub account or organization belongs to one workspace. Install the App on a different account or organization, or open the workspace it is linked to`;
 export async function linkInstallation(a: { token: string; organizationId: string; installationId: number; credentials: GithubCredentials; legacyGithubId?: number }) {
   const installation = (await userInstallations(a.credentials.token)).find((i) => i.id === a.installationId);
   if (!installation) throw new Error("Installation is not accessible to the signed-in GitHub user");
+  // Saving repository access for an account that already has the App changes that installation; it
+  // stays with the workspace it belongs to. Say so plainly instead of failing deep in linking.
+  const owner = await backend().query(api.repositories.installationOwnership, { token: a.token, organizationId: a.organizationId as Id<"organizations">, installationIds: [a.installationId] });
+  if (owner[String(a.installationId)] === "elsewhere") throw new Error(alreadyLinkedMessage(installation.account.login));
   if (installation.suspended_at) throw new Error("This installation is suspended on GitHub; unsuspend it there first");
   const github = await Github.installation(a.installationId),
     repositories = await github.repositories();

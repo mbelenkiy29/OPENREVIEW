@@ -173,9 +173,27 @@ test("Link an existing installation uses the same verified path, and refuses ins
   const rivalOrg = await t.mutation(api.users.createOrganization, { token: holder.session, name: "Rival" });
   const f = form(501); f.set("organizationId", rivalOrg);
   await expect(linkGithubInstallation(f)).rejects.toMatchObject({ url: expect.stringMatching(/^\/dashboard\/github-link/) });
-  expect(JSON.parse(decodeURIComponent(holder.jar.get("openreview_toast") ?? "")).text).toMatch(/another workspace/);
+  expect(JSON.parse(decodeURIComponent(holder.jar.get("openreview_toast") ?? "")).text).toMatch(/already installed on acme for another OpenReview workspace/);
   expect(await t.query(api.repositories.installationOwnership, { token: holder.session, organizationId: rivalOrg, installationIds: [501, 777] })).toEqual({ "501": "elsewhere", "777": "none" });
   // Without a fresh GitHub token the action re-authorizes first.
   holder.jar.delete("openreview_github_setup");
   await expect(linkGithubInstallation(f)).rejects.toMatchObject({ url: expect.stringMatching(/^\/api\/auth\/login\?purpose=github-install&next=%2Fdashboard%2Fgithub-link/) });
 });
+
+test("installing on an account whose App already belongs to another workspace explains it in setup and links nothing", async () => {
+  const { t, organizationId } = await setup(); github();
+  // The App on acme is linked to the first workspace.
+  const first = await startInstall(organizationId);
+  await callback(new Request(callbackUrl(first)));
+  // A second OpenReview account starts setup and picks the same GitHub account on GitHub.
+  const second = await t.mutation(api.users.login, { secret: "install-service-secret", githubId: 34, login: "newcomer", avatar: "" });
+  holder.session = await new SignJWT({}).setProtectedHeader({ alg: "HS256" }).setSubject(second).setIssuer("openreview").setAudience("openreview").setExpirationTime("1h").sign(new TextEncoder().encode(process.env.SESSION_SECRET));
+  const newWorkspace = await t.mutation(api.users.createOrganization, { token: holder.session, name: "New" });
+  const state = await startInstall(newWorkspace);
+  const response = await callback(new Request(callbackUrl(state)));
+  const target = new URL("https://x" + location(response));
+  expect(target.pathname).toBe("/dashboard/onboarding/connect");
+  expect(target.searchParams.get("message")).toMatch(/^OpenReview is already installed on acme for another OpenReview workspace/);
+  expect((await t.run((ctx) => ctx.db.query("repositories").collect())).map((r) => r.organizationId)).toEqual([organizationId]);
+});
+
