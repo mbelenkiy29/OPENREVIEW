@@ -32,6 +32,7 @@
 - Repositories added on GitHub get their real default branch, settings and team, the same as at install time.
 - The first review of a new repository waits for its first index with backoff, and if indexing hasn't finished after 30 minutes it fails with a clear message instead of waiting forever.
 - If the semantic search endpoint fails, the review carries on with graph and text context, and its coverage notes say so.
+- Fixed: after choosing repositories, setup could stay on "Starting indexing…" until the next click, even though indexing had started. The cause was a bug in the React version bundled with Next.js 15.5, which could also stall other page changes in the dashboard. OpenReview now includes React's fix.
 
 
 ### Fixing findings
