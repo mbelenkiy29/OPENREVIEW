@@ -130,6 +130,12 @@ a {
 a:hover {
   text-decoration: underline;
 }
+/* Links inside running text on public pages are underlined, so they don't rely on colour alone. */
+.docs-content :where(p, li, td) a,
+.consent p a,
+.auth p a {
+  text-decoration: underline;
+}
 h1,
 h2,
 h3,
@@ -1802,8 +1808,39 @@ form.catalog-review {
   color: var(--muted);
   margin: 18px 10px 4px;
 }
-.docs-nav > div:first-child h2 {
+.docs-nav > div:first-child h2,
+.docs-nav .docs-search + .sr-only + div h2 {
   margin-top: 0;
+}
+.docs-search {
+  position: relative;
+  margin: 0 0 16px;
+}
+.docs-search input {
+  width: 100%;
+  padding-right: 32px;
+}
+.docs-search input:focus + kbd,
+.docs-search input:not(:placeholder-shown) + kbd {
+  display: none;
+}
+.docs-search kbd {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.docs-nav a small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
 }
 .docs-nav ul {
   list-style: none;
@@ -2288,8 +2325,14 @@ form.catalog-review {
 .replica h1 {
   font-size: 28px;
 }
+/* Code in a demo window wraps instead of scrolling sideways, so nothing needs keyboard scrolling. */
 .replica pre {
   max-height: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.replica .activity-chart {
+  overflow: hidden;
 }
 .replica .activity-chart > div {
   min-width: 0;

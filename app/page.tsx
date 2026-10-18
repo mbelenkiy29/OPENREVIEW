@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { SiteFooter, SiteHeader, sourceRepository } from "./site-chrome";
 import { AgentReplica, AnalyticsReplica, ChatReplica, FindingReplica, ReviewReplica, SummaryReplica } from "./landing/replicas";
 import { Copy } from "./dashboard/live";
+import { ScrollTable } from "./dashboard/scroll-table";
 import { billingConfig } from "../src/billing";
 import { homeStructuredData, jsonLd } from "../src/structured-data";
 
@@ -93,18 +94,18 @@ export default function Home() {
         </div>
         <div className="terminal">
           <div className="terminal-bar"><span>Terminal</span><Copy value={commands.join("\n")} label="Copy" /></div>
-          <pre>{commands.map((c) => <code key={c}><span>$ </span>{c}{"\n"}</code>)}</pre>
+          <pre tabIndex={0} aria-label="Commands to run OpenReview locally">{commands.map((c) => <code key={c}><span>$ </span>{c}{"\n"}</code>)}</pre>
         </div>
       </section>
 
       <section className="compare-band" aria-labelledby="deploy-heading">
         <h2 id="deploy-heading">Self-hosted or cloud</h2>
-        <div className="table-scroll"><table className="compare"><thead><tr><th><span className="sr-only">Aspect</span></th><th>Self-hosted</th><th>Cloud</th></tr></thead><tbody>
+        <ScrollTable label="Self-hosted or cloud comparison" className="table-scroll"><table className="compare"><thead><tr><th><span className="sr-only">Aspect</span></th><th>Self-hosted</th><th>Cloud</th></tr></thead><tbody>
           <tr><th scope="row">Where it runs</th><td>Your Next.js host and Convex backend</td><td>A hosted OpenReview deployment</td></tr>
           <tr><th scope="row">Model and keys</th><td>Yours, with your own budget</td><td>Provided by the operator</td></tr>
           <tr><th scope="row">Review limits</th><td>None</td><td>Plan quota per seat</td></tr>
           <tr><th scope="row">Setup</th><td><Link href="/docs/self-hosting">Self-hosting guide</Link></td><td>Sign in and install the app</td></tr>
-        </tbody></table></div>
+        </tbody></table></ScrollTable>
       </section>
 
       {billing.enabled && <section id="pricing" className="pricing" aria-labelledby="pricing-heading">

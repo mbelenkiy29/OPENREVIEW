@@ -1,9 +1,10 @@
 'use client';
 import React,{useId,type ReactNode} from 'react';
-/** Keep horizontal table navigation available without intercepting keys in its links or controls. */
-export function ScrollTable({label,children}:{label:string;children:ReactNode}){
+/** Keep horizontal table navigation available without intercepting keys in its links or controls.
+ *  `className` picks the frame: the bordered card (default) or a bare `table-scroll` area. */
+export function ScrollTable({label,children,className="table-wrap"}:{label:string;children:ReactNode;className?:string}){
  const hint=useId();
- return <><p id={hint} className="sr-only">Use left and right arrow keys to scroll columns. Home shows the first column; End shows the last.</p><div className="table-wrap" role="region" aria-label={label} aria-describedby={hint} tabIndex={0} onKeyDown={event=>{
+ return <><p id={hint} className="sr-only">Use left and right arrow keys to scroll columns. Home shows the first column; End shows the last.</p><div className={className} role="region" aria-label={label} aria-describedby={hint} tabIndex={0} onKeyDown={event=>{
   if(event.target!==event.currentTarget||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey)return;
   const region=event.currentTarget;
   if(event.key==='ArrowRight')region.scrollLeft+=64;
