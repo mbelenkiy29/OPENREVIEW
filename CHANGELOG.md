@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased — October 2026
+<!-- Everything here is live on openreview.tech. Add entries under the current month; start a new "## Month YYYY" heading when the month changes. -->
+
+## October 2026
 
 ### Pull request reviews
 - Reviews catch boundaries that contradict their own documentation, such as a comment saying "$50.00 or more" over code that compares `> 50`.
@@ -67,6 +69,20 @@
 - Links to the source on GitHub in the header, the footer and the self-hosting section.
 - Public pages declare their canonical address, and the home page carries structured data (site name, app, licence, prices) for search engines.
 - A Security page (`/security`) describes how the hosted service handles code: what is stored and sent to the model, secret redaction, access control, encryption, GitHub App permissions, retention and how to report a vulnerability. The reporting contact is also published in `/.well-known/security.txt` and `SECURITY.md`.
+- Docs search: page titles and section headings, with `/` to focus it and Enter to open the top result.
+- The changelog is dated by month, each section has a link, and it has an RSS feed at `/changelog/feed.xml`.
+- Accessibility:
+  - tables, code and demo windows that scroll can be reached and scrolled with the keyboard;
+  - links inside text are underlined;
+  - chat thread lists are navigation regions.
+
+  An axe scan of the home, docs, changelog, security and sign-in pages finds no issues at desktop or phone width.
+
+### Security
+- Secret redaction also covers Stripe, Slack, GitLab and Google API keys, JSON Web Tokens, AWS secret access keys, quoted secrets under JSON keys, and secret-named settings in `.env`-style lines. Ordinary code and placeholders such as `your-api-key` are left as they are.
+- Webhook payloads are deleted 14 days after they were last processed, including deliveries that failed or never finished. Event payloads from other code hosts are cleared after the same 14 days. Their delivery records stay, so a redelivery is still recognised.
+- Every response sends `X-Content-Type-Options: nosniff` and `Referrer-Policy: strict-origin-when-cross-origin`, and pages refuse to be framed (`X-Frame-Options: DENY`, `frame-ancestors 'none'`).
+- The Privacy Policy now says that signing in with GitHub gives OpenReview no email address.
 
 ### Reviews
 - Agentic review engine (opt-in) that follows code across files with read-only tools, under per-mode budgets.

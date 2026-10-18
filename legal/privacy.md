@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Effective October 15, 2026**
+**Effective October 17, 2026**
 
 This policy explains what information the hosted OpenReview service at [openreview.tech](https://openreview.tech) collects, how it is used and shared, and the choices you have. OpenReview is operated by Michael Belenkiy ("we", "us"). Questions and requests go to [mbelenkiy29@gmail.com](mailto:mbelenkiy29@gmail.com).
 
@@ -8,7 +8,7 @@ OpenReview is also open-source software. If you run it on your own infrastructur
 
 ## Information we collect
 
-**Account information.** When you sign in with GitHub we receive your username, account ID, avatar image URL and, when GitHub provides it, your email address and whether it is verified. If other sign-in methods are offered (GitLab, Google or an emailed sign-in link), we receive the equivalent details from that provider.
+**Account information.** When you sign in with GitHub we keep your username, account ID and avatar image URL from your GitHub profile. We don't ask GitHub for access to your email addresses, and we don't store an email address from GitHub. If you sign in with GitLab or Google, we also receive your email address and whether that provider has verified it. If you sign in with an emailed link, we receive the email address you enter.
 
 **Workspace information.** This includes:
 - workspace and team names, members and their roles;

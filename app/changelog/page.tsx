@@ -1,16 +1,29 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { Fragment } from "react";
 import type { Metadata } from "next";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { parseChangelog } from "../../src/changelog";
 import { SiteFooter, SiteHeader } from "../site-chrome";
 
-export const metadata: Metadata = { title: "Changelog", description: "What changed in OpenReview.", alternates: { canonical: "/changelog" } };
+export const metadata: Metadata = { title: "Changelog", description: "What changed in OpenReview.", alternates: { canonical: "/changelog", types: { "application/rss+xml": "/changelog/feed.xml" } } };
+
+// Each month and section heading has an id, so the RSS feed and other pages can link to it.
 export default async function Changelog() {
-  const source = await fs.readFile(path.join(process.cwd(), "CHANGELOG.md"), "utf8");
+  const months = parseChangelog(await fs.readFile(path.join(process.cwd(), "CHANGELOG.md"), "utf8"));
+  const md = (text: string) => <Markdown remarkPlugins={[remarkGfm]} skipHtml>{text}</Markdown>;
   return <div className="docs-layout single">
     <SiteHeader current="changelog" />
-    <main className="docs-content review-markdown"><Markdown remarkPlugins={[remarkGfm]} skipHtml>{source}</Markdown></main>
+    <main className="docs-content review-markdown">
+      <h1>Changelog</h1>
+      <p>Follow along with the <a href="/changelog/feed.xml">RSS feed</a>.</p>
+      {months.map((m) => <Fragment key={m.id}>
+        <h2 id={m.id}>{m.title}</h2>
+        {m.intro && md(m.intro)}
+        {m.sections.map((s) => <Fragment key={s.id}><h3 id={s.id}>{s.title}</h3>{md(s.body)}</Fragment>)}
+      </Fragment>)}
+    </main>
     <SiteFooter />
   </div>;
 }

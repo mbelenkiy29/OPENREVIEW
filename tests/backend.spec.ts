@@ -1898,8 +1898,12 @@ test("failed provider delivery retry requires workspace admin, preserves signed 
  await t.mutation(api.providerConnections.retryEvent,{token:alice,id});
  const event=await t.run(ctx=>ctx.db.get(id));expect(event).toMatchObject({status:"queued",attempts:0,body:"verified-original",externalId:"original-delivery"});
  await expect(t.mutation(api.providerConnections.retryEvent,{token:alice,id})).rejects.toThrow("Only failed");
- const list=await t.query(api.providerConnections.events,{token:alice,connectionId});expect(list[0]).not.toHaveProperty("body");
+ const list=await t.query(api.providerConnections.events,{token:alice,connectionId});expect(list[0]).not.toHaveProperty("body");expect(list[0].payloadDeleted).toBe(false);
  await expect(t.query(api.providerConnections.events,{token:bob,connectionId})).rejects.toThrow("Forbidden");
+ // After 14 days the payload is pruned; the delivery stays listed but can no longer be retried.
+ await t.run(ctx=>ctx.db.patch(id,{status:"failed",body:"",bodyDeletedAt:Date.now()}));
+ await expect(t.mutation(api.providerConnections.retryEvent,{token:alice,id})).rejects.toThrow("can no longer be retried");
+ expect((await t.query(api.providerConnections.events,{token:alice,connectionId}))[0].payloadDeleted).toBe(true);
  const reviewId=await t.run(async ctx=>{
   const repositoryId=await ctx.db.insert("repositories",{organizationId,connectionId,externalId:"r_native",fullName:"acme/source",defaultBranch:"main",enabled:true,indexStatus:"ready",createdAt:Date.now()});
   const resultStorageId=await ctx.storage.store(new Blob([JSON.stringify({metadata:{suppressions:[{title:"Rejected candidate",agent:"correctness",reason:"Quote does not match source"}],coverageLimits:["No runtime evidence"]},privateContent:"not exposed"})]));
