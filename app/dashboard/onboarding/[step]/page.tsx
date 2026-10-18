@@ -4,7 +4,7 @@ import { api } from "../../../../convex/_generated/api";
 import { backend } from "../../../../src/server";
 import { emailOnWeb } from "../../../../src/email";
 import { billingConfig, checkoutTrialEnd } from "../../../../src/billing";
-import { installHref } from "../../../../src/github-install";
+import { installHref, linkHref } from "../../../../src/github-install";
 import { providerDisplay, providerShort } from "../../../../src/provider-display";
 import { nextStep, resolveStep, type ConfigureStep } from "../../../../src/onboarding-steps";
 import { Live } from "../../live";
@@ -50,7 +50,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
     const githubHref = process.env.GITHUB_APP_SLUG && process.env.GITHUB_CLIENT_ID ? installHref(organizationId, "/dashboard/onboarding/connect") : undefined;
     const error = query.error === "github-install" ? `The GitHub App installation didn’t finish: ${query.message ?? "please try again"}.` : undefined;
     return <WizardFrame step="connect" {...frame} nextLabel="Start indexing">
-      <ConnectStep action={selectAndIndex} organizationId={organizationId} repositories={repositories} accounts={accounts} githubHref={githubHref} providersHref="/dashboard/settings/providers" admin={admin} error={error}
+      <ConnectStep action={selectAndIndex} organizationId={organizationId} repositories={repositories} accounts={accounts} githubHref={githubHref} linkHref={githubHref ? linkHref(organizationId, "/dashboard/onboarding/connect") : undefined} providersHref="/dashboard/settings/providers" admin={admin} error={error}
         heading={<><Heading step="connect">Link the provider that hosts your code, then pick the repositories OpenReview should learn and review.</Heading><ReadOnlyNote admin={admin} /></>} />
     </WizardFrame>;
   }

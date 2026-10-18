@@ -22,6 +22,10 @@
 ### Setup
 - Guided workspace setup: connect a provider, choose repositories, watch the code graph build, then shape the summary, comment scope, triggers and tools with live previews, and invite your team. Automatic reviews wait until you choose when reviews run.
 - Installing the GitHub App now works from any signed-in session (email, Google or GitLab) and returns you to setup.
+- Installing the GitHub App no longer ends on an error page when it takes more than ten minutes on GitHub. OpenReview re-authorizes once and finishes linking, for up to 30 minutes. Problems show as a message on the page you started from.
+- **Link an existing installation** connects an App installation made directly on github.com, or one that never returned to OpenReview, and refreshes the repository list of a linked one.
+- Reinstalling the GitHub App keeps your repositories: they follow the new installation and the ones that were on come back on. Unsuspending an installation does the same, and repositories whose access was removed and given back are restored.
+- Repositories added on GitHub get their real default branch, settings and team, the same as at install time.
 
 ### Sign in
 - Sign-in and sign-up pages (`/login`, `/signup`): continue with GitHub, Google or GitLab, or get an emailed sign-in link, showing only the methods the deployment has configured. Errors and sign-in results now land on the sign-in page instead of the home page.

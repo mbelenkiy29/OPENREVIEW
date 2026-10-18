@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { SignJWT, jwtVerify, EncryptJWT, jwtDecrypt } from "jose";
 import { createHash } from "node:crypto";
 import { api } from "../convex/_generated/api";
+import { safeNext } from "./identity";
 
 export function backend() {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -35,9 +36,11 @@ export async function signSession(userId: string, sid?: string) {
     .setExpirationTime("7d")
     .sign(secret());
 }
-export async function session() {
+// `next`: where sign-in returns to when the visitor has no valid session (same-origin paths only).
+export async function session(next?: string) {
+  const login = next ? `/login?next=${encodeURIComponent(safeNext(next))}` : "/login";
   const token = (await cookies()).get("openreview_session")?.value;
-  if (!token) redirect("/login");
+  if (!token) redirect(login);
   try {
     await jwtVerify(token, secret(), {
       issuer: "openreview",
@@ -45,21 +48,21 @@ export async function session() {
       algorithms: ["HS256"],
     });
   } catch {
-    redirect("/login");
+    redirect(login);
   }
   // Server-side check: revoked or expired sessions (sign-out elsewhere, removal) end here.
-  if (!(await backend().query(api.identity.sessionValid, { token }).catch(() => false))) redirect("/login?signedout=1");
+  if (!(await backend().query(api.identity.sessionValid, { token }).catch(() => false))) redirect(next ? `${login}&signedout=1` : "/login?signedout=1");
   return token;
 }
-export async function current() {
-  const token = await session();
+export async function current(next?: string) {
+  const token = await session(next);
   return { token, ...(await backend().query(api.users.me, { token })) };
 }
-export async function seal(data: Record<string, unknown>) {
+export async function seal(data: Record<string, unknown>, expiresIn = "10m") {
   return new EncryptJWT(data)
     .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
     .setIssuedAt()
-    .setExpirationTime("10m")
+    .setExpirationTime(expiresIn)
     .encrypt(createHash("sha256").update(secret()).digest());
 }
 export async function unseal(token: string) {

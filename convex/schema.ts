@@ -307,11 +307,19 @@ export default defineSchema({
     accountId: v.number(),
     active: v.boolean(),
     createdAt: v.number(),
+    // Granted App permissions (e.g. contents: "write" enables fix pull requests), from the
+    // installation token or the installation webhook.
+    permissions: v.optional(v.record(v.string(), v.string())),
+    permissionsCheckedAt: v.optional(v.number()),
+    accountType: v.optional(v.string()),
   })
     .index("by_installation", ["installationId"])
     .index("by_org", ["organizationId"]),
   repositories: defineTable({
     indexScheduledId:v.optional(v.id("_scheduled_functions")),
+    // Set when GitHub suspended or removed the installation; reinstalling or unsuspending re-enables
+    // only these repositories, never ones an admin turned off.
+    disabledBy: v.optional(v.union(v.literal("suspend"), v.literal("uninstall"))),
     // Incremental ingestion of human review comments for learned conventions.
     conventionsCursor: v.optional(v.number()),
     conventionsSyncedAt: v.optional(v.number()),

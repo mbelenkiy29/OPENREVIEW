@@ -8,7 +8,7 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { authorize, authorizeRepository, visibleRepositories, service } from "./auth";
+import { audit, authorize, authorizeRepository, visibleRepositories, service } from "./auth";
 import { removeFile } from "./removeFile";
 import { settingsValidator,providerGroupValidator,nativeDepotIndexValidator } from "./schema";
 import {indexWriteAllowed,indexBatchMatches} from "./indexAuthority";
@@ -21,7 +21,7 @@ import { categories } from "../src/engine/types";
 export { defaults } from "../src/review-settings";
 import { effectiveSettings,providerTeam } from "./scopes";
 import type {QueryCtx,MutationCtx} from "./_generated/server";
-import type {Doc} from "./_generated/dataModel";
+import type {Doc,Id} from "./_generated/dataModel";
 export async function indexingAccess(ctx:QueryCtx|MutationCtx,repo:Doc<"repositories">){
  if(repo.connectionId){const c=await ctx.db.get(repo.connectionId);if(!c||c.organizationId!==repo.organizationId||!c.active||c.suspended)return "Provider access is disconnected or suspended";if(c.kind==="perforce")return "Perforce automatic reviews require the native polling controls; use CLI index/upload or the opt-in watch worker for submitted indexing";}
  else {const installationId=repo.installationId;if(installationId===undefined)return "GitHub installation access is unavailable";const installation=await ctx.db.query("githubInstallations").withIndex("by_installation",q=>q.eq("installationId",installationId)).unique();if(!installation?.active||installation.organizationId!==repo.organizationId)return "GitHub installation access is unavailable";}
@@ -118,14 +118,7 @@ export const reindex = mutation({
     await authorizeRepository(ctx, args.token, repo._id, true, Boolean("settings" in args && args.settings));
     const error=await indexingAccess(ctx,repo);if(error)throw new Error(error);
     if(!repo.enabled)throw new Error("Enable the repository before indexing");
-    const scheduled=repo.indexScheduledId?await ctx.db.system.get(repo.indexScheduledId):null;
-    if(repo.indexStatus==="indexing"||repo.indexStatus==="queued"&&scheduled&&["pending","inProgress"].includes(scheduled.state.kind))return;
-    const indexScheduledId=await ctx.scheduler.runAfter(0, internal.jobs.index, {
-      repositoryId: repo._id,
-    });
-    // The server action refreshes before the worker finishes preparation. Expose
-    // queued state immediately so the portal keeps polling through recovery.
-    await ctx.db.patch(repo._id,{indexStatus:"queued",error:undefined,indexScheduledId});
+    await scheduleIndexIfIdle(ctx,repo);
   },
 });
 export const connect = mutation({
@@ -136,6 +129,8 @@ export const connect = mutation({
     installationId: v.number(),
     account: v.string(),
     accountId: v.number(),
+    accountType: v.optional(v.string()),
+    permissions: v.optional(v.record(v.string(), v.string())),
     repositories: v.array(
       v.object({
         id: v.number(),
@@ -156,46 +151,106 @@ export const connect = mutation({
       .unique();
     if (existing && existing.organizationId !== args.organizationId)
       throw new Error("Installation belongs to another workspace");
-    if (!existing)
+    const details = { account: args.account, accountId: args.accountId, ...(args.accountType ? { accountType: args.accountType } : {}), ...(args.permissions ? { permissions: args.permissions, permissionsCheckedAt: Date.now() } : {}) };
+    if (!existing) {
       await ctx.db.insert("githubInstallations", {
         organizationId: args.organizationId,
         installationId: args.installationId,
-        account: args.account,
-        accountId: args.accountId,
+        ...details,
         active: true,
         createdAt: Date.now(),
       });
+      await audit(ctx, args.organizationId, user._id, "github.installation_linked", `${args.installationId}:${args.account}`);
+    } else {
+      // A verified callback for an installation GitHub had suspended or that was marked inactive.
+      if (!existing.active) await audit(ctx, args.organizationId, user._id, "github.installation_reactivated", `${args.installationId}:${args.account}`);
+      await ctx.db.patch(existing._id, { ...details, active: true });
+    }
     for (const repository of args.repositories) {
-      const teamId=repository.group?await providerTeam(ctx,args.organizationId,"github","https://api.github.com",repository.group,user._id):undefined;
-      const repo = await ctx.db
-        .query("repositories")
-        .withIndex("by_github", (q) => q.eq("githubId", repository.id))
-        .unique();
-      if (repo && repo.organizationId !== args.organizationId)
-        throw new Error("Repository already connected to another workspace");
-      if (!repo) {
-        const repositoryId = await ctx.db.insert("repositories", {
-          organizationId: args.organizationId,
-          installationId: args.installationId,
-          teamId,
-          githubId: repository.id,
-          fullName: repository.fullName,
-          defaultBranch: repository.defaultBranch,
-          enabled: false,
-          indexStatus: "not_indexed",
-          createdAt: Date.now(),
-        });
-        await ctx.db.insert("repositorySettings", {
-          repositoryId,
-          organizationId: args.organizationId,
-          inherit: true,
-          settings: defaults,
-        });
-        await autoEnableNewRepository(ctx, repositoryId);
-      }
+      const result = await upsertInstallationRepository(ctx, { organizationId: args.organizationId, installationId: args.installationId, repository, userId: user._id });
+      if (result === "elsewhere") throw new Error("Repository already connected to another workspace");
     }
   },
 });
+// Which of these GitHub installations are linked here, linked to another workspace, or unlinked.
+export const installationOwnership = query({
+  args: { token: v.string(), organizationId: v.id("organizations"), installationIds: v.array(v.number()) },
+  handler: async (ctx, a) => {
+    await authorize(ctx, a.token, a.organizationId, true);
+    const result: Record<string, "here" | "elsewhere" | "none"> = {};
+    for (const id of a.installationIds.slice(0, 200)) {
+      const row = await ctx.db.query("githubInstallations").withIndex("by_installation", (q) => q.eq("installationId", id)).unique();
+      result[String(id)] = !row ? "none" : row.organizationId === a.organizationId ? "here" : "elsewhere";
+    }
+    return result;
+  },
+});
+// One installed GitHub repository in a workspace. New rows get settings, a team and optional
+// auto-enable, the same from the install callback and the installation webhook. An existing row
+// follows a reinstall to the new installation id, and repositories GitHub's suspension or
+// uninstall turned off are turned back on.
+export async function upsertInstallationRepository(
+  ctx: MutationCtx,
+  a: { organizationId: Id<"organizations">; installationId: number; repository: { id: number; fullName: string; defaultBranch?: string; group?: { externalId: string; name: string } }; userId?: Id<"users"> },
+): Promise<"created" | "updated" | "elsewhere"> {
+  const repo = await ctx.db
+    .query("repositories")
+    .withIndex("by_github", (q) => q.eq("githubId", a.repository.id))
+    .unique();
+  if (repo && repo.organizationId !== a.organizationId) return "elsewhere";
+  const teamId = a.repository.group ? await providerTeam(ctx, a.organizationId, "github", "https://api.github.com", a.repository.group, a.userId) : undefined;
+  if (!repo) {
+    const repositoryId = await ctx.db.insert("repositories", {
+      organizationId: a.organizationId,
+      installationId: a.installationId,
+      teamId,
+      githubId: a.repository.id,
+      fullName: a.repository.fullName,
+      defaultBranch: a.repository.defaultBranch ?? "main",
+      enabled: false,
+      indexStatus: "not_indexed",
+      createdAt: Date.now(),
+    });
+    await ctx.db.insert("repositorySettings", { repositoryId, organizationId: a.organizationId, inherit: true, settings: defaults });
+    await autoEnableNewRepository(ctx, repositoryId);
+    return "created";
+  }
+  await ctx.db.patch(repo._id, {
+    installationId: a.installationId,
+    fullName: a.repository.fullName,
+    ...(a.repository.defaultBranch ? { defaultBranch: a.repository.defaultBranch } : {}),
+    ...(teamId && !repo.teamId ? { teamId } : {}),
+  });
+  if (!(await ctx.db.query("repositorySettings").withIndex("by_repo", (q) => q.eq("repositoryId", repo._id)).unique()))
+    await ctx.db.insert("repositorySettings", { repositoryId: repo._id, organizationId: a.organizationId, inherit: true, settings: defaults });
+  if (repo.disabledBy) await restoreRepository(ctx, repo._id, a.userId);
+  return "updated";
+}
+// Turns back on a repository that GitHub's suspension or uninstall disabled, then refreshes its
+// index (pushes were ignored while it was off). A refusal leaves it off and is audited.
+export async function restoreRepository(ctx: MutationCtx, repositoryId: Id<"repositories">, userId?: Id<"users">) {
+  const repo = await ctx.db.get(repositoryId);
+  if (!repo?.disabledBy) return;
+  try {
+    await enableIndexing(ctx, repo);
+    await ctx.db.patch(repo._id, { disabledBy: undefined });
+    const fresh = await ctx.db.get(repo._id);
+    if (fresh) await scheduleIndexIfIdle(ctx, fresh);
+    await audit(ctx, repo.organizationId, userId, "repository.restored", repo._id);
+  } catch (error) {
+    await audit(ctx, repo.organizationId, userId, "repository.restore_failed", `${repo._id}: ${error instanceof Error ? error.message.slice(0, 160) : "refused"}`);
+  }
+}
+// Schedules an index of the default branch unless one is already running or queued.
+export async function scheduleIndexIfIdle(ctx: MutationCtx, repo: Doc<"repositories">) {
+  const scheduled = repo.indexScheduledId ? await ctx.db.system.get(repo.indexScheduledId) : null;
+  if (repo.indexStatus === "indexing" || repo.indexStatus === "queued" && scheduled && ["pending", "inProgress"].includes(scheduled.state.kind)) return false;
+  const indexScheduledId = await ctx.scheduler.runAfter(0, internal.jobs.index, { repositoryId: repo._id });
+  // Callers refresh before the worker finishes preparation. Expose queued state immediately so the
+  // portal keeps polling through recovery.
+  await ctx.db.patch(repo._id, { indexStatus: "queued", error: undefined, indexScheduledId });
+  return true;
+}
 // Bounded configuration for a review/index step. File inventories are read on demand through
 // filesByPath / filePage / filesUnder so large repositories never exceed transaction read limits.
 export const data = internalQuery({

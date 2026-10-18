@@ -1,91 +1,61 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { api } from "../../../../convex/_generated/api";
-import type { Id } from "../../../../convex/_generated/dataModel";
-import { backend, current, origin, unseal } from "../../../../src/server";
-import { Github } from "../../../../src/github";
-import { installTarget, installerGithubId, defaultInstallReturn } from "../../../../src/github-install";
+import { cookieOptions, current, origin, seal, unseal } from "../../../../src/server";
+import { notify } from "../../../../src/toast";
+import { githubCredentials, linkInstallation } from "../../../../src/github-link";
+import { defaultInstallReturn, installFailurePath, installReturnPath, installStateMaxAge, installTarget, linkHref, resumePath, setupActionMessage } from "../../../../src/github-install";
+
+// GitHub's Setup URL. Large organizations need one admin check per repository.
+export const maxDuration = 120;
 
 export async function GET(request: Request) {
-  const { token, user, organizations } = await current();
-  const jar = await cookies(),
-    url = new URL(request.url);
-  let returnTo = defaultInstallReturn;
+  const url = new URL(request.url), resume = resumePath(url);
+  const { token, user, organizations } = await current(resume);
+  const jar = await cookies();
+  const sealed = jar.get("openreview_install_state")?.value;
+  const saved = sealed ? await unseal(sealed).catch(() => undefined) : undefined;
+  let returnTo = saved ? installReturnPath(saved.returnTo) : defaultInstallReturn;
   try {
-    const setup = jar.get("openreview_github_setup")?.value,
-      state = jar.get("openreview_install_state")?.value;
-    jar.delete("openreview_install_state");
-    if (!setup || !state)
-      throw new Error(
-        "Sign in again before installing the GitHub App (setup expires after ten minutes)",
-      );
-    const saved = await unseal(state),
-      credentials = await unseal(setup);
-    if (saved.state !== url.searchParams.get("state"))
-      throw new Error("Installation state mismatch");
+    const pending = setupActionMessage(url.searchParams.get("setup_action"));
+    if (pending) {
+      jar.delete("openreview_install_state");
+      throw new Error(pending);
+    }
+    if (!saved || !url.searchParams.get("state")) {
+      // No install in progress in this browser (the state expired), or GitHub came back from its
+      // configure page without one. The recovery page lists the installations to link or refresh.
+      jar.delete("openreview_install_state");
+      const workspace = organizations.find((o) => o._id === jar.get("openreview_workspace")?.value && ["owner", "admin"].includes(o.role)) ?? organizations.find((o) => ["owner", "admin"].includes(o.role));
+      if (!workspace?._id) throw new Error("Workspace admin required");
+      return NextResponse.redirect(`${origin()}${linkHref(workspace._id, defaultInstallReturn)}`);
+    }
+    if (saved.state !== url.searchParams.get("state")) {
+      jar.delete("openreview_install_state");
+      throw new Error("Installation state mismatch; start the install again");
+    }
     const target = installTarget(saved, user._id, organizations);
     returnTo = target.returnTo;
-    const installationId = z.coerce
-      .number()
-      .int()
-      .positive()
-      .parse(url.searchParams.get("installation_id"));
-    const userGithub = new Github(z.string().parse(credentials.token));
-    const installations = await userGithub.request(
-      "/user/installations?per_page=100",
-      z.object({
-        installations: z.array(
-          z.object({
-            id: z.number(),
-            account: z.object({ id: z.number(), login: z.string() }),
-          }),
-        ),
-      }),
-    );
-    const installation = installations.installations.find(
-      (i) => i.id === installationId,
-    );
-    if (!installation)
-      throw new Error(
-        "Installation is not accessible to the signed-in GitHub user",
-      );
-    const github = await Github.installation(installationId),
-      repositories = await github.repositories();
-    // Installs on the installer's own account need no per-repository admin check.
-    if (installation.account.id !== installerGithubId(credentials, user.githubId)) {
-      for (const repository of repositories) {
-        const access = await userGithub.request(
-          `/repos/${repository.full_name}`,
-          z.object({ permissions: z.object({ admin: z.boolean() }) }),
-        );
-        if (!access.permissions.admin)
-          throw new Error(
-            "Connecting organization repositories requires GitHub repository admin access",
-          );
-      }
+    const installationId = z.coerce.number().int().positive().safeParse(url.searchParams.get("installation_id"));
+    if (!installationId.success) throw new Error("GitHub did not return an installation; start the install again");
+    const credentials = await githubCredentials();
+    if (!credentials) {
+      // The GitHub sign-in token expired while the user was on GitHub. Get a fresh one (this does not
+      // sign in again) and come back here once; a second miss ends with a message instead of a loop.
+      if (saved.resumed) throw new Error("GitHub sign-in did not finish; use “Link an existing installation”");
+      jar.set("openreview_install_state", await seal({ state: saved.state, organizationId: target.organizationId, userId: user._id, returnTo, resumed: true }, `${installStateMaxAge}s`), { ...cookieOptions, maxAge: installStateMaxAge });
+      return NextResponse.redirect(`${origin()}/api/auth/login?purpose=github-install&next=${encodeURIComponent(resume)}`);
     }
-    await backend().mutation(api.repositories.connect, {
-      token,
-      secret: process.env.SERVICE_SECRET ?? "",
-      organizationId: target.organizationId as Id<"organizations">,
-      installationId,
-      account: installation.account.login,
-      accountId: installation.account.id,
-      repositories: repositories.map((r) => ({
-        id: r.id,
-        fullName: r.full_name,
-        defaultBranch: r.default_branch,
-        ...(r.owner.type==="Organization"&&r.owner.id?{group:{externalId:String(r.owner.id),name:r.owner.login.slice(0,100)}}:{}),
-      })),
-    });
+    const linked = await linkInstallation({ token, organizationId: target.organizationId, installationId: installationId.data, credentials, legacyGithubId: user.githubId });
+    jar.delete("openreview_install_state");
     jar.delete("openreview_github_setup");
+    await notify(`Connected ${linked.account} (${linked.repositories} ${linked.repositories === 1 ? "repository" : "repositories"})`);
     return NextResponse.redirect(`${origin()}${returnTo}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Installation failed";
-    // Guided setup shows the failure in place; other callers keep the JSON error.
-    if (returnTo.startsWith("/dashboard/onboarding/"))
-      return NextResponse.redirect(`${origin()}${returnTo}?error=github-install&message=${encodeURIComponent(message.slice(0, 200))}`);
-    return NextResponse.json({ error: message }, { status: 400 });
+    console.error(JSON.stringify({ event: "github.install_failed", error: message.slice(0, 200) }));
+    // The wizard shows the message in place; other pages show it as a toast. Never a raw error page.
+    if (!returnTo.startsWith("/dashboard/onboarding/")) await notify(`GitHub installation didn’t finish: ${message}`, "error");
+    return NextResponse.redirect(`${origin()}${installFailurePath(returnTo, message)}`);
   }
 }

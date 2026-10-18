@@ -8,6 +8,9 @@ import { randomBytes, createHash } from "node:crypto";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { backend, current } from "../../src/server";
+import { notify } from "../../src/toast";
+import { githubCredentials, linkInstallation } from "../../src/github-link";
+import { installReturnPath, linkHref } from "../../src/github-install";
 import { decryptCredential, encryptCredential } from "../../src/credentials";
 import { createDevinSession, validDevinKey } from "../../src/devin";
 import { fixHandoffPrompt } from "../../src/fix-handoff";
@@ -16,10 +19,6 @@ import {runtimePolicySchema} from "../../src/runtime-policy";
 import {approvalDefaults,runtimeDefaults} from "../../src/review-settings";
 
 const text = (f: FormData, key: string) => z.string().parse(f.get(key) ?? "");
-// One-shot confirmation shown by the dashboard Toaster after a redirect or revalidation.
-async function notify(message: string, tone: "success" | "error" = "success") {
-  (await cookies()).set("openreview_toast", encodeURIComponent(JSON.stringify({ text: message, tone })), { path: "/", sameSite: "lax", maxAge: 30, httpOnly: false, secure: process.env.NODE_ENV === "production" });
-}
 export async function saveApprovalPolicy(_state:{error?:string;saved?:boolean},form:FormData):Promise<{error?:string;saved?:boolean}>{
  try{
   const {token}=await current(),scope=text(form,"scope");
@@ -88,6 +87,23 @@ export async function switchTeam(form:FormData){
  if(teamId)jar.set("openreview_team",teamId,{httpOnly:true,sameSite:"lax",secure:process.env.NODE_ENV==="production",path:"/"});else jar.delete("openreview_team");
  revalidatePath("/dashboard","layout");
  const returnTo=text(form,"returnTo");redirect(/^\/dashboard\/(analytics|memory|pulls|settings)(\/([a-z-]+))?$/.test(returnTo)?returnTo:"/dashboard/analytics");
+}
+// "Link an existing installation": the same verified linking path the install callback uses.
+export async function linkGithubInstallation(form: FormData) {
+  const { token, user } = await current();
+  const organizationId = text(form, "organizationId"), returnTo = installReturnPath(text(form, "returnTo"));
+  const installationId = z.coerce.number().int().positive().parse(form.get("installationId"));
+  const credentials = await githubCredentials();
+  if (!credentials) redirect(`/api/auth/login?purpose=github-install&next=${encodeURIComponent(linkHref(organizationId, returnTo))}`);
+  try {
+    const linked = await linkInstallation({ token, organizationId, installationId, credentials, legacyGithubId: user.githubId });
+    await notify(`Connected ${linked.account} (${linked.repositories} ${linked.repositories === 1 ? "repository" : "repositories"})`);
+  } catch (error) {
+    await notify(`Couldn’t link the installation: ${error instanceof Error ? error.message : "please try again"}`, "error");
+    redirect(linkHref(organizationId, returnTo));
+  }
+  revalidatePath("/dashboard");
+  redirect(returnTo);
 }
 export async function configureRepository(form: FormData) {
   const { token } = await current();
