@@ -200,6 +200,8 @@ export default defineSchema({
     avatar: v.string(),
     // Tokens issued before this time are rejected ("sign out everywhere", member removal).
     sessionsValidAfter: v.optional(v.number()),
+    // Product milestones already sent to analytics (convex/analyticsMilestones.ts), so each is sent once.
+    analyticsMilestones: v.optional(v.array(v.string())),
     createdAt: v.number(),
   }).index("by_github", ["githubId"]),
   // Sign-in identities: one row per provider account. Accounts link only through a verified

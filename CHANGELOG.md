@@ -30,6 +30,9 @@
 
 ### Monitoring
 - Optional error tracking with Sentry and product analytics with PostHog for hosted deployments, off unless configured. Nothing sensitive leaves the browser or server: no session replays, no cookies or request bodies, no clicks or page text on signed-in pages, and secret URL parameters are stripped.
+- Product milestones for a sign-up funnel:
+  - `signed_up`, `workspace_created`, `repository_connected` and `first_review_completed`;
+  - each is sent once, with the time it happened, and only for visitors who accepted analytics.
 
 ### Billing
 - Starter plan: unlimited reviews under a monthly fair-use limit (500 per seat by default).

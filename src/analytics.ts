@@ -43,3 +43,11 @@ export function identifyAnalytics(userId: string, workspaceId?: string) {
 export function resetAnalytics() {
   if (posthog.__loaded) posthog.reset();
 }
+
+/** Sends product milestones (convex/analyticsMilestones.ts), each stamped with when it happened.
+ *  Returns false, sending nothing, when PostHog isn't running or the visitor opted out. */
+export function captureMilestones(milestones: { event: string; at: number; workspaceId?: string }[]) {
+  if (!posthog.__loaded || posthog.has_opted_out_capturing()) return false;
+  for (const m of milestones) posthog.capture(m.event, m.workspaceId ? { workspace_id: m.workspaceId } : {}, { timestamp: new Date(m.at) });
+  return true;
+}

@@ -36,7 +36,10 @@ Our hosting providers keep server logs that include IP addresses.
 
 **Error reports and analytics.** We use Sentry to learn about errors and PostHog to understand how the site is used.
 - **Sentry receives:** error reports with technical details, and performance timings for a sample of page loads.
-- **PostHog receives:** page views, and clicks on public pages such as the home page and documentation.
+- **PostHog receives:**
+  - page views;
+  - clicks on public pages such as the home page and documentation;
+  - four product milestones, each sent once: signing up, creating a workspace, connecting the first repository, and the first completed review.
 - **What identifies you:** after you sign in, both tools identify you only by an internal user ID and workspace ID.
 - **What is never sent:**
   - the text of what you click or read on signed-in pages;
