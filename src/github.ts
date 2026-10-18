@@ -444,8 +444,13 @@ export class Github {
   // Fix pull requests need contents:write; without it the feature is skipped, never an error.
   // Only a new namespaced branch is created and written, from the reviewed head; the pull
   // request's own branch (and its base) is never written. Retries reuse the branch or open PR.
+  // Why fix pull requests cannot be opened with this client, or null when they can.
+  protected fixPullRequestBlocker(): string | null {
+    return this.permissions?.contents === "write" ? null : "the GitHub App does not have Contents: Read and write permission";
+  }
   async openFixPullRequest(repository: string, number: number, fix: { branch: string; expectedHead: string; path: string; blobSha: string; content: string; title: string; body: string; message: string }): Promise<{ url: string; reused: boolean } | { skipped: string }> {
-    if (this.permissions?.contents !== "write") return { skipped: "the GitHub App does not have Contents: Read and write permission" };
+    const blocked = this.fixPullRequestBlocker();
+    if (blocked) return { skipped: blocked };
     const prefix = `/repos/${repository}`;
     const pr = await this.request(`${prefix}/pulls/${number}`, z.object({ state: z.string(), head: z.object({ sha: z.string(), ref: z.string(), repo: z.object({ full_name: z.string() }).nullable() }), base: z.object({ ref: z.string() }) }));
     if (pr.state !== "open") return { skipped: "the pull request is not open" };

@@ -172,6 +172,15 @@ export const connect = mutation({
     }
   },
 });
+// GitHub App installations linked to the workspace, with the optional permissions they granted.
+export const githubInstallations = query({
+  args: { token: v.string(), organizationId: v.id("organizations") },
+  handler: async (ctx, a) => {
+    await authorize(ctx, a.token, a.organizationId);
+    return (await ctx.db.query("githubInstallations").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId)).collect())
+      .map((i) => ({ installationId: i.installationId, account: i.account, accountType: i.accountType, active: i.active, contents: i.permissions?.contents, checks: i.permissions?.checks, checkedAt: i.permissionsCheckedAt }));
+  },
+});
 // Which of these GitHub installations are linked here, linked to another workspace, or unlinked.
 export const installationOwnership = query({
   args: { token: v.string(), organizationId: v.id("organizations"), installationIds: v.array(v.number()) },

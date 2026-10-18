@@ -36,6 +36,9 @@
 - Every finding on a review page links to the full Fix page (deep links, Devin and more), and deep links are hidden on findings that are already resolved or dismissed.
 - The Fix link under each inline finding is built the same way on every provider, and is left out when `APP_URL` is not a plain web origin.
 - Saving your coding agent confirms with a message, and shows the error if saving fails.
+- **Open a fix PR** on a finding's Fix page: OpenReview commits its validated suggestion to a new `openreview/fix-*` branch and opens a pull request against your branch, checked against your own GitHub write access. It needs the repository's Fix pull requests setting and the App's Contents: Read and write permission; the page says which one is missing.
+- Settings → Code providers shows, for each GitHub installation, whether it granted Contents and Checks write access.
+- On Gitea, fix pull request requests now say the feature isn't available there, instead of mentioning GitHub permissions.
 
 ### Sign in
 - Sign-in and sign-up pages (`/login`, `/signup`): continue with GitHub, Google or GitLab, or get an emailed sign-in link, showing only the methods the deployment has configured. Errors and sign-in results now land on the sign-in page instead of the home page.

@@ -585,6 +585,11 @@ export async function launchFix(_previous:{url?:string;error?:string},form:FormD
  try {const {token}=await current(); const id=await backend().mutation(api.bridge.createFix,{token,reviewId:text(form,"reviewId") as Id<"reviews">,...(text(form,"findingId")?{findingId:text(form,"findingId") as Id<"findings">}:{}),agent:z.enum(localAgents).parse(text(form,"agent"))});return {url:`openreview://fix?request=${id}`};}
  catch(error){return {error:error instanceof Error ? error.message.slice(0,500):"Unable to create fix request"};}
 }
+// "Open a fix PR": OpenReview opens a pull request with its validated suggestion on a new branch.
+export async function openFixPullRequest(_previous:{url?:string;reused?:boolean;note?:string;error?:string},form:FormData):Promise<{url?:string;reused?:boolean;note?:string;error?:string}> {
+ try{const {token}=await current();return await backend().action(api.fixPullRequestJobs.open,{token,findingId:text(form,"findingId") as Id<"findings">});}
+ catch(error){return {error:error instanceof Error?error.message.replace(/^.*Uncaught Error: /s,"").split("\n")[0].slice(0,300):"Could not open a fix pull request"};}
+}
 export async function reviewAgain(form:FormData) {
  const {token}=await current();const review=await backend().query(api.reviews.detail,{token,reviewId:text(form,"reviewId") as Id<"reviews">});
  if(review.review.nativeP4&&review.review.status==="failed"&&review.review.resultStorageId&&text(form,"fresh")!=="true"){await backend().mutation(api.p4Reviews.retryPublication,{token,reviewId:review.review._id});revalidatePath("/dashboard","layout");redirect("/dashboard/pulls/"+review.review._id);}
