@@ -35,10 +35,15 @@ export function safeFixBranch(branch: string, protectedRefs: string[]) {
 }
 
 export function fixHandoffUrl(appUrl: string | undefined, reviewId: string, fingerprint: string) {
-  if (!appUrl) return undefined;
+  if (!appUrl || !URL.canParse(appUrl)) return undefined;
   const origin = new URL(appUrl);
   if (!["http:", "https:"].includes(origin.protocol) || origin.username || origin.password) return undefined;
   return `${origin.origin}/fix/${encodeURIComponent(reviewId)}?finding=${encodeURIComponent(fingerprint)}`;
+}
+/** The "Fix with …" link under an inline finding, or "" when APP_URL is unset or not a plain web origin. */
+export function fixHandoffLink(appUrl: string | undefined, reviewId: string, fingerprint: string, label = "Fix with your agent") {
+  const url = fixHandoffUrl(appUrl, reviewId, fingerprint);
+  return url ? `\n\n[${label.replace(/[[\]\r\n]/g, "")}](${url})` : "";
 }
 
 export function fixReplyBody(p: { title: string; explanation?: string; block?: string; problem?: string; handoff?: string; pullRequest?: { url: string; reused: boolean }; pullRequestNote?: string; revision: string }) {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fixHandoffLink } from "./fix-command";
 import { catalogPageSize, changeMetadataSchema, numberedPage, validateChangePage, type ChangeMetadata, type ChangePage } from "./change-metadata";
 import { reviewLinks } from "./review-summary";
 import { repositorySourceUrl } from "./source-url";
@@ -148,7 +149,7 @@ export class AzureDevOps implements Scm {
       omitted,
     } as unknown as ScmChange;
   }
-  async publish(repository: string, number: number, sha: string, summary: string, findings: Finding[], marker: string, style = "detailed", revisionKey?: string, unresolvedCount = findings.length) {
+  async publish(repository: string, number: number, sha: string, summary: string, findings: Finding[], marker: string, style = "detailed", revisionKey?: string, unresolvedCount = findings.length, options: import("./github").PublishOptions = {}) {
     const prefix = `${this.repo(repository)}/pullRequests/${number}`;
     const pr = await this.request(`${this.repo(repository)}/pullrequests/${number}`, prSchema);
     const current = (p: z.infer<typeof prSchema>) => p.status === "active" && p.lastMergeSourceCommit.commitId === sha && (revisionKey === undefined || revisionKey === p.lastMergeTargetCommit.commitId + ":" + p.lastMergeSourceCommit.commitId);
@@ -171,7 +172,7 @@ export class AzureDevOps implements Scm {
         const { file } = await this.patch(repository, entry);
         if (!changedLines(file.patch).has(f.startLine)) throw new Error("Finding line not in the computed diff");
         await recheck();
-        const created = await this.request(`${prefix}/threads`, thread, "POST", { comments: [{ parentCommentId: 0, commentType: 1, content: findingComment(f, style) + "\n\n" + findingMarker + (process.env.APP_URL ? `\n\n[Fix with your agent](${process.env.APP_URL}/fix/${marker}?finding=${f.fingerprint})` : "") }], status: azureThreadStatus.active, threadContext: { filePath: "/" + f.filePath, rightFileStart: { line: f.startLine, offset: 1 }, rightFileEnd: { line: Math.max(f.startLine, f.endLine), offset: 1 } }, pullRequestThreadContext: { changeTrackingId: entry.changeTrackingId, iterationContext: { firstComparingIteration: 1, secondComparingIteration: iteration.id } } });
+        const created = await this.request(`${prefix}/threads`, thread, "POST", { comments: [{ parentCommentId: 0, commentType: 1, content: findingComment(f, style) + "\n\n" + findingMarker + fixHandoffLink(process.env.APP_URL, marker, f.fingerprint, options.fixLabel) }], status: azureThreadStatus.active, threadContext: { filePath: "/" + f.filePath, rightFileStart: { line: f.startLine, offset: 1 }, rightFileEnd: { line: Math.max(f.startLine, f.endLine), offset: 1 } }, pullRequestThreadContext: { changeTrackingId: entry.changeTrackingId, iterationContext: { firstComparingIteration: 1, secondComparingIteration: iteration.id } } });
         if (created.comments[0]?.author.id !== me.id) throw new Error("Azure DevOps returned another publication identity");
         comments.push({ id: `${created.id}:${created.comments[0].id}`, fingerprint: f.fingerprint });
       }

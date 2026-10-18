@@ -1,10 +1,17 @@
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { z } from "zod";
-import { cookieOptions, seal } from "../../../../src/server";
+import { cookieOptions, origin, seal } from "../../../../src/server";
+import { resumePath } from "../../../../src/github-install";
 import { Github } from "../../../../src/github";
 import { finishOAuth } from "../../../../src/oauth-flow";
 
 export async function GET(request: Request) {
+  // With "Request user authorization during installation" turned on in the App settings, GitHub
+  // sends installs here instead of the Setup URL. Hand them to the install callback.
+  const url = new URL(request.url);
+  if (url.searchParams.has("installation_id") && !(await cookies()).get("openreview_oauth_state"))
+    return NextResponse.redirect(origin() + resumePath(url));
   let accessToken = "", githubUserId = 0;
   return finishOAuth(request, "github", async (code, redirectUri) => {
     const response = await fetch("https://github.com/login/oauth/access_token", {

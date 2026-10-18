@@ -6,3 +6,6 @@ export function wantsAnswer(body: string) {
   return text.length >= 2 && !acknowledgement.test(text);
 }
 export const threadReplyLimits = { perThread: 3, perPullRequest: 10, windowMs: 3_600_000 } as const;
+/** A comment OpenReview posted for a developer to start a cloud agent: OpenReview never answers it. */
+export const isAgentHandoff = (body: string) => /<!-- openreview:agent-handoff:[A-Za-z0-9]+ -->\s*$/.test(body);
+

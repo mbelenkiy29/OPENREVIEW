@@ -24,6 +24,7 @@ export async function loadSetup() {
     // Workspaces from before guided setup have no record: treat them as set up (setup reopened).
     completed: !status.onboarding || Boolean(status.onboarding.completedAt),
     billing: billing.enabled,
+    planMissing: billing.enabled && billing.planMissing,
   };
   return { user, organization: { ...organization, _id: organizationId }, status, billing, state };
 }

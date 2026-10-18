@@ -15,6 +15,7 @@ import { recordSignals } from "./commitSignals";
 import {p4FixAuthority} from "./p4FixAuthority";
 import { eligibleFixFinding } from "../src/fix-prompt";
 import { effectiveSettings } from "./scopes";
+import { scheduleIndexIfIdle } from "./repositories";
 import { rateLimit } from "./rateLimit";
 import {repositoryContextValidator,validateRepositoryContext,requireContextReader,contextReadable,requireFindingReader} from "./repositoryContext";
 import {validateIntegrationScopes} from "./integrations";
@@ -178,7 +179,7 @@ export const stage = internalMutation({
     else await ctx.db.patch(review._id, {
       status: args.status,
       updatedAt: Date.now(),
-      ...(args.status === "ingesting" ? {error:undefined,finishedAt:undefined,retryScheduledId:undefined,retryAt:undefined} : {}),
+      ...(args.status === "ingesting" ? {error:undefined,finishedAt:undefined,retryScheduledId:undefined,retryAt:undefined,indexWaitSince:undefined} : {}),
       ...(args.status === "ingesting" && review.status !== "waiting_runtime" && review.status !== "waiting_agent" ? { attempts: review.attempts + 1 } : {}),
     });
     await ctx.db.insert("reviewRuns", {
@@ -656,3 +657,31 @@ export const recordCall = internalMutation({
     });
   },
 });
+// The first review of a repository waits for its first index. Checks back off from 3 to 30 seconds and
+// are kept in retryScheduledId, so the recovery sweep never adds a second polling chain. Indexing is
+// started only when none is running, and the wait ends after indexWaitMinutes.
+export const indexWaitMinutes = 30;
+export const indexWaitExpired = `Repository indexing has not finished after ${indexWaitMinutes} minutes. Once Dashboard → Repositories shows the repository ready, comment "@openreview review again" on the pull request.`;
+export function indexWaitDelay(elapsed: number) { return elapsed < 60000 ? 3000 : elapsed < 5 * 60000 ? 10000 : 30000; }
+export const awaitIndex = internalMutation({
+  args: { reviewId: v.id("reviews") },
+  handler: async (ctx, a): Promise<"waiting" | "failed" | "expired" | "done"> => {
+    const review = await ctx.db.get(a.reviewId);
+    if (!review || !["queued", "failed"].includes(review.status)) return "done";
+    const repo = await ctx.db.get(review.repositoryId);
+    if (!repo || repo.indexedSha) return "done";
+    const now = Date.now(), since = review.indexWaitSince ?? now;
+    // The check that is running now is this review's own scheduled retry; drop it before finishing.
+    const clear = { retryScheduledId: undefined, retryAt: undefined, indexWaitSince: undefined, updatedAt: now };
+    if (repo.indexStatus === "failed") { await ctx.db.patch(review._id, clear); return "failed"; }
+    if (now - since >= indexWaitMinutes * 60000) { await ctx.db.patch(review._id, clear); return "expired"; }
+    if (repo.enabled && repo.indexStatus !== "indexing") await scheduleIndexIfIdle(ctx, repo);
+    const pending = review.retryScheduledId ? await ctx.db.system.get(review.retryScheduledId) : null;
+    if (pending?.state.kind === "pending") return "waiting";
+    const delay = indexWaitDelay(now - since);
+    const retryScheduledId = await ctx.scheduler.runAfter(delay, internal.jobs.review, a);
+    await ctx.db.patch(review._id, { indexWaitSince: since, retryScheduledId, retryAt: now + delay, updatedAt: now });
+    return "waiting";
+  },
+});
+

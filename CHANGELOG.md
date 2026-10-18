@@ -22,8 +22,28 @@
   - The risk line no longer shows a second confidence number.
 
 ### Setup
+- **New workspaces choose a plan first.** On the hosted cloud, setup now goes workspace → Choose your plan → connect your code. The Starter plan's 14-day free trial starts by adding a card in Stripe Checkout, and nothing is charged until it ends. Until Stripe confirms the plan, every dashboard page leads back to the plan step, and repositories aren't indexed or reviewed. The choice is stored with the workspace. Workspaces created before this change are not affected.
 - Guided workspace setup: connect a provider, choose repositories, watch the code graph build, then shape the summary, comment scope, triggers and tools with live previews, and invite your team. Automatic reviews wait until you choose when reviews run.
 - Installing the GitHub App now works from any signed-in session (email, Google or GitLab) and returns you to setup.
+- Installing the GitHub App no longer ends on an error page when it takes more than ten minutes on GitHub. OpenReview re-authorizes once and finishes linking, for up to 30 minutes. Problems show as a message on the page you started from.
+- **Link an existing installation** connects an App installation made directly on github.com, or one that never returned to OpenReview, and refreshes the repository list of a linked one.
+- When the GitHub account you pick already has the App for another OpenReview workspace, setup now says so and explains what to do, instead of leaving you on GitHub. Choosing repositories for that account on GitHub changes the other workspace.
+- Reinstalling the GitHub App keeps your repositories: they follow the new installation and the ones that were on come back on. Unsuspending an installation does the same, and repositories whose access was removed and given back are restored.
+- Repositories added on GitHub get their real default branch, settings and team, the same as at install time.
+- The first review of a new repository waits for its first index with backoff, and if indexing hasn't finished after 30 minutes it fails with a clear message instead of waiting forever.
+- If the semantic search endpoint fails, the review carries on with graph and text context, and its coverage notes say so.
+
+
+### Fixing findings
+- Signing in from a **Fix with your agent** link in a pull request now returns you to that fix, instead of the dashboard.
+- One default coding agent everywhere: Claude Code, unless the workspace or you choose another. The settings page no longer shows a preview-only button.
+- Every finding on a review page links to the full Fix page (deep links, Devin and more), and deep links are hidden on findings that are already resolved or dismissed.
+- The Fix link under each inline finding is built the same way on every provider, and is left out when `APP_URL` is not a plain web origin.
+- Saving your coding agent confirms with a message, and shows the error if saving fails.
+- **Open a fix PR** on a finding's Fix page: OpenReview commits its validated suggestion to a new `openreview/fix-*` branch and opens a pull request against your branch, checked against your own GitHub write access. It needs the repository's Fix pull requests setting and the App's Contents: Read and write permission; the page says which one is missing.
+- Settings → Code providers shows, for each GitHub installation, whether it granted Contents and Checks write access.
+- **Cloud agents.** Hand a finding to Claude, Codex, Copilot or Cursor from its Fix page. OpenReview posts a comment as you that mentions the agent, so it starts in its own cloud: Claude replies in the finding's thread, the others in the pull request conversation. Choose your agent, or the workspace default, under Settings → Agents, which also lists what each agent needs. When cloud agents are the workspace default, the link under each finding reads, for example, **Fix with Claude**. See [Fix with agents](docs/public/fix-with-agents.md).
+- On Gitea, fix pull request requests now say the feature isn't available there, instead of mentioning GitHub permissions.
 
 ### Sign in
 - Sign-in and sign-up pages (`/login`, `/signup`): continue with GitHub, Google or GitLab, or get an emailed sign-in link, showing only the methods the deployment has configured. Errors and sign-in results now land on the sign-in page instead of the home page.

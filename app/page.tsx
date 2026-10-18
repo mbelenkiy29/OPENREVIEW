@@ -55,7 +55,7 @@ export default function Home() {
           <Link className="button primary large" href="/signup">Get started</Link>
           <Link className="button large" href="/login">Sign in</Link>
         </div>
-        {billing.enabled && <p className="hero-note">{billing.trialDays} days free, no card required.</p>}
+        {billing.enabled && <p className="hero-note">{billing.trialDays} days free. Cancel anytime before the trial ends.</p>}
         <p className="hero-links"><Link href="/docs/quickstart">Read the quickstart →</Link><Link href="/docs/self-hosting">Self-host it →</Link></p>
       </section>
       <div className="stage"><ReviewReplica /><p className="stage-hint">Live demo with sample data. Click around.</p></div>
@@ -111,7 +111,7 @@ export default function Home() {
       {billing.enabled && <section id="pricing" className="pricing" aria-labelledby="pricing-heading">
         <h2 id="pricing-heading">Pricing</h2>
         <div className="feature-grid two">
-          <article className="feature-card"><h3>Trial</h3><p className="price">Free for {billing.trialDays} days</p><p>Up to {billing.trialReviews} reviews a month, with every feature included. No card required.</p><p className="pricing-action"><Link className="button primary" href="/signup">Start free trial</Link></p></article>
+          <article className="feature-card"><h3>Free trial</h3><p className="price">Free for {billing.trialDays} days</p><p>Everything in Starter. Add a card when you set up your workspace; nothing is charged until the trial ends, and you can cancel before then.</p><p className="pricing-action"><Link className="button primary" href="/signup">Start free trial</Link></p></article>
           <article className="feature-card"><h3>Starter</h3><p className="price">{process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>Unlimited reviews, with a fair-use limit of {billing.reviewsPerSeat} per seat each month. Owners, admins and members are seats; viewers are free.</p><p className="pricing-action"><Link className="button" href="/signup">Choose Starter</Link></p></article>
         </div>
       </section>}

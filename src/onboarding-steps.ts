@@ -1,6 +1,8 @@
 // Guided workspace setup: the step registry, the settings each configuration step may change, and
 // the resume/guard rules shared by the wizard pages and the Convex onboarding functions.
-export const wizardSteps = ["workspace", "connect", "indexing", "summary", "comments", "triggers", "tools", "team", "plan", "done"] as const;
+// On billing deployments the plan comes right after the workspace: nothing is indexed or reviewed
+// until a new workspace has chosen one.
+export const wizardSteps = ["workspace", "plan", "connect", "indexing", "summary", "comments", "triggers", "tools", "team", "done"] as const;
 export type WizardStep = (typeof wizardSteps)[number];
 export const configureSteps = ["summary", "comments", "triggers", "tools"] as const;
 export type ConfigureStep = (typeof configureSteps)[number];
@@ -38,7 +40,8 @@ export function nextStep(step: WizardStep, billing: boolean): WizardStep | undef
 }
 export function previousStep(step: WizardStep, billing: boolean): WizardStep | undefined {
   const at = wizardSteps.indexOf(step);
-  return step === "connect" ? undefined : [...stepsFor(billing)].reverse().find((s) => wizardSteps.indexOf(s) < at);
+  // Setup starts over at connect: the workspace and plan are never revisited with Back.
+  return step === "connect" || step === "plan" ? undefined : [...stepsFor(billing)].reverse().find((s) => wizardSteps.indexOf(s) < at && s !== "plan");
 }
 
 export type Onboarding = { startedAt: number; step?: string; reviewsPaused?: boolean; completedAt?: number; skipped?: boolean };
@@ -47,20 +50,22 @@ export function needsSetup(organization: { onboarding?: Onboarding | null } | nu
   return Boolean(organization?.onboarding?.startedAt && !organization.onboarding.completedAt);
 }
 
-export type SetupState = { hasWorkspace: boolean; connected: boolean; selected: number; indexingStarted: boolean; cursor?: string; completed: boolean; billing: boolean };
+// planMissing: a new workspace on a billing deployment without a Stripe-confirmed plan.
+export type SetupState = { hasWorkspace: boolean; connected: boolean; selected: number; indexingStarted: boolean; cursor?: string; completed: boolean; billing: boolean; planMissing?: boolean };
 /** The step to show for a request: guards send users back to the first step they still need. */
 export function resolveStep(requested: string | undefined, state: SetupState): WizardStep {
   if (!state.hasWorkspace) return "workspace";
+  if (state.billing && state.planMissing) return "plan";
   const ready = state.connected && state.selected > 0 && state.indexingStarted;
+  if (requested === "plan") return state.billing ? "plan" : ready ? "done" : "connect";
   if (requested === undefined) {
     if (!ready) return "connect";
     if (state.completed) return "connect";
     const after = isWizardStep(state.cursor) ? nextStep(state.cursor, state.billing) : undefined;
-    return after && after !== "workspace" ? after : "indexing";
+    return after && after !== "workspace" && after !== "plan" && after !== "connect" ? after : "indexing";
   }
   if (!isWizardStep(requested) || requested === "workspace") return "connect";
   if (requested !== "connect" && !ready) return "connect";
-  if (requested === "plan" && !state.billing) return "done";
   return requested;
 }
 

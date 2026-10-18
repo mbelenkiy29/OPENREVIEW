@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applySuggestion, fixBranchName, fixCommand, fixHandoffUrl, fixReplyBody, safeFixBranch } from "../src/fix-command";
+import { applySuggestion, fixBranchName, fixCommand, fixHandoffLink, fixHandoffUrl, fixReplyBody, safeFixBranch } from "../src/fix-command";
+import { readFileSync } from "node:fs";
 import { Github } from "../src/github";
 
 test("fix command parsing accepts only explicit fix requests and detects pull request opt-in", () => {
@@ -107,3 +108,16 @@ test("fix pull requests refuse forks, moved heads, closed PRs and unsafe branche
   parents = [{ sha: "z".repeat(40) }];
   assert.deepEqual(await github.openFixPullRequest("owner/repo", 3, fixInput), { skipped: "branch openreview/fix-3-abc123 already exists with other commits; delete it to open a new fix pull request" });
 });
+
+test("every provider's inline Fix link comes from one builder that checks APP_URL", () => {
+  assert.equal(fixHandoffLink("https://review.example.com/", "rev 1", "fp1"), "\n\n[Fix with your agent](https://review.example.com/fix/rev%201?finding=fp1)");
+  assert.equal(fixHandoffLink("https://review.example.com", "rev1", "fp1", "Fix with [Claude]\n"), "\n\n[Fix with Claude](https://review.example.com/fix/rev1?finding=fp1)");
+  for (const bad of [undefined, "", "not a url", "javascript:alert(1)", "https://user:pass@review.example.com"]) assert.equal(fixHandoffLink(bad, "rev1", "fp1"), "", String(bad));
+  // No publisher joins APP_URL into a /fix/ link by hand any more.
+  for (const file of ["github", "gitlab", "gitea", "origin", "azure-devops", "bitbucket-dc"]) {
+    const source = readFileSync(new URL(`../src/${file}.ts`, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /APP_URL[^\n]{0,80}\/fix\//, file);
+    assert.match(source, /fixHandoffLink\(/, file);
+  }
+});
+
