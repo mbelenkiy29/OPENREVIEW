@@ -16,6 +16,9 @@ async function setup(){
  const login=async(githubId:number,name:string)=>{const id=await t.mutation(api.users.login,{secret:'billing-service',githubId,login:name,avatar:''});return {id:id as Id<'users'>,token:await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(id).setExpirationTime('120d').sign(new TextEncoder().encode(secret))};};
  const alice=await login(31,'alice'),bob=await login(32,'bob'),vera=await login(33,'vera');
  const org=await t.mutation(api.users.createOrganization,{token:alice.token,name:'Acme'});
+ // Most tests cover workspaces from before plans were required (trial without a card); see the
+ // required-plan test for new workspaces.
+ await t.run(ctx=>ctx.db.patch(org,{planRequired:undefined}));
  await t.mutation(api.repositories.connect,{token:alice.token,secret:'billing-service',organizationId:org,installationId:31,account:'acme',accountId:1,repositories:[{id:3101,fullName:'acme/shop',defaultBranch:'main'}]});
  const [repo]=await t.query(api.repositories.list,{token:alice.token,organizationId:org});
  const members=await t.run(async ctx=>{await ctx.db.patch(repo._id,{enabled:true});return {bob:await ctx.db.insert('organizationMembers',{organizationId:org,userId:bob.id,role:'member'}),vera:await ctx.db.insert('organizationMembers',{organizationId:org,userId:vera.id,role:'viewer'})};});
@@ -140,6 +143,7 @@ test('seats follow membership: viewers are free and changes resync the subscript
  // The untouched 14-day trial carries into the subscription, so the card is not charged until it ends.
  expect(Object.fromEntries(session)).toMatchObject({mode:'subscription',customer:'cus_1',client_reference_id:org,integration_identifier:expect.stringMatching(/^openreview-starter-seats-[a-z]{8}$/),allow_promotion_codes:'true','line_items[0][price]':'price_seat','line_items[0][quantity]':'2','subscription_data[metadata][organizationId]':org,'subscription_data[trial_end]':String(Math.floor((Date.now()+14*86400000)/1000)),success_url:'https://review.example.com/dashboard/settings/billing?checkout=success',cancel_url:'https://review.example.com/dashboard/settings/billing?checkout=cancelled'});
  expect(session.has('payment_method_types')).toBe(false);
+ expect(session.get('payment_method_collection')).toBe('always');
  // From guided setup, Checkout returns to the plan step.
  await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org,returnTo:'onboarding'});
  expect(Object.fromEntries(new URLSearchParams(calls.at(-1)!.body))).toMatchObject({success_url:'https://review.example.com/dashboard/onboarding/plan?checkout=success',cancel_url:'https://review.example.com/dashboard/onboarding/plan?checkout=cancelled'});
@@ -159,4 +163,34 @@ test('seats follow membership: viewers are free and changes resync the subscript
  // Live keys are refused unless explicitly allowed.
  process.env.STRIPE_SECRET_KEY='sk_live_x';
  await expect(t.action(api.billingJobs.portal,{token:alice.token,organizationId:org})).rejects.toThrow(/test-mode key/);
+});
+
+test('a new workspace must choose a plan: nothing indexes, reviews or finishes setup until Stripe confirms the trial',async()=>{
+ const {t,alice,repo}=await setup();
+ const fresh=await t.mutation(api.users.createOrganization,{token:alice.token,name:'New customer'});
+ expect((await t.run(ctx=>ctx.db.get(fresh)))?.planRequired).toBe(true);
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:fresh})).toMatchObject({planRequired:true,planSelected:false,planMissing:true});
+ await t.mutation(api.repositories.connect,{token:alice.token,secret:'billing-service',organizationId:fresh,installationId:77,account:'newco',accountId:7,repositories:[{id:7701,fullName:'newco/app',defaultBranch:'main'}]});
+ const newRepo=(await t.run(ctx=>ctx.db.query('repositories').withIndex('by_github',q=>q.eq('githubId',7701)).unique()))!;
+ await expect(t.mutation(api.repositories.configure,{token:alice.token,repositoryId:newRepo._id,enabled:true})).rejects.toThrow(/Choose a plan/);
+ await expect(t.mutation(api.onboarding.advance,{token:alice.token,organizationId:fresh,step:'plan'})).rejects.toThrow(/Choose a plan/);
+ await expect(t.mutation(api.onboarding.complete,{token:alice.token,organizationId:fresh,skipped:true})).rejects.toThrow(/Choose a plan/);
+ await t.run(ctx=>ctx.db.patch(newRepo._id,{enabled:true}));
+ const blocked=await reviewOf(t,await enqueue(t,newRepo._id,1));
+ expect([blocked?.status,blocked?.error]).toEqual(['failed',expect.stringMatching(/^Billing: Choose a plan/)]);
+ // An abandoned or failed Checkout is not a choice.
+ const created=Math.floor(Date.now()/1000);
+ await t.mutation(internal.billing.linkCustomer,{organizationId:fresh,customerId:'cus_new'});
+ await deliver(t,{id:'evt_incomplete',type:'customer.subscription.created',created,data:{object:{id:'sub_new',customer:'cus_new',status:'incomplete',metadata:{organizationId:fresh},items:{data:[{id:'si_new',quantity:1,current_period_end:created+14*86400}]}}}});
+ expect((await t.run(ctx=>ctx.db.get(fresh)))?.planSelectedAt).toBeUndefined();
+ // Stripe confirms the trial subscription (card collected): the choice is recorded once and everything opens up.
+ await deliver(t,{id:'evt_new_checkout',type:'checkout.session.completed',created:created+1,data:{object:{mode:'subscription',client_reference_id:fresh,customer:'cus_new',subscription:'sub_new'}}});
+ const chosen=(await t.run(ctx=>ctx.db.get(fresh)))!;
+ expect([chosen.plan,typeof chosen.planSelectedAt]).toEqual(['starter','number']);
+ expect((await t.run(ctx=>ctx.db.query('auditEvents').collect())).filter(e=>e.action==='billing.plan_selected').map(e=>e.organizationId)).toEqual([fresh]);
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:fresh})).toMatchObject({planSelected:true,planMissing:false});
+ await t.mutation(api.repositories.configure,{token:alice.token,repositoryId:newRepo._id,enabled:true});
+ expect(await t.mutation(api.onboarding.advance,{token:alice.token,organizationId:fresh,step:'plan'})).toBe('connect');
+ // Workspaces from before plans were required are untouched.
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:repo.organizationId})).toMatchObject({planRequired:false,planMissing:false});
 });

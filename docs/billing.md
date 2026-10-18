@@ -4,7 +4,8 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 
 ## Plans
 
-- **Trial:** a workspace gets a free trial of `BILLING_TRIAL_DAYS` days (default 14). The trial clock starts at the workspace's first review or first Checkout, not at workspace creation, so workspaces created before billing was turned on still get the full trial. It includes `BILLING_TRIAL_REVIEWS` reviews per calendar month (UTC, default 200).
+- **Choosing a plan (new workspaces):** a workspace created while billing is on (`organizations.planRequired`) must choose a plan before anything else. Setup goes workspace → **Choose your plan** → connect. The plan step starts Stripe Checkout for the Starter plan with a `BILLING_TRIAL_DAYS` (default 14) day trial, and the card is always collected (`payment_method_collection: always`). The choice is recorded (`organizations.planSelectedAt`, `plan`, audit `billing.plan_selected`) only when Stripe confirms it: `checkout.session.completed` with a subscription, or a subscription that is trialing, active or past due. Until then the dashboard sends everyone to the plan step (Billing and Account settings stay open), and the server refuses indexing, reviews, advancing and finishing setup.
+- **Trial (older workspaces):** workspaces from before plans were required have no `planRequired` flag and keep the app-level trial: `BILLING_TRIAL_DAYS` days, starting at the first review or first Checkout, with no card.
 - **Starter (per seat):**
   - A Stripe subscription whose quantity is the number of active seats. Owners, admins and members are seats; viewers are free.
   - Reviews are unlimited under a monthly fair-use limit of seats × `BILLING_REVIEWS_PER_SEAT` (default 500).

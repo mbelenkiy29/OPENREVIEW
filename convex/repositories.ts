@@ -1,5 +1,6 @@
 import {beginCatalog} from "./pullCatalogs";
 import { autoEnableNewRepository } from "./repositoryOnboarding";
+import { choosePlanMessage, planMissing } from "./billing";
 import {
   internalMutation,
   internalQuery,
@@ -30,6 +31,7 @@ export async function indexingAccess(ctx:QueryCtx|MutationCtx,repo:Doc<"reposito
 }
 export async function enableIndexing(ctx:MutationCtx,repo:Doc<"repositories">){
  const error=await indexingAccess(ctx,repo);if(error)throw new Error(error);
+ if(await planMissing(ctx,repo.organizationId))throw new Error(choosePlanMessage);
  const scheduled=repo.indexScheduledId?await ctx.db.system.get(repo.indexScheduledId):null;
  const queued=repo.indexStatus==="queued"&&scheduled&&["pending","inProgress"].includes(scheduled.state.kind);
  const pending=(!repo.indexedSha||["failed","cancelled"].includes(repo.indexStatus))&&!queued&&repo.indexStatus!=="indexing";

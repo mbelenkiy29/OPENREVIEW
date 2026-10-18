@@ -22,6 +22,7 @@
   - The risk line no longer shows a second confidence number.
 
 ### Setup
+- **New workspaces choose a plan first.** On the hosted cloud, setup now goes workspace → Choose your plan → connect your code. The Starter plan's 14-day free trial starts by adding a card in Stripe Checkout, and nothing is charged until it ends. Until Stripe confirms the plan, every dashboard page leads back to the plan step, and repositories aren't indexed or reviewed. The choice is stored with the workspace. Workspaces created before this change are not affected.
 - Guided workspace setup: connect a provider, choose repositories, watch the code graph build, then shape the summary, comment scope, triggers and tools with live previews, and invite your team. Automatic reviews wait until you choose when reviews run.
 - Installing the GitHub App now works from any signed-in session (email, Google or GitLab) and returns you to setup.
 - Installing the GitHub App no longer ends on an error page when it takes more than ten minutes on GitHub. OpenReview re-authorizes once and finishes linking, for up to 30 minutes. Problems show as a message on the page you started from.

@@ -1,3 +1,4 @@
+import { choosePlanMessage, planMissing } from "./billing";
 import {query,mutation} from "./_generated/server";
 import {v} from "convex/values";
 import {authorize,visibleRepositories,audit} from "./auth";
@@ -94,6 +95,7 @@ export const saveDefaults=mutation({args:{token:v.string(),organizationId:v.id("
 export const advance=mutation({args:{token:v.string(),organizationId:v.id("organizations"),step:v.string()},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true);
  if(!isWizardStep(a.step)||isConfigureStep(a.step)||a.step==="done")throw new Error("Unknown setup step");
+ if(await planMissing(ctx,a.organizationId))throw new Error(choosePlanMessage);
  const organization=await ctx.db.get(a.organizationId);
  await ctx.db.patch(a.organizationId,{onboarding:{...(organization?.onboarding??{startedAt:Date.now()}),step:a.step}});
  await audit(ctx,a.organizationId,user._id,"onboarding.step_completed",a.step);
@@ -102,6 +104,7 @@ export const advance=mutation({args:{token:v.string(),organizationId:v.id("organ
 }});
 export const complete=mutation({args:{token:v.string(),organizationId:v.id("organizations"),skipped:v.optional(v.boolean())},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true),organization=await ctx.db.get(a.organizationId);
+ if(await planMissing(ctx,a.organizationId))throw new Error(choosePlanMessage);
  const onboarding=organization?.onboarding??{startedAt:Date.now()};
  if(onboarding.reviewsPaused){
   // Setup ended before the triggers step: release the hold so automatic reviews follow the defaults.

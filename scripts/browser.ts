@@ -149,16 +149,17 @@ try {
   await page.keyboard.press("Control+Enter");
   await page.waitForURL("**/dashboard/onboarding/team");
   await page.keyboard.press("Control+Enter");
-  // With billing on (the hosted cloud), the plan step comes before done; the trial needs no card.
-  await page.waitForURL(/\/dashboard\/onboarding\/(plan|done)$/);
-  const billing = page.url().endsWith("/plan");
+  await page.waitForURL("**/dashboard/onboarding/done");
+  const billing = (await backend.query(api.billing.status, { token, organizationId })).enabled;
   if (billing) {
+    // A workspace from before plans were required keeps the optional plan step (trial without a card).
+    await page.goto(`${url}/dashboard/onboarding/plan`);
     await page.getByRole("heading", { name: "Choose your plan", level: 1 }).waitFor();
     await page.getByRole("button", { name: /Continue on the trial/ }).click();
-    await page.waitForURL("**/dashboard/onboarding/done");
+    await page.waitForURL("**/dashboard/onboarding/connect");
   }
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const step of ["connect", "indexing", "summary", "comments", "triggers", "tools", "team", ...(billing ? ["plan"] : []), "done"]) {
+  for (const step of [...(billing ? ["plan"] : []), "connect", "indexing", "summary", "comments", "triggers", "tools", "team", "done"]) {
     await page.goto(`${url}/dashboard/onboarding/${step}`);
     await page.locator("[data-wizard-heading]").waitFor();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `Setup step ${step} overflows at 390 px`);
@@ -169,6 +170,21 @@ try {
   await page.getByRole("button", { name: /^Go to dashboard/ }).click();
   await page.waitForURL("**/dashboard/analytics");
   assert.ok((await backend.query(api.onboarding.status, { token, organizationId })).onboarding?.completedAt, "Setup completion was not recorded");
+  // A new workspace on a billing deployment must choose a plan first: every dashboard page leads to the
+  // plan step, which only offers Checkout (card required). Then switch back to the fixture workspace.
+  if (billing) {
+    const required = await backend.mutation(api.users.createOrganization, { token, name: "Plan gate check" });
+    const asWorkspace = (id: string) => context.addCookies([{ name: "openreview_workspace", value: id, url, sameSite: "Lax" }]);
+    await asWorkspace(required);
+    await page.goto(`${url}/dashboard/analytics`);
+    await page.waitForURL("**/dashboard/onboarding/plan");
+    await page.getByRole("heading", { name: "Choose your plan", level: 1 }).waitFor();
+    await page.getByRole("button", { name: /Start free trial/ }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /Continue on the trial/ }).count(), 0, "A required plan can be skipped");
+    await page.goto(`${url}/dashboard/onboarding/connect`);
+    await page.waitForURL("**/dashboard/onboarding/plan");
+    await asWorkspace(organizationId);
+  }
   // Fix agents: settings list the cloud agents and what each needs; the link page answers without a raw error.
   await page.goto(`${url}/dashboard/settings/agents`);
   await page.getByRole("heading", { name: "Personal fix agent" }).waitFor();

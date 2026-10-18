@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Effective October 15, 2026**
+**Effective October 17, 2026**
 
 These terms govern your use of the hosted OpenReview service at [openreview.tech](https://openreview.tech) (the "Service"). The Service is operated by Michael Belenkiy ("we", "us"). By signing in or using the Service you agree to these terms. If you use the Service on behalf of an organization, you confirm that you can accept these terms for it, and "you" includes that organization.
 
@@ -36,7 +36,7 @@ You agree not to:
 
 ## 6. Plans, billing and the free trial
 
-- **Free trial:** each workspace gets a 14-day free trial that starts at its first review, with a monthly review limit shown in the product. If you subscribe during the trial, the first charge happens when the trial ends.
+- **Free trial:** a new workspace starts with a 14-day free trial of the Starter plan, which you begin by choosing the plan and adding a payment method during setup. Nothing is charged during the trial. The first charge happens when it ends unless you cancel before then in **Settings → Billing → Manage billing**. Workspaces created before October 17, 2026 keep their existing trial, which started at their first review and needed no payment method.
 - **Starter plan:** billed monthly per seat. Owners, admins and members are seats; viewers are free. Reviews are unlimited, subject to a fair-use limit shown in the product (currently 500 reviews per seat each month). If a workspace reaches the limit, reviews pause until the next month.
 - **Seat changes:** when members join, leave or change roles, the seat count updates automatically and Stripe applies prorated charges or credits.
 - **Renewal and cancellation:** subscriptions renew automatically each month until canceled. You can cancel at any time in **Settings → Billing → Manage billing**. Cancellation takes effect at the end of the current billing period. We do not refund partial periods, except where the law requires it.
