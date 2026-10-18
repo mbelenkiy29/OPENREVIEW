@@ -4,6 +4,7 @@ import posthog from "posthog-js";
 import { useEffect } from "react";
 import { analyticsStartedEvent } from "../src/consent";
 import { sentryDsn } from "../src/telemetry";
+import { userJotLogout } from "./userjot";
 
 /** Ties analytics and error reports to the signed-in user and active workspace, by internal id only. */
 export function TelemetryIdentity({ userId, workspaceId }: { userId: string; workspaceId?: string }) {
@@ -26,10 +27,11 @@ export function TelemetryIdentity({ userId, workspaceId }: { userId: string; wor
   return null;
 }
 
-/** A sign-out form that also forgets the user in this browser's analytics and error reports. */
+/** A sign-out form that also forgets the user in this browser's analytics, error reports and feedback widget. */
 export function SignOutForm({ action, label }: { action: () => Promise<void>; label: string }) {
   return <form action={action} onSubmit={() => {
     if (posthog.__loaded) posthog.reset();
     if (sentryDsn) Sentry.setUser(null);
+    userJotLogout();
   }}><button className="small">{label}</button></form>;
 }

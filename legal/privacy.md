@@ -46,6 +46,12 @@ Our hosting providers keep server logs that include IP addresses.
   - private details from page addresses, such as invitation links and sign-in codes.
 - **Your permission comes first:** PostHog runs only after you accept the analytics cookie. Sentry sets no cookies.
 
+**Feedback boards.** Feature requests, bug reports, votes, comments and the public roadmap are run by UserJot, through the feedback button on every page and the board at [/feedback](/feedback).
+- **UserJot receives:** what you post, vote on or comment, and the address of the site you sent it from (never the page path).
+- **What identifies you:** when you are signed in, your internal user ID, your username, your profile picture and your verified email, so your posts are attributed to you and you hear back when a request ships. Signed-out visitors are anonymous until they sign in to UserJot.
+- **Who can see it:** posts, votes and comments on the public boards, with your name and picture, are visible to anyone who visits them.
+- **In your browser:** the UserJot widget keeps its own session in your browser so it remembers you between visits.
+
 **Cookies.** Most of our cookies are needed for the service to work:
 - your sign-in session;
 - your active workspace and team;
@@ -93,6 +99,7 @@ We share information only as needed to run the service, with:
 | OSV.dev | Checking package names and versions from dependency changes for known vulnerabilities (no source code is sent) |
 | Sentry | Error reports and performance monitoring |
 | PostHog | Product analytics |
+| UserJot | Feedback boards, roadmap and the feedback widget |
 | Linear, Atlassian, Notion, Slack | Only when your workspace connects them |
 | An email delivery provider | Only when email sign-in or email notifications are turned on |
 

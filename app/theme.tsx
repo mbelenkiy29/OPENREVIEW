@@ -15,6 +15,11 @@ export function ThemeProvider({initial,children}:{initial:Theme;children:ReactNo
   return <ThemeContext.Provider value={{theme,select}}>{children}</ThemeContext.Provider>;
 }
 
+/** The visitor's appearance preference, for third-party widgets that theme themselves. */
+export function useTheme():Theme {
+  return useContext(ThemeContext)?.theme??"system";
+}
+
 export function ThemePicker() {
   const preference=useContext(ThemeContext);
   if(!preference)return null;

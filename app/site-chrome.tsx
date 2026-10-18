@@ -1,16 +1,17 @@
 import Link from "next/link";
 import { billingConfig } from "../src/billing";
+import { userJotConfig } from "../src/userjot";
 import { CookieSettings } from "./consent";
 import { ThemePicker } from "./theme";
 import { Mark } from "./ui/logo";
 
-// Public-site header and footer shared by the landing page, docs and changelog. On the landing
-// page links are in-page anchors; elsewhere they point back to the landing sections.
-export function SiteHeader({ home = false, current }: { home?: boolean; current?: "docs" | "changelog" }) {
+// Public-site header and footer shared by the landing page, docs, changelog and feedback board. On
+// the landing page links are in-page anchors; elsewhere they point back to the landing sections.
+export function SiteHeader({ home = false, current }: { home?: boolean; current?: "docs" | "changelog" | "roadmap" | "feedback" }) {
   const base = home ? "" : "/";
   // Pricing lives on the landing page; statically built pages skip it so the link never
   // depends on the build environment.
-  const pricing = home && billingConfig().enabled;
+  const pricing = home && billingConfig().enabled, feedback = Boolean(userJotConfig());
   return <header className="site-header">
     <Link className="brand" href="/"><Mark /> OpenReview</Link>
     <nav className="site-nav" aria-label="Site">
@@ -19,6 +20,7 @@ export function SiteHeader({ home = false, current }: { home?: boolean; current?
       {pricing && <Link href={`${base}#pricing`}>Pricing</Link>}
       <Link href="/docs/quickstart" aria-current={current === "docs" ? "page" : undefined}>Docs</Link>
       <Link href="/changelog" aria-current={current === "changelog" ? "page" : undefined}>Changelog</Link>
+      {feedback && <><Link href="/feedback/roadmap" aria-current={current === "roadmap" ? "page" : undefined}>Roadmap</Link><Link href="/feedback" aria-current={current === "feedback" ? "page" : undefined}>Feedback</Link></>}
     </nav>
     <div className="site-actions">
       {home ? <Link href="/login">Sign in</Link> : <Link href="/dashboard">Dashboard</Link>}
@@ -34,7 +36,7 @@ const columns: [string, [string, string][]][] = [
 ];
 
 export function SiteFooter({ home = false }: { home?: boolean }) {
-  const pricing = home && billingConfig().enabled;
+  const pricing = home && billingConfig().enabled, feedback = Boolean(userJotConfig());
   return <footer className="site-footer">
     <div className="footer-grid">
       <div>
@@ -47,6 +49,7 @@ export function SiteFooter({ home = false }: { home?: boolean }) {
         <Link href="/#how">How it works</Link>
         {pricing && <Link href="/#pricing">Pricing</Link>}
         <Link href="/changelog">Changelog</Link>
+        {feedback && <><Link href="/feedback/roadmap">Roadmap</Link><Link href="/feedback">Feedback</Link></>}
       </nav>
       {columns.map(([title, links]) => <nav key={title} aria-label={title}>
         <h2>{title}</h2>

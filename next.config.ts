@@ -8,6 +8,10 @@ const config: NextConfig = {
   poweredByHeader: false,
   // PostHog proxying needs exact paths, only when analytics is configured (src/telemetry.ts).
   ...(posthogToken ? { skipTrailingSlashRedirect: true } : {}),
+  async redirects() {
+    // The roadmap is a view of the feedback board (app/feedback).
+    return [{ source: '/roadmap', destination: '/feedback/roadmap', permanent: false }];
+  },
   async rewrites() {
     // OAuth discovery documents for the remote MCP endpoint (RFC 9728 and RFC 8414 well-known paths).
     const oauth = [

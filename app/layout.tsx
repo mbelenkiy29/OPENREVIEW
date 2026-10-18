@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import {cookies} from "next/headers";
 import {ThemeProvider} from "./theme";
 import {ConsentBanner} from "./consent";
+import {UserJot} from "./userjot";
+import {userJotConfig} from "../src/userjot";
 // Fonts are bundled from npm so builds never fetch them: Inter for UI, JetBrains Mono for code
 // and metadata, EB Garamond for editorial subheads.
 import "@fontsource-variable/inter";
@@ -24,9 +26,10 @@ export default async function RootLayout({
 }) {
   const preference=(await cookies()).get("openreview_theme")?.value;
   const theme=preference==="light"||preference==="dark"?preference:"system";
+  const userJot=userJotConfig();
   return (
-    <html lang="en" data-theme={theme}>
-      <body><ThemeProvider initial={theme}>{children}<ConsentBanner /></ThemeProvider></body>
+    <html lang="en" data-theme={theme} data-userjot={userJot ? "" : undefined}>
+      <body><ThemeProvider initial={theme}>{children}<ConsentBanner />{userJot&&<UserJot projectId={userJot.projectId} />}</ThemeProvider></body>
     </html>
   );
 }
