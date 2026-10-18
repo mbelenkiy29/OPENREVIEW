@@ -527,6 +527,8 @@ export default defineSchema({
     nativeP4: v.optional(v.object({requestedBy:v.id("users"),connectionId:v.id("providerConnections"),credentialDigest:v.string(),baselineJobId:v.id("indexJobs"),inputStorageId:v.id("_storage"),polling:v.optional(p4PollingReference),lease:v.optional(v.object({id:v.string(),expiresAt:v.number()}))})),
     retryScheduledId: v.optional(v.id("_scheduled_functions")),
     retryAt: v.optional(v.number()),
+    // When this review started waiting for the repository's first index (cleared once it runs).
+    indexWaitSince: v.optional(v.number()),
     findingsRecorded: v.optional(v.boolean()),
   })
     .index("by_org", ["organizationId"])

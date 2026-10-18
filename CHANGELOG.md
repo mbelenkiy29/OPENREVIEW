@@ -26,6 +26,8 @@
 - **Link an existing installation** connects an App installation made directly on github.com, or one that never returned to OpenReview, and refreshes the repository list of a linked one.
 - Reinstalling the GitHub App keeps your repositories: they follow the new installation and the ones that were on come back on. Unsuspending an installation does the same, and repositories whose access was removed and given back are restored.
 - Repositories added on GitHub get their real default branch, settings and team, the same as at install time.
+- The first review of a new repository waits for its first index with backoff, and if indexing hasn't finished after 30 minutes it fails with a clear message instead of waiting forever.
+- If the semantic search endpoint fails, the review carries on with graph and text context, and its coverage notes say so.
 
 ### Sign in
 - Sign-in and sign-up pages (`/login`, `/signup`): continue with GitHub, Google or GitLab, or get an emailed sign-in link, showing only the methods the deployment has configured. Errors and sign-in results now land on the sign-in page instead of the home page.
