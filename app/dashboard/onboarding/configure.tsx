@@ -8,6 +8,7 @@ import { findingComment } from "../../../src/review-summary";
 import { ReviewMarkdown } from "../markdown";
 import { example, exampleSummary } from "../summary-example";
 import { Stage } from "./art";
+import { defaultLocalAgent, localAgentLabels, localAgents } from "../../../src/fix-agents";
 import { StepForm } from "./wizard-client";
 
 type Settings = { summarySections?: string[]; commentStyle: string; severityThreshold: string; minimumConfidence: number; maxComments: number; strictness?: number; categories: string[];
@@ -138,10 +139,10 @@ export function TriggersStep(props: Props) {
   </>;
 }
 
-const agents = [["claude", "Claude Code"], ["codex", "Codex"], ["cursor", "Cursor"]] as const;
+const agents = localAgents.map((a) => [a, localAgentLabels[a]] as const);
 export function ToolsStep(props: Props & { agent?: string }) {
   const d = props.defaults;
-  const [security, setSecurity] = useState(d.securityScan ?? true), [fixPrs, setFixPrs] = useState(d.fixPullRequests ?? false), [agent, setAgent] = useState(props.agent ?? "claude"), [mode, setMode] = useState(d.mode);
+  const [security, setSecurity] = useState(d.securityScan ?? true), [fixPrs, setFixPrs] = useState(d.fixPullRequests ?? false), [agent, setAgent] = useState(props.agent ?? defaultLocalAgent), [mode, setMode] = useState(d.mode);
   const agentName = agents.find(([v]) => v === agent)?.[1] ?? "your agent";
   return <>
     <Shell {...props} step="tools">

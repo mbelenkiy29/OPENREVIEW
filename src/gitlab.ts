@@ -1,4 +1,5 @@
 import {changeMetadataSchema,catalogPageSize,numberedPage,validateChangePage,type ChangeMetadata,type ChangePage} from "./change-metadata";
+import { fixHandoffLink } from "./fix-command";
 import { reviewLinks } from "./review-summary";
 import { z } from "zod";
 import { repositorySourceUrl } from "./source-url";
@@ -198,7 +199,7 @@ export class Gitlab implements Scm {
   if(latest.state!==pr.state||latest.diff_refs.head_sha!==pr.diff_refs.head_sha||latest.diff_refs.base_sha!==pr.diff_refs.base_sha||latest.diff_refs.start_sha!==pr.diff_refs.start_sha)throw new Error("GitLab revision changed during ingestion");
   return {number:pr.iid,title:pr.title,body:pr.description,draft:pr.draft,state:pr.state==="opened"?"open":"closed",html_url:pr.web_url,user:{login:pr.author.username},...(pr.author.id?{authorExternalId:String(pr.author.id)}:{}),head:{sha:pr.diff_refs.head_sha,ref:pr.source_branch},base:{sha:pr.diff_refs.base_sha,ref:pr.target_branch},revisionKey:pr.diff_refs.base_sha+":"+pr.diff_refs.start_sha,diff:files.map(f=>({path:f.new_path,previousPath:f.renamed_file?f.old_path:undefined,status:f.deleted_file?"removed":f.new_file?"added":f.renamed_file?"renamed":"modified",patch:f.diff})),comments:notes.map(n=>({id:n.id,body:n.body,path:n.position?.new_path??"",line:n.position?.new_line??null,user:{login:n.author.username}})),reviews:[],commits:commits.map(c=>({sha:c.id})),checks:pipelines.filter(p=>p.sha===pr.diff_refs.head_sha).map(p=>({name:"GitLab pipeline #"+p.id,status:["success","failed","canceled","skipped"].includes(p.status)?"completed":"in_progress",conclusion:p.status==="success"?"success":p.status}))};
  }
- async publish(repo:string,number:number,sha:string,summary:string,findings:Finding[],marker:string,style="detailed",revisionKey?:string,unresolvedCount=findings.length){
+ async publish(repo:string,number:number,sha:string,summary:string,findings:Finding[],marker:string,style="detailed",revisionKey?:string,unresolvedCount=findings.length,options:import("./github").PublishOptions={}){
   const prefix=this.prefix(repo)+"/merge_requests/"+number;
   const pr=await this.request(prefix,prSchema);if(pr.diff_refs.head_sha!==sha||pr.state!=="opened"||(revisionKey!==undefined&&revisionKey!==pr.diff_refs.base_sha+":"+pr.diff_refs.start_sha))throw new Error("Merge request revision changed or closed");
   const current=async()=>{const latest=await this.request(prefix,prSchema);if(latest.state!=="opened"||latest.diff_refs.head_sha!==sha||latest.diff_refs.base_sha!==pr.diff_refs.base_sha||latest.diff_refs.start_sha!==pr.diff_refs.start_sha)throw new Error("Merge request revision changed or closed");};
@@ -210,7 +211,7 @@ export class Gitlab implements Scm {
    const diff=diffs.find(d=>d.new_path===f.filePath);if(!diff||diff.too_large||diff.collapsed||!changedLines(diff.diff).has(f.startLine))throw new Error("Finding line not in complete current diff");
    const prior=notes.find(n=>n.author.username===me.username&&n.body.includes(findingMarker)&&n.position?.head_sha===sha&&n.position.new_path===f.filePath&&n.position.new_line===f.startLine);if(prior){comments.push({id:prior.id,fingerprint:f.fingerprint});continue;}
    await current();
-   const result=await this.request(prefix+"/discussions",z.object({notes:z.array(note).min(1)}),{body:findingComment(f,style,{syntax:"gitlab",start:f.startLine,end:f.startLine})+"\n\n"+findingMarker+(process.env.APP_URL?"\n\n[Fix with your agent]("+process.env.APP_URL+"/fix/"+marker+"?finding="+f.fingerprint+")":""),position:{position_type:"text",base_sha:pr.diff_refs.base_sha,head_sha:sha,start_sha:pr.diff_refs.start_sha,new_path:diff.new_path,old_path:diff.old_path,new_line:f.startLine}});
+   const result=await this.request(prefix+"/discussions",z.object({notes:z.array(note).min(1)}),{body:findingComment(f,style,{syntax:"gitlab",start:f.startLine,end:f.startLine})+"\n\n"+findingMarker+fixHandoffLink(process.env.APP_URL,marker,f.fingerprint,options.fixLabel),position:{position_type:"text",base_sha:pr.diff_refs.base_sha,head_sha:sha,start_sha:pr.diff_refs.start_sha,new_path:diff.new_path,old_path:diff.old_path,new_line:f.startLine}});
    if(result.notes[0].author.username!==me.username||result.notes[0].position?.head_sha!==sha)throw new Error("GitLab returned another publication identity or revision");
    comments.push({id:result.notes[0].id,fingerprint:f.fingerprint});
   }

@@ -1,4 +1,5 @@
 import {changeMetadataSchema,catalogPageSize,numberedPage,validateChangePage,type ChangeMetadata,type ChangePage} from "./change-metadata";
+import { fixHandoffLink } from "./fix-command";
 import { reviewLinks } from "./review-summary";
 import { z } from "zod";
 import { repositorySourceUrl } from "./source-url";
@@ -331,7 +332,7 @@ export class BitbucketDC implements Scm {
   const latest=await this.details(repo,number);if(ingestionIdentity(pr)!==ingestionIdentity(latest))throw new Error("Bitbucket revision, author or reviewer decisions changed during ingestion");
   return {number:pr.id,title:pr.title,body:pr.description??null,draft:pr.draft??false,state:pr.state==="OPEN"?"open":"closed",html_url:this.base+this.prefix(repo)+"/pull-requests/"+number,user:{login:pr.author.user.name},...(pr.author.user.id&&pr.author.user.active&&pr.author.user.type==="NORMAL"?{authorExternalId:String(pr.author.user.id)}:{}),head:{sha:pr.fromRef.latestCommit,ref:pr.fromRef.displayId},base:{sha:base.id,ref:pr.toRef.displayId},revisionKey:pr.toRef.latestCommit,diff:files,comments:comments.map(c=>({id:c.id,body:c.text,path:c.anchor?filePath(c.anchor.path):"",line:c.anchor?.line??null,user:{login:c.author.name}})),reviews:decisions(pr),commits:commits.map(c=>({sha:c.id})),checks:checks.map(c=>({name:c.name??c.key,status:c.state==="INPROGRESS"?"in_progress":"completed",conclusion:c.state==="SUCCESSFUL"?"success":c.state==="FAILED"?"failure":c.state.toLowerCase()}))};
  }
- async publish(repo:string,number:number,sha:string,summary:string,findings:Finding[],marker:string,style="detailed",revisionKey?:string,unresolvedCount=findings.length){
+ async publish(repo:string,number:number,sha:string,summary:string,findings:Finding[],marker:string,style="detailed",revisionKey?:string,unresolvedCount=findings.length,options:import("./github").PublishOptions={}){
   const pr=await this.pullRequest(repo,number);
   if(!this.botUsername)throw new Error("Configure the Bitbucket bot username before publishing");
   const guard=async()=>{const current=await this.details(repo,number);if(current.state!=="OPEN"||current.fromRef.latestCommit!==sha||revisionKey!==current.toRef.latestCommit)throw new Error("Bitbucket revision changed or closed");};
@@ -340,7 +341,7 @@ export class BitbucketDC implements Scm {
    const file=pr.diff.find(d=>d.path===f.filePath);if(!file||!changedLines(file.patch).has(f.startLine))throw new Error("Bitbucket finding must anchor to an added line in the reviewed diff");
    const findingMarker="<!-- openreview-finding:"+f.fingerprint+" -->",runMarker="<!-- openreview:"+marker+" -->";
    const prior=notes.find(n=>n.author.name===this.botUsername&&n.anchor?.toHash===sha&&n.text.includes(findingMarker)&&n.text.includes(runMarker));if(prior){comments.push({id:prior.id,fingerprint:f.fingerprint});continue;}
-   await guard();const result=await this.request(prefix,z.object({id,author:user}),{text:findingComment(f,style)+"\n\n"+runMarker+(process.env.APP_URL?"\n\n[Fix with your agent]("+process.env.APP_URL+"/fix/"+marker+"?finding="+f.fingerprint+")":""),anchor:{diffType:"RANGE",fromHash:pr.base.sha,toHash:sha,path:f.filePath,...(file.previousPath?{srcPath:file.previousPath}:{}),line:f.startLine,lineType:"ADDED",fileType:"TO"}});
+   await guard();const result=await this.request(prefix,z.object({id,author:user}),{text:findingComment(f,style)+"\n\n"+runMarker+fixHandoffLink(process.env.APP_URL,marker,f.fingerprint,options.fixLabel),anchor:{diffType:"RANGE",fromHash:pr.base.sha,toHash:sha,path:f.filePath,...(file.previousPath?{srcPath:file.previousPath}:{}),line:f.startLine,lineType:"ADDED",fileType:"TO"}});
    if(result.author.name!==this.botUsername)throw new Error("Bitbucket published comment author differs from configured bot");
    comments.push({id:result.id,fingerprint:f.fingerprint});
   }

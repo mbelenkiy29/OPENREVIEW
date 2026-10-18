@@ -150,7 +150,7 @@ export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
                   {f.canFix && <FixButton reviewId={f.reviewId} agent={personalAgent} findingId={f._id} />}
                   {f.status === "open" && !f.canFix && data.writableRepositoryIds.includes(f.repositoryId) && <p className="muted">Fix requires this finding to belong to the latest completed review, meet the current confidence threshold, and have current repository access.</p>}
                   <Copy value={prompt} />
-                  <AgentLinks prompt={prompt} repo={data.repositories.find((r) => r._id === f.repositoryId)} devin={devinHandoff(devinConfigured, f.canFix, f.reviewId, f.fingerprint)} />
+                  {f.status === "open" && <AgentLinks prompt={prompt} repo={data.repositories.find((r) => r._id === f.repositoryId)} devin={devinHandoff(devinConfigured, f.canFix, f.reviewId, f.fingerprint)} />}
                   <details>
                     <summary>
                       Portable prompt for Codex, Claude Code, or Cursor

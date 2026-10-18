@@ -1524,15 +1524,16 @@ test("team isolation, inherited settings, bridge replay and revocation fail clos
 test("agent defaults inherit per workspace, personal overrides reset, and administration stays isolated",async()=>{
  const {t,alice,bob,organizationId}=await setup();
  const other=await t.mutation(api.users.createOrganization,{token:bob,name:"Other"});
- expect((await t.query(api.bridge.personal,{token:alice,organizationId})).agent).toBe("codex");
- await t.mutation(api.bridge.saveWorkspaceAgent,{token:alice,organizationId,agent:"claude"});
+ expect((await t.query(api.bridge.personal,{token:alice,organizationId})).agent).toBe("claude"); // Claude Code is the default until the workspace or person chooses
+ expect((await t.query(api.bridge.personal,{token:alice,organizationId})).githubLinked).toBe(true);
+ await t.mutation(api.bridge.saveWorkspaceAgent,{token:alice,organizationId,agent:"codex"});
  await t.mutation(api.bridge.saveWorkspaceAgent,{token:bob,organizationId:other,agent:"cursor"});
- expect((await t.query(api.bridge.personal,{token:alice,organizationId})).agent).toBe("claude");
+ expect((await t.query(api.bridge.personal,{token:alice,organizationId})).agent).toBe("codex");
  await expect(t.query(api.bridge.personal,{token:bob,organizationId})).rejects.toThrow("Forbidden");
  await expect(t.mutation(api.bridge.saveWorkspaceAgent,{token:bob,organizationId,agent:"codex"})).rejects.toThrow("Forbidden");
  const invitationId=await t.mutation(api.users.invite,{token:alice,organizationId,githubLogin:"bob",role:"viewer"});
  await t.mutation(api.users.acceptInvitation,{token:bob,invitationId});
- expect(await t.query(api.bridge.personal,{token:bob,organizationId})).toMatchObject({agent:"claude",workspaceAgent:"claude",canManageWorkspace:false});
+ expect(await t.query(api.bridge.personal,{token:bob,organizationId})).toMatchObject({agent:"codex",workspaceAgent:"codex",canManageWorkspace:false});
  await expect(t.mutation(api.bridge.saveWorkspaceAgent,{token:bob,organizationId,agent:"cursor"})).rejects.toThrow("Forbidden");
  const hash="e".repeat(64),code="f".repeat(12);
  await t.mutation(api.bridge.startPair,{secret:"integration-service-secret",hash,code,name:"Other workspace bridge"});
@@ -1540,15 +1541,15 @@ test("agent defaults inherit per workspace, personal overrides reset, and admini
  await t.mutation(api.bridge.approvePair,{token:bob,organizationId:other,code});
  expect((await t.query(api.bridge.personal,{token:bob,organizationId})).devices).toEqual([]);
  expect((await t.query(api.bridge.personal,{token:bob,organizationId:other})).devices).toHaveLength(1);
- await t.mutation(api.bridge.savePersonal,{token:bob,agent:"codex"});
- for(const id of [organizationId,other])expect((await t.query(api.bridge.personal,{token:bob,organizationId:id})).agent).toBe("codex");
+ await t.mutation(api.bridge.savePersonal,{token:bob,agent:"cursor"});
+ for(const id of [organizationId,other])expect((await t.query(api.bridge.personal,{token:bob,organizationId:id})).agent).toBe("cursor");
  await t.mutation(api.bridge.savePersonal,{token:bob});
- const inherited=await t.query(api.bridge.personal,{token:bob,organizationId});expect(inherited.agent).toBe("claude");expect(inherited.personalAgent).toBeUndefined();
+ const inherited=await t.query(api.bridge.personal,{token:bob,organizationId});expect(inherited.agent).toBe("codex");expect(inherited.personalAgent).toBeUndefined();
  expect((await t.query(api.bridge.personal,{token:bob,organizationId:other})).agent).toBe("cursor");
- expect((await t.query(api.bridge.personal,{token:bob})).agent).toBe("codex");
+ expect((await t.query(api.bridge.personal,{token:bob})).agent).toBe("claude");
  await t.mutation(api.bridge.saveWorkspaceAgent,{token:alice,organizationId,agent:"cursor"});
  expect((await t.query(api.bridge.personal,{token:bob,organizationId})).agent).toBe("cursor");
- expect((await t.query(api.scopes.activity,{token:alice,organizationId})).filter(e=>e.action==="agent.default_changed").map(e=>e.target)).toEqual(["cursor","claude"]);
+ expect((await t.query(api.scopes.activity,{token:alice,organizationId})).filter(e=>e.action==="agent.default_changed").map(e=>e.target)).toEqual(["cursor","codex"]);
 });
 
 test("completed indexing filters excluded knowledge changes while preserving source edits and removals",async()=>{

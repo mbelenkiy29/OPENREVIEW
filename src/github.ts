@@ -1,5 +1,5 @@
 import {changeMetadataSchema,catalogPageSize,numberedPage,validateChangePage,type ChangeMetadata,type ChangePage} from "./change-metadata";
-import { safeFixBranch } from "./fix-command";
+import { fixHandoffLink, safeFixBranch } from "./fix-command";
 import {githubWebOrigin} from "./github-enterprise";
 import { reviewLinks, inlineFindings } from "./review-summary";
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -45,7 +45,8 @@ const summaryPointer = "## OpenReview\n\nThe review summary for this pull reques
 // Where the review summary goes on GitHub: the pull request description (between hidden markers,
 // the author's text kept) or one issue comment (the default here; review settings choose). Both are
 // edited in place on every review.
-export type PublishOptions = { placement?: "description" | "comment" };
+// fixLabel: the inline "Fix with …" link text, from the workspace's default fix agent.
+export type PublishOptions = { placement?: "description" | "comment"; fixLabel?: string };
 // GitHub rejects pull request bodies longer than 65,536 characters; past that the comment is used.
 const descriptionLimit = 65000;
 const treeSchema = z.object({
@@ -634,7 +635,7 @@ export class Github {
           line: range.end,
           side: "RIGHT",
           ...(range.start < range.end ? { start_line: range.start, start_side: "RIGHT" } : {}),
-          body: findingComment(f, style, { syntax: "github", start: range.start, end: range.end }, { agentPrompt: true }) + (process.env.APP_URL ? `\n\n[Fix with your agent](${process.env.APP_URL}/fix/${marker}?finding=${f.fingerprint})` : ""),
+          body: findingComment(f, style, { syntax: "github", start: range.start, end: range.end }, { agentPrompt: true }) + fixHandoffLink(process.env.APP_URL, marker, f.fingerprint, options.fixLabel),
         };
       });
       const result = await this.request(

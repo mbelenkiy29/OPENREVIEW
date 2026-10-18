@@ -9,6 +9,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { backend, current } from "../../src/server";
 import { notify } from "../../src/toast";
+import { localAgents } from "../../src/fix-agents";
 import { githubCredentials, linkInstallation } from "../../src/github-link";
 import { installReturnPath, linkHref } from "../../src/github-install";
 import { decryptCredential, encryptCredential } from "../../src/credentials";
@@ -568,16 +569,20 @@ export async function reviewBridgePair(_state:{error?:string;code?:string;saved?
  }catch{return {code,error:"Pairing could not be reviewed or approved. Check workspace access and the current code, then review it again. Expired, revoked or already paired codes cannot be used."};}
 }
 export async function saveAgent(form:FormData) {
- const {token}=await current();const agent=text(form,"agent");await backend().mutation(api.bridge.savePersonal,{token,...(agent?{agent:z.enum(["codex","claude","cursor"]).parse(agent)}:{})});revalidatePath("/dashboard", "layout");
+ try{const {token}=await current();const agent=text(form,"agent");await backend().mutation(api.bridge.savePersonal,{token,...(agent?{agent:z.enum(localAgents).parse(agent)}:{})});await notify("Coding agent saved");}
+ catch(error){await notify(`Couldn’t save your agent: ${error instanceof Error?error.message:"please try again"}`,"error");}
+ revalidatePath("/dashboard", "layout");
 }
 export async function saveWorkspaceAgent(form:FormData){
- const {token}=await current();await backend().mutation(api.bridge.saveWorkspaceAgent,{token,organizationId:text(form,"organizationId") as Id<"organizations">,agent:z.enum(["codex","claude","cursor"]).parse(text(form,"agent"))});revalidatePath("/dashboard", "layout");
+ try{const {token}=await current();await backend().mutation(api.bridge.saveWorkspaceAgent,{token,organizationId:text(form,"organizationId") as Id<"organizations">,agent:z.enum(localAgents).parse(text(form,"agent"))});await notify("Workspace agent saved");}
+ catch(error){await notify(`Couldn’t save the workspace agent: ${error instanceof Error?error.message:"please try again"}`,"error");}
+ revalidatePath("/dashboard", "layout");
 }
 export async function revokeBridge(form:FormData) {
  const {token}=await current();await backend().mutation(api.bridge.revoke,{token,deviceId:text(form,"deviceId") as Id<"bridgeDevices">});revalidatePath("/dashboard/settings/agents");
 }
 export async function launchFix(_previous:{url?:string;error?:string},form:FormData):Promise<{url?:string;error?:string}> {
- try {const {token}=await current(); const id=await backend().mutation(api.bridge.createFix,{token,reviewId:text(form,"reviewId") as Id<"reviews">,...(text(form,"findingId")?{findingId:text(form,"findingId") as Id<"findings">}:{}),agent:z.enum(["codex","claude","cursor"]).parse(text(form,"agent"))});return {url:`openreview://fix?request=${id}`};}
+ try {const {token}=await current(); const id=await backend().mutation(api.bridge.createFix,{token,reviewId:text(form,"reviewId") as Id<"reviews">,...(text(form,"findingId")?{findingId:text(form,"findingId") as Id<"findings">}:{}),agent:z.enum(localAgents).parse(text(form,"agent"))});return {url:`openreview://fix?request=${id}`};}
  catch(error){return {error:error instanceof Error ? error.message.slice(0,500):"Unable to create fix request"};}
 }
 export async function reviewAgain(form:FormData) {

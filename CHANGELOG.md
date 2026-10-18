@@ -29,6 +29,14 @@
 - The first review of a new repository waits for its first index with backoff, and if indexing hasn't finished after 30 minutes it fails with a clear message instead of waiting forever.
 - If the semantic search endpoint fails, the review carries on with graph and text context, and its coverage notes say so.
 
+
+### Fixing findings
+- Signing in from a **Fix with your agent** link in a pull request now returns you to that fix, instead of the dashboard.
+- One default coding agent everywhere: Claude Code, unless the workspace or you choose another. The settings page no longer shows a preview-only button.
+- Every finding on a review page links to the full Fix page (deep links, Devin and more), and deep links are hidden on findings that are already resolved or dismissed.
+- The Fix link under each inline finding is built the same way on every provider, and is left out when `APP_URL` is not a plain web origin.
+- Saving your coding agent confirms with a message, and shows the error if saving fails.
+
 ### Sign in
 - Sign-in and sign-up pages (`/login`, `/signup`): continue with GitHub, Google or GitLab, or get an emailed sign-in link, showing only the methods the deployment has configured. Errors and sign-in results now land on the sign-in page instead of the home page.
 

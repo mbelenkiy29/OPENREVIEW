@@ -1,4 +1,5 @@
 import {changeMetadataSchema,catalogPageSize,numberedPage,validateChangePage,type ChangeMetadata,type ChangePage} from "./change-metadata";
+import { fixHandoffLink } from "./fix-command";
 import { reviewLinks } from "./review-summary";
 import { z } from "zod";
 import { repositorySourceUrl } from "./source-url";
@@ -153,7 +154,7 @@ export class Gitea extends Github {
   const diff=parseDiff(patch);if(diff.length!==pr.changed_files)throw new Error("Gitea diff coverage incomplete; binary/unsupported paths require a smaller review");
   return {...pr,...(pr.user.id?{authorExternalId:String(pr.user.id)}:{}),draft:pr.draft??false,diff,reviews,comments:comments.map(c=>({...c,path:"",line:null})),commits,checks:statuses.map(s=>({name:s.context,status:s.status==="pending"?"in_progress":"completed",conclusion:s.status}))};
  }
- override async publish(repo:string,number:number,sha:string,summary:string,findings:Finding[],marker:string,style="detailed",_revisionKey?:string,unresolvedCount=findings.length){
+ override async publish(repo:string,number:number,sha:string,summary:string,findings:Finding[],marker:string,style="detailed",_revisionKey?:string,unresolvedCount=findings.length,options:import("./github").PublishOptions={}){
   const prefix="/repos/"+repo+"/pulls/"+number;
   const current=async()=>{const pr=await this.request(prefix,z.object({head:z.object({sha:z.string()}),state:z.string()}));if(pr.head.sha!==sha||pr.state!=="open")throw new Error("Pull request changed or closed");};
   await current();const publisher=await this.publisherLogin();
@@ -161,7 +162,7 @@ export class Gitea extends Github {
   const prior=existing.find(r=>r.user.login===publisher&&r.commit_id===sha&&r.state==="COMMENT"&&r.body?.trimEnd().endsWith("<!-- openreview:"+marker+" -->"));if(prior){const comments=await this.findingComments(repo,number,prior.id,findings,sha);await current();return {id:prior.id,reused:true,comments};}
   if(findings.length){const diff=parseDiff(await this.request(prefix+".diff",z.string()));for(const f of findings)if(f.commitSha!==sha||!changedLines(diff.find(d=>d.path===f.filePath)?.patch??"").has(f.startLine))throw new Error("Finding line not in complete current diff");}
   await current();
-  const result=await this.request(prefix+"/reviews",z.object({id:z.number(),commit_id:z.string(),user:z.object({login:z.string()})}),{method:"POST",body:JSON.stringify({commit_id:sha,event:"COMMENT",body:"## OpenReview\n\n"+summary+reviewLinks(marker,unresolvedCount)+"\n\n<!-- openreview:"+marker+" -->",comments:findings.map(f=>({path:f.filePath,new_position:f.startLine,old_position:0,body:findingComment(f,style)+(process.env.APP_URL?"\n\n[Fix with your agent]("+process.env.APP_URL+"/fix/"+marker+"?finding="+f.fingerprint+")":"")}))})});
+  const result=await this.request(prefix+"/reviews",z.object({id:z.number(),commit_id:z.string(),user:z.object({login:z.string()})}),{method:"POST",body:JSON.stringify({commit_id:sha,event:"COMMENT",body:"## OpenReview\n\n"+summary+reviewLinks(marker,unresolvedCount)+"\n\n<!-- openreview:"+marker+" -->",comments:findings.map(f=>({path:f.filePath,new_position:f.startLine,old_position:0,body:findingComment(f,style)+fixHandoffLink(process.env.APP_URL,marker,f.fingerprint,options.fixLabel)}))})});
   if(result.user.login!==publisher||result.commit_id!==sha)throw new Error("Gitea returned another publication identity or revision");
   const comments=await this.findingComments(repo,number,result.id,findings,sha);await current();return {id:result.id,reused:false,comments};
  }

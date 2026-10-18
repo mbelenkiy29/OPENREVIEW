@@ -9,6 +9,7 @@ import { rateLimit } from "./rateLimit";
 import { fixPrompt, eligibleFixFinding } from "../src/fix-prompt";
 import {p4FixAuthority} from "./p4FixAuthority";
 import { findingSchema } from "../src/engine/types";
+import { resolveLocalAgent } from "../src/fix-agents";
 
 async function device(ctx: MutationCtx, hash: string) {
   const d=await ctx.db.query("bridgeDevices").withIndex("by_hash",q=>q.eq("tokenHash",hash)).unique();
@@ -54,7 +55,8 @@ export const personal = query({args:{token:v.string(),organizationId:v.optional(
   const identity=a.organizationId?await authorize(ctx,a.token,a.organizationId):null;
   const workspace=a.organizationId?await ctx.db.get(a.organizationId):null;
   const preference=await ctx.db.query("personalSettings").withIndex("by_user",q=>q.eq("userId",u._id)).unique();
-  return {account:u.login,agent:preference?.agent??workspace?.defaultAgent??"codex",personalAgent:preference?.agent,workspaceAgent:workspace?.defaultAgent??"codex",canPair:!!identity&&identity.member.role!=="viewer",canManageWorkspace:!!identity&&["owner","admin"].includes(identity.member.role),devices:devices.filter(d=>!a.organizationId||d.organizationId===a.organizationId).map(d=>({_id:d._id,name:d.name,expiresAt:d.expiresAt,revoked:d.revoked,lastSeen:d.lastSeen}))};
+  const githubLinked=Boolean(u.githubId)||Boolean(await ctx.db.query("identities").withIndex("by_user",q=>q.eq("userId",u._id)).filter(q=>q.eq(q.field("provider"),"github")).first());
+  return {account:u.login,githubLinked,agent:resolveLocalAgent(preference?.agent,workspace?.defaultAgent),personalAgent:preference?.agent,workspaceAgent:resolveLocalAgent(workspace?.defaultAgent),canPair:!!identity&&identity.member.role!=="viewer",canManageWorkspace:!!identity&&["owner","admin"].includes(identity.member.role),devices:devices.filter(d=>!a.organizationId||d.organizationId===a.organizationId).map(d=>({_id:d._id,name:d.name,expiresAt:d.expiresAt,revoked:d.revoked,lastSeen:d.lastSeen}))};
 }});
 export const savePersonal = mutation({args:{token:v.string(),agent:v.optional(codingAgentValidator)},handler:async(ctx,a)=>{
  const u=await authenticated(ctx,a.token);const old=await ctx.db.query("personalSettings").withIndex("by_user",q=>q.eq("userId",u._id)).unique();
@@ -69,7 +71,7 @@ export const saveWorkspaceAgent=mutation({args:{token:v.string(),organizationId:
 export const revoke = mutation({args:{token:v.string(),deviceId:v.id("bridgeDevices")},handler:async(ctx,a)=>{
  const u=await authenticated(ctx,a.token);const d=await ctx.db.get(a.deviceId);if(d?.userId!==u._id) throw new Error("Device not accessible");await ctx.db.patch(d._id,{revoked:true});
 }});
-export const createFix = mutation({args:{token:v.string(),reviewId:v.id("reviews"),findingId:v.optional(v.id("findings")),agent:v.union(v.literal("codex"),v.literal("claude"),v.literal("cursor"))},handler:async(ctx,a)=>{
+export const createFix = mutation({args:{token:v.string(),reviewId:v.id("reviews"),findingId:v.optional(v.id("findings")),agent:codingAgentValidator},handler:async(ctx,a)=>{
  const r=await ctx.db.get(a.reviewId);if(!r) throw new Error("Review not found");const {user}=await authorizeRepository(ctx,a.token,r.repositoryId,true);await requireContextReader(ctx,user._id,r);
  await rateLimit(ctx,`fix:${user._id}`,20);
  const latest=await ctx.db.query("reviews").withIndex("by_pr",q=>q.eq("repositoryId",r.repositoryId).eq("prNumber",r.prNumber)).order("desc").first();
