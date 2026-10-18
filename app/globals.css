@@ -493,6 +493,23 @@ form:not(.toolbar):not(.form-grid):not(.feedback):not(.sign-in-form) {
   display: flex;
   gap: 6px;
 }
+/* Feedback entries (app/userjot.tsx): buttons that read as the menu's links. */
+.profile-feedback {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.profile-feedback .link-button {
+  color: var(--accent);
+  text-decoration: none;
+  text-align: left;
+}
+.profile-feedback .link-button:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
 .scope-menu {
   left: 0;
   width: 320px;
@@ -955,6 +972,22 @@ tr:last-child td {
   border-radius: var(--radius-lg);
   background: var(--bg);
   box-shadow: var(--shadow-popover);
+}
+/* The UserJot launcher (40px, 20px from the bottom right) sits below toasts and, on phones, the
+   consent banner, and clear of the controls at the page's bottom right, so none hide behind it. */
+[data-userjot] .toast {
+  bottom: 72px;
+}
+[data-userjot] .site-footer {
+  padding-bottom: 80px;
+}
+[data-userjot] .wizard-bar {
+  padding-right: 76px;
+}
+@media (max-width: 460px) {
+  [data-userjot] .consent {
+    bottom: 72px;
+  }
 }
 .toast.success {
   box-shadow: var(--shadow-popover), inset 0 0 0 1px var(--success);
@@ -1911,6 +1944,53 @@ form.catalog-review {
 .table-scroll {
   overflow-x: auto;
   max-width: 100%;
+}
+/* Feedback board (app/feedback): the UserJot embed inside the site frame. */
+.board-page {
+  width: 100%;
+  max-width: 1252px;
+  margin: 0 auto;
+  padding: 40px 24px 96px;
+  min-width: 0;
+}
+.board-intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px 24px;
+  margin-bottom: 24px;
+}
+.board-intro h1 {
+  font-size: 40px;
+  letter-spacing: -0.022em;
+  margin-bottom: 8px;
+}
+.board-intro p {
+  margin: 0;
+  max-width: 560px;
+}
+.board-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.board-embed {
+  height: max(640px, calc(100vh - 240px));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg);
+}
+.board-embed iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.board-note {
+  margin: 12px 0 0;
+  font-size: 13px;
 }
 
 /* ---------- Landing ---------- */

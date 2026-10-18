@@ -6,6 +6,7 @@ import { withLoadedAnalytics } from "../src/analytics-loader";
 import { analyticsStartedEvent } from "../src/consent";
 import { sentryDsn } from "../src/telemetry";
 import { reportMilestones } from "./telemetry-actions";
+import { userJotLogout } from "./userjot";
 
 /** Ties analytics and error reports to the signed-in user and active workspace, by internal id only,
  *  and sends product milestones not yet reported. */
@@ -30,10 +31,11 @@ export function TelemetryIdentity({ userId, workspaceId, milestones = [] }: { us
   return null;
 }
 
-/** A sign-out form that also forgets the user in this browser's analytics and error reports. */
+/** A sign-out form that also forgets the user in this browser's analytics, error reports and feedback widget. */
 export function SignOutForm({ action, label }: { action: () => Promise<void>; label: string }) {
   return <form action={action} onSubmit={() => {
     withLoadedAnalytics((a) => a.resetAnalytics());
     if (sentryDsn) Sentry.setUser(null);
+    userJotLogout();
   }}><button className="small">{label}</button></form>;
 }

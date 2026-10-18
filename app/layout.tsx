@@ -3,6 +3,8 @@ import {siteDescription as description} from "../src/structured-data";
 import {themeScript} from "../src/theme";
 import {ThemeProvider} from "./theme";
 import {ConsentBanner} from "./consent";
+import {UserJot} from "./userjot";
+import {userJotConfig} from "../src/userjot";
 // Fonts are bundled from npm so builds never fetch them: Inter for UI, JetBrains Mono for code
 // and metadata, EB Garamond for editorial subheads.
 import "@fontsource-variable/inter";
@@ -24,10 +26,11 @@ export default function RootLayout({
 }) {
   // The theme is applied in the browser from its cookie (src/theme.ts), so this layout reads no
   // cookies and public pages stay static. The script sets data-theme, which the server never renders.
+  const userJot=userJotConfig();
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning data-userjot={userJot ? "" : undefined}>
       <head><script dangerouslySetInnerHTML={{__html:themeScript}} /></head>
-      <body><ThemeProvider>{children}<ConsentBanner /></ThemeProvider></body>
+      <body><ThemeProvider>{children}<ConsentBanner />{userJot&&<UserJot projectId={userJot.projectId} />}</ThemeProvider></body>
     </html>
   );
 }
