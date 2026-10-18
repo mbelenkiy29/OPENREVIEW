@@ -1,6 +1,6 @@
 import { parsePatch } from "./diff-view";
 import type { Candidate, ChangedFile } from "./engine/types";
-import { redact } from "./engine/indexer";
+import { placeholder, redact } from "./redact";
 
 // Deterministic, high-signal security checks over added lines. They are original, small and tested;
 // model judgment never removes their results (the model may only explain and rank around them).
@@ -8,12 +8,11 @@ type Check = { id: string; title: string; severity: Candidate["severity"]; paths
 const code = /\.(?:[cm]?[jt]sx?|py|go|rb|java|kt|cs|php|rs|swift|scala)$/i;
 const js = /\.[cm]?[jt]sx?$/i, py = /\.py$/i;
 const testPath = /(^|\/)(tests?|__tests__|spec|fixtures?|examples?|mocks?|testdata)\/|\.(test|spec)\.[^/]+$|_test\.go$/i;
-// Placeholder values that are documentation, not credentials.
-const placeholder = /EXAMPLE|example|dummy|placeholder|changeme|your[_-]?|xxx+|\*{3,}|<[^>]+>|\$\{|process\.env|os\.environ|getenv/i;
 const tokens = /\b(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,}|xox[abpors]-[A-Za-z0-9-]{10,}|sk_live_[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35})\b/;
 const assigned = /(\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret)\b["']?\s*[:=]\s*["'])[^"'\s]{12,}(["'])/i;
-// Evidence quotes never repeat a secret value in comments or storage.
-export const maskSecrets = (line: string) => redact(line).replace(new RegExp(tokens.source, "g"), "[REDACTED TOKEN]").replace(new RegExp(assigned.source, "gi"), "$1[REDACTED]$2");
+// Evidence quotes never repeat a secret value in comments or storage. Redaction masks every token and
+// assignment these checks flag (tests/redact.test.ts), so quotes and stored code are masked alike.
+export const maskSecrets = redact;
 // SQL keywords: uppercase as written in most code, or lowercase with enough structure to rule out prose.
 const sql = /(?:SELECT\b[^"'`]*\bFROM\b|INSERT\s+INTO\b|UPDATE\s+\w+\s+SET\b|DELETE\s+FROM\b|select\b[^"'`]*\bfrom\s+\w+[^"'`]*\bwhere\b|insert\s+into\s+\w+\s*\(|update\s+\w+\s+set\s+\w+\s*=|delete\s+from\s+\w+\s+where\b)/.source;
 export const securityChecks: Check[] = [
