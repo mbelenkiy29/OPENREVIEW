@@ -50,6 +50,12 @@
 - Public pages declare their canonical address, and the home page carries structured data (site name, app, licence, prices) for search engines.
 - A Security page (`/security`) describes how the hosted service handles code: what is stored and sent to the model, secret redaction, access control, encryption, GitHub App permissions, retention and how to report a vulnerability. The reporting contact is also published in `/.well-known/security.txt` and `SECURITY.md`.
 
+### Security
+- Secret redaction also covers Stripe, Slack, GitLab and Google API keys, JSON Web Tokens, AWS secret access keys, quoted secrets under JSON keys, and secret-named settings in `.env`-style lines. Ordinary code and placeholders such as `your-api-key` are left as they are.
+- Webhook payloads are deleted 14 days after they were last processed, including deliveries that failed or never finished. Event payloads from other code hosts are cleared after the same 14 days. Their delivery records stay, so a redelivery is still recognised.
+- Every response sends `X-Content-Type-Options: nosniff` and `Referrer-Policy: strict-origin-when-cross-origin`, and pages refuse to be framed (`X-Frame-Options: DENY`, `frame-ancestors 'none'`).
+- The Privacy Policy now says that signing in with GitHub gives OpenReview no email address.
+
 ### Reviews
 - Agentic review engine (opt-in) that follows code across files with read-only tools, under per-mode budgets.
 - Tree-sitter code graph with resolved cross-file edges, plus optional chunk-level semantic retrieval.

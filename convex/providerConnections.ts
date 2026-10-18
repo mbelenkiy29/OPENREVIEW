@@ -115,7 +115,7 @@ export const originLifecycle=internalMutation({args:{id:v.id("providerConnection
  await audit(ctx,c.organizationId,undefined,a.eventType,c._id);
 }});
 export const claimEvent=internalMutation({args:{id:v.id("providerEvents")},handler:async(ctx,a)=>{
- const event=await ctx.db.get(a.id);if(!event||event.status==="completed")return false;
+ const event=await ctx.db.get(a.id);if(!event||event.status==="completed"||event.bodyDeletedAt)return false;
  if(event.status==="processing"&&(event.updatedAt??event.createdAt)>Date.now()-15*60000)return false;
  if(event.attempts>=3){await ctx.db.patch(event._id,{status:"failed",error:"Provider event recovery exhausted",updatedAt:Date.now()});return false;}
  await ctx.db.patch(event._id,{status:"processing",attempts:event.attempts+1,updatedAt:Date.now()});
@@ -125,13 +125,14 @@ export const claimEvent=internalMutation({args:{id:v.id("providerEvents")},handl
 
 export const events=query({args:{token:v.string(),connectionId:v.id("providerConnections")},handler:async(ctx,a)=>{
  const c=await ctx.db.get(a.connectionId);if(!c)throw new Error("Connection unavailable");await authorize(ctx,a.token,c.organizationId,true);
- return (await ctx.db.query("providerEvents").withIndex("by_connection_created",q=>q.eq("connectionId",c._id)).order("desc").take(50)).map(e=>({_id:e._id,eventType:e.eventType,status:e.status,attempts:e.attempts,createdAt:e.createdAt}));
+ return (await ctx.db.query("providerEvents").withIndex("by_connection_created",q=>q.eq("connectionId",c._id)).order("desc").take(50)).map(e=>({_id:e._id,eventType:e.eventType,status:e.status,attempts:e.attempts,createdAt:e.createdAt,payloadDeleted:!!e.bodyDeletedAt}));
 }});
 export const retryEvent=mutation({args:{token:v.string(),id:v.id("providerEvents")},handler:async(ctx,a)=>{
  const e=await ctx.db.get(a.id);if(!e)throw new Error("Delivery unavailable");const c=await ctx.db.get(e.connectionId);if(!c)throw new Error("Connection unavailable");
  const {user}=await authorize(ctx,a.token,c.organizationId,true);
  if(!c.active||c.suspended)throw new Error("Connection disabled or suspended");
  if(e.status!=="failed")throw new Error("Only failed deliveries may be retried");
+ if(e.bodyDeletedAt)throw new Error("This delivery's payload was deleted 14 days after it was last processed, so it can no longer be retried");
  await ctx.db.patch(e._id,{status:"queued",attempts:0,error:undefined,updatedAt:Date.now()});
  await audit(ctx,c.organizationId,user._id,"provider.delivery_retried",e._id);
  await ctx.scheduler.runAfter(0,internal.providerJobs.event,{id:e._id});

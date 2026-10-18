@@ -19,7 +19,7 @@ Admins can limit how long data is kept. Both limits are between 7 and 3,650 days
 
 A daily job applies the settings in small batches, and every change to them is recorded in the audit log.
 
-Separately, processed webhook payloads, which are not linked to any workspace, are deleted across the deployment after 14 days.
+Separately, webhook payloads are deleted 14 days after they were last processed, whether processing succeeded, failed or never finished. A job every six hours handles this across the deployment. GitHub deliveries, which are not linked to any workspace, are deleted along with their payload files. Deliveries from other code hosts keep their record, which stops a redelivery from being processed twice and still appears under **Recent deliveries**. Their payload is cleared, so they can no longer be retried.
 
 ## Deleting a workspace
 
