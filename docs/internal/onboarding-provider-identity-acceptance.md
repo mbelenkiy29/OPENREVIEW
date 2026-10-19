@@ -1,6 +1,6 @@
 # Onboarding repository identity and mobile selection
 
-October 4, 2026. Final production release `dpl_2qSHvNVW9NH8gSfMK4DYiagSytHM` is verified READY at https://openreview-flame-two.vercel.app, with the integrated Convex tidy-ocelot-457 deployment complete.
+October 4, 2026. Final production release `<deployment-id>` is verified READY at `<vercel-url>`, with the integrated Convex `<prod-deployment>` deployment complete.
 
 Computer use found two onboarding checkboxes with the identical accessible label `alice/openreview-acceptance · main`. Native readback after adding identity established that these are two Gitea connections on different instances, not different providers. Selecting or inspecting indexing from the repository name alone was ambiguous.
 
@@ -10,7 +10,7 @@ The first deployed identity form exposed a shared CSS conflict at mobile width: 
 
 The final hosted walkthrough verified Ready, saved GitHub/Gitea selection, pinned indexed revisions, candidate totals and explicit coverage limits; expanded repository selection shows all eight identities. Tab from the disclosure reaches the first checkbox, then the first Gitea checkbox with the full identity as its accessible name. Both original selected IDs remain unchanged. No Save, indexing, review or Fix action was submitted. Browser warning/error logs were empty; viewport override was reset afterward. This is current owner/light desktop/mobile evidence, not a dark-mode, viewer or all-provider live connection claim. Existing stored ready indexes do not establish that historical temporary provider endpoints are currently reachable.
 
-193 Node + 159 Convex = **352 passing tests**. The added backend regression verifies duplicate names across distinct provider identities and withholding foreign connection identity/credentials. Initial test fixture setup errors were corrected; the final backend suite passes all 159 tests. Lint, frontend/backend typechecks, local production builds and both hosted integrated builds passed. The first hosted release `dpl_E9qh7rMubzT2ACkVNHmb4rXgpvnb` is superseded by the final layout correction.
+193 Node + 159 Convex = **352 passing tests**. The added backend regression verifies duplicate names across distinct provider identities and withholding foreign connection identity/credentials. Initial test fixture setup errors were corrected; the final backend suite passes all 159 tests. Lint, frontend/backend typechecks, local production builds and both hosted integrated builds passed. The first hosted release `<deployment-id>` is superseded by the final layout correction.
 
 Inference ledger remained $4.606786 committed plus $0.270556 retained reservations under $5. No credential, repository selection, index job, inference, approval/runtime policy or repository push changed in this walkthrough.
 

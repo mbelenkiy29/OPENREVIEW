@@ -1,6 +1,6 @@
 # Native Linear disconnect and revocation
 
-October 4, 2026. Computer use invoked Disconnect Linear on the approved read-only Michael Belenkiy connection. Revocation acceptance initially ran on release `dpl_B7QWGjhmd2RkQjQcad7QoP99DSRc`; the status-message correction is deployed on READY release `dpl_91kYEHw8b2pj65A71Rp3ymg1xZoR` at https://openreview-flame-two.vercel.app.
+October 4, 2026. Computer use invoked Disconnect Linear on the approved read-only Michael Belenkiy connection. Revocation acceptance initially ran on release `<deployment-id>`; the status-message correction is deployed on READY release `<deployment-id>` at `<vercel-url>`.
 
 ## Verified live state
 
