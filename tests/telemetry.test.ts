@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { posthogBeforeSend, posthogHosts, sanitizeUrl, scrubBreadcrumb, scrubSentryEvent, sentryDataCollection, tracesSampleRate } from "../src/telemetry";
+import { posthogBeforeSend, posthogHosts, sanitizeUrl, scrubBreadcrumb, scrubSentryEvent, scrubSentryTransaction, sentryDataCollection, tracesSampleRate } from "../src/telemetry";
 
 test("URLs keep only allowlisted query parameters and never a fragment", () => {
   assert.equal(sanitizeUrl("https://openreview.tech/invite?token=secret123"), "https://openreview.tech/invite");
@@ -10,6 +10,14 @@ test("URLs keep only allowlisted query parameters and never a fragment", () => {
   assert.equal(sanitizeUrl("/dashboard/pulls?repository=acme%2Fsecret-repo"), "/dashboard/pulls");
   assert.equal(sanitizeUrl("not a url"), "not a url");
   assert.equal(sanitizeUrl("mailto:someone@example.com"), "mailto:someone@example.com");
+  // Referral codes identify their owner, so the path is generalized too.
+  assert.equal(sanitizeUrl("https://openreview.tech/r/ABCD2345?referral=X&utm_source=x"), "https://openreview.tech/r/[code]?utm_source=x");
+  assert.equal(sanitizeUrl("/r/abcd-2345"), "/r/[code]");
+  assert.equal(sanitizeUrl("https://www.reddit.com/r/programming/comments/abc/openreview/"), "https://www.reddit.com/r/programming/comments/abc/openreview/");
+  assert.equal(sanitizeUrl("https://www.reddit.com/r/devops"), "https://www.reddit.com/r/devops");
+  assert.equal(sanitizeUrl("https://www.reddit.com/r/HackerNews/"), "https://www.reddit.com/r/HackerNews/");
+  assert.equal(sanitizeUrl("/signup?referral=ABCD2345"), "/signup");
+  assert.equal(sanitizeUrl("/resources/r/x"), "/resources/r/x");
 });
 
 test("PostHog events drop element captures on private pages and strip secrets everywhere", () => {
@@ -17,7 +25,12 @@ test("PostHog events drop element captures on private pages and strip secrets ev
   for (const name of ["$autocapture", "$rageclick", "$dead_click"]) {
     assert.equal(posthogBeforeSend(event(name, "https://openreview.tech/dashboard/pulls/123?x=1")), null, name);
     assert.equal(posthogBeforeSend(event(name, "https://openreview.tech/invite?token=abc")), null, name);
+    assert.equal(posthogBeforeSend(event(name, "https://openreview.tech/r/ABCD2345")), null, name);
+    // Sign-in links on a referred sign-up page carry the code in their href.
+    assert.equal(posthogBeforeSend(event(name, "https://openreview.tech/signup?referral=ABCD2345")), null, name);
   }
+  const referral = posthogBeforeSend(event("$pageview", "https://openreview.tech/r/ABCD2345"))!;
+  assert.deepEqual([referral.properties.$current_url, referral.properties.$pathname], ["https://openreview.tech/r/[code]", "/r/[code]"]);
   const landing = posthogBeforeSend(event("$autocapture", "https://openreview.tech/?utm_campaign=launch&token=abc"));
   assert.equal(landing?.properties.$current_url, "https://openreview.tech/?utm_campaign=launch", "public pages keep clicks");
   const pageview = posthogBeforeSend(event("$pageview", "https://openreview.tech/invite?token=abc"))!;
@@ -44,6 +57,19 @@ test("Sentry events carry no cookies, credentials, bodies, query strings or user
   assert.deepEqual(sentryDataCollection.httpBodies, []);
   assert.deepEqual(sentryDataCollection.genAI, { inputs: false, outputs: false });
   assert.equal(sentryDataCollection.stackFrameVariables, false);
+});
+
+test("Sentry performance events get the same scrubbing, including span URLs and names", () => {
+  const event = scrubSentryTransaction({
+    transaction: "GET /r/ABCD2345",
+    request: { url: "https://openreview.tech/r/ABCD2345?referral=X", cookies: { openreview_session: "jwt" } },
+    contexts: { trace: { data: { "url.full": "https://openreview.tech/r/ABCD2345?referral=X", "url.path": "/r/ABCD2345", "http.request.method": "GET" } } },
+    spans: [{ description: "GET /signup?referral=ABCD2345", data: { "url.full": "https://openreview.tech/invite?token=abc" } }, {}],
+  });
+  assert.equal(event.transaction, "GET /r/[code]");
+  assert.deepEqual(event.request, { url: "https://openreview.tech/r/[code]" });
+  assert.deepEqual(event.contexts.trace.data, { "url.full": "https://openreview.tech/r/[code]", "url.path": "/r/[code]", "http.request.method": "GET" });
+  assert.deepEqual(event.spans, [{ description: "GET /signup", data: { "url.full": "https://openreview.tech/invite" } }, {}]);
 });
 
 test("sampling and hosts default safely", () => {

@@ -78,6 +78,7 @@ Each feature below has automated tests. The evidence level for each one (tests w
 - Analytics trends: reviews, findings, addressed rate and estimated time saved.
 - A diff viewer with inline findings.
 - Optional Stripe seat billing with review quotas. It is off unless `BILLING_ENABLED=true`.
+- An optional referral program for the hosted cloud: personal links, a Checkout discount, commissions with refund and dispute clawback, workspace credit, and optional cash payouts through Stripe Connect. It is off unless `REFERRALS_ENABLED=true` and billing is on. See [docs/billing.md](docs/billing.md#referral-program).
 - Self-hosting kit: a Helm chart, AWS Terraform, an offline mode (`OPENREVIEW_OFFLINE=true`) that only contacts your model, embedding, code-host and SSO endpoints, and a checksummed tree-sitter grammar bundle. See [docs/self-hosting-kit.md](docs/self-hosting-kit.md).
 
 **Command line**

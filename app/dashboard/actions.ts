@@ -18,6 +18,7 @@ import { fixHandoffPrompt } from "../../src/fix-handoff";
 import {approvalPolicySchema} from "../../src/approval";
 import {runtimePolicySchema} from "../../src/runtime-policy";
 import {approvalDefaults,runtimeDefaults} from "../../src/review-settings";
+import { REFERRAL_PAYOUT_REVIEW_CENTS, formatMoney, parseMoneyInput, stripeHostedUrl } from "../../src/referrals";
 
 const text = (f: FormData, key: string) => z.string().parse(f.get(key) ?? "");
 export async function saveApprovalPolicy(_state:{error?:string;saved?:boolean},form:FormData):Promise<{error?:string;saved?:boolean}>{
@@ -202,12 +203,13 @@ export async function revokeInvitation(_state:{error?:string},form:FormData):Pro
   revalidatePath("/dashboard","layout");
   return {};
 }
-export async function logout() {
+async function endSession(to: string): Promise<never> {
   const jar = await cookies(), token = jar.get("openreview_session")?.value;
   if (token) await backend().mutation(api.identity.signOut, { token }).catch(() => undefined);
   jar.delete("openreview_session");
-  redirect("/");
+  redirect(to);
 }
+export async function logout() { await endSession("/"); }
 export async function signOutEverywhere() {
   const { token } = await current();
   await backend().mutation(api.identity.signOutEverywhere, { token });
@@ -316,6 +318,44 @@ export async function startCheckout(form: FormData) {
   try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: text(form, "organizationId") as Id<"organizations"> }); }
   catch { redirect("/dashboard/settings/billing?billing=error"); }
   redirect(url);
+}
+export async function applyReferralCode(form: FormData) {
+  const { token } = await current();
+  try { const result = await backend().mutation(api.referrals.applyCode, { token, organizationId: text(form, "organizationId") as Id<"organizations">, code: text(form, "code") }); await notify(result.ok ? "Referral code applied." : result.error, result.ok ? "success" : "error"); }
+  catch (e) { await notify(backendMessage(e, "Could not apply the referral code."), "error"); }
+  revalidatePath("/dashboard", "layout");
+}
+export async function redeemReferralCredit(form: FormData) {
+  const { token } = await current(), amount = parseMoneyInput(form.get("amount"));
+  if (amount === null) await notify("Enter an amount in dollars, like 25 or 25.50.", "error");
+  else try { const result = await backend().mutation(api.referrals.requestCredit, { token, organizationId: text(form, "organizationId") as Id<"organizations">, amount }); await notify(result.ok ? "Credit requested. It appears on the workspace’s next invoice." : result.error, result.ok ? "success" : "error"); }
+  catch (e) { await notify(backendMessage(e, "Could not apply the credit."), "error"); }
+  revalidatePath("/dashboard", "layout");
+}
+// Cash payouts: each step needs a sign-in from the last 15 minutes. With an older session the backend
+// answers signIn, and this session ends so the sign-in page (which says why) asks again and returns to Referrals.
+// Stripe links are followed only to Stripe-hosted https pages.
+async function payoutStep(step: () => Promise<{ ok: true; url?: string; review?: boolean } | { ok: false; error: string; signIn?: string }>, done: string, fallback: string) {
+  let result;
+  try { result = await step(); }
+  catch (e) { await notify(backendMessage(e, fallback), "error"); return revalidatePath("/dashboard", "layout"); }
+  if (!result.ok) { if (result.signIn) await endSession(result.signIn); await notify(result.error, "error"); return revalidatePath("/dashboard", "layout"); }
+  if (result.url !== undefined) { const url = stripeHostedUrl(result.url); if (url) redirect(url); await notify(fallback, "error"); }
+  else await notify(result.review ? `Cash-out requested. OpenReview reviews cash-outs that bring your total over ${formatMoney(REFERRAL_PAYOUT_REVIEW_CENTS)} in 30 days before sending them.` : done);
+  revalidatePath("/dashboard", "layout");
+}
+export async function startReferralPayoutSetup(form: FormData) {
+  const { token } = await current();
+  await payoutStep(() => backend().action(api.referralJobs.startPayoutSetup, { token, country: text(form, "country") }), "", "Could not open Stripe payout setup.");
+}
+export async function requestReferralPayout(form: FormData) {
+  const { token } = await current(), amount = parseMoneyInput(form.get("amount"));
+  if (amount === null) { await notify("Enter an amount in dollars, like 50 or 50.25.", "error"); return revalidatePath("/dashboard", "layout"); }
+  await payoutStep(() => backend().mutation(api.referrals.requestPayout, { token, amount }), "Cash-out requested. Stripe sends it to your bank on your payout schedule.", "Could not cash out.");
+}
+export async function openReferralPayoutDashboard() {
+  const { token } = await current();
+  await payoutStep(() => backend().action(api.referralJobs.payoutDashboardLink, { token }), "", "Could not open the Stripe dashboard.");
 }
 export async function openBillingPortal(form: FormData) {
   const { token } = await current();

@@ -19,11 +19,11 @@ export const inviteByEmail = action({ args: { token: v.string(), organizationId:
 } });
 
 // Magic-link sign-in. The response never reveals whether an account exists for the address.
-export const requestMagicLink = action({ args: { secret: v.string(), email: v.string(), next: v.optional(v.string()) }, handler: async (ctx, a): Promise<"sent"> => {
+export const requestMagicLink = action({ args: { secret: v.string(), email: v.string(), next: v.optional(v.string()), referralCode: v.optional(v.string()) }, handler: async (ctx, a): Promise<"sent"> => {
   service(a.secret);
   if (!emailConfigured()) throw new Error("Email sign-in is not configured");
   const email = emailAddress.parse(a.email), t = token();
-  await ctx.runMutation(internal.identity.storeLoginToken, { email, tokenHash: t.hash });
+  await ctx.runMutation(internal.identity.storeLoginToken, { email, tokenHash: t.hash, ...(a.referralCode ? { referralCode: a.referralCode } : {}) });
   const next = a.next && /^\/(?!\/)[A-Za-z0-9/_?=&.%-]{0,300}$/.test(a.next) ? `&next=${encodeURIComponent(a.next)}` : "";
   await sendEmail({ to: email, subject: "Your OpenReview sign-in link", text: `Sign in to OpenReview (single use, expires in 15 minutes):\n${appOrigin()}/api/auth/email/verify?token=${t.raw}${next}\n\nIf you did not request this, ignore this email.` });
   return "sent";

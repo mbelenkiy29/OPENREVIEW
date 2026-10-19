@@ -5,6 +5,8 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { authorize } from "./auth";
 import { billingConfig, billingDecision, periodKey, seatCount, trialEndsFrom } from "../src/billing";
+import { referralConfig } from "../src/referrals";
+import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus } from "./referralLedger";
 
 // Billing state and the review quota gate. With BILLING_ENABLED unset every check allows.
 // The account row (and with it the trial clock) starts with the first review or checkout, so
@@ -53,7 +55,7 @@ export async function reviewAllowance(ctx: MutationCtx, organizationId: Id<"orga
 }
 
 export const status = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
-  const { member } = await authorize(ctx, a.token, a.organizationId);
+  const { user, member } = await authorize(ctx, a.token, a.organizationId);
   const config = billingConfig();
   if (!config.enabled) return { enabled: false as const };
   const stored = await accountOf(ctx, a.organizationId);
@@ -61,7 +63,8 @@ export const status = query({ args: { token: v.string(), organizationId: v.id("o
   const usage = await usageOf(ctx, a.organizationId, periodKey(Date.now()));
   const decision = billingDecision({ status: account.status, seats: account.seats, trialEndsAt: account.trialEndsAt, pastDueSince: account.pastDueSince, subscriptionId: account.subscriptionId }, usage?.reviews ?? 0, Date.now(), config);
   const organization = await ctx.db.get(a.organizationId);
-  return { enabled: true as const, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin: ["owner", "admin"].includes(member.role), status: account.status, plan: decision.plan, allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: decision.used, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: account.trialEndsAt, trialStarted: Boolean(stored), trialDays: config.trialDays, trialReviews: config.trialReviews, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, reviewsPerSeat: config.reviewsPerSeat, hasCustomer: Boolean(account.customerId) };
+  const admin = ["owner", "admin"].includes(member.role), referrals = admin && referralConfig().enabled;
+  return { enabled: true as const, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: decision.used, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: account.trialEndsAt, trialStarted: Boolean(stored), trialDays: config.trialDays, trialReviews: config.trialReviews, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, reviewsPerSeat: config.reviewsPerSeat, hasCustomer: Boolean(account.customerId) };
 } });
 
 export const checkoutContext = internalQuery({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
@@ -81,7 +84,7 @@ export const linkCustomer = internalMutation({ args: { organizationId: v.id("org
 const subscriptionArgs = v.object({ id: v.string(), customer: v.string(), status: v.string(), quantity: v.number(), itemId: v.optional(v.string()), currentPeriodEnd: v.optional(v.number()), organizationId: v.optional(v.string()) });
 // Signed Stripe events, applied at most once; subscription events older than the last applied
 // one are recorded but ignored, so redelivery and reordering cannot roll state back.
-export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), type: v.string(), created: v.number(), checkout: v.optional(v.object({ organizationId: v.string(), customer: v.string(), subscription: v.optional(v.string()) })), subscription: v.optional(subscriptionArgs), invoice: v.optional(v.object({ customer: v.string(), subscription: v.optional(v.string()) })) }, handler: async (ctx, a): Promise<string> => {
+export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), type: v.string(), created: v.number(), checkout: v.optional(v.object({ organizationId: v.string(), customer: v.string(), subscription: v.optional(v.string()) })), subscription: v.optional(subscriptionArgs), invoice: v.optional(v.object(invoiceFacts)), charge: v.optional(v.object(chargeEvent)) }, handler: async (ctx, a): Promise<string> => {
   if (await ctx.db.query("stripeEvents").withIndex("by_event", (q) => q.eq("eventId", a.eventId)).unique()) return "duplicate";
   const record = async (outcome: string) => { await ctx.db.insert("stripeEvents", { eventId: a.eventId, type: a.type.slice(0, 100), outcome, createdAt: Date.now() }); return outcome; };
   const byCustomer = (customer: string) => ctx.db.query("billingAccounts").withIndex("by_customer", (q) => q.eq("customerId", customer)).unique();
@@ -111,7 +114,16 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
     if (!account || (a.invoice.subscription && account.subscriptionId && a.invoice.subscription !== account.subscriptionId)) return record("unknown customer");
     if (a.type === "invoice.payment_failed") await ctx.db.patch(account._id, { status: "past_due", pastDueSince: account.pastDueSince ?? a.created, updatedAt: Date.now() });
     if (a.type === "invoice.paid" && account.status === "past_due") await ctx.db.patch(account._id, { status: "active", pastDueSince: undefined, updatedAt: Date.now() });
+    // Referral commissions accrue in their own job, so a referral bug can never fail this webhook.
+    if (a.type === "invoice.paid" && referralConfig().enabled && a.invoice.id && a.invoice.subscription) await ctx.scheduler.runAfter(0, internal.referrals.accrue, { ...a.invoice, paidAt: a.invoice.paidAt ?? a.created });
     return record(a.type);
+  }
+  // Refunds and disputes claw referral commissions back, so this follows billing rather than
+  // REFERRALS_ENABLED: switching the program off does not stop clawbacks. A refund without a customer
+  // never paid an invoice; a dispute names no customer, so its job checks the charge's.
+  if (a.charge && billingConfig().enabled && (a.charge.customer ? await mayHaveCommission(ctx, a.charge.customer) : a.charge.kind === "dispute" && await anyCommission(ctx))) {
+    await ctx.scheduler.runAfter(0, internal.referralJobs.resolveChargeEvent, a.charge);
+    return record("referral check queued");
   }
   return record("ignored");
 } });

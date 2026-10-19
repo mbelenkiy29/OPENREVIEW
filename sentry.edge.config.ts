@@ -1,6 +1,6 @@
 // Edge runtime error tracking; loaded by instrumentation.ts only when a DSN is set.
 import * as Sentry from "@sentry/nextjs";
-import { scrubBreadcrumb, scrubSentryEvent, sentryDataCollection, sentryDsn, telemetryEnvironment, tracesSampleRate } from "./src/telemetry";
+import { scrubBreadcrumb, scrubSentryEvent, scrubSentryTransaction, sentryDataCollection, sentryDsn, telemetryEnvironment, tracesSampleRate } from "./src/telemetry";
 
 Sentry.init({
   dsn: sentryDsn,
@@ -8,5 +8,6 @@ Sentry.init({
   tracesSampleRate: tracesSampleRate(),
   dataCollection: sentryDataCollection,
   beforeSend: scrubSentryEvent,
+  beforeSendTransaction: scrubSentryTransaction,
   beforeBreadcrumb: scrubBreadcrumb,
 });

@@ -20,6 +20,7 @@ export const docPages: DocPage[] = [
   { slug: "origin", title: "Origin", description: "Origin repositories.", section: "Providers", file: "origin.md" },
   { slug: "fix-with-agents", title: "Fix with agents", description: "Cloud agents, local agents, Devin and OpenReview fix pull requests.", section: "Use", file: "public/fix-with-agents.md" },
   { slug: "chat", title: "Codebase chat", description: "Cited answers about your repositories.", section: "Use", file: "public/chat.md" },
+  // public/referrals.md is published (slug "referrals") when the program launches, with its Terms and Privacy sections.
   { slug: "notifications", title: "Slack and email", description: "Notifications, Slack Q&A and email.", section: "Use", file: "notifications.md" },
   { slug: "linear", title: "Linear", description: "Requirements context from Linear issues.", section: "Use", file: "linear.md" },
   { slug: "atlassian", title: "Jira and Confluence", description: "Requirements context from Atlassian.", section: "Use", file: "atlassian.md" },

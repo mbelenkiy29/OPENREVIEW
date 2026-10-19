@@ -12,7 +12,7 @@ import { exchangeSlackCode, SlackApi } from "../src/slack";
 import { Linear, linearToken } from "../src/linear";
 import { Atlassian, atlassianToken } from "../src/atlassian";
 import { Notion, notionToken } from "../src/notion";
-import { stripe } from "../src/billing";
+import { stripe, stripeGet, stripeV2 } from "../src/billing";
 import { createDevinSession } from "../src/devin";
 import { devinHandoff } from "../src/agent-links";
 import { authorizationServerMetadata, loadClientMetadata } from "../src/oauth-server";
@@ -69,6 +69,8 @@ test("offline mode: OSV, email, Slack, Linear, Atlassian, Notion, Stripe, Devin,
   await assert.rejects(notionToken("client", "secret", { refreshToken: "r" }, injected.fn), offlineError);
   await assert.rejects(new Notion("token", injected.fn).page("01234567-89ab-4def-8123-456789abcdef"), offlineError);
   await assert.rejects(stripe("/v1/customers", { name: "Acme" }, "sk_test_fixture", injected.fn), offlineError);
+  await assert.rejects(stripeGet("/v1/charges/ch_1", {}, "sk_test_fixture", injected.fn), offlineError);
+  await assert.rejects(stripeV2("POST", "/v2/core/accounts", "sk_test_fixture", { body: { identity: { country: "us" } } }, injected.fn), offlineError);
   await assert.rejects(createDevinSession("apk_fixture", "Fix it", "Fix", async (url, init) => injected.fn(url, init)), offlineError);
   assert.equal(devinHandoff(true, true, "review-1"), undefined, "no Send to Devin button offline");
   assert.equal(authorizationServerMetadata("https://review.example").client_id_metadata_document_supported, false);

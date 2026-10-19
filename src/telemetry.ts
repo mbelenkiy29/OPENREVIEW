@@ -25,7 +25,8 @@ export function posthogHosts(host = posthogHost) {
 // Query parameters worth keeping; everything else (invite tokens, OAuth codes and state, error
 // messages, filters naming private repositories) is dropped before it leaves the browser or server.
 const keptParams = new Set(["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "ref", "checkout", "billing", "signedout"]);
-/** A URL without secrets: only allowlisted query parameters, never a fragment. Non-URLs pass through. */
+/** A URL without secrets: only allowlisted query parameters, never a fragment, and referral links as
+ *  `/r/[code]` (a code identifies its owner). Non-URLs pass through. */
 export function sanitizeUrl(value: string): string {
   const relative = value.startsWith("/");
   if (!relative && !/^https?:\/\//i.test(value)) return value;
@@ -33,6 +34,8 @@ export function sanitizeUrl(value: string): string {
   try { url = new URL(value, "https://openreview.invalid"); } catch { return value; }
   for (const key of [...url.searchParams.keys()]) if (!keptParams.has(key)) url.searchParams.delete(key);
   url.hash = "";
+  // Only a code-shaped single segment off Reddit: subreddits (r/HackerNews) and their threads are kept.
+  if (/^\/r\/[2-9a-hjkmnp-tv-z-]{8,16}\/?$/i.test(url.pathname) && !/(^|\.)reddit\.com$/i.test(url.hostname)) url.pathname = "/r/[code]";
   return relative ? url.pathname + url.search : url.toString();
 }
 const looksLikeUrl = (value: string) => /^(https?:\/\/|\/)/.test(value);
@@ -43,9 +46,9 @@ function sanitizeRecord(record: Record<string, unknown> | undefined, everyKey = 
     if (typeof value === "string" && looksLikeUrl(value) && (everyKey || /url|referrer|href|pathname|path/i.test(key))) record[key] = sanitizeUrl(value);
 }
 
-// Signed-in pages show private repositories, code and findings: no click text or element data is
-// captured there, only page views and explicit events.
-const privatePath = /^\/(dashboard|invite|fix|api)(\/|$)/;
+// Signed-in pages show private repositories, code and findings, and referral pages name the referrer:
+// no click text or element data is captured there, only page views and explicit events.
+const privatePath = /^\/(dashboard|invite|fix|api|r)(\/|$)/;
 const pathOf = (url: unknown) => {
   if (typeof url !== "string") return "";
   try { return new URL(url, "https://openreview.invalid").pathname; } catch { return ""; }
@@ -54,7 +57,8 @@ type PosthogEvent = { event: string; properties: Record<string, unknown>; $set?:
 /** PostHog `before_send`: drops element captures on private pages and strips secrets from URLs. */
 export function posthogBeforeSend<T extends PosthogEvent>(event: T | null): T | null {
   if (!event) return null;
-  if (["$autocapture", "$rageclick", "$dead_click"].includes(event.event) && privatePath.test(pathOf(event.properties.$current_url) || pathOf(event.properties.$pathname))) return null;
+  // Sign-in links on a referred sign-up page carry the code in their href, which element captures record.
+  if (["$autocapture", "$rageclick", "$dead_click"].includes(event.event) && (privatePath.test(pathOf(event.properties.$current_url) || pathOf(event.properties.$pathname)) || /[?&]referral=/.test(String(event.properties.$current_url ?? "")))) return null;
   sanitizeRecord(event.properties);
   sanitizeRecord(event.$set);
   sanitizeRecord(event.$set_once);
@@ -93,6 +97,17 @@ export function scrubSentryEvent<T extends SentryLikeEvent>(event: T): T {
   }
   for (const crumb of event.breadcrumbs ?? []) sanitizeRecord(crumb.data, true);
   if (event.user) event.user = event.user.id ? { id: event.user.id } : {};
+  return event;
+}
+type SentryLikeTransaction = SentryLikeEvent & { transaction?: string; contexts?: { trace?: { data?: Record<string, unknown> } }; spans?: { description?: string; data?: Record<string, unknown> }[] };
+const scrubName = (name: string) => name.split(" ").map(sanitizeUrl).join(" ");
+/** Sentry `beforeSendTransaction`: performance events skip `beforeSend` but carry the page URL too, in
+ *  the request, the transaction name ("GET /r/ABCD2345") and span attributes (url.full, url.path). */
+export function scrubSentryTransaction<T extends SentryLikeTransaction>(event: T): T {
+  scrubSentryEvent(event);
+  if (event.transaction) event.transaction = scrubName(event.transaction);
+  sanitizeRecord(event.contexts?.trace?.data, true);
+  for (const span of event.spans ?? []) { sanitizeRecord(span.data, true); if (span.description) span.description = scrubName(span.description); }
   return event;
 }
 /** Sentry `beforeBreadcrumb`: navigation and request breadcrumbs keep only sanitized URLs. */

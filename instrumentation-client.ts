@@ -3,7 +3,7 @@
 import * as Sentry from "@sentry/nextjs";
 import { loadAnalytics } from "./src/analytics-loader";
 import { analyticsAllowed, clearAnalyticsStorage } from "./src/consent";
-import { scrubBreadcrumb, scrubSentryEvent, sentryDataCollection, sentryDsn, telemetryEnvironment, tracesSampleRate } from "./src/telemetry";
+import { scrubBreadcrumb, scrubSentryEvent, scrubSentryTransaction, sentryDataCollection, sentryDsn, telemetryEnvironment, tracesSampleRate } from "./src/telemetry";
 
 if (sentryDsn)
   Sentry.init({
@@ -13,6 +13,7 @@ if (sentryDsn)
     // No session replay: signed-in pages show customers' private code.
     dataCollection: sentryDataCollection,
     beforeSend: scrubSentryEvent,
+    beforeSendTransaction: scrubSentryTransaction,
     beforeBreadcrumb: scrubBreadcrumb,
   });
 

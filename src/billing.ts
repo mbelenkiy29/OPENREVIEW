@@ -4,7 +4,7 @@ import { assertEgress } from "./egress";
 // before that keep an app-level trial that starts with the first review or checkout.
 // The Starter plan is a per-seat subscription with unlimited reviews under a monthly fair-use limit.
 export type BillingConfig = { enabled: boolean; trialDays: number; trialReviews: number; reviewsPerSeat: number; graceDays: number };
-const int = (value: string | undefined, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isInteger(n) && n >= min && n <= max ? n : fallback; };
+export const int = (value: string | undefined, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isInteger(n) && n >= min && n <= max ? n : fallback; };
 export function billingConfig(env: Record<string, string | undefined> = process.env): BillingConfig {
   return { enabled: env.BILLING_ENABLED === "true", trialDays: int(env.BILLING_TRIAL_DAYS, 14, 0, 365), trialReviews: int(env.BILLING_TRIAL_REVIEWS, 200, 0, 1_000_000), reviewsPerSeat: int(env.BILLING_REVIEWS_PER_SEAT, 500, 1, 1_000_000), graceDays: int(env.BILLING_GRACE_DAYS, 7, 0, 60) };
 }
@@ -52,6 +52,8 @@ export async function verifyStripeSignature(payload: string, header: string | nu
 
 // Minimal Stripe REST client (form-encoded), pinned to one API version; webhook endpoints should
 // use the same version. Prefer a restricted key (rk_…). Live keys need BILLING_ALLOW_LIVE=true.
+// Upgrading to 2026-09-30.endive or later: v2 account links no longer take `configurations`, so drop
+// them from the use_case in convex/referralJobs.ts (startPayoutSetup) in the same change.
 export const STRIPE_API_VERSION = "2026-08-26.dahlia";
 export function stripeKey(env: Record<string, string | undefined> = process.env) {
   const key = env.STRIPE_SECRET_KEY;
@@ -68,11 +70,27 @@ export function formEncode(params: Record<string, unknown>, prefix = ""): string
     return [`${encodeURIComponent(key)}=${encodeURIComponent(String(v))}`];
   });
 }
-export async function stripe<T>(path: string, params: Record<string, unknown>, key: string, fetchImpl: typeof fetch = fetch, idempotencyKey?: string): Promise<T> {
-  if (!/^\/v1\/[a-z_/]+[a-zA-Z0-9_/]*$/.test(path)) throw new Error("Invalid Stripe API path");
+/** A Stripe API error: the HTTP status (0 when the request never got an answer) and Stripe's error
+ *  type, code and param, never the response body. shouldRetry is Stripe's Stripe-Should-Retry header. */
+export class StripeError extends Error {
+  constructor(readonly status: number, readonly type?: string, readonly code?: string, readonly param?: string, readonly shouldRetry?: boolean) { super(`Stripe request failed (${status}${type ? ` ${type}` : ""}${code ? ` ${code}` : ""})`); this.name = "StripeError"; }
+}
+const v1Path = /^\/v1\/[a-z_/]+[a-zA-Z0-9_/]*$/, v2Path = /^\/v2\/core\/(accounts|account_links)(\/acct_[A-Za-z0-9]{1,64})?$/;
+async function request<T>(method: "GET" | "POST", path: string, allowed: RegExp, query: Record<string, unknown>, body: { type: string; text: string } | undefined, key: string, fetchImpl: typeof fetch, idempotencyKey?: string): Promise<T> {
   assertEgress("billing", "Stripe billing");
-  const response = await fetchImpl("https://api.stripe.com" + path, { method: "POST", redirect: "error", headers: { authorization: `Bearer ${key}`, "stripe-version": STRIPE_API_VERSION, "content-type": "application/x-www-form-urlencoded", ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}) }, body: formEncode(params).join("&"), signal: AbortSignal.timeout(20000) });
-  const data = (await response.json().catch(() => null)) as T & { error?: { type?: string } } | null;
-  if (!response.ok || !data) throw new Error(`Stripe request failed (${response.status}${data?.error?.type ? ` ${data.error.type}` : ""})`);
+  if (!allowed.test(path)) throw new Error("Invalid Stripe API path");
+  const search = formEncode(query).join("&");
+  let response: Response;
+  try { response = await fetchImpl("https://api.stripe.com" + path + (search ? `?${search}` : ""), { method, redirect: "error", headers: { authorization: `Bearer ${key}`, "stripe-version": STRIPE_API_VERSION, ...(body ? { "content-type": body.type } : {}), ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}) }, ...(body ? { body: body.text } : {}), signal: AbortSignal.timeout(20000) }); }
+  catch { throw new StripeError(0); } // network failure or timeout: the request may or may not have reached Stripe
+  // v1 and v2 errors share the {error:{type,code,param}} shape.
+  const data = (await response.json().catch(() => null)) as T & { error?: { type?: string; code?: string; param?: string } } | null, retry = response.headers.get("stripe-should-retry");
+  if (!response.ok || !data) throw new StripeError(response.status, data?.error?.type, data?.error?.code, data?.error?.param, retry === null ? undefined : retry === "true");
   return data;
 }
+export const stripe = <T>(path: string, params: Record<string, unknown>, key: string, fetchImpl: typeof fetch = fetch, idempotencyKey?: string) => request<T>("POST", path, v1Path, {}, { type: "application/x-www-form-urlencoded", text: formEncode(params).join("&") }, key, fetchImpl, idempotencyKey);
+/** A Stripe GET: `query` is form-encoded into the URL (nested keys like created[gte] work). */
+export const stripeGet = <T>(path: string, query: Record<string, unknown>, key: string, fetchImpl: typeof fetch = fetch) => request<T>("GET", path, v1Path, query, undefined, key, fetchImpl);
+/** A Stripe v2 request (Connect accounts and account links only): a JSON body, and a query whose
+ *  arrays are indexed (include[0]=…), as v2 requires. */
+export const stripeV2 = <T>(method: "GET" | "POST", path: string, key: string, { body, query = {}, idempotencyKey }: { body?: Record<string, unknown>; query?: Record<string, unknown>; idempotencyKey?: string } = {}, fetchImpl: typeof fetch = fetch) => request<T>(method, path, v2Path, query, body ? { type: "application/json", text: JSON.stringify(body) } : undefined, key, fetchImpl, idempotencyKey);
