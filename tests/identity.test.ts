@@ -2,12 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { gitlabAuthorizeUrl, gitlabProfile, googleAuthorizeUrl, googleProfile, newSession, safeNext } from "../src/identity";
+import { signInAgain } from "../convex/referralLedger";
 
 const fake = (routes: Record<string, unknown>) => (async (input: string | URL | Request) => { const url = String(input).split("?")[0]; return url in routes ? Response.json(routes[url]) : new Response("no", { status: 404 }); }) as typeof fetch;
 
 test("post-sign-in redirects stay on this origin", () => {
   assert.equal(safeNext("/invite?token=abc_123"), "/invite?token=abc_123");
   for (const bad of ["//evil.example", "https://evil.example", "/\\evil.example", "javascript:alert(1)", "/a b", "", null, undefined]) assert.equal(safeNext(bad), "/dashboard", String(bad));
+  // endSession (app/dashboard/actions.ts) redirects through safeNext; its real targets must pass unchanged.
+  for (const ok of ["/", signInAgain.signIn]) assert.equal(safeNext(ok), ok);
 });
 
 test("session IDs are random and stored only as their SHA-256", () => {
