@@ -36,5 +36,6 @@ test("redirect results become one plain message, errors first", () => {
   assert.deepEqual(authMessage({ email: "sent" }), { tone: "status", text: "Check your inbox. The sign-in link expires in 15 minutes." });
   assert.equal(authMessage({ email: "error" })?.tone, "alert");
   assert.equal(authMessage({ signedout: "1" })?.tone, "status");
+  assert.deepEqual(authMessage({ reauth: "1", signedout: "1" }), { tone: "status", text: "For your security, sign in again to continue." }, "a payout step that needs a recent sign-in says why");
   assert.equal(authMessage({ error: "signin", email: "sent" })?.tone, "alert");
 });

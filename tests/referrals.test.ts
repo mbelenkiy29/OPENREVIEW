@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { StripeError } from "../src/billing";
 import { OfflineError } from "../src/egress";
-import { REFERRAL_CODE_LENGTH, REFERRAL_CODE_WINDOW_DAYS, REFERRAL_CURRENCY, REFERRAL_MIN_CREDIT_CENTS, REFERRAL_MIN_PAYOUT_CENTS, REFERRAL_PAYOUT_COUNTRIES, REFERRAL_PAYOUT_REVIEW_CENTS, addMonthsUTC, classifyStripeFailure, commissionAmount, commissionAvailable, commissionBase, conversionEmail, couponMonthsNeeded, formatMoney, generateReferralCode, normalizeReferralCode, parseMoneyInput, referralBalances, referralCodeAlphabet, referralConfig, referralDisclosure, referralFact, reversalTarget } from "../src/referrals";
+import { REFERRAL_CODE_LENGTH, REFERRAL_CODE_WINDOW_DAYS, REFERRAL_CURRENCY, REFERRAL_MIN_CREDIT_CENTS, REFERRAL_MIN_PAYOUT_CENTS, REFERRAL_PAYOUT_COUNTRIES, REFERRAL_PAYOUT_REVIEW_CENTS, addMonthsUTC, classifyStripeFailure, commissionAmount, commissionAvailable, commissionBase, conversionEmail, couponMonthsNeeded, formatMoney, generateReferralCode, normalizeReferralCode, parseMoneyInput, referralBalances, referralCodeAlphabet, referralConfig, referralDisclosure, referralFact, reversalTarget, stripeHostedUrl } from "../src/referrals";
 
 const on = { BILLING_ENABLED: "true", REFERRALS_ENABLED: "true" };
 test("referrals are off unless both REFERRALS_ENABLED and billing are on; defaults and clamping", () => {
@@ -132,4 +132,9 @@ test("Stripe failures are classified for retries", () => {
   for (const e of [new StripeError(0), new StripeError(429, "invalid_request_error", "lock_timeout"), new StripeError(409, "idempotency_error", "idempotency_key_in_use"), new OfflineError("billing", "Stripe billing"), new Error("Configure STRIPE_SECRET_KEY"), "boom"]) assert.equal(classifyStripeFailure(e), "transient", String(e));
   for (const status of [500, 502, 503]) assert.equal(classifyStripeFailure(new StripeError(status)), "indeterminate", String(status));
   for (const e of [new StripeError(400, "invalid_request_error", "resource_missing"), new StripeError(402, "card_error"), new StripeError(403), new StripeError(404)]) assert.equal(classifyStripeFailure(e), "definite", e.message);
+});
+
+test("payout redirects go only to Stripe-hosted https pages", () => {
+  for (const url of ["https://connect.stripe.com/setup/e/acct_1/abc", "https://connect.stripe.com/express/acct_1/xyz", "https://dashboard.stripe.com/b/acct_1"]) assert.equal(stripeHostedUrl(url), url);
+  for (const url of ["http://connect.stripe.com/setup", "https://connect.stripe.com.evil.example/x", "https://evilstripe.com/x", "https://connect.stripe.com:8443/x", "https://user@connect.stripe.com/x", "javascript:alert(1)", "/dashboard", "", null, 42]) assert.equal(stripeHostedUrl(url), null, String(url));
 });

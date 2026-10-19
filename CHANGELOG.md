@@ -32,7 +32,7 @@
 - When billing is on, guided setup ends with a plan step: add a payment method through Stripe Checkout without being charged before the trial ends, or continue on the trial.
 - The 14-day trial now starts with a workspace's first review instead of its creation date.
 - Restricted Stripe keys (`rk_…`) are accepted, and Stripe requests pin an API version.
-- Referral program (hosted cloud, off unless `REFERRALS_ENABLED=true`): every user gets a link under Settings → Referrals. A referred workspace gets a Checkout discount, and the referrer earns 20% of what it pays, excluding tax, for 12 months, held 30 days. Refunds and disputes claw commissions back, and earnings can be applied as credit on a workspace bill. See [docs/billing.md](docs/billing.md#referral-program).
+- Referral program (hosted cloud, off unless `REFERRALS_ENABLED=true`): every user gets a link under Settings → Referrals. A referred workspace gets a Checkout discount, and the referrer earns 20% of what it pays, excluding tax, for 12 months, held 30 days. Refunds and disputes claw commissions back, and earnings can be applied as credit on a workspace bill or, with `REFERRAL_PAYOUTS_ENABLED=true`, cashed out to a US bank account through Stripe Connect (cash-outs that bring someone's total over $500 in 30 days are reviewed first, and every payout step needs a sign-in from the last 15 minutes). See [docs/billing.md](docs/billing.md#referral-program).
 
 ### Site
 - Privacy Policy and Terms of Service pages for the hosted service, linked from the footer and the sign-in buttons.

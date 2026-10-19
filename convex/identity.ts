@@ -4,7 +4,7 @@ import { v } from "convex/values";
 import { decodeJwt } from "jose";
 import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { audit, authenticated, authorize, service } from "./auth";
+import { audit, authenticated, authenticatedSession, authorize, service } from "./auth";
 import { rateLimit } from "./rateLimit";
 import { scheduleSeatSync } from "./billing";
 import { recordReferralSignup } from "./referralLedger";
@@ -43,9 +43,9 @@ export async function resolveIdentity(ctx: MutationCtx, p: Profile): Promise<{ u
   await ctx.db.insert("identities", { userId, provider: p.provider, providerUserId: p.providerUserId, ...(email ? { email } : {}), emailVerified: Boolean(email && p.emailVerified), createdAt: now, lastLoginAt: now });
   return { userId, created };
 }
-async function startSession(ctx: MutationCtx, userId: Id<"users">, hash: string, providerName: string, userAgent?: string) {
+async function startSession(ctx: MutationCtx, userId: Id<"users">, hash: string, providerName: string, userAgent?: string, signedInAt?: number) {
   if (!hex64.test(hash)) throw new Error("Invalid session");
-  await ctx.db.insert("sessions", { userId, hash, provider: providerName, ...(userAgent ? { userAgent: userAgent.slice(0, 200) } : {}), createdAt: Date.now(), expiresAt: Date.now() + sessionDays * 86400000 });
+  await ctx.db.insert("sessions", { userId, hash, provider: providerName, ...(userAgent ? { userAgent: userAgent.slice(0, 200) } : {}), ...(signedInAt !== undefined ? { signedInAt } : {}), createdAt: Date.now(), expiresAt: Date.now() + sessionDays * 86400000 });
 }
 
 // OAuth sign-in (GitHub, GitLab, Google): the web server verified the provider response.
@@ -56,9 +56,11 @@ export const signIn = mutation({ args: { secret: v.string(), provider, providerU
   service(a.secret);
   if (a.provider === "email") throw new Error("Email sign-in uses magic links");
   if (!a.providerUserId || a.providerUserId.length > 200 || (a.provider === "github" && !/^\d{1,20}$/.test(a.providerUserId))) throw new Error("Invalid provider identity");
-  let userId: Id<"users">;
+  let userId: Id<"users">, signedInAt: number | undefined;
   if (a.linkToken) {
-    const current = await authenticated(ctx, a.linkToken);
+    // Linking proves only the new provider account, not who is signed in: the new session keeps the old sign-in time (0 for a token without a session).
+    const { user: current, session } = await authenticatedSession(ctx, a.linkToken);
+    signedInAt = session?.signedInAt ?? session?.createdAt ?? 0;
     const existing = await ctx.db.query("identities").withIndex("by_provider_user", (q) => q.eq("provider", a.provider).eq("providerUserId", a.providerUserId)).unique();
     if (existing && existing.userId !== current._id) throw new Error("This account is already linked to another OpenReview user");
     if (!existing) { const email = a.email ? emailAddress.safeParse(a.email).data : undefined; await ctx.db.insert("identities", { userId: current._id, provider: a.provider, providerUserId: a.providerUserId, ...(email ? { email } : {}), emailVerified: Boolean(email && a.emailVerified), createdAt: Date.now(), lastLoginAt: Date.now() }); }
@@ -68,7 +70,7 @@ export const signIn = mutation({ args: { secret: v.string(), provider, providerU
     userId = resolved.userId;
     if (resolved.created) await recordReferralSignup(ctx, userId, a.referralCode);
   }
-  await startSession(ctx, userId, a.sessionHash, a.provider, a.userAgent);
+  await startSession(ctx, userId, a.sessionHash, a.provider, a.userAgent, signedInAt);
   return userId;
 } });
 

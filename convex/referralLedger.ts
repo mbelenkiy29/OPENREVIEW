@@ -152,3 +152,15 @@ export async function settleRedemption(ctx: MutationCtx, redemption: Doc<"referr
   await ctx.db.patch(redemption._id, { ...("stripeId" in outcome ? { status: "completed" as const, stripeId: outcome.stripeId, completedAt: now } : { status: "failed" as const, error: outcome.error.slice(0, 300) }), leaseId: undefined, leaseUntil: undefined, updatedAt: now });
   if (redemption.creditOrganizationId && await ctx.db.get(redemption.creditOrganizationId)) await audit(ctx, redemption.creditOrganizationId, undefined, action, redemption._id);
 }
+
+// Cash payouts (Phase 4): transfers to the referrer's Stripe Connect account (Accounts v2, recipient).
+export const payoutAccountOf = (ctx: QueryCtx, userId: Id<"users">) => ctx.db.query("referralPayoutAccounts").withIndex("by_user", (q) => q.eq("userId", userId)).first();
+/** An account's transfer status and earliest requirement deadline, as read from Stripe. */
+export const payoutStatus = { transfers: v.union(v.literal("active"), v.literal("pending"), v.literal("restricted"), v.literal("unsupported"), v.literal("unknown")), requirements: v.optional(v.string()) };
+// Setting up payouts and cashing out need a browser sign-in from the last 15 minutes, so an older
+// stolen session or an API key (no session) can't add a bank account or move money. A session started
+// by linking another provider keeps the linking session's sign-in time (signedInAt).
+// shortcut: no security-notice emails and no first-payout delay; add them here if account takeover is seen despite this gate.
+export const recentSignIn = (session: Doc<"sessions"> | null) => session !== null && Date.now() - (session.signedInAt ?? session.createdAt) < 15 * 60000;
+export const signInAgain = { ok: false as const, error: "Sign in again to continue.", signIn: "/login?next=/dashboard/settings/referrals&reauth=1" };
+export const payoutsOff = "This deployment doesn’t offer cash payouts.";

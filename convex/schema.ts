@@ -223,6 +223,8 @@ export default defineSchema({
     revokedAt: v.optional(v.number()),
     // Set for sessions started through a workspace's SSO connection (enforcement checks it).
     ssoConnectionId: v.optional(v.id("ssoConnections")),
+    // Set when linking another provider started the session: the linking session's sign-in time, so a link never counts as a fresh sign-in.
+    signedInAt: v.optional(v.number()),
   }).index("by_hash", ["hash"]).index("by_user", ["userId"]),
   // Per-workspace single sign-on (M2). One connection per workspace; the OIDC client secret is stored
   // encrypted by the web server. Domains are proven with a DNS TXT record before they count.
@@ -621,7 +623,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_invoice", ["invoiceId"]).index("by_referrer", ["referrerId"]).index("by_referral", ["referralId"]),
-  // A referrer's credits (and, later, payouts), posted to Stripe with a stored idempotency key and a
+  // A referrer's credits and payouts, posted to Stripe with a stored idempotency key and a
   // lookup before every post. review → processing → completed | failed; failed releases the balance.
   referralRedemptions: defineTable({
     userId: v.id("users"),
@@ -645,6 +647,18 @@ export default defineSchema({
     updatedAt: v.number(),
     completedAt: v.optional(v.number()),
   }).index("by_user", ["userId"]).index("by_status", ["status", "updatedAt"]).index("by_credit_org", ["creditOrganizationId"]),
+  // A referrer's Stripe Connect account for cash payouts (Accounts v2, recipient). Stripe holds the
+  // identity and bank details; this keeps only the account id and its transfer status as last read.
+  referralPayoutAccounts: defineTable({
+    userId: v.id("users"),
+    accountId: v.string(),
+    country: v.string(), // ISO-2, uppercase
+    transfers: v.union(v.literal("active"), v.literal("pending"), v.literal("restricted"), v.literal("unsupported"), v.literal("unknown")),
+    requirements: v.optional(v.string()), // requirements.summary.minimum_deadline.status: currently_due, eventually_due or past_due
+    onboardedAt: v.optional(v.number()), // first time transfers were active
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"]).index("by_account", ["accountId"]),
   billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number() }).index("by_org_period", ["organizationId", "period"]),
   stripeEvents: defineTable({ eventId: v.string(), type: v.string(), outcome: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Slack app installs (one per Slack workspace); the bot token is encrypted with scope `<org>:slack`.

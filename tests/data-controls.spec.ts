@@ -90,6 +90,7 @@ test("workspace deletion: owner-only with a grace period, cancellable, then a re
   // A referral that bound Acme belongs to its referrer (Rival's owner): it keeps only Acme's id.
   const referralId = await t.run((ctx) => ctx.db.insert("referrals", { referrerId: rival.userId, referredUserId: acme.userId, referredOrganizationId: acme.organizationId, source: "link", status: "pending", attributedAt: Date.now(), boundAt: Date.now(), updatedAt: Date.now() }));
   const commissionId = await t.run((ctx) => ctx.db.insert("referralCommissions", { referralId, referrerId: rival.userId, referredOrganizationId: acme.organizationId, invoiceId: "in_1", subscriptionId: "sub_1", currency: "usd", base: 10000, rateBps: 2000, amount: 2000, reversed: 0, status: "accrued", invoiceCreated: Date.now(), paidAt: Date.now(), availableAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now() }));
+  const payoutAccountId = await t.run((ctx) => ctx.db.insert("referralPayoutAccounts", { userId: acme.userId, accountId: "acct_1Acme", country: "US", transfers: "active", onboardedAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now() }));
   const redemptionId = await t.run((ctx) => ctx.db.insert("referralRedemptions", { userId: acme.userId, kind: "credit", amount: 1000, currency: "usd", creditOrganizationId: acme.organizationId, status: "completed", stripeId: "cbtxn_1", idempotencyKey: "referral-credit:r:1", keyIssuedAt: Date.now(), attempts: 0, createdAt: Date.now(), updatedAt: Date.now(), completedAt: Date.now() }));
   // Only the owner, and only with the exact name.
   await expect(t.mutation(api.dataControls.requestDeletion, { token: admin, organizationId: acme.organizationId, confirmName: "Acme" })).rejects.toThrow(/Only the workspace owner/);
@@ -111,6 +112,7 @@ test("workspace deletion: owner-only with a grace period, cancellable, then a re
   expect(await t.run((ctx) => ctx.db.get(referralId))).toMatchObject({ referredOrganizationId: acme.organizationId, status: "pending" });
   expect(await t.run((ctx) => ctx.db.get(commissionId))).toMatchObject({ referredOrganizationId: acme.organizationId, status: "accrued", amount: 2000 });
   expect(await t.run((ctx) => ctx.db.get(redemptionId))).toMatchObject({ creditOrganizationId: acme.organizationId, status: "completed", amount: 1000 });
+  expect(await t.run((ctx) => ctx.db.get(payoutAccountId))).toMatchObject({ userId: acme.userId, accountId: "acct_1Acme" });
   // Voiding them afterwards does not recreate Acme's audit log.
   await t.mutation(internal.referralOps.voidReferral, { referralId, reason: "abuse" });
   await t.mutation(internal.referralOps.voidCommission, { commissionId, reason: "abuse" });

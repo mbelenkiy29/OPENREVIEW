@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, formEncode, openSubscription, periodKey, seatCount, stripe, stripeGet, stripeKey, trialEndsFrom, verifyStripeSignature } from "../src/billing";
+import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, formEncode, openSubscription, periodKey, seatCount, stripe, stripeGet, stripeKey, stripeV2, trialEndsFrom, verifyStripeSignature } from "../src/billing";
 
 const config = billingConfig({ BILLING_ENABLED: "true", BILLING_TRIAL_REVIEWS: "3", BILLING_REVIEWS_PER_SEAT: "10", BILLING_GRACE_DAYS: "7" });
 const now = Date.UTC(2026, 9, 14), day = 86400000;
@@ -111,4 +111,35 @@ test("Stripe GETs put the query in the URL and send no body", async () => {
   assert.equal(seen?.url, "https://api.stripe.com/v1/charges/ch_3Abc");
   await assert.rejects(stripeGet("/v1/charges/ch_1", {}, "rk_test_1", (async () => Response.json({ error: { type: "invalid_request_error", code: "resource_missing" } }, { status: 404 })) as typeof fetch), /404 invalid_request_error resource_missing/);
   for (const path of ["/v1/charges/../x", "/v1/charges/ch_1?expand[]=x", "https://evil.example/v1/charges"]) await assert.rejects(stripeGet(path, {}, "rk_test_1", ok), /Invalid Stripe API path/, path);
+});
+
+test("Stripe v2 requests send JSON, index include[] in the query, and only reach Connect accounts and account links", async () => {
+  let seen: { url: string; init?: RequestInit } | undefined;
+  const ok = (async (url: string | URL | Request, init?: RequestInit) => { seen = { url: String(url), init }; return Response.json({ id: "acct_1Abc" }); }) as typeof fetch;
+  const body = { identity: { country: "us" }, configuration: { recipient: { capabilities: { stripe_balance: { stripe_transfers: { requested: true } } } } }, include: ["configuration.recipient", "requirements"] };
+  assert.deepEqual(await stripeV2("POST", "/v2/core/accounts", "rk_test_1", { body, idempotencyKey: "referral-account:u:US:abcd1234" }, ok), { id: "acct_1Abc" });
+  assert.equal(seen?.url, "https://api.stripe.com/v2/core/accounts");
+  assert.equal(seen?.init?.method, "POST");
+  assert.equal(seen?.init?.redirect, "error");
+  assert.deepEqual(JSON.parse(String(seen?.init?.body)), body);
+  let headers = new Headers(seen?.init?.headers);
+  assert.equal(headers.get("content-type"), "application/json");
+  assert.equal(headers.get("idempotency-key"), "referral-account:u:US:abcd1234");
+  assert.equal(headers.get("stripe-version"), STRIPE_API_VERSION);
+  assert.equal(headers.get("authorization"), "Bearer rk_test_1");
+  await stripeV2("GET", "/v2/core/accounts/acct_1Abc", "rk_test_1", { query: { include: ["configuration.recipient", "requirements"] } }, ok);
+  assert.equal(seen?.url, "https://api.stripe.com/v2/core/accounts/acct_1Abc?include%5B0%5D=configuration.recipient&include%5B1%5D=requirements");
+  assert.equal(seen?.init?.body, undefined);
+  headers = new Headers(seen?.init?.headers);
+  assert.equal(headers.get("content-type"), null);
+  assert.equal(headers.get("idempotency-key"), null);
+  await stripeV2("POST", "/v2/core/account_links", "rk_test_1", { body: { account: "acct_1Abc" } }, ok);
+  assert.equal(seen?.url, "https://api.stripe.com/v2/core/account_links");
+  await assert.rejects(stripeV2("POST", "/v2/core/accounts", "rk_test_1", { body: {} }, (async () => Response.json({ error: { type: "idempotency_error", code: "idempotency_key_reused", message: "secret detail" } }, { status: 409 })) as typeof fetch), (error: unknown) => error instanceof StripeError && error.status === 409 && error.type === "idempotency_error" && error.message === "Stripe request failed (409 idempotency_error idempotency_key_reused)");
+  for (const path of ["/v2/core/events", "/v2/core/accounts/acct_1/persons", "/v2/core/accounts/../x", "/v2/core/accounts/acct_1?include[0]=x", "/v1/transfers", "https://evil.example/v2/core/accounts"]) await assert.rejects(stripeV2("GET", path, "rk_test_1", {}, ok), /Invalid Stripe API path/, path);
+});
+
+test("the pinned API version is dahlia: account links still take configurations", () => {
+  // 2026-09-30.endive drops account_links use_case configurations; update startPayoutSetup when this changes.
+  assert.equal(STRIPE_API_VERSION, "2026-08-26.dahlia");
 });

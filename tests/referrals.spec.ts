@@ -42,7 +42,7 @@ test("every user gets one code, created on first use; the link preview shows Git
   for (const unknown of ["not-a-code", "", code === "ZZZZZZZZ" ? "YYYYYYYY" : "ZZZZZZZZ"]) expect(await t.query(api.referrals.preview, { secret: svc, code: unknown })).toBeNull();
   // Only the web server may look codes up.
   await expect(t.query(api.referrals.preview, { secret: "wrong", code })).rejects.toThrow(/Unauthorized/);
-  expect(await t.query(api.referrals.overview, { token: alice.token })).toEqual({ enabled: true, code, login: "alice", notified: false, signedUp: 0, subscribed: 0, pending: 0, currency: "usd", available: 0, onHold: 0, redeemed: 0, holdDays: 30, minCredit: 1000, people: [], activity: [], workspaces: [] });
+  expect(await t.query(api.referrals.overview, { token: alice.token })).toEqual({ enabled: true, code, login: "alice", notified: false, signedUp: 0, subscribed: 0, pending: 0, currency: "usd", available: 0, onHold: 0, redeemed: 0, holdDays: 30, minCredit: 1000, people: [], activity: [], workspaces: [], payouts: null });
   expect((await t.query(api.referrals.overview, { token: gina.token }) as { login: string | null }).login).toBeNull();
   await expect(t.mutation(api.referrals.ensureCode, { token: "not-a-token" })).rejects.toThrow();
 });

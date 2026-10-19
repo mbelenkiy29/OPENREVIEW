@@ -13,7 +13,7 @@ import { IndexGraph } from "./dashboard/onboarding/art";
 import { SignInOptions } from "./sign-in";
 import { Mark } from "./ui/logo";
 
-export type AuthQuery = { next?: string; error?: string; email?: string; signedout?: string; referral?: string };
+export type AuthQuery = { next?: string; error?: string; email?: string; signedout?: string; reauth?: string; referral?: string };
 
 /** Signed-in visitors skip the page and go where they were headed. */
 export async function redirectIfSignedIn(next?: string) {

@@ -12,6 +12,11 @@ export function referralConfig(env: Record<string, string | undefined> = process
 export const REFERRAL_CURRENCY = "usd", REFERRAL_MIN_CREDIT_CENTS = 1000, REFERRAL_MIN_PAYOUT_CENTS = 5000, REFERRAL_PAYOUT_REVIEW_CENTS = 50000, REFERRAL_CODE_WINDOW_DAYS = 30;
 // shortcut: payouts go to US Connect accounts only; add a country list when expanding beyond the US.
 export const REFERRAL_PAYOUT_COUNTRIES = ["US"];
+/** A Stripe-hosted page to send the browser to (Connect onboarding, the Express dashboard), or null
+ *  for anything that is not https on a stripe.com host. */
+export function stripeHostedUrl(url: unknown): string | null {
+  try { const u = new URL(String(url)); return u.protocol === "https:" && !u.port && !u.username && !u.password && (u.hostname === "stripe.com" || u.hostname.endsWith(".stripe.com")) ? u.href : null; } catch { return null; }
+}
 
 // Codes: 8 symbols from an alphabet without 0/O, 1/I/L or U, so they survive being read aloud or
 // retyped. 30 symbols and rejection of bytes ≥ 240 (8 × 30) keep every symbol equally likely.

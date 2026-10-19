@@ -25,12 +25,13 @@ export function authQuery({ next, referral, ...result }: { next?: string; referr
 }
 
 export type AuthMessage = { tone: "alert" | "status"; text: string };
-export function authMessage(query: { error?: string; email?: string; signedout?: string }): AuthMessage | null {
+export function authMessage(query: { error?: string; email?: string; signedout?: string; reauth?: string }): AuthMessage | null {
   if (query.error === "sso") return { tone: "alert", text: "Single sign-on isn’t set up for that email domain, or the sign-in couldn’t be verified. Ask your workspace admin." };
   if (query.error === "link") return { tone: "alert", text: "That sign-in link is invalid, expired or already used. Request a new one below." };
   if (query.error) return { tone: "alert", text: "Sign-in didn’t finish. Try again, or choose another sign-in method." };
   if (query.email === "sent") return { tone: "status", text: "Check your inbox. The sign-in link expires in 15 minutes." };
   if (query.email === "error") return { tone: "alert", text: "We couldn’t send a sign-in link. Check the address, or try again in a few minutes." };
+  if (query.reauth) return { tone: "status", text: "For your security, sign in again to continue." };
   if (query.signedout) return { tone: "status", text: "You’ve been signed out." };
   return null;
 }
