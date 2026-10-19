@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Effective October 17, 2026**
+**Effective November 16, 2026**
 
 This policy explains what information the hosted OpenReview service at [openreview.tech](https://openreview.tech) collects, how it is used and shared, and the choices you have. OpenReview is operated by Michael Belenkiy ("we", "us"). Questions and requests go to [mbelenkiy29@gmail.com](mailto:mbelenkiy29@gmail.com).
 
@@ -26,6 +26,10 @@ OpenReview is also open-source software. If you run it on your own infrastructur
 **Integration content.** When a workspace admin connects Linear, Jira, Confluence, Notion or Slack, we receive the content needed for the features you turn on. Examples are tickets or pages linked from a pull request, and Slack messages that ask OpenReview a question. We store integration access tokens encrypted.
 
 **Billing information.** Payments are handled by Stripe. We receive and store your Stripe customer and subscription identifiers, plan status, seat count and billing dates. We never receive or store full card numbers.
+
+**Referral information.** If you use the referral program, we keep your referral code, who signed up or added a workspace through it and when, the referred workspace's identifier, the commissions earned from its paid invoices (Stripe invoice and charge identifiers, amounts, refunds and disputes), and the credits you applied, with the workspace and Stripe customer balance transaction they went to. If you cash out, Stripe collects your identity, tax and bank details directly for your Stripe account; to start that account we send Stripe your verified email address and your OpenReview user ID, and we store only the account's identifier, country and payout status, and the transfers we sent to it.
+- **What a referrer sees:** the GitHub username of each person they referred, or "Email sign-up" for anyone without one, when they signed up, when their workspace subscribed, and what the referrer earned from each of its payments, including any share taken back after a refund or dispute. Referrers never see email addresses, workspace names or workspace content.
+- **What a referred person sees:** the referrer's GitHub username, if they have one, on the referral page.
 
 **Technical and usage information.** We record:
 - sign-in sessions, with the sign-in provider, the browser's user-agent string and timestamps;
@@ -97,7 +101,7 @@ We share information only as needed to run the service, with:
 | Vercel | Website hosting |
 | Convex | Database and backend processing |
 | OpenAI | AI model processing for reviews and answers |
-| Stripe | Payments and subscriptions |
+| Stripe | Payments, subscriptions and referral payouts |
 | GitHub (and other code hosts you connect) | Sign-in and repository access |
 | OSV.dev | Checking package names and versions from dependency changes for known vulnerabilities (no source code is sent) |
 | Sentry | Error reports and performance monitoring |
@@ -114,7 +118,7 @@ Information is also shared:
 
 ## How long we keep information
 
-We keep information while your account or workspace is active. If you ask us to delete your account or workspace, we delete it within 30 days. Copies in backups are removed within 90 days. Billing records are kept as long as tax and accounting law requires.
+We keep information while your account or workspace is active. If you ask us to delete your account or workspace, we delete it within 30 days. Copies in backups are removed within 90 days. Billing records are kept as long as tax and accounting law requires. Referral records are part of the referrer's account: they are kept when a referred workspace is deleted (only its identifier remains), and deleted with the referrer's account, except where tax and accounting law requires us to keep records of commissions, credits and payouts.
 
 Uninstalling the GitHub App or removing a repository stops our access to it. To have that repository's stored data deleted as well, email us.
 
