@@ -120,6 +120,8 @@ pnpm dev
 
 Open http://localhost:3000. Local setup generates independent session, service, and webhook secrets and synchronizes them to the local backend without printing their values. `.env.local` and `.env.backend` are ignored by Git. For provider/GitHub settings, edit `.env.local`, then run `pnpm setup:local` again. Backend changes must be deployed with `pnpm backend` or `convex dev --once`.
 
+To test billing and referrals locally, point the [Stripe CLI](https://docs.stripe.com/stripe-cli) at a Stripe sandbox (`stripe switch`, never live mode), and run `stripe listen --print-secret` once for the webhook signing secret. Put the sandbox values from [docs/billing.md](docs/billing.md#setup-operator) in `.env.local`: `STRIPE_SECRET_KEY` (`rk_test_…`), `STRIPE_WEBHOOK_SECRET`, `STRIPE_SEAT_PRICE_ID` and `BILLING_ENABLED=true`, plus `REFERRALS_ENABLED=true` and `STRIPE_REFERRAL_COUPON_ID` for referrals. Then run `pnpm setup:local`, which copies the billing settings that have a value to the local backend. Keep `pnpm stripe:listen` running to forward sandbox webhooks to it. Claude Code copies `.env.local` into each new worktree (`.worktreeinclude`), so agents working there can use the same sandbox. Worktrees created earlier need a copy made by hand.
+
 ## GitHub App setup
 
 Register your own GitHub App in GitHub Settings → Developer settings → GitHub Apps.

@@ -178,7 +178,7 @@ test("local bootstrap fills blank secrets, preserves configured secrets, synchro
     });
     await writeFile(
       path.join(directory, ".env.local"),
-      'SESSION_SECRET=\nSERVICE_SECRET=configured-secret\nGITHUB_WEBHOOK_SECRET=""\nEMBEDDING_MODEL=embedding-fixture\nLINEAR_CLIENT_ID=linear-fixture\n',
+      'SESSION_SECRET=\nSERVICE_SECRET=configured-secret\nGITHUB_WEBHOOK_SECRET=""\nEMBEDDING_MODEL=embedding-fixture\nLINEAR_CLIENT_ID=linear-fixture\nSTRIPE_SECRET_KEY=rk_test_fixture\nSTRIPE_WEBHOOK_SECRET=\nREFERRALS_ENABLED=true\n',
       { mode: 0o644 },
     );
     await execute(
@@ -203,6 +203,9 @@ test("local bootstrap fills blank secrets, preserves configured secrets, synchro
       ),
     );
     assert.ok((await readFile(path.join(directory,".env.backend"),"utf8")).includes("LINEAR_CLIENT_ID=linear-fixture"));
+    const backend = await readFile(path.join(directory, ".env.backend"), "utf8");
+    assert.ok(backend.includes("STRIPE_SECRET_KEY=rk_test_fixture") && backend.includes("REFERRALS_ENABLED=true"));
+    assert.ok(!backend.includes("STRIPE_WEBHOOK_SECRET"), "a blank billing setting is not synchronized");
     assert.equal(
       (await stat(path.join(directory, ".env.local"))).mode & 0o777,
       0o600,

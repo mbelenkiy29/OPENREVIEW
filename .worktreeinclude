@@ -1,0 +1,3 @@
+# Gitignored files Claude Code copies into each new worktree, so agents there get the local
+# settings and Stripe sandbox keys (see README, Local quickstart).
+.env.local
