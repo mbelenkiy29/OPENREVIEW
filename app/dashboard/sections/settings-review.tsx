@@ -140,7 +140,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                       name="mode"
                       defaultValue={repoSettings.settings.mode}
                     >
-                      {["fast", "standard", "deep"].map((s) => (
+                      {["fast", "standard", "deep", "auto"].map((s) => (
                         <option key={s}>{s}</option>
                       ))}
                     </select>

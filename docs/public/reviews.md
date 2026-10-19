@@ -105,7 +105,7 @@ A change can break code it did not touch, such as a caller in another file that 
 
 ## Review tier per pull request
 
-The tier (fast, standard or deep) comes from, in order: an `@openreview review fast|standard|deep` comment for that run, an `openreview:fast|standard|deep` label on the pull request (several labels: the highest wins; a tier label also starts reviews of labelled pull requests even when automatic reviews are off), then the configured tier, which touched `.openreview/` folders can raise. Admins can cap the tier with **Highest tier a request may use** (`maxReviewTier`); the cap applies to every source. The review page shows the tier used and where it came from.
+The tier (fast, standard or deep) comes from, in order: an `@openreview review fast|standard|deep` comment for that run, an `openreview:fast|standard|deep` label on the pull request (several labels: the highest wins; a tier label also starts reviews of labelled pull requests even when automatic reviews are off), then the configured tier, which touched `.openreview/` folders can raise. A configured tier of `auto` picks one per pull request: deep for 1,000+ changed lines, or 200+ lines when a file touches security- or data-sensitive code (the same risk score that orders files in large reviews); fast for 50 or fewer lines of low-risk changes; standard otherwise. Generated, lock and docs files don't count toward size. Any explicit tier (comment, label or folder) replaces `auto`. Admins can cap the tier with **Highest tier a request may use** (`maxReviewTier`); the cap applies to every source. The review page shows the tier used and where it came from.
 
 ## Commands in pull requests
 

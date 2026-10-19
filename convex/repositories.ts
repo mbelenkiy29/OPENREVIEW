@@ -85,7 +85,7 @@ export const configure = mutation({
         s.minimumConfidence < 0.5 ||
         s.minimumConfidence > 1 ||
         !["critical", "high", "medium", "low"].includes(s.severityThreshold) ||
-        !["fast", "standard", "deep"].includes(s.mode) ||
+        !["fast", "standard", "deep", "auto"].includes(s.mode) ||
         !["concise", "detailed"].includes(s.commentStyle) ||
         !validSummarySections(s.summarySections) ||
         !validReviewEngine(s.reviewEngine) ||
