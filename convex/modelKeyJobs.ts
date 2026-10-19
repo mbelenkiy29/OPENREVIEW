@@ -15,6 +15,6 @@ export const save = action({ args: { token: v.string(), organizationId: v.id("or
   if (a.provider === "openrouter" && !model) throw new Error("OpenRouter needs a model, for example anthropic/claude-sonnet-5-5");
   assertEgress("workspace-model", "Workspace model keys");
   await ctx.runMutation(internal.modelKeys.checkRate, { organizationId: a.organizationId });
-  await checkModelKey(a.provider, key);
+  await checkModelKey(a.provider, key, model);
   await ctx.runMutation(internal.modelKeys.save, { token: a.token, organizationId: a.organizationId, provider: a.provider, model, credentials: encryptCredential(key, `${a.organizationId}:model`) });
 } });

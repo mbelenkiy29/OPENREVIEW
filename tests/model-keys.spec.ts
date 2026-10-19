@@ -19,12 +19,13 @@ test("model keys: admins save a checked, encrypted workspace key that every mode
   const organizationId = await t.mutation(api.users.createOrganization, { token: admin.token, name: "Acme" });
   await t.run((ctx) => ctx.db.insert("organizationMembers", { organizationId, userId: member.id, role: "member" }));
 
-  // The provider check: one GET with the key; this fake provider only accepts "sk-ant-good".
+  // The provider check: one GET with the key. This fake Anthropic accepts "sk-ant-good" and has no "claude-unknown";
+  // this fake OpenAI answers 403 to a restricted key that may not list models.
   const checks: { url: string; headers: Record<string, string> }[] = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     const headers = init?.headers as Record<string, string>;
     checks.push({ url: String(url), headers });
-    return new Response("{}", { status: headers["x-api-key"] === "sk-ant-good" ? 200 : 401 });
+    return new Response("{}", { status: headers["x-api-key"] === "sk-ant-good" ? (String(url).endsWith("/claude-unknown") ? 404 : 200) : headers.authorization === "Bearer sk-proj-restricted" ? 403 : 401 });
   });
   // Model calls: record which key, model and budget each one would use.
   const calls: { apiKey: string; provider: string; model: string; budget: boolean }[] = [];
@@ -38,7 +39,7 @@ test("model keys: admins save a checked, encrypted workspace key that every mode
     vi.useFakeTimers(); await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync()); vi.useRealTimers();
     return calls.at(-1);
   };
-  const save = (token: string, key: string, provider: "anthropic" | "openai" | "openrouter" = "anthropic") => t.action(api.modelKeyJobs.save, { token, organizationId, provider, key });
+  const save = (token: string, key: string, provider: "anthropic" | "openai" | "openrouter" = "anthropic", model?: string) => t.action(api.modelKeyJobs.save, { token, organizationId, provider, key, ...(model ? { model } : {}) });
   const rows = () => t.run((ctx) => ctx.db.query("modelKeys").collect());
 
   // Without a workspace key: the platform key, the operator's task routing and the inference budget.
@@ -48,6 +49,9 @@ test("model keys: admins save a checked, encrypted workspace key that every mode
   await expect(save(member.token, "sk-ant-good")).rejects.toThrow(/Forbidden/);
   await expect(save(admin.token, "sk-ant-bad")).rejects.toThrow(/rejected/);
   await expect(save(admin.token, "sk-or-good", "openrouter")).rejects.toThrow(/OpenRouter needs a model/);
+  // A model the key can't use (a typo, or one of another provider) is refused too.
+  await expect(save(admin.token, "sk-ant-good", "anthropic", "claude-unknown")).rejects.toThrow(/can't use a model named claude-unknown/);
+  expect(checks.at(-1)?.url).toBe("https://api.anthropic.com/v1/models/claude-unknown");
   expect(await rows()).toEqual([]);
 
   await save(admin.token, " sk-ant-good ");
@@ -72,4 +76,10 @@ test("model keys: admins save a checked, encrypted workspace key that every mode
   expect(await rows()).toEqual([]);
   expect(await draft()).toEqual({ apiKey: "sk-platform", provider: "openai", model: "gpt-platform-rules", budget: true });
   expect((await t.run((ctx) => ctx.db.query("auditEvents").collect())).filter((e) => e.action.startsWith("model_key.")).map((e) => e.action)).toEqual(["model_key.saved", "model_key.removed"]);
+
+  // A restricted OpenAI key without the Models permission gets 403 from the check, which proves nothing either way: it is saved.
+  await save(admin.token, "sk-proj-restricted", "openai", "gpt-5");
+  expect(checks.at(-1)?.url).toBe("https://api.openai.com/v1/models/gpt-5");
+  expect(await t.query(api.modelKeys.status, { token: member.token, organizationId })).toMatchObject({ provider: "openai", model: "gpt-5" });
+  await expect(save(admin.token, "sk-proj-revoked", "openai")).rejects.toThrow(/rejected/);
 });
