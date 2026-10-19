@@ -611,6 +611,8 @@ export default defineSchema({
     rateBps: v.number(),
     amount: v.number(),
     reversed: v.number(), // clawed back by refunds and disputes
+    // The invoice's charges as last fetched from Stripe (cents); reversed is recomputed from them.
+    charges: v.optional(v.array(v.object({ id: v.string(), amount: v.number(), refunded: v.number(), dispute: v.optional(v.object({ id: v.string(), status: v.string(), amount: v.number() })), fetchedAt: v.number() }))),
     status: v.union(v.literal("accrued"), v.literal("void")),
     voidReason: v.optional(v.string()),
     invoiceCreated: v.number(),
@@ -619,6 +621,30 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_invoice", ["invoiceId"]).index("by_referrer", ["referrerId"]).index("by_referral", ["referralId"]),
+  // A referrer's credits (and, later, payouts), posted to Stripe with a stored idempotency key and a
+  // lookup before every post. review → processing → completed | failed; failed releases the balance.
+  referralRedemptions: defineTable({
+    userId: v.id("users"),
+    kind: v.union(v.literal("credit"), v.literal("payout")),
+    amount: v.number(),
+    currency: v.string(),
+    creditOrganizationId: v.optional(org), // the workspace whose Stripe customer balance is credited
+    customerId: v.optional(v.string()), // that workspace's Stripe customer when the credit was requested
+    accountId: v.optional(v.string()),
+    status: v.union(v.literal("review"), v.literal("processing"), v.literal("completed"), v.literal("failed")),
+    stripeId: v.optional(v.string()),
+    idempotencyKey: v.string(),
+    keyIssuedAt: v.number(),
+    indeterminateAt: v.optional(v.number()), // a post got a 5xx: never post again, only look it up
+    leaseId: v.optional(v.string()),
+    leaseUntil: v.optional(v.number()),
+    pausedAt: v.optional(v.number()),
+    attempts: v.number(),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  }).index("by_user", ["userId"]).index("by_status", ["status", "updatedAt"]).index("by_credit_org", ["creditOrganizationId"]),
   billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number() }).index("by_org_period", ["organizationId", "period"]),
   stripeEvents: defineTable({ eventId: v.string(), type: v.string(), outcome: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Slack app installs (one per Slack workspace); the bot token is encrypted with scope `<org>:slack`.

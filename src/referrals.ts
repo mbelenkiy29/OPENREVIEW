@@ -1,4 +1,4 @@
-import { billingConfig, int } from "./billing";
+import { StripeError, billingConfig, int } from "./billing";
 // Referral program (cloud only). Off unless REFERRALS_ENABLED=true and billing is on, so self-hosted
 // installs are unaffected. Every signed-in user gets a personal code; people who sign up through it
 // are attributed to the referrer, and their first workspace is bound to the referral.
@@ -59,4 +59,38 @@ export const referralFact = (r: { invitedBy: string | null; discount: boolean },
 export function conversionEmail(p: { name: string | null; rateBps: number; months: number; holdDays: number; url: string }) {
   const who = p.name ? `@${p.name}` : "Someone you referred";
   return { subject: `${who} subscribed to OpenReview`, text: `${who} just subscribed to OpenReview through your referral.\n\nYou earn ${p.rateBps / 100}% of what their workspace pays, excluding tax, for ${p.months} months from its first payment. Each commission becomes available ${p.holdDays} days after the payment.\n\nSee your referrals: ${p.url}` };
+}
+
+// Clawback and redemption (Phase 3). A commission is reversed in proportion to the cash its invoice
+// lost: refunds, and disputes that are open or lost. Won, warning_closed and prevented disputes keep it.
+export type ChargeFacts = { id: string; amount: number; refunded: number; dispute?: { id: string; status: string; amount: number }; fetchedAt: number };
+const disputeKept = new Set(["won", "warning_closed", "prevented"]);
+export function reversalTarget(amount: number, charges: Pick<ChargeFacts, "amount" | "refunded" | "dispute">[]) {
+  const paid = charges.reduce((sum, c) => sum + c.amount, 0);
+  const lost = charges.reduce((sum, c) => sum + Math.min(c.amount, c.refunded + (c.dispute && !disputeKept.has(c.dispute.status) ? c.dispute.amount : 0)), 0);
+  return paid > 0 ? amount - Math.floor(amount * (paid - lost) / paid) : 0;
+}
+type Commission = { currency: string; amount: number; reversed: number; status: string; availableAt: number };
+type Redemption = { currency: string; amount: number; status: string };
+// shortcut: no Stripe re-verification (verifyDue) before a commission is released; the hold alone gates it.
+export const commissionAvailable =(c: Commission, now: number) => c.status === "accrued" && c.availableAt <= now;
+/** Per currency: available = released commissions (net of clawbacks) minus redemptions that are not
+ *  failed. A clawback after a redemption makes it negative; later commissions pay that back first. */
+export function referralBalances(commissions: Commission[], redemptions: Redemption[], now: number) {
+  const out: Record<string, { available: number; onHold: number; redeemed: number }> = {}, of = (currency: string) => out[currency] ??= { available: 0, onHold: 0, redeemed: 0 };
+  for (const c of commissions) if (c.status === "accrued") { const b = of(c.currency); if (commissionAvailable(c, now)) b.available += c.amount - c.reversed; else b.onHold += c.amount - c.reversed; }
+  for (const r of redemptions) if (r.status !== "failed") { const b = of(r.currency); b.redeemed += r.amount; b.available -= r.amount; }
+  return out;
+}
+/** "25", "$25.50" or "1,000" → cents; null for anything else. */
+export function parseMoneyInput(input: unknown): number | null {
+  const m = typeof input === "string" ? /^\$?(\d{1,7})(?:\.(\d{1,2}))?$/.exec(input.trim().replace(/,/g, "")) : null;
+  return m ? Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0")) : null;
+}
+/** How a failed Stripe write is retried. transient: retry with the same idempotency key (no answer,
+ *  429, 409 key-in-use or lock, offline, config). indeterminate (5xx): the object may exist, so never
+ *  post again, only look it up. definite (other 4xx): nothing was created. */
+export function classifyStripeFailure(error: unknown): "transient" | "indeterminate" | "definite" {
+  if (!(error instanceof StripeError) || error.status === 0 || error.status === 429 || error.status === 409) return "transient";
+  return error.status >= 500 ? "indeterminate" : "definite";
 }

@@ -2,7 +2,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { backend } from "../../src/server";
 import { checkoutTrialEnd } from "../../src/billing";
-import { referralConfig, referralDisclosure, referralFact } from "../../src/referrals";
+import { formatMoney, referralConfig, referralDisclosure, referralFact } from "../../src/referrals";
 import { applyReferralCode, openBillingPortal, startCheckout } from "./actions";
 
 const day = (ms: number) => new Date(ms).toLocaleDateString("en-US", { timeZone: "UTC", dateStyle: "medium" });
@@ -27,6 +27,7 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
         <dt>Seats</dt><dd>{s.activeSeats} active (owners, admins and members; viewers are free){s.billedSeats !== null ? ` · ${s.billedSeats} billed` : ""}</dd>
         <dt>Starter plan</dt><dd>{price ? `${price} · ` : ""}unlimited reviews, fair use {s.reviewsPerSeat} per seat each month</dd>
         {s.referral?.referred && <><dt>Referral</dt><dd>{referralFact(s.referral, referralConfig().discountLabel)}</dd></>}
+        {s.referralCredit ? <><dt>Referral credit</dt><dd>{formatMoney(s.referralCredit)} applied from referral earnings · Stripe takes it off the next invoices</dd></> : null}
       </dl>
       {s.admin ? <div className="row">
         {!subscribed && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><button className="primary">{checkoutTrialEnd(s.trialEndsAt, Date.now()) ? "Add payment method" : "Subscribe with Stripe"}</button></form>}

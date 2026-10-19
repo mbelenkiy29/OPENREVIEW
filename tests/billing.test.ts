@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, formEncode, openSubscription, periodKey, seatCount, stripe, stripeKey, trialEndsFrom, verifyStripeSignature } from "../src/billing";
+import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, formEncode, openSubscription, periodKey, seatCount, stripe, stripeGet, stripeKey, trialEndsFrom, verifyStripeSignature } from "../src/billing";
 
 const config = billingConfig({ BILLING_ENABLED: "true", BILLING_TRIAL_REVIEWS: "3", BILLING_REVIEWS_PER_SEAT: "10", BILLING_GRACE_DAYS: "7" });
 const now = Date.UTC(2026, 9, 14), day = 86400000;
@@ -86,4 +86,29 @@ test("Stripe client: test-mode (restricted or secret) keys by default, pinned AP
   await assert.rejects(stripe("/v1/checkout/sessions", {}, "sk_test_1", (async () => Response.json({ error: { type: "invalid_request_error", code: "resource_missing", param: "discounts[0][coupon]", message: "No such coupon: 'secret-coupon'" } }, { status: 400 })) as typeof fetch), (error: unknown) => error instanceof StripeError && error.status === 400 && error.type === "invalid_request_error" && error.code === "resource_missing" && error.param === "discounts[0][coupon]" && error.message === "Stripe request failed (400 invalid_request_error resource_missing)");
   await assert.rejects(stripe("/v1/customers", {}, "sk_test_1", (async () => new Response("<html>bad gateway</html>", { status: 502 })) as typeof fetch), (error: unknown) => error instanceof StripeError && error.message === "Stripe request failed (502)");
   await assert.rejects(stripe("https://evil.example", {}, "sk_test_1", ok), /Invalid Stripe API path/);
+  // No answer at all (network failure, timeout): status 0, so callers retry with the same key.
+  await assert.rejects(stripe("/v1/customers", {}, "sk_test_1", (async () => { throw new TypeError("fetch failed"); }) as typeof fetch), (error: unknown) => error instanceof StripeError && error.status === 0 && error.message === "Stripe request failed (0)");
+  await assert.rejects(stripe("/v1/customers", {}, "sk_test_1", (async () => Response.json({ error: { type: "api_error" } }, { status: 500, headers: { "stripe-should-retry": "false" } })) as typeof fetch), (error: unknown) => error instanceof StripeError && error.status === 500 && error.shouldRetry === false);
+  await assert.rejects(stripe("/v1/customers", {}, "sk_test_1", (async () => Response.json({ error: { type: "invalid_request_error", code: "lock_timeout" } }, { status: 429, headers: { "stripe-should-retry": "true" } })) as typeof fetch), (error: unknown) => error instanceof StripeError && error.code === "lock_timeout" && error.shouldRetry === true);
+});
+
+test("Stripe GETs put the query in the URL and send no body", async () => {
+  let seen: { url: string; init?: RequestInit } | undefined;
+  const ok = (async (url: string | URL | Request, init?: RequestInit) => { seen = { url: String(url), init }; return Response.json({ data: [], has_more: false }); }) as typeof fetch;
+  assert.deepEqual(await stripeGet("/v1/invoice_payments", { payment: { type: "payment_intent", payment_intent: "pi_1" }, status: "paid", limit: 100, starting_after: undefined }, "rk_test_1", ok), { data: [], has_more: false });
+  assert.equal(seen?.url, "https://api.stripe.com/v1/invoice_payments?payment%5Btype%5D=payment_intent&payment%5Bpayment_intent%5D=pi_1&status=paid&limit=100");
+  assert.equal(seen?.init?.method, "GET");
+  assert.equal(seen?.init?.body, undefined);
+  assert.equal(seen?.init?.redirect, "error");
+  const headers = new Headers(seen?.init?.headers);
+  assert.equal(headers.get("content-type"), null);
+  assert.equal(headers.get("idempotency-key"), null);
+  assert.equal(headers.get("stripe-version"), STRIPE_API_VERSION);
+  assert.equal(headers.get("authorization"), "Bearer rk_test_1");
+  await stripeGet("/v1/customers/cus_A1/balance_transactions", { created: { gte: 1760000000 } }, "rk_test_1", ok);
+  assert.equal(seen?.url, "https://api.stripe.com/v1/customers/cus_A1/balance_transactions?created%5Bgte%5D=1760000000");
+  await stripeGet("/v1/charges/ch_3Abc", {}, "rk_test_1", ok);
+  assert.equal(seen?.url, "https://api.stripe.com/v1/charges/ch_3Abc");
+  await assert.rejects(stripeGet("/v1/charges/ch_1", {}, "rk_test_1", (async () => Response.json({ error: { type: "invalid_request_error", code: "resource_missing" } }, { status: 404 })) as typeof fetch), /404 invalid_request_error resource_missing/);
+  for (const path of ["/v1/charges/../x", "/v1/charges/ch_1?expand[]=x", "https://evil.example/v1/charges"]) await assert.rejects(stripeGet(path, {}, "rk_test_1", ok), /Invalid Stripe API path/, path);
 });

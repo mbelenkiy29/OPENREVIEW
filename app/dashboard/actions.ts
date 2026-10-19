@@ -14,6 +14,7 @@ import { fixHandoffPrompt } from "../../src/fix-handoff";
 import {approvalPolicySchema} from "../../src/approval";
 import {runtimePolicySchema} from "../../src/runtime-policy";
 import {approvalDefaults,runtimeDefaults} from "../../src/review-settings";
+import { parseMoneyInput } from "../../src/referrals";
 
 const text = (f: FormData, key: string) => z.string().parse(f.get(key) ?? "");
 // One-shot confirmation shown by the dashboard Toaster after a redirect or revalidation.
@@ -304,6 +305,13 @@ export async function applyReferralCode(form: FormData) {
   const { token } = await current();
   try { const result = await backend().mutation(api.referrals.applyCode, { token, organizationId: text(form, "organizationId") as Id<"organizations">, code: text(form, "code") }); await notify(result.ok ? "Referral code applied." : result.error, result.ok ? "success" : "error"); }
   catch (e) { await notify(backendMessage(e, "Could not apply the referral code."), "error"); }
+  revalidatePath("/dashboard", "layout");
+}
+export async function redeemReferralCredit(form: FormData) {
+  const { token } = await current(), amount = parseMoneyInput(form.get("amount"));
+  if (amount === null) await notify("Enter an amount in dollars, like 25 or 25.50.", "error");
+  else try { const result = await backend().mutation(api.referrals.requestCredit, { token, organizationId: text(form, "organizationId") as Id<"organizations">, amount }); await notify(result.ok ? "Credit requested. It appears on the workspace’s next invoice." : result.error, result.ok ? "success" : "error"); }
+  catch (e) { await notify(backendMessage(e, "Could not apply the credit."), "error"); }
   revalidatePath("/dashboard", "layout");
 }
 export async function openBillingPortal(form: FormData) {

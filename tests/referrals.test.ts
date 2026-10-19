@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { REFERRAL_CODE_LENGTH, REFERRAL_CODE_WINDOW_DAYS, REFERRAL_CURRENCY, REFERRAL_MIN_CREDIT_CENTS, REFERRAL_MIN_PAYOUT_CENTS, REFERRAL_PAYOUT_COUNTRIES, REFERRAL_PAYOUT_REVIEW_CENTS, addMonthsUTC, commissionAmount, commissionBase, conversionEmail, couponMonthsNeeded, formatMoney, generateReferralCode, normalizeReferralCode, referralCodeAlphabet, referralConfig, referralDisclosure, referralFact } from "../src/referrals";
+import { StripeError } from "../src/billing";
+import { OfflineError } from "../src/egress";
+import { REFERRAL_CODE_LENGTH, REFERRAL_CODE_WINDOW_DAYS, REFERRAL_CURRENCY, REFERRAL_MIN_CREDIT_CENTS, REFERRAL_MIN_PAYOUT_CENTS, REFERRAL_PAYOUT_COUNTRIES, REFERRAL_PAYOUT_REVIEW_CENTS, addMonthsUTC, classifyStripeFailure, commissionAmount, commissionAvailable, commissionBase, conversionEmail, couponMonthsNeeded, formatMoney, generateReferralCode, normalizeReferralCode, parseMoneyInput, referralBalances, referralCodeAlphabet, referralConfig, referralDisclosure, referralFact, reversalTarget } from "../src/referrals";
 
 const on = { BILLING_ENABLED: "true", REFERRALS_ENABLED: "true" };
 test("referrals are off unless both REFERRALS_ENABLED and billing are on; defaults and clamping", () => {
@@ -92,4 +94,42 @@ test("money, the billing fact and the conversion email", () => {
   assert.match(email.text, /https:\/\/review\.example\.com\/dashboard\/settings\/referrals$/);
   assert.equal(conversionEmail({ name: null, rateBps: 1250, months: 6, holdDays: 0, url: "u" }).subject, "Someone you referred subscribed to OpenReview");
   assert.match(conversionEmail({ name: null, rateBps: 1250, months: 6, holdDays: 0, url: "u" }).text, /12\.5%/);
+});
+
+test("clawback: refunds and open or lost disputes reverse the commission pro rata; won, warning_closed and prevented keep it", () => {
+  const charge = (refunded: number, dispute?: { status: string; amount: number }) => ({ amount: 12000, refunded, ...(dispute ? { dispute: { id: "dp_1", ...dispute } } : {}) });
+  assert.equal(reversalTarget(2000, []), 0, "no charge known yet");
+  assert.equal(reversalTarget(2000, [charge(0)]), 0);
+  assert.equal(reversalTarget(2000, [charge(6000)]), 1000, "half refunded");
+  assert.equal(reversalTarget(2000, [charge(12000)]), 2000, "fully refunded");
+  assert.equal(reversalTarget(2000, [charge(1)]), 1, "rounds the kept share down");
+  for (const status of ["needs_response", "under_review", "warning_needs_response", "lost"]) assert.equal(reversalTarget(2000, [charge(0, { status, amount: 12000 })]), 2000, status);
+  for (const status of ["won", "warning_closed", "prevented"]) assert.equal(reversalTarget(2000, [charge(0, { status, amount: 12000 })]), 0, status);
+  assert.equal(reversalTarget(2000, [charge(0, { status: "lost", amount: 3000 })]), 500, "a partial dispute.amount");
+  assert.equal(reversalTarget(2000, [charge(6000, { status: "lost", amount: 12000 })]), 2000, "a charge never loses more than it paid");
+  assert.equal(reversalTarget(2000, [charge(12000), { amount: 12000, refunded: 0 }]), 1000, "two charges, one refunded");
+});
+
+test("balances per currency: released commissions net of clawbacks, minus redemptions that did not fail, and can go negative", () => {
+  const now = 1_000_000, c = (amount: number, reversed: number, availableAt: number, status = "accrued", currency = "usd") => ({ currency, amount, reversed, status, availableAt });
+  assert.equal(commissionAvailable(c(1, 0, now), now), true);
+  assert.equal(commissionAvailable(c(1, 0, now + 1), now), false);
+  assert.equal(commissionAvailable(c(1, 0, now, "void"), now), false);
+  assert.deepEqual(referralBalances([], [], now), {});
+  const commissions = [c(2000, 0, now - 1), c(2000, 500, now), c(3000, 0, now + 1), c(9000, 0, now - 1, "void"), c(700, 0, now - 1, "accrued", "eur")];
+  const redemptions = [{ currency: "usd", amount: 1000, status: "completed" }, { currency: "usd", amount: 500, status: "processing" }, { currency: "usd", amount: 200, status: "review" }, { currency: "usd", amount: 9999, status: "failed" }];
+  assert.deepEqual(referralBalances(commissions, redemptions, now), { usd: { available: 1800, onHold: 3000, redeemed: 1700 }, eur: { available: 700, onHold: 0, redeemed: 0 } });
+  // A full refund after redeeming: the balance goes negative.
+  assert.deepEqual(referralBalances([c(2000, 2000, now - 1)], [{ currency: "usd", amount: 2000, status: "completed" }], now), { usd: { available: -2000, onHold: 0, redeemed: 2000 } });
+});
+
+test("money input parses dollars and cents, nothing else", () => {
+  for (const [input, cents] of [["25", 2500], ["$25.5", 2550], [" 25.05 ", 2505], ["1,000", 100000], ["0", 0]] as const) assert.equal(parseMoneyInput(input), cents, input);
+  for (const bad of ["", "abc", "-5", "1.234", "25.", "1e3", "12345678", null, 25]) assert.equal(parseMoneyInput(bad), null, String(bad));
+});
+
+test("Stripe failures are classified for retries", () => {
+  for (const e of [new StripeError(0), new StripeError(429, "invalid_request_error", "lock_timeout"), new StripeError(409, "idempotency_error", "idempotency_key_in_use"), new OfflineError("billing", "Stripe billing"), new Error("Configure STRIPE_SECRET_KEY"), "boom"]) assert.equal(classifyStripeFailure(e), "transient", String(e));
+  for (const status of [500, 502, 503]) assert.equal(classifyStripeFailure(new StripeError(status)), "indeterminate", String(status));
+  for (const e of [new StripeError(400, "invalid_request_error", "resource_missing"), new StripeError(402, "card_error"), new StripeError(403), new StripeError(404)]) assert.equal(classifyStripeFailure(e), "definite", e.message);
 });

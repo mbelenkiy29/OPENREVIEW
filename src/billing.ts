@@ -67,15 +67,22 @@ export function formEncode(params: Record<string, unknown>, prefix = ""): string
     return [`${encodeURIComponent(key)}=${encodeURIComponent(String(v))}`];
   });
 }
-/** A Stripe API error: the HTTP status and Stripe's error type, code and param, never the response body. */
+/** A Stripe API error: the HTTP status (0 when the request never got an answer) and Stripe's error
+ *  type, code and param, never the response body. shouldRetry is Stripe's Stripe-Should-Retry header. */
 export class StripeError extends Error {
-  constructor(readonly status: number, readonly type?: string, readonly code?: string, readonly param?: string) { super(`Stripe request failed (${status}${type ? ` ${type}` : ""}${code ? ` ${code}` : ""})`); this.name = "StripeError"; }
+  constructor(readonly status: number, readonly type?: string, readonly code?: string, readonly param?: string, readonly shouldRetry?: boolean) { super(`Stripe request failed (${status}${type ? ` ${type}` : ""}${code ? ` ${code}` : ""})`); this.name = "StripeError"; }
 }
-export async function stripe<T>(path: string, params: Record<string, unknown>, key: string, fetchImpl: typeof fetch = fetch, idempotencyKey?: string): Promise<T> {
-  if (!/^\/v1\/[a-z_/]+[a-zA-Z0-9_/]*$/.test(path)) throw new Error("Invalid Stripe API path");
+async function request<T>(method: "GET" | "POST", path: string, params: Record<string, unknown>, key: string, fetchImpl: typeof fetch, idempotencyKey?: string): Promise<T> {
   assertEgress("billing", "Stripe billing");
-  const response = await fetchImpl("https://api.stripe.com" + path, { method: "POST", redirect: "error", headers: { authorization: `Bearer ${key}`, "stripe-version": STRIPE_API_VERSION, "content-type": "application/x-www-form-urlencoded", ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}) }, body: formEncode(params).join("&"), signal: AbortSignal.timeout(20000) });
-  const data = (await response.json().catch(() => null)) as T & { error?: { type?: string; code?: string; param?: string } } | null;
-  if (!response.ok || !data) throw new StripeError(response.status, data?.error?.type, data?.error?.code, data?.error?.param);
+  if (!/^\/v1\/[a-z_/]+[a-zA-Z0-9_/]*$/.test(path)) throw new Error("Invalid Stripe API path");
+  const form = formEncode(params).join("&"), get = method === "GET";
+  let response: Response;
+  try { response = await fetchImpl("https://api.stripe.com" + path + (get && form ? `?${form}` : ""), { method, redirect: "error", headers: { authorization: `Bearer ${key}`, "stripe-version": STRIPE_API_VERSION, ...(get ? {} : { "content-type": "application/x-www-form-urlencoded" }), ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}) }, ...(get ? {} : { body: form }), signal: AbortSignal.timeout(20000) }); }
+  catch { throw new StripeError(0); } // network failure or timeout: the request may or may not have reached Stripe
+  const data = (await response.json().catch(() => null)) as T & { error?: { type?: string; code?: string; param?: string } } | null, retry = response.headers.get("stripe-should-retry");
+  if (!response.ok || !data) throw new StripeError(response.status, data?.error?.type, data?.error?.code, data?.error?.param, retry === null ? undefined : retry === "true");
   return data;
 }
+export const stripe = <T>(path: string, params: Record<string, unknown>, key: string, fetchImpl: typeof fetch = fetch, idempotencyKey?: string) => request<T>("POST", path, params, key, fetchImpl, idempotencyKey);
+/** A Stripe GET: `query` is form-encoded into the URL (nested keys like created[gte] work). */
+export const stripeGet = <T>(path: string, query: Record<string, unknown>, key: string, fetchImpl: typeof fetch = fetch) => request<T>("GET", path, query, key, fetchImpl);

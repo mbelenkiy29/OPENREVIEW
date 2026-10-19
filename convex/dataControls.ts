@@ -53,6 +53,7 @@ export const sharedTables: Partial<Record<TableNames, string>> = {
   workspaceDeletions: "deletion receipts",
   referralCodes: "personal referral codes", referrals: "referrer's attribution records; keep only the referred workspace's id",
   referralCommissions: "referrer's earnings ledger (Stripe ids and amounts, no workspace content)",
+  referralRedemptions: "referral credits and payouts already issued",
 };
 
 // Files referenced by a row (any v.id("_storage") field, at any depth), deleted with it.

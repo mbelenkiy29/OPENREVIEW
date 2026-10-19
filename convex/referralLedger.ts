@@ -1,8 +1,9 @@
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { v, type ObjectType } from "convex/values";
-import { REFERRAL_CODE_WINDOW_DAYS, REFERRAL_CURRENCY, addMonthsUTC, commissionAmount, commissionBase, normalizeReferralCode, referralConfig } from "../src/referrals";
+import { audit } from "./auth";
+import { v, type Infer, type ObjectType } from "convex/values";
+import { REFERRAL_CODE_WINDOW_DAYS, REFERRAL_CURRENCY, addMonthsUTC, commissionAmount, commissionBase, normalizeReferralCode, referralConfig, reversalTarget } from "../src/referrals";
 
 // Referral helpers shared by sign-in, workspace creation and the referral functions (no endpoints).
 export async function codeOwner(ctx: QueryCtx, code: unknown) {
@@ -110,4 +111,44 @@ export async function accrueCommission(ctx: MutationCtx, f: ObjectType<typeof in
   if (ended) return "ended";
   await ctx.db.insert("referralCommissions", { referralId: referral._id, referrerId: referral.referrerId, referredOrganizationId: account.organizationId, invoiceId, subscriptionId: f.subscription, currency: f.currency, base, rateBps: config.rateBps, amount: commissionAmount(base, config.rateBps), reversed: 0, status: "accrued", invoiceCreated: f.invoiceCreated, paidAt, availableAt: paidAt + config.holdDays * 86400000, createdAt: now, updatedAt: now });
   return "accrued";
+}
+
+// Clawback and redemption (Phase 3).
+export const anyCommission = async (ctx: QueryCtx) => Boolean(await ctx.db.query("referralCommissions").first());
+/** Whether a charge of this Stripe customer could have paid a commissioned invoice, so charge events for
+ *  everyone else are skipped: its workspace carries a referral, or the workspace is unknown (deleted after
+ *  paying; the purge drops its billing account) and the deployment has commissions at all. */
+export async function mayHaveCommission(ctx: QueryCtx, customer: string) {
+  const account = await ctx.db.query("billingAccounts").withIndex("by_customer", (q) => q.eq("customerId", customer)).first();
+  return account ? Boolean(await referralOfWorkspace(ctx, account.organizationId)) : anyCommission(ctx);
+}
+// What the webhook forwards about a refunded or disputed charge (http.ts): only which charge changed.
+export const chargeEvent = { chargeId: v.string(), kind: v.union(v.literal("refund"), v.literal("dispute")), customer: v.optional(v.string()), paymentIntent: v.optional(v.string()) };
+// One charge as just fetched from Stripe (cents; fetchedAt in ms).
+export const chargeFacts = v.object({ id: v.string(), amount: v.number(), refunded: v.number(), dispute: v.optional(v.object({ id: v.string(), status: v.string(), amount: v.number() })), fetchedAt: v.number() });
+/** Stores a charge's current refund and dispute state on the invoice's commission and recomputes the
+ *  clawback. Ordered by when we fetched it, never by event time: an older fetch changes nothing. */
+export async function applyChargeFacts(ctx: MutationCtx, invoiceId: string, charge: Infer<typeof chargeFacts>): Promise<string> {
+  const commission = await ctx.db.query("referralCommissions").withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId)).first();
+  if (!commission) return "no commission";
+  if ((commission.charges?.find((c) => c.id === charge.id)?.fetchedAt ?? -1) >= charge.fetchedAt) return "stale";
+  // shortcut: an invoice paid by several charges is reversed as if the charges seen so far were all of it; list GET /v1/invoice_payments?invoice=<id> here if partial payments are turned on.
+  const charges = [...(commission.charges ?? []).filter((c) => c.id !== charge.id), charge];
+  await ctx.db.patch(commission._id, { charges, reversed: reversalTarget(commission.amount, charges), updatedAt: Date.now() });
+  return "applied";
+}
+/** A referrer's commissions and redemptions, for balances. */
+export async function ledgerFor(ctx: QueryCtx, userId: Id<"users">) {
+  // shortcut: 5000 rows each; add a running-balance table if a referrer ever gets close.
+  const commissions = await ctx.db.query("referralCommissions").withIndex("by_referrer", (q) => q.eq("referrerId", userId)).take(5000);
+  return { commissions, redemptions: await ctx.db.query("referralRedemptions").withIndex("by_user", (q) => q.eq("userId", userId)).take(5000) };
+}
+/** Referral credit applied to a workspace's bill (Settings → Billing), in cents. */
+export const referralCredit = async (ctx: QueryCtx, organizationId: Id<"organizations">) => (await ctx.db.query("referralRedemptions").withIndex("by_credit_org", (q) => q.eq("creditOrganizationId", organizationId)).take(1000)).reduce((sum, r) => sum + (r.status === "completed" ? r.amount : 0), 0);
+/** Ends a redemption that is still processing (completed with its Stripe id, or failed, which
+ *  releases the balance) and audits it on the credited workspace while that still exists. */
+export async function settleRedemption(ctx: MutationCtx, redemption: Doc<"referralRedemptions">, outcome: { stripeId: string } | { error: string }, action: string) {
+  const now = Date.now();
+  await ctx.db.patch(redemption._id, { ...("stripeId" in outcome ? { status: "completed" as const, stripeId: outcome.stripeId, completedAt: now } : { status: "failed" as const, error: outcome.error.slice(0, 300) }), leaseId: undefined, leaseUntil: undefined, updatedAt: now });
+  if (redemption.creditOrganizationId && await ctx.db.get(redemption.creditOrganizationId)) await audit(ctx, redemption.creditOrganizationId, undefined, action, redemption._id);
 }
