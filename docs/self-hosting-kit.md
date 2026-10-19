@@ -91,6 +91,7 @@ Everything else is turned off. Each feature tells people why:
 | Email (Resend) | Email sign-in, invitations and notification emails are hidden or skipped |
 | Stripe billing | Stripe calls fail with an offline error. Leave `BILLING_ENABLED` off when self-hosting. |
 | Send to Devin | The button is hidden |
+| Workspace model keys | Saving a key fails with an offline error. Keys saved earlier are ignored, and the workspace uses the model you configured. |
 | Google sign-in | The button is hidden, and the route returns 503 |
 | MCP client metadata documents | The authorization server advertises `client_id_metadata_document_supported: false`. Clients register with Dynamic Client Registration instead. |
 | Feature tips | No tips appear in review summaries |

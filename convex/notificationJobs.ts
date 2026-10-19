@@ -82,7 +82,7 @@ export const slackAnswer = internalAction({ args: { installationId: v.id("slackI
   const usage: ModelUsage[] = [];
   let text: string, outcome = "answered";
   try {
-    const run = await runChatAgent({ question: a.question, history: [], repositories: context.repositories.map(({ repo }) => ({ name: repo.fullName, tools: chatToolbox(ctx, repo) })), model: budgetModel(ctx), usage });
+    const run = await runChatAgent({ question: a.question, history: [], repositories: context.repositories.map(({ repo }) => ({ name: repo.fullName, tools: chatToolbox(ctx, repo) })), model: await budgetModel(ctx, context.repositories[0].repo.organizationId), usage });
     if (run.answer) {
       const sources = run.answer.citations.map((c, i) => {
         const entry = context.repositories.find((r) => r.repo.fullName === c.repository)!;

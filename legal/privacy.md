@@ -90,7 +90,7 @@ Feedback you give on reviews, such as reactions, replies and approved rules, is 
 
 ## AI processing
 
-To review code and answer questions, we send the relevant code, diffs and context to an AI model provider through its API; currently that is OpenAI. We use API services whose terms say that content sent through the API is not used to train their models. We do not use your code or content to train AI models.
+To review code and answer questions, we send the relevant code, diffs and context to an AI model provider through its API; currently that is OpenAI. If a workspace saves its own model provider key, that workspace's content goes to the provider it chose, under that provider's terms with the workspace; semantic search, when turned on, still uses our embedding provider. We use API services whose terms say that content sent through the API is not used to train their models. We do not use your code or content to train AI models.
 
 ## Who we share information with
 

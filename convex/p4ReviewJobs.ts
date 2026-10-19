@@ -60,7 +60,7 @@ export const run=internalAction({args:{reviewId:v.id("reviews")},handler:async(c
    const linked=await ctx.runQuery(internal.p4Identities.find,{repositoryId:state.repo._id,username:snapshot.review.author});
    const cross=await ctx.runAction(internal.repositoryContextJobs.retrieve,{repositoryId:state.repo._id,actor:snapshot.review.author,nativeAuthor:true,nativeActor:linked?{id:linked.identity._id,generation:linked.identity.generation}:undefined,identifiers:[...new Set(prepared.input.diff.flatMap(f=>f.patch.match(/[A-Za-z_]\w{3,}/g)??[]))].slice(0,30)});
    const context={repositoryId:state.repo._id,scopes:requirements.scopes,repositoryContext:cross.receipt??undefined};
-   const underlying=budgetModel(ctx,config.settings.model,{get:key=>ctx.runQuery(internal.cache.get,{organizationId:state.repo.organizationId,key,context}),set:async(key,value)=>{await ctx.runMutation(internal.cache.set,{organizationId:state.repo.organizationId,key,result:value,context});}});
+   const underlying=await budgetModel(ctx,state.repo.organizationId,config.settings.model,{get:key=>ctx.runQuery(internal.cache.get,{organizationId:state.repo.organizationId,key,context}),set:async(key,value)=>{await ctx.runMutation(internal.cache.set,{organizationId:state.repo.organizationId,key,result:value,context});}});
    const model:ModelProvider={generate:async(request,validator)=>{
     const currentSnapshot=await current();
     if(cross.receipt){if(currentSnapshot.review.author!==cross.receipt.actor)throw new Error("P4 context author changed");await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:cross.receipt});}

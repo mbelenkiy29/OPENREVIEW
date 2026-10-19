@@ -2,14 +2,14 @@ import { repositoryDisplay } from "../../../src/provider-display";
 import Link from "next/link";
 
 import { lockableKeys } from "../../../src/review-settings";
-import { saveSettings, revokeApiKey, revokeMcpConnection, decideConvention } from "../actions";
+import { saveSettings, revokeApiKey, revokeMcpConnection, decideConvention, saveModelKey, removeModelKey } from "../actions";
 import { ApiKeyForm } from "../api-key";
 import { SummarySettings } from "../summary-settings";
 
 import type { DashboardContext } from "../load";
 
 export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
-  const { apiKeys, mcpConnections, conventions, data, filters, isAdmin, organization, repoLabel, repoSettings, requestedRepository, section, semantic } = ctx;
+  const { apiKeys, mcpConnections, modelKey, conventions, data, filters, isAdmin, organization, repoLabel, repoSettings, requestedRepository, section, semantic } = ctx;
   return (
 (
           <>
@@ -29,6 +29,26 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                 ))}
               </section>
             ) : <p>Workspace admin access required.</p>)}
+            {section[1] === "keys" && isAdmin && (
+              <section aria-labelledby="model-key">
+                <h2 id="model-key">Model provider key</h2>
+                <p className="muted">Run this workspace&apos;s reviews, chat and fixes on your own Anthropic, OpenAI or OpenRouter account. Your provider bills that usage. The key is encrypted and never shown again.</p>
+                {modelKey ? (
+                  <form action={removeModelKey}>
+                    <p>Using your {{ anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter" }[modelKey.provider]} key{modelKey.model ? <> with <code>{modelKey.model}</code></> : ""} since {new Date(modelKey.updatedAt).toLocaleDateString("en-US", { timeZone: "UTC" })}.</p>
+                    <input type="hidden" name="organizationId" value={organization._id} />
+                    <button>Remove key</button>
+                  </form>
+                ) : <p>This workspace uses OpenReview&apos;s model.</p>}
+                <form action={saveModelKey} className="form-grid">
+                  <input type="hidden" name="organizationId" value={organization._id} />
+                  <label>Provider<select name="provider" defaultValue={modelKey?.provider ?? "anthropic"}><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option></select></label>
+                  <label>API key<input name="key" type="password" autoComplete="off" required maxLength={500} /></label>
+                  <label>Model (required for OpenRouter)<input name="model" maxLength={200} placeholder="Provider default" defaultValue={modelKey?.model ?? ""} /></label>
+                  <button className="primary">{modelKey ? "Replace key" : "Save key"}</button>
+                </form>
+              </section>
+            )}
             {section[1] === "keys" && (
               <section aria-labelledby="mcp-connections">
                 <h2 id="mcp-connections">Connected MCP clients</h2>

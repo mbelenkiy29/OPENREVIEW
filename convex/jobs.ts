@@ -556,7 +556,7 @@ export const review = internalAction({
       // Agent-authored pull requests (explicit signals only) may be routed to a dedicated model.
       const aiAuthored = detectAiAuthored({ author: pr.user.login, branch: pr.head.ref, body: pr.body, commits: pr.commits });
       const routed = reviewModelFor({ model: settings.model, aiAuthoredModel: effective.aiAuthoredModel }, aiAuthored);
-      const modelProvider = budgetModel(ctx,routed.model, {
+      const modelProvider = await budgetModel(ctx,repo.organizationId,routed.model, {
         get: (key) =>
           ctx.runQuery(internal.cache.get, {
             organizationId: repo.organizationId,

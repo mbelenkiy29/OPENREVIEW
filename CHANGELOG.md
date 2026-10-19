@@ -4,6 +4,9 @@
 
 ## October 2026
 
+### Your own model key
+- Workspace owners and admins can run reviews, chat and fixes on their own Anthropic, OpenAI or OpenRouter key under Settings → API Keys. The key is checked, stored encrypted and never shown again, and the provider bills its usage.
+
 ### Pull request reviews
 - Reviews catch boundaries that contradict their own documentation, such as a comment saying "$50.00 or more" over code that compares `> 50`.
 - Findings are no longer dropped when the model attaches a made-up rule ID. Only custom-rule findings need a real rule.

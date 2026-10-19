@@ -120,7 +120,7 @@ export const reply = internalAction({
       }
       }
       if (!body) {
-        const answer = await budgetModel(ctx).generate(
+        const answer = await (await budgetModel(ctx, data.repo.organizationId)).generate(
           {
             task: "conversation",
             system:

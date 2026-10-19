@@ -17,7 +17,7 @@ export const ingest = internalAction({ args: { repositoryId: v.id("repositories"
   const batch = await scm.mergedReviewComments(repo.fullName, repo.conventionsCursor ?? 0, 10);
   const comments = usableComments(batch.comments);
   if (comments.length < 3) return ctx.runMutation(internal.conventions.record, { repositoryId: repo._id, cursor: batch.cursor, candidates: [] });
-  const extracted = await budgetModel(ctx).generate({ task: "knowledge:conventions", system: conventionSystem, input: { comments: comments.map((c, index) => ({ index, path: c.path ?? null, text: c.body })) } }, conventionSchema(comments.length));
+  const extracted = await (await budgetModel(ctx, repo.organizationId)).generate({ task: "knowledge:conventions", system: conventionSystem, input: { comments: comments.map((c, index) => ({ index, path: c.path ?? null, text: c.body })) } }, conventionSchema(comments.length));
   await ctx.runMutation(internal.usage.record, { repositoryId: repo._id, kind: "conventions", inputTokens: extracted.usage.inputTokens, outputTokens: extracted.usage.outputTokens, estimatedCost: extracted.usage.estimatedCost, durationMs: extracted.usage.latencyMs });
   const candidates = clusterConventions(extracted.value.conventions.map((c) => ({ text: c.text, category: c.category, evidence: [...new Set(c.evidence)].map((i) => ({ url: comments[i].url, author: comments[i].author, excerpt: comments[i].body.slice(0, 200) })) })));
   return ctx.runMutation(internal.conventions.record, { repositoryId: repo._id, cursor: batch.cursor, candidates });
