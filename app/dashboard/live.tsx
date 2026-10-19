@@ -17,9 +17,11 @@ export function Live({ active }: { active: boolean }) {
 export function Copy({
   value,
   label = "Copy fix prompt",
+  failedLabel = "Copy failed; select the prompt below",
 }: {
   value: string;
   label?: string;
+  failedLabel?: string;
 }) {
   return (
     <button
@@ -29,7 +31,7 @@ export function Copy({
           await navigator.clipboard.writeText(value);
           target.textContent = "Copied";
         } catch {
-          target.textContent = "Copy failed; select the prompt below";
+          target.textContent = failedLabel;
         }
       }}
     >

@@ -6,6 +6,9 @@ const org = v.id("organizations"),
   repo = v.id("repositories"),
   review = v.id("reviews");
 export const codingAgentValidator=v.union(v.literal("codex"),v.literal("claude"),v.literal("cursor"));
+// Cloud agents started by an @mention comment posted as the developer (src/fix-agents.ts).
+export const cloudAgentValidator=v.union(v.literal("claude"),v.literal("codex"),v.literal("copilot"),v.literal("cursor"));
+export const handoffValidator=v.union(v.literal("bridge"),v.literal("cloud"));
 export const providerGroupValidator=v.object({externalId:v.string(),name:v.string()});
 export const nativeDepotIndexValidator=v.object({requestedBy:v.id("users"),connectionId:v.id("providerConnections"),credentialDigest:v.string()});
 export const p4PollingReference=v.object({id:v.id("p4Polls"),generation:v.number()});
@@ -116,23 +119,24 @@ export default defineSchema({
   providerIdentities:defineTable({organizationId:org,connectionId:v.id("providerConnections"),userId:v.id("users"),externalId:v.string(),username:v.string(),credentials:v.optional(v.string()),connectionDigest:v.string(),active:v.boolean(),generation:v.number(),expiresAt:v.number(),createdAt:v.number(),updatedAt:v.number()}).index("by_connection_user",["connectionId","userId"]).index("by_connection_external",["connectionId","externalId"]),
   p4Identities:defineTable({organizationId:org,repositoryId:repo,connectionId:v.id("providerConnections"),userId:v.id("users"),username:v.string(),credentials:v.optional(v.string()),connectionDigest:v.string(),active:v.boolean(),generation:v.number(),expiresAt:v.number(),createdAt:v.number(),updatedAt:v.number()}).index("by_repo_user",["repositoryId","userId"]).index("by_repo_username",["repositoryId","username"]).index("by_user",["userId"]),
   p4Polls:defineTable({organizationId:org,repositoryId:repo,requestedBy:v.id("users"),connectionId:v.id("providerConnections"),credentialDigest:v.string(),baselineJobId:v.id("indexJobs"),enabled:v.boolean(),generation:v.number(),status:v.string(),cursor:v.optional(v.number()),pending:v.array(v.number()),position:v.number(),pages:v.number(),scanned:v.number(),skipped:v.number(),diagnostics:v.array(v.object({nativeNumber:v.number(),reason:v.string()})),attempts:v.number(),error:v.optional(v.string()),scheduledId:v.optional(v.id("_scheduled_functions")),nextAt:v.optional(v.number()),lease:v.optional(v.object({id:v.string(),expiresAt:v.number()})),lastCompleteAt:v.optional(v.number()),updatedAt:v.number(),createdAt:v.number()}).index("by_repo",["repositoryId"]).index("by_org",["organizationId"]).index("by_enabled",["enabled"]),
-  providerEvents: defineTable({connectionId:v.id("providerConnections"),externalId:v.string(),body:v.string(),eventType:v.optional(v.string()),status:v.string(),error:v.optional(v.string()),createdAt:v.number(),updatedAt:v.optional(v.number()),attempts:v.number()}).index("by_delivery",["connectionId","externalId"]).index("by_connection_created",["connectionId","createdAt"]).index("by_status",["status"]),
+  // The row outlives its body: it dedupes redeliveries and lists the delivery; the body is cleared after 14 days.
+  providerEvents: defineTable({connectionId:v.id("providerConnections"),externalId:v.string(),body:v.string(),bodyDeletedAt:v.optional(v.number()),eventType:v.optional(v.string()),status:v.string(),error:v.optional(v.string()),createdAt:v.number(),updatedAt:v.optional(v.number()),attempts:v.number()}).index("by_delivery",["connectionId","externalId"]).index("by_connection_created",["connectionId","createdAt"]).index("by_status",["status"]).index("by_body_deleted",["bodyDeletedAt","createdAt"]),
   teams: defineTable({ organizationId: org, name: v.string(), externalKey: v.optional(v.string()), autoEnableRepositories: v.optional(v.boolean()), createdAt: v.number() }).index("by_org", ["organizationId"]),
   teamMembers: defineTable({ organizationId: org, teamId: v.id("teams"), userId: v.id("users"), role: v.union(v.literal("admin"), v.literal("member"), v.literal("viewer")) }).index("by_team", ["teamId"]).index("by_team_user", ["teamId", "userId"]),
   scopeSettings: defineTable({ organizationId: org, teamId: v.optional(v.id("teams")), settings: settingsValidator, overrideKeys: v.array(v.string()) }).index("by_org", ["organizationId"]).index("by_team", ["teamId"]),
   repositoryClusters: defineTable({ organizationId: org, name: v.string(), repositoryIds: v.array(repo), createdAt: v.number() }).index("by_org", ["organizationId"]),
   // Proposed clusters (from manifests and names); applied only when an admin approves one.
   clusterSuggestions: defineTable({ organizationId: org, key: v.string(), name: v.string(), repositoryIds: v.array(repo), reasons: v.array(v.object({ kind: v.string(), detail: v.string() })), score: v.number(), status: v.string() /* suggested | approved | dismissed | stale */, clusterId: v.optional(v.id("repositoryClusters")), decidedBy: v.optional(v.id("users")), createdAt: v.number(), updatedAt: v.number() }).index("by_org_status", ["organizationId", "status"]).index("by_org_key", ["organizationId", "key"]),
-  auditEvents: defineTable({ organizationId: org, userId: v.optional(v.id("users")), action: v.string(), target: v.string(), createdAt: v.number() }).index("by_org", ["organizationId"]),
+  auditEvents: defineTable({ organizationId: org, userId: v.optional(v.id("users")), action: v.string(), target: v.string(), createdAt: v.number() }).index("by_org", ["organizationId"]).index("by_org_user", ["organizationId", "userId"]),
   // A developer's own third-party agent credentials (Devin), encrypted by the web server with
   // CREDENTIAL_ENCRYPTION_KEY under the scope `<userId>:<kind>`; Convex never sees the plain value.
   personalCredentials: defineTable({ userId: v.id("users"), kind: v.string(), ciphertext: v.string(), updatedAt: v.number() }).index("by_user_kind", ["userId", "kind"]),
   // A workspace's own model provider key (bring your own key), encrypted with CREDENTIAL_ENCRYPTION_KEY
   // under the scope `<organizationId>:model`. When present, every model call for the workspace uses it.
   modelKeys: defineTable({ organizationId: org, provider: v.union(v.literal("anthropic"), v.literal("openai"), v.literal("openrouter")), credentials: v.string(), model: v.optional(v.string()), updatedBy: v.id("users"), updatedAt: v.number() }).index("by_org", ["organizationId"]),
-  personalSettings: defineTable({ userId: v.id("users"), agent: v.union(v.literal("codex"), v.literal("claude"), v.literal("cursor")), updatedAt: v.number() }).index("by_user", ["userId"]),
+  personalSettings: defineTable({ userId: v.id("users"), agent: v.optional(v.union(v.literal("codex"), v.literal("claude"), v.literal("cursor"))), handoff: v.optional(handoffValidator), cloudAgent: v.optional(cloudAgentValidator), updatedAt: v.number() }).index("by_user", ["userId"]),
   bridgeDevices: defineTable({ tokenHash: v.string(), code: v.string(), userId: v.optional(v.id("users")), organizationId: v.optional(org), name: v.string(), expiresAt: v.number(), revoked: v.boolean(), createdAt: v.number(), lastSeen: v.optional(v.number()) }).index("by_hash", ["tokenHash"]).index("by_code", ["code"]).index("by_user", ["userId"]),
-  fixRequests: defineTable({ userId: v.id("users"), organizationId: org, repositoryId: repo, reviewId: review, headSha: v.string(), findingIds: v.optional(v.array(v.id("findings"))), agent: v.string(), prompt: v.string(), status: v.string(), error: v.optional(v.string()), deviceId: v.optional(v.id("bridgeDevices")), expiresAt: v.number(), createdAt: v.number(), updatedAt: v.number() }).index("by_user", ["userId"]).index("by_review", ["reviewId"]),
+  fixRequests: defineTable({ userId: v.id("users"), organizationId: org, repositoryId: repo, reviewId: review, headSha: v.string(), findingIds: v.optional(v.array(v.id("findings"))), agent: v.string(), prompt: v.string(), status: v.string(), error: v.optional(v.string()), deviceId: v.optional(v.id("bridgeDevices")), expiresAt: v.number(), createdAt: v.number(), updatedAt: v.number(), /* cloud agent handoffs (kind "cloud"): intent → posting → posted | failed */ kind: v.optional(v.string()), commentUrl: v.optional(v.string()), postedAs: v.optional(v.string()) }).index("by_user", ["userId"]).index("by_review", ["reviewId"]),
   rateLimits: defineTable({
     key: v.string(),
     window: v.number(),
@@ -202,6 +206,8 @@ export default defineSchema({
     avatar: v.string(),
     // Tokens issued before this time are rejected ("sign out everywhere", member removal).
     sessionsValidAfter: v.optional(v.number()),
+    // Product milestones already sent to analytics (convex/analyticsMilestones.ts), so each is sent once.
+    analyticsMilestones: v.optional(v.array(v.string())),
     createdAt: v.number(),
   }).index("by_github", ["githubId"]),
   // Sign-in identities: one row per provider account. Accounts link only through a verified
@@ -226,6 +232,8 @@ export default defineSchema({
     revokedAt: v.optional(v.number()),
     // Set for sessions started through a workspace's SSO connection (enforcement checks it).
     ssoConnectionId: v.optional(v.id("ssoConnections")),
+    // Set when linking another provider started the session: the linking session's sign-in time, so a link never counts as a fresh sign-in.
+    signedInAt: v.optional(v.number()),
   }).index("by_hash", ["hash"]).index("by_user", ["userId"]),
   // Per-workspace single sign-on (M2). One connection per workspace; the OIDC client secret is stored
   // encrypted by the web server. Domains are proven with a DNS TXT record before they count.
@@ -262,10 +270,10 @@ export default defineSchema({
     revokedAt: v.optional(v.number()),
     createdAt: v.number(),
   }).index("by_token", ["tokenHash"]).index("by_org", ["organizationId"]),
-  loginTokens: defineTable({ email: v.string(), tokenHash: v.string(), expiresAt: v.number(), usedAt: v.optional(v.number()), createdAt: v.number() }).index("by_token", ["tokenHash"]),
+  loginTokens: defineTable({ email: v.string(), tokenHash: v.string(), expiresAt: v.number(), usedAt: v.optional(v.number()), createdAt: v.number(), referralCode: v.optional(v.string()) }).index("by_token", ["tokenHash"]),
   // onboarding: guided setup progress for workspaces created with it (absent on older workspaces,
   // which are never sent to setup). reviewsPaused marks automatic reviews held off while indexing.
-  organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), createdAt: v.number() }),
+  organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), defaultHandoff:v.optional(handoffValidator), defaultCloudAgent:v.optional(cloudAgentValidator), /* billing deployments: a new workspace must choose a plan (Stripe-confirmed) before setup, indexing or reviews; older workspaces have no flag */ planRequired:v.optional(v.boolean()), planSelectedAt:v.optional(v.number()), plan:v.optional(v.string()), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), createdAt: v.number() }),
   // Workspace deletion receipts (M3): survive the purge; step + cursor make the purge resumable.
   workspaceDeletions: defineTable({ organizationId: org, name: v.string(), requestedBy: v.id("users"), requestedAt: v.number(), scheduledFor: v.number(), scheduledId: v.optional(v.id("_scheduled_functions")), status: v.string() /* scheduled | cancelled | purging | done */, step: v.number(), cursor: v.optional(v.string()), counts: v.record(v.string(), v.number()), startedAt: v.optional(v.number()), cancelledAt: v.optional(v.number()), completedAt: v.optional(v.number()) }).index("by_org", ["organizationId"]),
   // Daily analytics rollup per (repository, UTC day, PR author), recomputed from raw tables for
@@ -310,11 +318,19 @@ export default defineSchema({
     accountId: v.number(),
     active: v.boolean(),
     createdAt: v.number(),
+    // Granted App permissions (e.g. contents: "write" enables fix pull requests), from the
+    // installation token or the installation webhook.
+    permissions: v.optional(v.record(v.string(), v.string())),
+    permissionsCheckedAt: v.optional(v.number()),
+    accountType: v.optional(v.string()),
   })
     .index("by_installation", ["installationId"])
     .index("by_org", ["organizationId"]),
   repositories: defineTable({
     indexScheduledId:v.optional(v.id("_scheduled_functions")),
+    // Set when GitHub suspended or removed the installation; reinstalling or unsuspending re-enables
+    // only these repositories, never ones an admin turned off.
+    disabledBy: v.optional(v.union(v.literal("suspend"), v.literal("uninstall"))),
     // Incremental ingestion of human review comments for learned conventions.
     conventionsCursor: v.optional(v.number()),
     conventionsSyncedAt: v.optional(v.number()),
@@ -522,6 +538,8 @@ export default defineSchema({
     nativeP4: v.optional(v.object({requestedBy:v.id("users"),connectionId:v.id("providerConnections"),credentialDigest:v.string(),baselineJobId:v.id("indexJobs"),inputStorageId:v.id("_storage"),polling:v.optional(p4PollingReference),lease:v.optional(v.object({id:v.string(),expiresAt:v.number()}))})),
     retryScheduledId: v.optional(v.id("_scheduled_functions")),
     retryAt: v.optional(v.number()),
+    // When this review started waiting for the repository's first index (cleared once it runs).
+    indexWaitSince: v.optional(v.number()),
     findingsRecorded: v.optional(v.boolean()),
   })
     .index("by_org", ["organizationId"])
@@ -580,6 +598,86 @@ export default defineSchema({
     lastEventCreated: v.optional(v.number()),
     updatedAt: v.number(),
   }).index("by_org", ["organizationId"]).index("by_customer", ["customerId"]),
+  // Referral program (REFERRALS_ENABLED and BILLING_ENABLED only). One personal code per user. A
+  // referral attributes a newly created user to the code's owner, then binds their first workspace.
+  // The workspace is stored as referredOrganizationId: the referrer's records outlive its deletion.
+  referralCodes: defineTable({ userId: v.id("users"), code: v.string(), createdAt: v.number() }).index("by_code", ["code"]).index("by_user", ["userId"]),
+  referrals: defineTable({
+    referrerId: v.id("users"),
+    referredUserId: v.id("users"),
+    referredOrganizationId: v.optional(org),
+    source: v.union(v.literal("link"), v.literal("code")),
+    status: v.union(v.literal("signed_up"), v.literal("pending"), v.literal("active"), v.literal("ended"), v.literal("void")),
+    attributedAt: v.number(),
+    boundAt: v.optional(v.number()),
+    // Set from the first paid invoice; commissions accrue from windowStart until commissionEndsAt.
+    firstPaidAt: v.optional(v.number()),
+    windowStart: v.optional(v.number()),
+    commissionEndsAt: v.optional(v.number()),
+    noticeSentAt: v.optional(v.number()),
+    voidedAt: v.optional(v.number()),
+    voidReason: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_referrer", ["referrerId"]).index("by_referred_user", ["referredUserId"]).index("by_referred_org", ["referredOrganizationId"]),
+  // The referrer's earnings: one row per paid invoice of a referred workspace (cents). Accrued by a
+  // job scheduled from the invoice.paid webhook, and redeemable once availableAt passes.
+  referralCommissions: defineTable({
+    referralId: v.id("referrals"),
+    referrerId: v.id("users"),
+    referredOrganizationId: org,
+    invoiceId: v.string(),
+    subscriptionId: v.string(),
+    currency: v.string(),
+    base: v.number(), // cash collected excluding tax
+    rateBps: v.number(),
+    amount: v.number(),
+    reversed: v.number(), // clawed back by refunds and disputes
+    // The invoice's charges as last fetched from Stripe (cents); reversed is recomputed from them.
+    charges: v.optional(v.array(v.object({ id: v.string(), amount: v.number(), refunded: v.number(), dispute: v.optional(v.object({ id: v.string(), status: v.string(), amount: v.number() })), fetchedAt: v.number() }))),
+    status: v.union(v.literal("accrued"), v.literal("void")),
+    voidReason: v.optional(v.string()),
+    invoiceCreated: v.number(),
+    paidAt: v.number(),
+    availableAt: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_invoice", ["invoiceId"]).index("by_referrer", ["referrerId"]).index("by_referral", ["referralId"]),
+  // A referrer's credits and payouts, posted to Stripe with a stored idempotency key and a
+  // lookup before every post. review → processing → completed | failed; failed releases the balance.
+  referralRedemptions: defineTable({
+    userId: v.id("users"),
+    kind: v.union(v.literal("credit"), v.literal("payout")),
+    amount: v.number(),
+    currency: v.string(),
+    creditOrganizationId: v.optional(org), // the workspace whose Stripe customer balance is credited
+    customerId: v.optional(v.string()), // that workspace's Stripe customer when the credit was requested
+    accountId: v.optional(v.string()),
+    status: v.union(v.literal("review"), v.literal("processing"), v.literal("completed"), v.literal("failed")),
+    stripeId: v.optional(v.string()),
+    idempotencyKey: v.string(),
+    keyIssuedAt: v.number(),
+    indeterminateAt: v.optional(v.number()), // a post got a 5xx: never post again, only look it up
+    leaseId: v.optional(v.string()),
+    leaseUntil: v.optional(v.number()),
+    pausedAt: v.optional(v.number()),
+    attempts: v.number(),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  }).index("by_user", ["userId"]).index("by_status", ["status", "updatedAt"]).index("by_credit_org", ["creditOrganizationId"]),
+  // A referrer's Stripe Connect account for cash payouts (Accounts v2, recipient). Stripe holds the
+  // identity and bank details; this keeps only the account id and its transfer status as last read.
+  referralPayoutAccounts: defineTable({
+    userId: v.id("users"),
+    accountId: v.string(),
+    country: v.string(), // ISO-2, uppercase
+    transfers: v.union(v.literal("active"), v.literal("pending"), v.literal("restricted"), v.literal("unsupported"), v.literal("unknown")),
+    requirements: v.optional(v.string()), // requirements.summary.minimum_deadline.status: currently_due, eventually_due or past_due
+    onboardedAt: v.optional(v.number()), // first time transfers were active
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"]).index("by_account", ["accountId"]),
   billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number() }).index("by_org_period", ["organizationId", "period"]),
   stripeEvents: defineTable({ eventId: v.string(), type: v.string(), outcome: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Slack app installs (one per Slack workspace); the bot token is encrypted with scope `<org>:slack`.
@@ -875,7 +973,8 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_delivery", ["deliveryId"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_updated", ["updatedAt"]),
   // OAuth for the remote MCP endpoint. Secrets (codes, tokens) are stored only as SHA-256 hashes.
   oauthClients: defineTable({ clientId: v.string(), name: v.string(), redirectUris: v.array(v.string()), kind: v.string() /* registered | metadata */, fetchedAt: v.optional(v.number()), createdAt: v.number() }).index("by_client", ["clientId"]),
   oauthCodes: defineTable({ hash: v.string(), clientId: v.string(), clientName: v.string(), redirectUri: v.string(), codeChallenge: v.string(), resource: v.string(), scopes: v.array(v.string()), organizationId: org, userId: v.id("users"), expiresAt: v.number(), used: v.boolean(), grantId: v.optional(v.id("oauthGrants")) }).index("by_hash", ["hash"]),

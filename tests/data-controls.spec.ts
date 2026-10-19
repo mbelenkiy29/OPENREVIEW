@@ -87,6 +87,11 @@ test("workspace deletion: owner-only with a grace period, cancellable, then a re
   await t.run((ctx) => ctx.db.insert("organizationMembers", { organizationId: acme.organizationId, userId: adminId, role: "admin" }));
   const admin = await new SignJWT({}).setSubject(adminId).setProtectedHeader({ alg: "HS256" }).setIssuer("openreview").setAudience("openreview").setExpirationTime("30d").sign(new TextEncoder().encode(process.env.SESSION_SECRET));
   const rivalBefore = await owned(t, rival.organizationId, rival.repo._id);
+  // A referral that bound Acme belongs to its referrer (Rival's owner): it keeps only Acme's id.
+  const referralId = await t.run((ctx) => ctx.db.insert("referrals", { referrerId: rival.userId, referredUserId: acme.userId, referredOrganizationId: acme.organizationId, source: "link", status: "pending", attributedAt: Date.now(), boundAt: Date.now(), updatedAt: Date.now() }));
+  const commissionId = await t.run((ctx) => ctx.db.insert("referralCommissions", { referralId, referrerId: rival.userId, referredOrganizationId: acme.organizationId, invoiceId: "in_1", subscriptionId: "sub_1", currency: "usd", base: 10000, rateBps: 2000, amount: 2000, reversed: 0, status: "accrued", invoiceCreated: Date.now(), paidAt: Date.now(), availableAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now() }));
+  const payoutAccountId = await t.run((ctx) => ctx.db.insert("referralPayoutAccounts", { userId: acme.userId, accountId: "acct_1Acme", country: "US", transfers: "active", onboardedAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now() }));
+  const redemptionId = await t.run((ctx) => ctx.db.insert("referralRedemptions", { userId: acme.userId, kind: "credit", amount: 1000, currency: "usd", creditOrganizationId: acme.organizationId, status: "completed", stripeId: "cbtxn_1", idempotencyKey: "referral-credit:r:1", keyIssuedAt: Date.now(), attempts: 0, createdAt: Date.now(), updatedAt: Date.now(), completedAt: Date.now() }));
   // Only the owner, and only with the exact name.
   await expect(t.mutation(api.dataControls.requestDeletion, { token: admin, organizationId: acme.organizationId, confirmName: "Acme" })).rejects.toThrow(/Only the workspace owner/);
   await expect(t.mutation(api.dataControls.requestDeletion, { token: acme.token, organizationId: acme.organizationId, confirmName: "acme" })).rejects.toThrow(/exactly/);
@@ -103,6 +108,14 @@ test("workspace deletion: owner-only with a grace period, cancellable, then a re
   await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
   const receipt = (await t.run((ctx) => ctx.db.query("workspaceDeletions").collect())).find((d) => d.status === "done")!;
   expect(receipt.counts).toMatchObject({ codeChunks: 230, reviews: 1, findings: 1, reviewFindings: 1, chatMessages: 1, oauthTokens: 1, indexSkippedFiles: 1, organizations: 1 });
+  expect(await owned(t, acme.organizationId, acme.repo._id)).toEqual({});
+  expect(await t.run((ctx) => ctx.db.get(referralId))).toMatchObject({ referredOrganizationId: acme.organizationId, status: "pending" });
+  expect(await t.run((ctx) => ctx.db.get(commissionId))).toMatchObject({ referredOrganizationId: acme.organizationId, status: "accrued", amount: 2000 });
+  expect(await t.run((ctx) => ctx.db.get(redemptionId))).toMatchObject({ creditOrganizationId: acme.organizationId, status: "completed", amount: 1000 });
+  expect(await t.run((ctx) => ctx.db.get(payoutAccountId))).toMatchObject({ userId: acme.userId, accountId: "acct_1Acme" });
+  // Voiding them afterwards does not recreate Acme's audit log.
+  await t.mutation(internal.referralOps.voidReferral, { referralId, reason: "abuse" });
+  await t.mutation(internal.referralOps.voidCommission, { commissionId, reason: "abuse" });
   expect(await owned(t, acme.organizationId, acme.repo._id)).toEqual({});
   expect(await t.run(async (ctx) => Promise.all(acme.storage.map((id) => ctx.storage.get(id))))).toEqual([null, null, null]);
   // Rows reached through parents are gone too (reviewFindings, chat messages, tokens, skipped files).
@@ -187,6 +200,50 @@ test("retention, data sharing and webhook pruning", async () => {
     await ctx.db.insert("webhookDeliveries", { deliveryId: "old", event: "pull_request", payloadStorageId: oldPayload, status: "completed", attempts: 1, createdAt: Date.now() - 20 * 86_400_000, updatedAt: Date.now() - 20 * 86_400_000 });
     await ctx.db.insert("webhookDeliveries", { deliveryId: "new", event: "pull_request", payloadStorageId: newPayload, status: "completed", attempts: 1, createdAt: Date.now(), updatedAt: Date.now() });
   });
-  expect(await t.mutation(internal.dataControls.pruneWebhookPayloads, {})).toBe(1);
+  expect(await t.mutation(internal.dataControls.pruneWebhookPayloads, {})).toEqual({ deliveries: 1, events: 0 });
   expect(await t.run(async (ctx) => [(await ctx.db.query("webhookDeliveries").collect()).map((d) => d.deliveryId), await ctx.storage.get(oldPayload), Boolean(await ctx.storage.get(newPayload))])).toEqual([["new"], null, true]);
+});
+
+test("webhook payloads are pruned 14 days after their last processing attempt, whatever the outcome", async () => {
+  const t = convexTest(schema, modules);
+  const day = 86_400_000, now = Date.now(), old = now - 15 * day;
+  const { connectionId, payloads } = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Acme", createdAt: now });
+    const connectionId = await ctx.db.insert("providerConnections", { organizationId, kind: "gitlab", instance: "https://gitlab.example", name: "GitLab", credentials: "encrypted", webhookSecret: "encrypted", active: true, createdAt: now });
+    const payloads: Record<string, Id<"_storage">> = {};
+    // GitHub deliveries in every state, plus one that arrived long ago but was processed again recently.
+    for (const [deliveryId, status, updatedAt] of [["completed", "completed", old], ["failed", "failed", old], ["queued", "queued", old], ["processing", "processing", old], ["recent", "failed", now - day], ["retried", "completed", now - day]] as const) {
+      payloads[deliveryId] = await ctx.storage.store(new Blob(["{}"]));
+      await ctx.db.insert("webhookDeliveries", { deliveryId, event: "pull_request", payloadStorageId: payloads[deliveryId], status, attempts: 1, createdAt: deliveryId === "retried" ? old : updatedAt, updatedAt });
+    }
+    for (const [externalId, status, createdAt, updatedAt] of [["done", "completed", old, old], ["gave-up", "failed", old, old], ["never-ran", "queued", old, undefined], ["fresh", "failed", now - day, now - day], ["retried", "failed", old, now - day]] as const)
+      await ctx.db.insert("providerEvents", { connectionId, externalId, body: `{"id":"${externalId}"}`, eventType: "merge_request", status, attempts: 1, createdAt, ...(updatedAt ? { updatedAt } : {}) });
+    return { connectionId, payloads };
+  });
+  expect(await t.mutation(internal.dataControls.pruneWebhookPayloads, {})).toEqual({ deliveries: 4, events: 3 });
+  const deliveries = await t.run(async (ctx) => (await ctx.db.query("webhookDeliveries").collect()).map((d) => d.deliveryId).sort());
+  expect(deliveries).toEqual(["recent", "retried"]);
+  const files = await t.run(async (ctx) => Object.fromEntries(await Promise.all(Object.entries(payloads).map(async ([id, storageId]) => [id, Boolean(await ctx.storage.get(storageId))]))));
+  expect(files).toEqual({ completed: false, failed: false, queued: false, processing: false, recent: true, retried: true });
+  // Provider event rows stay (they dedupe redeliveries and list the delivery); only old bodies are cleared.
+  const events = await t.run(async (ctx) => Object.fromEntries((await ctx.db.query("providerEvents").collect()).map((e) => [e.externalId, { body: e.body, deleted: Boolean(e.bodyDeletedAt) }])));
+  expect(events).toEqual({ done: { body: "", deleted: true }, "gave-up": { body: "", deleted: true }, "never-ran": { body: "", deleted: true }, fresh: { body: '{"id":"fresh"}', deleted: false }, retried: { body: '{"id":"retried"}', deleted: false } });
+  // A second run finds nothing new; an event whose payload is gone is never processed or retried again.
+  expect(await t.mutation(internal.dataControls.pruneWebhookPayloads, {})).toEqual({ deliveries: 0, events: 0 });
+  const gaveUp = await t.run(async (ctx) => (await ctx.db.query("providerEvents").withIndex("by_delivery", (q) => q.eq("connectionId", connectionId).eq("externalId", "gave-up")).unique())!);
+  expect(await t.mutation(internal.providerConnections.claimEvent, { id: gaveUp._id })).toBe(false);
+  expect(await t.run((ctx) => ctx.db.get(gaveUp._id))).toMatchObject({ status: "failed", attempts: 1 });
+  // Redeliveries of a pruned event are still recognised as duplicates.
+  expect(await t.mutation(internal.providerConnections.receive, { connectionId, externalId: "done", body: "{}" })).toBe((await t.run(async (ctx) => (await ctx.db.query("providerEvents").withIndex("by_delivery", (q) => q.eq("connectionId", connectionId).eq("externalId", "done")).unique())!._id)));
+});
+
+test("webhook pruning continues in further batches until the backlog is cleared", async () => {
+  const t = convexTest(schema, modules);
+  const old = Date.now() - 20 * 86_400_000;
+  await t.run(async (ctx) => {
+    for (let i = 0; i < 230; i++) await ctx.db.insert("webhookDeliveries", { deliveryId: "d" + i, event: "push", payloadStorageId: await ctx.storage.store(new Blob(["{}"])), status: "completed", attempts: 1, createdAt: old, updatedAt: old });
+  });
+  expect(await t.mutation(internal.dataControls.pruneWebhookPayloads, {})).toEqual({ deliveries: 200, events: 0 });
+  await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
+  expect(await t.run(async (ctx) => (await ctx.db.query("webhookDeliveries").collect()).length)).toBe(0);
 });

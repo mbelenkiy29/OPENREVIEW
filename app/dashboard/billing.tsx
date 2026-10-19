@@ -2,7 +2,8 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { backend } from "../../src/server";
 import { checkoutTrialEnd } from "../../src/billing";
-import { openBillingPortal, startCheckout } from "./actions";
+import { formatMoney, referralConfig, referralDisclosure, referralFact } from "../../src/referrals";
+import { applyReferralCode, openBillingPortal, startCheckout } from "./actions";
 
 const day = (ms: number) => new Date(ms).toLocaleDateString("en-US", { timeZone: "UTC", dateStyle: "medium" });
 // Settings → Billing: plan, quota usage, seats, and Stripe Checkout / Customer Portal (cloud only).
@@ -19,17 +20,25 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
       <h2 id="plan-heading">{subscribed ? "Starter plan" : "Free trial"}</h2>
       <dl className="facts">
         <dt>Status</dt><dd><span className={`badge ${s.status}`}>{s.status.replaceAll("_", " ")}</span></dd>
-        {!subscribed && <><dt>Trial ends</dt><dd>{s.trialStarted ? day(s.trialEndsAt) : `${s.trialDays} days after the first review`}</dd></>}
+        {!subscribed && <><dt>Trial ends</dt><dd>{s.trialStarted ? day(s.trialEndsAt) : s.planRequired ? `${s.trialDays} days after you add a card` : `${s.trialDays} days after the first review`}</dd></>}
         {s.currentPeriodEnd && <><dt>Current period ends</dt><dd>{day(s.currentPeriodEnd)}</dd></>}
         {s.pastDueSince && <><dt>Past due since</dt><dd>{day(s.pastDueSince)} · reviews pause after {s.graceDays} days</dd></>}
         <dt>Reviews this month</dt><dd>{subscribed ? `${s.used} · unlimited (fair use: ${s.limit})` : `${s.used} of ${s.limit ?? "unlimited"}`}{s.blocked ? ` · ${s.blocked} blocked` : ""}</dd>
         <dt>Seats</dt><dd>{s.activeSeats} active (owners, admins and members; viewers are free){s.billedSeats !== null ? ` · ${s.billedSeats} billed` : ""}</dd>
         <dt>Starter plan</dt><dd>{price ? `${price} · ` : ""}unlimited reviews, fair use {s.reviewsPerSeat} per seat each month</dd>
+        {s.referral?.referred && <><dt>Referral</dt><dd>{referralFact(s.referral, referralConfig().discountLabel)}</dd></>}
+        {s.referralCredit ? <><dt>Referral credit</dt><dd>{formatMoney(s.referralCredit)} applied from referral earnings · Stripe takes it off the next invoices</dd></> : null}
       </dl>
       {s.admin ? <div className="row">
         {!subscribed && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><button className="primary">{checkoutTrialEnd(s.trialEndsAt, Date.now()) ? "Add payment method" : "Subscribe with Stripe"}</button></form>}
         {s.hasCustomer && <form action={openBillingPortal}><input type="hidden" name="organizationId" value={organizationId} /><button>Manage billing</button></form>}
       </div> : <p className="muted">Only workspace owners and admins can change billing.</p>}
     </section>
+    {s.referral?.canApply && <section aria-labelledby="referral-code-heading">
+      <h2 id="referral-code-heading">Referral code</h2>
+      <p>Were you referred by someone already on OpenReview? Add their code before you subscribe{referralConfig().discountLabel ? ` to get ${referralConfig().discountLabel}` : ""}.</p>
+      <form action={applyReferralCode} className="form-grid"><input type="hidden" name="organizationId" value={organizationId} /><label>Code<input name="code" defaultValue={filters.referral ?? ""} required maxLength={64} autoComplete="off" spellCheck={false} /></label><button>Apply code</button></form>
+      <p className="muted">{referralDisclosure(null)}</p>
+    </section>}
   </>;
 }

@@ -12,7 +12,7 @@ import {
 } from "../src/engine/diff";
 import { eligibleFile, indexRepository, moduleReferencesCurrent, redact } from "../src/engine/indexer";
 import { retrieve } from "../src/engine/retrieval";
-import { grounded, reviewChange, reviewSummarySchema, resolutionSchema } from "../src/engine/review";
+import { capReviewScore, grounded, reviewChange, reviewScoreCeiling, reviewSummarySchema, resolutionSchema } from "../src/engine/review";
 import { validateModelUrl, HttpModel } from "../src/engine/model";
 import { sourceChunks } from "../src/engine/chunks";
 import type {
@@ -549,7 +549,9 @@ test("merge readiness is recorded separately from assessment confidence and vali
  const finding={...candidate,commitSha:input.headSha,agent:"security",fingerprint:"score",severity:"critical" as const};
  const validator=reviewSummarySchema(undefined,[],[finding]);
  assert.equal(validator.safeParse({summary,approvalAssessment}).success,false);
- for(const value of [-1,1.5,6,5,2])assert.equal(validator.safeParse({summary,approvalAssessment,reviewScore:{...score,value}}).success,false);
+ for(const value of [-1,1.5,6])assert.equal(validator.safeParse({summary,approvalAssessment,reviewScore:{...score,value}}).success,false);
+ // Over-cap scores parse; reviewChange clamps them so the model cannot fail the review.
+ for(const value of [5,2])assert.equal(validator.safeParse({summary,approvalAssessment,reviewScore:{...score,value}}).success,true);
  assert.equal(validator.parse({summary,approvalAssessment,reviewScore:score}).approvalAssessment?.confidence,1);
  assert.equal(validator.safeParse({summary,reviewScore:{...score,reason:"Regression tests passed and confirm authorization works."}}).success,false);
  assert.equal(validator.safeParse({summary,reviewScore:{...score,reason:"Requirements are confirmed at https://linear.app/acme/issue/ENG-99/invented"}}).success,false);
@@ -557,6 +559,35 @@ test("merge readiness is recorded separately from assessment confidence and vali
  const result=await reviewChange(input,new FixtureModel());
  assert.equal(result.metadata.reviewScore?.value,1);assert.match(result.summary,/### Confidence score\n\*\*1\/5\*\* — /);
  assert.equal(reviewSummary({overview:summary,score:result.metadata.reviewScore,files:[],findings:[],resolved:[],assessment:approvalAssessment,runtimeEvidence:undefined,coverageLimits:[],contextCount:0,candidates:0,suppressed:0},["risk"]).includes("### Confidence score"),false);
+});
+
+test("an over-cap confidence score is clamped instead of failing the review, and verified findings still render",async()=>{
+ class OverConfident extends FixtureModel {
+  async generate<T>(request:ModelRequest,schema:z.ZodType<T>){
+   if(request.task!=="summary")return super.generate(request,schema);
+   this.calls.push(request.task);
+   return {value:schema.parse({summary:"This change updates authentication. One high severity authorization defect was verified.",reviewScore:{value:4,reason:"Only minor polish remains in the authentication change."}}),usage:{task:request.task,provider:"fixture",model:"deterministic",inputTokens:0,outputTokens:0,latencyMs:0,estimatedCost:0,cached:false}};
+  }
+ }
+ const model=new OverConfident();
+ const result=await reviewChange(input,model);
+ assert.equal(model.calls.filter(c=>c==="summary").length,1);
+ assert.ok(result.findings.length>0);assert.ok(result.findings.every(f=>f.severity==="high"));
+ assert.match(result.summary,/Deleted accounts remain authorized/);
+ assert.deepEqual(result.metadata.reviewScore,{value:2,reason:"Unresolved verified findings cap this score at 2/5 (the summary proposed 4/5). Only minor polish remains in the authentication change."});
+ assert.equal(result.metadata.verdict,"changes");
+ assert.match(result.summary,/### Confidence score\n\*\*2\/5\*\* — Unresolved verified findings cap this score at 2\/5 \(the summary proposed 4\/5\)\.\n/);
+ assert.equal(capReviewScore({value:5,reason:"x".repeat(2000)},[{severity:"critical"}])?.reason.length,2000);
+ assert.deepEqual(capReviewScore({value:3,reason:"Within the cap for a medium finding."},[{severity:"medium"}]),{value:3,reason:"Within the cap for a medium finding."});
+ assert.equal(reviewScoreCeiling([]),5);assert.equal(reviewScoreCeiling([{severity:"low"}]),4);
+});
+
+test("the model adapter accepts an over-cap summary score in one request instead of exhausting repairs",async(t)=>{
+ let calls=0;
+ t.mock.method(globalThis,"fetch",async()=>{calls++;return Response.json({choices:[{message:{content:JSON.stringify({summary:"The change updates the authentication guard for missing users.",reviewScore:{value:5,reason:"No remaining issues were apparent in the guard change."}})}}],usage:{prompt_tokens:1,completion_tokens:1}});});
+ const finding={...candidate,commitSha:input.headSha,agent:"security",fingerprint:"cap",severity:"high" as const};
+ const response=await new HttpModel({provider:"openai",apiKey:"test-only-key",model:"fixture-model",inputCostPerMillion:0,outputCostPerMillion:0}).generate({task:"summary",system:"Summarize",input:{}},reviewSummarySchema(undefined,[],[finding]));
+ assert.equal(calls,1);assert.equal(capReviewScore(response.value.reviewScore,[finding])?.value,2);
 });
 
 test("structured summaries reject malformed control characters while preserving readable Markdown",()=>{

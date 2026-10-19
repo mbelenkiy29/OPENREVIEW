@@ -6,25 +6,30 @@ import { api } from "../../convex/_generated/api";
 import { backend } from "../../src/server";
 import { SettingsNavigation } from "./settings-navigation";
 import { PortalDisclosure } from "./portal-disclosure";
+import { UserJotButton } from "../userjot";
+import { userJotConfig } from "../../src/userjot";
 import {ThemePicker} from "../theme";
 import { Mark } from "../ui/logo";
 import {analyticsPeriod} from "../../src/analytics-period";
 import { BarList, LineChart } from "../ui/charts";
 import { setMinutesPerFinding } from "./actions";
+import { referralConfig } from "../../src/referrals";
 
-const settingsGroups = [
+// Read per request: Referrals appears only while the referral program is on (unknown keys 404).
+const settingsGroups = () => [
   { label: "Repositories", links: [["repositories", "Add/Remove Repos"], ["providers", "Code Providers"]] },
   { label: "Agent Config", links: [["review", "Code Review"], ["agents", "Personal agents"], ["automation", "Runtime & Approval"]] },
   { label: "Admin", links: [["teams", "Teams & Inheritance"], ["people", "People"], ["usage", "Usage"], ["billing", "Billing"], ["notifications", "Notifications"], ["data", "Data & deletion"]] },
   { label: "Developer", links: [["keys", "API Keys"], ["audit", "Audit Log"]] },
-  { label: "Personal", links: [["account", "Account & sessions"]] },
+  { label: "Personal", links: [["account", "Account & sessions"], ...(referralConfig().enabled ? [["referrals", "Referrals"]] : [])] },
 ];
-export const settingsNavigation = settingsGroups.flatMap(group => group.links);
+export const settingsNavigation = () => settingsGroups().flatMap(group => group.links);
 
 export function PortalNav({ organization, login, route, section, team,scopeSelector,children }: { organization: string; login: string; route: string; section?: string; team?:string;scopeSelector:ReactNode;children: ReactNode }) {
   const href=(path:string)=>path+(team!==undefined?"?team="+encodeURIComponent(team):"");
-  const secondary = route === "memory" ? [["rules", "Custom rules"], ["clusters", "Cross-repo context"], ["knowledge", "Knowledge Base"], ["preferences", "Learned preferences"], ["integrations", "Integrations"]] : route === "settings" ? settingsNavigation : route === "pulls" ? [["", "All Pull Requests"], ["findings", "Findings"]] : [];
-  return <><div className="portal-top"><div className="portal-identity"><Link className="brand" href={href("/dashboard/analytics")}><Mark /> OpenReview</Link><PortalDisclosure className="scope-selector" label={organization}><div className="scope-menu">{scopeSelector}</div></PortalDisclosure><PortalDisclosure className="profile" label={`@${login}`}><div className="profile-menu"><ThemePicker/>{children}<Link href="/dashboard/onboarding">Workspace setup</Link><Link href="/dashboard/settings/agents">Personal settings</Link></div></PortalDisclosure></div><nav className="primary-nav" aria-label="Main navigation">{[["analytics", "Analytics"], ["chat", "Chat"], ["memory", "Memory"], ["pulls", "Pull Requests"], ["settings", "Settings"]].map(([key,label]) => <Link key={key} href={href(`/dashboard/${key}`)} aria-current={route === key ? "page" : undefined}>{label}</Link>)}</nav></div>{secondary.length > 0 && <aside className="secondary-nav">{route === "settings" ? <SettingsNavigation groups={settingsGroups} section={section} team={team} /> : <nav aria-label={`${route} navigation`}>{secondary.map(([key,label]) => <Link key={key} href={href(`/dashboard/${route}${key ? `/${key}` : ""}`)} aria-current={(section ?? (route === "memory" ? "rules" : "")) === key ? "page" : undefined}>{label}</Link>)}</nav>}</aside>}</>;
+  const feedback = Boolean(userJotConfig());
+  const secondary = route === "memory" ? [["rules", "Custom rules"], ["clusters", "Cross-repo context"], ["knowledge", "Knowledge Base"], ["preferences", "Learned preferences"], ["integrations", "Integrations"]] : route === "settings" ? settingsNavigation() : route === "pulls" ? [["", "All Pull Requests"], ["findings", "Findings"]] : [];
+  return <><div className="portal-top"><div className="portal-identity"><Link className="brand" href={href("/dashboard/analytics")}><Mark /> OpenReview</Link><PortalDisclosure className="scope-selector" label={organization}><div className="scope-menu">{scopeSelector}</div></PortalDisclosure><PortalDisclosure className="profile" label={`@${login}`}><div className="profile-menu"><ThemePicker/>{children}<Link href="/dashboard/onboarding">Workspace setup</Link><Link href="/dashboard/settings/agents">Personal settings</Link>{referralConfig().enabled && <Link href="/dashboard/settings/referrals">Refer someone</Link>}{feedback && <div className="profile-feedback"><UserJotButton className="link-button">Request a feature</UserJotButton><UserJotButton className="link-button">Report a bug</UserJotButton><Link href="/feedback/roadmap">Roadmap</Link></div>}</div></PortalDisclosure></div><nav className="primary-nav" aria-label="Main navigation">{[["analytics", "Analytics"], ["chat", "Chat"], ["memory", "Memory"], ["pulls", "Pull Requests"], ["settings", "Settings"]].map(([key,label]) => <Link key={key} href={href(`/dashboard/${key}`)} aria-current={route === key ? "page" : undefined}>{label}</Link>)}</nav></div>{secondary.length > 0 && <aside className="secondary-nav">{route === "settings" ? <SettingsNavigation groups={settingsGroups()} section={section} team={team} /> : <nav aria-label={`${route} navigation`}>{secondary.map(([key,label]) => <Link key={key} href={href(`/dashboard/${route}${key ? `/${key}` : ""}`)} aria-current={(section ?? (route === "memory" ? "rules" : "")) === key ? "page" : undefined}>{label}</Link>)}</nav>}</aside>}</>;
 }
 export async function AnalyticsView({token,organizationId,repositories,filters}: {token:string;organizationId:Id<"organizations">;repositories:Doc<"repositories">[];filters:Record<string,string|undefined>}) {
   const now = new Date(), start = new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1)).toISOString().slice(0,10);

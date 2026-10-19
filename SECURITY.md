@@ -1,6 +1,12 @@
 # Security policy
 
-Do not post live credentials, private repository source, or exploitable deployment details in public issues. Contact the operator of the affected OpenReview installation privately; until a project maintainer security address is established, use a private repository security advisory rather than a public issue.
+## Reporting a vulnerability
+
+Email **mbelenkiy29@gmail.com** with "Security" in the subject line, a minimal reproduction and the affected version or URL. This address covers the open-source project and the hosted service at openreview.tech; the same contact is published at https://openreview.tech/.well-known/security.txt, and https://openreview.tech/security describes how the hosted service handles code. For a self-hosted installation, also contact its operator.
+
+Do not post live credentials, private repository source, or exploitable deployment details in public issues. While testing, use only your own accounts and workspaces, don't access or change other people's data, and don't run denial-of-service attacks.
+
+## Running OpenReview securely
 
 Operators must use HTTPS for web/backend, strong independent secrets, protected Convex administrative endpoints, trusted reverse proxies, encrypted disks/backups, and current dependency patches. Restrict inbound access and model endpoint configuration. Keep GitHub App private keys out of client environments. Rotate compromised App/model/API/session credentials promptly.
 
@@ -8,4 +14,4 @@ The application verifies webhook HMACs, OAuth/install state, signed session toke
 
 Untrusted repository code must never run on the application host. Optional runtime validation must use an isolated container with explicit limits and no application secrets. Source/model text cannot grant permissions or change system instructions.
 
-No production security audit or Greptile parity is claimed. Report suspected tenant isolation, webhook authentication, or unsafe execution defects with a minimal reproduction and affected version.
+No independent security audit has been done. Tenant isolation, webhook authentication and unsafe execution defects are especially welcome reports.

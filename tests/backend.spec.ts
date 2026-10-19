@@ -1524,15 +1524,16 @@ test("team isolation, inherited settings, bridge replay and revocation fail clos
 test("agent defaults inherit per workspace, personal overrides reset, and administration stays isolated",async()=>{
  const {t,alice,bob,organizationId}=await setup();
  const other=await t.mutation(api.users.createOrganization,{token:bob,name:"Other"});
- expect((await t.query(api.bridge.personal,{token:alice,organizationId})).agent).toBe("codex");
- await t.mutation(api.bridge.saveWorkspaceAgent,{token:alice,organizationId,agent:"claude"});
+ expect((await t.query(api.bridge.personal,{token:alice,organizationId})).agent).toBe("claude"); // Claude Code is the default until the workspace or person chooses
+ expect((await t.query(api.bridge.personal,{token:alice,organizationId})).githubLinked).toBe(true);
+ await t.mutation(api.bridge.saveWorkspaceAgent,{token:alice,organizationId,agent:"codex"});
  await t.mutation(api.bridge.saveWorkspaceAgent,{token:bob,organizationId:other,agent:"cursor"});
- expect((await t.query(api.bridge.personal,{token:alice,organizationId})).agent).toBe("claude");
+ expect((await t.query(api.bridge.personal,{token:alice,organizationId})).agent).toBe("codex");
  await expect(t.query(api.bridge.personal,{token:bob,organizationId})).rejects.toThrow("Forbidden");
  await expect(t.mutation(api.bridge.saveWorkspaceAgent,{token:bob,organizationId,agent:"codex"})).rejects.toThrow("Forbidden");
  const invitationId=await t.mutation(api.users.invite,{token:alice,organizationId,githubLogin:"bob",role:"viewer"});
  await t.mutation(api.users.acceptInvitation,{token:bob,invitationId});
- expect(await t.query(api.bridge.personal,{token:bob,organizationId})).toMatchObject({agent:"claude",workspaceAgent:"claude",canManageWorkspace:false});
+ expect(await t.query(api.bridge.personal,{token:bob,organizationId})).toMatchObject({agent:"codex",workspaceAgent:"codex",canManageWorkspace:false});
  await expect(t.mutation(api.bridge.saveWorkspaceAgent,{token:bob,organizationId,agent:"cursor"})).rejects.toThrow("Forbidden");
  const hash="e".repeat(64),code="f".repeat(12);
  await t.mutation(api.bridge.startPair,{secret:"integration-service-secret",hash,code,name:"Other workspace bridge"});
@@ -1540,15 +1541,15 @@ test("agent defaults inherit per workspace, personal overrides reset, and admini
  await t.mutation(api.bridge.approvePair,{token:bob,organizationId:other,code});
  expect((await t.query(api.bridge.personal,{token:bob,organizationId})).devices).toEqual([]);
  expect((await t.query(api.bridge.personal,{token:bob,organizationId:other})).devices).toHaveLength(1);
- await t.mutation(api.bridge.savePersonal,{token:bob,agent:"codex"});
- for(const id of [organizationId,other])expect((await t.query(api.bridge.personal,{token:bob,organizationId:id})).agent).toBe("codex");
+ await t.mutation(api.bridge.savePersonal,{token:bob,agent:"cursor"});
+ for(const id of [organizationId,other])expect((await t.query(api.bridge.personal,{token:bob,organizationId:id})).agent).toBe("cursor");
  await t.mutation(api.bridge.savePersonal,{token:bob});
- const inherited=await t.query(api.bridge.personal,{token:bob,organizationId});expect(inherited.agent).toBe("claude");expect(inherited.personalAgent).toBeUndefined();
+ const inherited=await t.query(api.bridge.personal,{token:bob,organizationId});expect(inherited.agent).toBe("codex");expect(inherited.personalAgent).toBeUndefined();
  expect((await t.query(api.bridge.personal,{token:bob,organizationId:other})).agent).toBe("cursor");
- expect((await t.query(api.bridge.personal,{token:bob})).agent).toBe("codex");
+ expect((await t.query(api.bridge.personal,{token:bob})).agent).toBe("claude");
  await t.mutation(api.bridge.saveWorkspaceAgent,{token:alice,organizationId,agent:"cursor"});
  expect((await t.query(api.bridge.personal,{token:bob,organizationId})).agent).toBe("cursor");
- expect((await t.query(api.scopes.activity,{token:alice,organizationId})).filter(e=>e.action==="agent.default_changed").map(e=>e.target)).toEqual(["cursor","claude"]);
+ expect((await t.query(api.scopes.activity,{token:alice,organizationId})).filter(e=>e.action==="agent.default_changed").map(e=>e.target)).toEqual(["cursor","codex"]);
 });
 
 test("completed indexing filters excluded knowledge changes while preserving source edits and removals",async()=>{
@@ -1897,8 +1898,12 @@ test("failed provider delivery retry requires workspace admin, preserves signed 
  await t.mutation(api.providerConnections.retryEvent,{token:alice,id});
  const event=await t.run(ctx=>ctx.db.get(id));expect(event).toMatchObject({status:"queued",attempts:0,body:"verified-original",externalId:"original-delivery"});
  await expect(t.mutation(api.providerConnections.retryEvent,{token:alice,id})).rejects.toThrow("Only failed");
- const list=await t.query(api.providerConnections.events,{token:alice,connectionId});expect(list[0]).not.toHaveProperty("body");
+ const list=await t.query(api.providerConnections.events,{token:alice,connectionId});expect(list[0]).not.toHaveProperty("body");expect(list[0].payloadDeleted).toBe(false);
  await expect(t.query(api.providerConnections.events,{token:bob,connectionId})).rejects.toThrow("Forbidden");
+ // After 14 days the payload is pruned; the delivery stays listed but can no longer be retried.
+ await t.run(ctx=>ctx.db.patch(id,{status:"failed",body:"",bodyDeletedAt:Date.now()}));
+ await expect(t.mutation(api.providerConnections.retryEvent,{token:alice,id})).rejects.toThrow("can no longer be retried");
+ expect((await t.query(api.providerConnections.events,{token:alice,connectionId}))[0].payloadDeleted).toBe(true);
  const reviewId=await t.run(async ctx=>{
   const repositoryId=await ctx.db.insert("repositories",{organizationId,connectionId,externalId:"r_native",fullName:"acme/source",defaultBranch:"main",enabled:true,indexStatus:"ready",createdAt:Date.now()});
   const resultStorageId=await ctx.storage.store(new Blob([JSON.stringify({metadata:{suppressions:[{title:"Rejected candidate",agent:"correctness",reason:"Quote does not match source"}],coverageLimits:["No runtime evidence"]},privateContent:"not exposed"})]));

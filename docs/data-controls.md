@@ -19,7 +19,7 @@ Admins can limit how long data is kept. Both limits are between 7 and 3,650 days
 
 A daily job applies the settings in small batches, and every change to them is recorded in the audit log.
 
-Separately, processed webhook payloads, which are not linked to any workspace, are deleted across the deployment after 14 days.
+Separately, webhook payloads are deleted 14 days after they were last processed, whether processing succeeded, failed or never finished. A job every six hours handles this across the deployment. GitHub deliveries, which are not linked to any workspace, are deleted along with their payload files. Deliveries from other code hosts keep their record, which stops a redelivery from being processed twice and still appears under **Recent deliveries**. Their payload is cleared, so they can no longer be retried.
 
 ## Deleting a workspace
 
@@ -29,6 +29,6 @@ Separately, processed webhook payloads, which are not linked to any workspace, a
    - If the workspace subscribes during the grace period, the deletion is cancelled when the purge would start, and the audit log records `workspace.deletion_blocked`.
 3. **Purge.** The purge removes every workspace-owned row and the files those rows reference: repositories, indexes, embeddings, reviews, findings, rules, conventions, chats, members, teams, settings, keys, OAuth grants, SSO, billing records and the audit log.
    - It runs in small transactions and records its progress in a deletion receipt, so it resumes after an interruption. Running a step twice deletes nothing extra.
-   - The tables it keeps, with reasons, are listed in `sharedTables` in `convex/dataControls.ts`: personal accounts and sessions, deployment-wide budgets and replay-protection receipts.
+   - The tables it keeps, with reasons, are listed in `sharedTables` in `convex/dataControls.ts`: personal accounts and sessions, deployment-wide budgets and replay-protection receipts, and on the hosted cloud the referrer's referral records (attributions, commissions, credits and payouts, and their Stripe payout account link), which keep only the deleted workspace's id.
    - A test fails if a new table is in neither the purge plan nor that list.
 4. **Provider access.** OpenReview does not change settings at your code providers. After deletion, uninstall the GitHub App (or disconnect GitLab, Bitbucket, Azure DevOps, Slack, Linear, Jira, Confluence and Notion) from each provider's own settings.

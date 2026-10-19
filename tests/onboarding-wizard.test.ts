@@ -26,26 +26,38 @@ test("setup resumes at the first step still needed and guards later steps", () =
   assert.equal(nextStep("done", true), undefined);
   assert.equal(previousStep("connect", true), undefined);
   assert.equal(previousStep("summary", false), "indexing");
-  assert.deepEqual([...wizardSteps].slice(3, 7), [...configureSteps]);
+  assert.deepEqual([...wizardSteps].slice(4, 8), [...configureSteps]);
   assert.equal(needsSetup({ onboarding: { startedAt: 1 } }), true);
   assert.equal(needsSetup({ onboarding: { startedAt: 1, completedAt: 2 } }), false);
   assert.equal(needsSetup({}), false);
   assert.equal(needsSetup(null), false);
 });
 
-test("the plan step exists only where the deployment bills workspaces", () => {
+test("the plan step comes right after the workspace, only where the deployment bills workspaces", () => {
   assert.deepEqual(stepsFor(true), wizardSteps);
   assert.deepEqual(stepsFor(false), wizardSteps.filter((s) => s !== "plan"));
-  assert.equal(nextStep("team", true), "plan");
-  assert.equal(nextStep("team", false), "done");
-  assert.equal(nextStep("plan", false), "done", "a stale plan link still moves forward");
-  assert.equal(previousStep("done", true), "plan");
-  assert.equal(previousStep("done", false), "team");
+  assert.deepEqual(wizardSteps.slice(0, 3), ["workspace", "plan", "connect"]);
+  assert.equal(nextStep("plan", true), "connect");
+  assert.equal(nextStep("workspace", false), "connect");
+  assert.equal(nextStep("team", true), "done");
+  assert.equal(previousStep("plan", true), undefined);
+  assert.equal(previousStep("connect", true), undefined, "connect is the first step with no way back on deployments without billing too");
+  assert.equal(previousStep("indexing", true), "connect");
+  // Optional for workspaces created before plans were required.
   assert.equal(resolveStep("plan", ready), "done");
   assert.equal(resolveStep("plan", { ...ready, billing: true }), "plan");
-  assert.equal(resolveStep("plan", { ...ready, billing: true, indexingStarted: false }), "connect");
+  assert.equal(resolveStep("plan", { ...ready, billing: true, indexingStarted: false }), "plan", "the plan comes before connecting");
   assert.equal(resolveStep(undefined, { ...ready, cursor: "team" }), "done");
-  assert.equal(resolveStep(undefined, { ...ready, cursor: "team", billing: true }), "plan");
+  assert.equal(resolveStep(undefined, { ...ready, cursor: "plan", billing: true }), "indexing");
+});
+
+test("a new workspace on a billing deployment cannot get past the plan step until a plan is confirmed", () => {
+  const fresh = { hasWorkspace: true, connected: false, selected: 0, indexingStarted: false, completed: false, billing: true, planMissing: true };
+  for (const requested of [undefined, "connect", "indexing", "tools", "done", "workspace", "bogus"]) assert.equal(resolveStep(requested, fresh), "plan", String(requested));
+  assert.equal(resolveStep(undefined, { ...ready, billing: true, planMissing: true }), "plan");
+  assert.equal(resolveStep(undefined, { ...fresh, planMissing: false }), "connect");
+  assert.equal(resolveStep("tools", { ...ready, billing: false, planMissing: true }), "tools", "without billing nothing is required");
+  assert.equal(resolveStep(undefined, { ...fresh, hasWorkspace: false }), "workspace");
 });
 
 test("each configuration step owns distinct, real workspace settings and parses only its form", () => {

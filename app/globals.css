@@ -130,6 +130,12 @@ a {
 a:hover {
   text-decoration: underline;
 }
+/* Links inside running text on public pages are underlined, so they don't rely on colour alone. */
+.docs-content :where(p, li, td) a,
+.consent p a,
+.auth p a {
+  text-decoration: underline;
+}
 h1,
 h2,
 h3,
@@ -486,6 +492,23 @@ form:not(.toolbar):not(.form-grid):not(.feedback):not(.sign-in-form) {
 .profile-menu form {
   display: flex;
   gap: 6px;
+}
+/* Feedback entries (app/userjot.tsx): buttons that read as the menu's links. */
+.profile-feedback {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.profile-feedback .link-button {
+  color: var(--accent);
+  text-decoration: none;
+  text-align: left;
+}
+.profile-feedback .link-button:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 .scope-menu {
   left: 0;
@@ -949,6 +972,22 @@ tr:last-child td {
   border-radius: var(--radius-lg);
   background: var(--bg);
   box-shadow: var(--shadow-popover);
+}
+/* The UserJot launcher (40px, 20px from the bottom right) sits below toasts and, on phones, the
+   consent banner, and clear of the controls at the page's bottom right, so none hide behind it. */
+[data-userjot] .toast {
+  bottom: 72px;
+}
+[data-userjot] .site-footer {
+  padding-bottom: 80px;
+}
+[data-userjot] .wizard-bar {
+  padding-right: 76px;
+}
+@media (max-width: 460px) {
+  [data-userjot] .consent {
+    bottom: 72px;
+  }
 }
 .toast.success {
   box-shadow: var(--shadow-popover), inset 0 0 0 1px var(--success);
@@ -1802,8 +1841,39 @@ form.catalog-review {
   color: var(--muted);
   margin: 18px 10px 4px;
 }
-.docs-nav > div:first-child h2 {
+.docs-nav > div:first-child h2,
+.docs-nav .docs-search + .sr-only + div h2 {
   margin-top: 0;
+}
+.docs-search {
+  position: relative;
+  margin: 0 0 16px;
+}
+.docs-search input {
+  width: 100%;
+  padding-right: 32px;
+}
+.docs-search input:focus + kbd,
+.docs-search input:not(:placeholder-shown) + kbd {
+  display: none;
+}
+.docs-search kbd {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.docs-nav a small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
 }
 .docs-nav ul {
   list-style: none;
@@ -1875,6 +1945,53 @@ form.catalog-review {
   overflow-x: auto;
   max-width: 100%;
 }
+/* Feedback board (app/feedback): the UserJot embed inside the site frame. */
+.board-page {
+  width: 100%;
+  max-width: 1252px;
+  margin: 0 auto;
+  padding: 40px 24px 96px;
+  min-width: 0;
+}
+.board-intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px 24px;
+  margin-bottom: 24px;
+}
+.board-intro h1 {
+  font-size: 40px;
+  letter-spacing: -0.022em;
+  margin-bottom: 8px;
+}
+.board-intro p {
+  margin: 0;
+  max-width: 560px;
+}
+.board-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.board-embed {
+  height: max(640px, calc(100vh - 240px));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg);
+}
+.board-embed iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.board-note {
+  margin: 12px 0 0;
+  font-size: 13px;
+}
 
 /* ---------- Landing ---------- */
 .landing main {
@@ -1940,6 +2057,12 @@ form.catalog-review {
   min-height: 42px;
   padding: 10px 18px;
   font-size: 15px;
+}
+.hero .hero-note {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
 }
 .hero-links {
   display: flex;
@@ -2048,6 +2171,17 @@ form.catalog-review {
   font-size: 14px;
   color: var(--muted);
   line-height: 1.55;
+}
+.landing .feature-card > .pricing-action {
+  margin-top: auto;
+  padding-top: 12px;
+}
+.stage-hint {
+  margin: 20px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
 }
 .landing .feature-card .price {
   font-size: 26px;
@@ -2194,7 +2328,7 @@ form.catalog-review {
   flex-wrap: wrap;
 }
 
-/* Landing replicas: real dashboard markup rendered statically inside a window frame. */
+/* Landing replicas: real dashboard markup inside a window frame, interactive with sample data. */
 .replica {
   margin: 0;
   min-width: 0;
@@ -2221,7 +2355,6 @@ form.catalog-review {
 }
 .replica-bar span {
   flex: 1;
-  margin-right: 46px;
   text-align: center;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -2230,8 +2363,17 @@ form.catalog-review {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.replica-bar em {
+  width: 42px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: normal;
+  color: var(--muted);
+  text-align: right;
+}
 .replica-screen {
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .replica-screen.tall {
   height: 880px;
@@ -2263,14 +2405,153 @@ form.catalog-review {
 .replica h1 {
   font-size: 28px;
 }
+/* Code in a demo window wraps instead of scrolling sideways, so nothing needs keyboard scrolling. */
 .replica pre {
   max-height: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.replica .activity-chart {
+  overflow: hidden;
 }
 .replica .activity-chart > div {
   min-width: 0;
 }
 .replica .activity-chart small {
   display: none;
+}
+/* The hero window keeps the app chrome in place while its content scrolls. */
+.replica-screen.tall .portal-top {
+  position: sticky;
+  top: 0;
+}
+.replica-screen.tall .secondary-nav {
+  position: sticky;
+  top: 93px;
+}
+/* Navigation inside a demo is made of buttons that take the look of the app's links. */
+.replica :is(.primary-nav, .secondary-nav nav, .chat-threads li, .timeline li) > button,
+.replica button.pull-link {
+  display: block;
+  min-height: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+}
+.replica :is(.secondary-nav nav, .chat-threads li) > button {
+  width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.replica .chat-threads li > button {
+  padding: 7px 10px;
+}
+.replica :is(.primary-nav, .secondary-nav nav, .chat-threads li) > button:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.replica :is(.primary-nav, .secondary-nav nav, .chat-threads li) > button[aria-current="page"] {
+  color: var(--text);
+  background: var(--soft);
+}
+.replica button.pull-link {
+  padding: 0;
+  color: var(--accent);
+}
+.replica button.pull-link:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+.replica .timeline li > button {
+  padding: 0;
+  color: var(--accent);
+  white-space: normal;
+}
+.replica .timeline li > button:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+.replica .timeline li > button[aria-current="page"] {
+  color: var(--text);
+  font-weight: 500;
+}
+.replica .verified-finding {
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.replica .verified-finding > summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+.replica .evidence {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 6px;
+  margin: 8px 0;
+}
+.replica .evidence pre {
+  width: 100%;
+  margin: 0;
+}
+.source-view {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.source-view > p {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.source-view .diff-table td {
+  border: 0;
+}
+.source-quoted td {
+  background: var(--surface-2);
+}
+.source-quoted td:first-child {
+  box-shadow: inset 2px 0 0 var(--ember);
+  color: var(--text);
+}
+.demo-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+.demo-suggestions > .muted {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.demo-suggestions button {
+  text-align: left;
+}
+.demo-readout {
+  margin: 0 0 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.replica .activity-chart:hover > div:not([data-active]) > div {
+  opacity: 0.35;
+}
+.demo-series {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 8px;
+  padding: 0;
+  border: 0;
 }
 
 /* ---------- Onboarding wizard ---------- */
@@ -3379,8 +3660,12 @@ input.switch:checked::before {
   .feature .stage {
     padding: 16px 10px;
   }
-  .replica-screen.tall {
-    height: 680px;
+  /* Phones scroll the page, not the demo: windows grow to fit their content. */
+  .replica-screen.tall,
+  .replica-screen.short {
+    height: auto;
+    max-height: none;
+    overflow-y: visible;
   }
   .replica .content > header {
     display: none;

@@ -16,6 +16,11 @@ The hosted site can report errors to [Sentry](https://sentry.io) and product ana
   - Page views across the site.
   - Clicks on public pages (home, docs, changelog).
   - After sign-in, the internal user ID, with the active workspace ID on each event.
+  - Four product milestones, for a sign-up funnel: `signed_up`, `workspace_created`, `repository_connected` and `first_review_completed`.
+    - The server works them out (`convex/analyticsMilestones.ts`).
+    - The browser sends each with the time it happened, and only after consent.
+    - Each is then marked reported on the user, so it goes out once.
+    - `repository_connected` uses the time the workspace's first enabled repository was added.
 - Not collected:
   - Clicks and page text on signed-in pages (dashboard, invitations, fix links); those pages only send page views.
   - Session recordings, which are off.
@@ -30,7 +35,7 @@ The hosted site can report errors to [Sentry](https://sentry.io) and product ana
 - **Self-hosted:** without `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` there is no banner.
 - **Sentry:** sets no cookies and is not gated.
 
-**URLs:** before any event leaves the browser or server, each URL keeps only a short allowlist of query parameters (`utm_*`, `ref`, `checkout`, `billing`, `signedout`) and loses its fragment. Invitation tokens, sign-in codes, error messages and repository filters are never sent.
+**URLs:** before any event leaves the browser or server, each URL keeps only a short allowlist of query parameters (`utm_*`, `ref`, `checkout`, `billing`, `signedout`) and loses its fragment. Invitation tokens, sign-in codes, error messages and repository filters are never sent. Referral links (`/r/<code>`) are reported as `/r/[code]`, in errors and performance traces alike, because a code identifies the person who shared it. Clicks aren't captured on those pages or on sign-up pages opened from them.
 
 **Same-origin delivery:** events go through this site's own origin, so ad blockers that block Sentry and PostHog domains don't drop them:
 - `/lighthouse` → Sentry.

@@ -1,5 +1,5 @@
 import {changeMetadataSchema,catalogPageSize,numberedPage,validateChangePage,type ChangeMetadata,type ChangePage} from "./change-metadata";
-import { safeFixBranch } from "./fix-command";
+import { fixHandoffLink, safeFixBranch } from "./fix-command";
 import {githubWebOrigin} from "./github-enterprise";
 import { reviewLinks, inlineFindings } from "./review-summary";
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -45,7 +45,8 @@ const summaryPointer = "## OpenReview\n\nThe review summary for this pull reques
 // Where the review summary goes on GitHub: the pull request description (between hidden markers,
 // the author's text kept) or one issue comment (the default here; review settings choose). Both are
 // edited in place on every review.
-export type PublishOptions = { placement?: "description" | "comment" };
+// fixLabel: the inline "Fix with …" link text, from the workspace's default fix agent.
+export type PublishOptions = { placement?: "description" | "comment"; fixLabel?: string };
 // GitHub rejects pull request bodies longer than 65,536 characters; past that the comment is used.
 const descriptionLimit = 65000;
 const treeSchema = z.object({
@@ -443,8 +444,13 @@ export class Github {
   // Fix pull requests need contents:write; without it the feature is skipped, never an error.
   // Only a new namespaced branch is created and written, from the reviewed head; the pull
   // request's own branch (and its base) is never written. Retries reuse the branch or open PR.
+  // Why fix pull requests cannot be opened with this client, or null when they can.
+  protected fixPullRequestBlocker(): string | null {
+    return this.permissions?.contents === "write" ? null : "the GitHub App does not have Contents: Read and write permission";
+  }
   async openFixPullRequest(repository: string, number: number, fix: { branch: string; expectedHead: string; path: string; blobSha: string; content: string; title: string; body: string; message: string }): Promise<{ url: string; reused: boolean } | { skipped: string }> {
-    if (this.permissions?.contents !== "write") return { skipped: "the GitHub App does not have Contents: Read and write permission" };
+    const blocked = this.fixPullRequestBlocker();
+    if (blocked) return { skipped: blocked };
     const prefix = `/repos/${repository}`;
     const pr = await this.request(`${prefix}/pulls/${number}`, z.object({ state: z.string(), head: z.object({ sha: z.string(), ref: z.string(), repo: z.object({ full_name: z.string() }).nullable() }), base: z.object({ ref: z.string() }) }));
     if (pr.state !== "open") return { skipped: "the pull request is not open" };
@@ -634,7 +640,7 @@ export class Github {
           line: range.end,
           side: "RIGHT",
           ...(range.start < range.end ? { start_line: range.start, start_side: "RIGHT" } : {}),
-          body: findingComment(f, style, { syntax: "github", start: range.start, end: range.end }, { agentPrompt: true }) + (process.env.APP_URL ? `\n\n[Fix with your agent](${process.env.APP_URL}/fix/${marker}?finding=${f.fingerprint})` : ""),
+          body: findingComment(f, style, { syntax: "github", start: range.start, end: range.end }, { agentPrompt: true }) + fixHandoffLink(process.env.APP_URL, marker, f.fingerprint, options.fixLabel),
         };
       });
       const result = await this.request(

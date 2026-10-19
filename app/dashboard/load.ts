@@ -8,6 +8,7 @@ import { settingsNavigation } from "./portal";
 import { knowledgeView } from "../../src/knowledge-view";
 import { navigation } from "./sections/shared";
 import { needsSetup } from "../../src/onboarding-steps";
+import { billingConfig } from "../../src/billing";
 
 // The workspace chosen in the workspace menu (cookie), else the first membership.
 export function activeWorkspace<T extends { _id?: string }>(user: { organizations: T[] }, jar: { get(name: string): { value: string } | undefined }) {
@@ -28,6 +29,9 @@ export async function loadDashboard({
   const organization = activeWorkspace(user, jar);
   if (!organization?._id) redirect("/dashboard/onboarding/workspace");
   const filters = await searchParams;
+  // A new workspace on a billing deployment chooses a plan before anything else (Billing, Account and
+  // the personal Referrals settings stay reachable); the server enforces the same rule.
+  if (billingConfig().enabled && organization.planRequired && !organization.planSelectedAt && !(section[0] === "settings" && ["billing", "account", "referrals"].includes(section[1] ?? ""))) redirect("/dashboard/onboarding/plan");
   // Admins of a workspace still in guided setup land there; deep links are never redirected.
   if (!section[0] && needsSetup(organization) && ["owner", "admin"].includes(organization.role)) redirect("/dashboard/onboarding");
   const aliases: Record<string, string[]> = { overview: ["analytics"], repositories: ["settings", "repositories"], reviews: ["pulls"], findings: ["pulls", "findings"], knowledge: ["memory", "knowledge"], rules: ["memory", "rules"], team: ["settings", "people"], usage: ["settings", "usage"] };
@@ -42,7 +46,7 @@ export async function loadDashboard({
     const query = new URLSearchParams(Object.entries(filters).filter((e): e is [string,string] => e[1] !== undefined));
     redirect(`/dashboard/settings/${filters.repository ? "review" : "repositories"}${query.size ? "?"+query : ""}`);
   }
-  if(route === "settings" && !settingsNavigation.some(([key])=>key === section[1]))notFound();
+  if(route === "settings" && !settingsNavigation().some(([key])=>key === section[1]))notFound();
   const view = route === "analytics" ? "overview" : route === "pulls" ? section[1] === "findings" ? "findings" : "reviews" : route === "memory" ? section[1] === "knowledge" ? "knowledge" : "rules" : route === "settings" ? ({ repositories: "repositories", people: "team", usage: "usage" }[section[1] ?? ""] ?? "settings") : route;
   const reviewDetailId = route === "pulls" && section[1] !== "findings" ? section[1] : undefined;
   const requestedRepository = filters.repository;

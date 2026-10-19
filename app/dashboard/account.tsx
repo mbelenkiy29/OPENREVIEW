@@ -1,5 +1,6 @@
 import { api } from "../../convex/_generated/api";
 import { backend } from "../../src/server";
+import { referralConfig } from "../../src/referrals";
 import { revokeSession, signOutEverywhere } from "./actions";
 
 const when = (ms: number) => new Date(ms).toLocaleString("en-US", { timeZone: "UTC", dateStyle: "medium", timeStyle: "short" }) + " UTC";
@@ -11,7 +12,7 @@ export async function AccountPanel({ token }: { token: string }) {
     <section aria-labelledby="methods-heading">
       <h2 id="methods-heading">Sign-in methods</h2>
       <ul>{data.identities.map((i) => <li key={i.provider + (i.email ?? "")}>{i.provider}{i.email ? ` · ${i.email}${i.emailVerified ? " (verified)" : ""}` : ""} · last used {when(i.lastLoginAt)}</li>)}</ul>
-      <p className="muted">Accounts join automatically only when both sides have the same verified email. To add another method to this account, link it while signed in:</p>
+      <p className="muted">Accounts join automatically only when both sides have the same verified email. To add another method to this account, link it {referralConfig().payoutsEnabled ? "within 15 minutes of signing in (sign out and back in first if it’s been longer)" : "while signed in"}:</p>
       <div className="row">
         {!linked.has("github") && <a className="button" href="/api/auth/login?link=1&next=/dashboard/settings/account">Link GitHub</a>}
         {process.env.GITLAB_OAUTH_CLIENT_ID && !linked.has("gitlab") && <a className="button" href="/api/auth/gitlab/login?link=1&next=/dashboard/settings/account">Link GitLab</a>}

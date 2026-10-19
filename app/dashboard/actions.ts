@@ -7,19 +7,20 @@ import { z } from "zod";
 import { randomBytes, createHash } from "node:crypto";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { backend, current } from "../../src/server";
+import { backend, cookieOptions, current, seal } from "../../src/server";
+import { notify } from "../../src/toast";
+import { agentIntentCookie, isCloudAgent, localAgents } from "../../src/fix-agents";
+import { githubCredentials, linkInstallation } from "../../src/github-link";
+import { installReturnPath, linkHref } from "../../src/github-install";
 import { decryptCredential, encryptCredential } from "../../src/credentials";
 import { createDevinSession, validDevinKey } from "../../src/devin";
 import { fixHandoffPrompt } from "../../src/fix-handoff";
 import {approvalPolicySchema} from "../../src/approval";
 import {runtimePolicySchema} from "../../src/runtime-policy";
 import {approvalDefaults,runtimeDefaults} from "../../src/review-settings";
+import { REFERRAL_PAYOUT_REVIEW_CENTS, formatMoney, parseMoneyInput, stripeHostedUrl } from "../../src/referrals";
 
 const text = (f: FormData, key: string) => z.string().parse(f.get(key) ?? "");
-// One-shot confirmation shown by the dashboard Toaster after a redirect or revalidation.
-async function notify(message: string, tone: "success" | "error" = "success") {
-  (await cookies()).set("openreview_toast", encodeURIComponent(JSON.stringify({ text: message, tone })), { path: "/", sameSite: "lax", maxAge: 30, httpOnly: false, secure: process.env.NODE_ENV === "production" });
-}
 export async function saveApprovalPolicy(_state:{error?:string;saved?:boolean},form:FormData):Promise<{error?:string;saved?:boolean}>{
  try{
   const {token}=await current(),scope=text(form,"scope");
@@ -88,6 +89,23 @@ export async function switchTeam(form:FormData){
  if(teamId)jar.set("openreview_team",teamId,{httpOnly:true,sameSite:"lax",secure:process.env.NODE_ENV==="production",path:"/"});else jar.delete("openreview_team");
  revalidatePath("/dashboard","layout");
  const returnTo=text(form,"returnTo");redirect(/^\/dashboard\/(analytics|memory|pulls|settings)(\/([a-z-]+))?$/.test(returnTo)?returnTo:"/dashboard/analytics");
+}
+// "Link an existing installation": the same verified linking path the install callback uses.
+export async function linkGithubInstallation(form: FormData) {
+  const { token, user } = await current();
+  const organizationId = text(form, "organizationId"), returnTo = installReturnPath(text(form, "returnTo"));
+  const installationId = z.coerce.number().int().positive().parse(form.get("installationId"));
+  const credentials = await githubCredentials();
+  if (!credentials) redirect(`/api/auth/login?purpose=github-install&next=${encodeURIComponent(linkHref(organizationId, returnTo))}`);
+  try {
+    const linked = await linkInstallation({ token, organizationId, installationId, credentials, legacyGithubId: user.githubId });
+    await notify(`Connected ${linked.account} (${linked.repositories} ${linked.repositories === 1 ? "repository" : "repositories"})`);
+  } catch (error) {
+    await notify(`Couldn’t link the installation: ${error instanceof Error ? error.message : "please try again"}`, "error");
+    redirect(linkHref(organizationId, returnTo));
+  }
+  revalidatePath("/dashboard");
+  redirect(returnTo);
 }
 export async function configureRepository(form: FormData) {
   const { token } = await current();
@@ -185,12 +203,13 @@ export async function revokeInvitation(_state:{error?:string},form:FormData):Pro
   revalidatePath("/dashboard","layout");
   return {};
 }
-export async function logout() {
+async function endSession(to: string): Promise<never> {
   const jar = await cookies(), token = jar.get("openreview_session")?.value;
   if (token) await backend().mutation(api.identity.signOut, { token }).catch(() => undefined);
   jar.delete("openreview_session");
-  redirect("/");
+  redirect(to);
 }
+export async function logout() { await endSession("/"); }
 export async function signOutEverywhere() {
   const { token } = await current();
   await backend().mutation(api.identity.signOutEverywhere, { token });
@@ -299,6 +318,44 @@ export async function startCheckout(form: FormData) {
   try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: text(form, "organizationId") as Id<"organizations"> }); }
   catch { redirect("/dashboard/settings/billing?billing=error"); }
   redirect(url);
+}
+export async function applyReferralCode(form: FormData) {
+  const { token } = await current();
+  try { const result = await backend().mutation(api.referrals.applyCode, { token, organizationId: text(form, "organizationId") as Id<"organizations">, code: text(form, "code") }); await notify(result.ok ? "Referral code applied." : result.error, result.ok ? "success" : "error"); }
+  catch (e) { await notify(backendMessage(e, "Could not apply the referral code."), "error"); }
+  revalidatePath("/dashboard", "layout");
+}
+export async function redeemReferralCredit(form: FormData) {
+  const { token } = await current(), amount = parseMoneyInput(form.get("amount"));
+  if (amount === null) await notify("Enter an amount in dollars, like 25 or 25.50.", "error");
+  else try { const result = await backend().mutation(api.referrals.requestCredit, { token, organizationId: text(form, "organizationId") as Id<"organizations">, amount }); await notify(result.ok ? "Credit requested. It appears on the workspace’s next invoice." : result.error, result.ok ? "success" : "error"); }
+  catch (e) { await notify(backendMessage(e, "Could not apply the credit."), "error"); }
+  revalidatePath("/dashboard", "layout");
+}
+// Cash payouts: each step needs a sign-in from the last 15 minutes. With an older session the backend
+// answers signIn, and this session ends so the sign-in page (which says why) asks again and returns to Referrals.
+// Stripe links are followed only to Stripe-hosted https pages.
+async function payoutStep(step: () => Promise<{ ok: true; url?: string; review?: boolean } | { ok: false; error: string; signIn?: string }>, done: string, fallback: string) {
+  let result;
+  try { result = await step(); }
+  catch (e) { await notify(backendMessage(e, fallback), "error"); return revalidatePath("/dashboard", "layout"); }
+  if (!result.ok) { if (result.signIn) await endSession(result.signIn); await notify(result.error, "error"); return revalidatePath("/dashboard", "layout"); }
+  if (result.url !== undefined) { const url = stripeHostedUrl(result.url); if (url) redirect(url); await notify(fallback, "error"); }
+  else await notify(result.review ? `Cash-out requested. OpenReview reviews cash-outs that bring your total over ${formatMoney(REFERRAL_PAYOUT_REVIEW_CENTS)} in 30 days before sending them.` : done);
+  revalidatePath("/dashboard", "layout");
+}
+export async function startReferralPayoutSetup(form: FormData) {
+  const { token } = await current();
+  await payoutStep(() => backend().action(api.referralJobs.startPayoutSetup, { token, country: text(form, "country") }), "", "Could not open Stripe payout setup.");
+}
+export async function requestReferralPayout(form: FormData) {
+  const { token } = await current(), amount = parseMoneyInput(form.get("amount"));
+  if (amount === null) { await notify("Enter an amount in dollars, like 50 or 50.25.", "error"); return revalidatePath("/dashboard", "layout"); }
+  await payoutStep(() => backend().mutation(api.referrals.requestPayout, { token, amount }), "Cash-out requested. Stripe sends it to your bank on your payout schedule.", "Could not cash out.");
+}
+export async function openReferralPayoutDashboard() {
+  const { token } = await current();
+  await payoutStep(() => backend().action(api.referralJobs.payoutDashboardLink, { token }), "", "Could not open the Stripe dashboard.");
 }
 export async function openBillingPortal(form: FormData) {
   const { token } = await current();
@@ -566,18 +623,40 @@ export async function reviewBridgePair(_state:{error?:string;code?:string;saved?
   return {code,preview:await backend().mutation(api.bridge.previewPair,{token,organizationId,code})};
  }catch{return {code,error:"Pairing could not be reviewed or approved. Check workspace access and the current code, then review it again. Expired, revoked or already paired codes cannot be used."};}
 }
+const handoffChoice=(f:FormData)=>{const handoff=text(f,"handoff"),cloudAgent=text(f,"cloudAgent");return {...(handoff?{handoff:z.enum(["bridge","cloud"]).parse(handoff)}:{}),...(cloudAgent?{cloudAgent:z.string().refine(isCloudAgent).parse(cloudAgent)}:{})};};
 export async function saveAgent(form:FormData) {
- const {token}=await current();const agent=text(form,"agent");await backend().mutation(api.bridge.savePersonal,{token,...(agent?{agent:z.enum(["codex","claude","cursor"]).parse(agent)}:{})});revalidatePath("/dashboard", "layout");
+ try{const {token}=await current();const agent=text(form,"agent");await backend().mutation(api.bridge.savePersonal,{token,...(agent?{agent:z.enum(localAgents).parse(agent)}:{}),...handoffChoice(form)});await notify("Fix agent saved");}
+ catch(error){await notify(`Couldn’t save your agent: ${error instanceof Error?error.message:"please try again"}`,"error");}
+ revalidatePath("/dashboard", "layout");
 }
 export async function saveWorkspaceAgent(form:FormData){
- const {token}=await current();await backend().mutation(api.bridge.saveWorkspaceAgent,{token,organizationId:text(form,"organizationId") as Id<"organizations">,agent:z.enum(["codex","claude","cursor"]).parse(text(form,"agent"))});revalidatePath("/dashboard", "layout");
+ try{const {token}=await current();await backend().mutation(api.bridge.saveWorkspaceAgent,{token,organizationId:text(form,"organizationId") as Id<"organizations">,agent:z.enum(localAgents).parse(text(form,"agent")),...handoffChoice(form)});await notify("Workspace fix agent saved");}
+ catch(error){await notify(`Couldn’t save the workspace agent: ${error instanceof Error?error.message:"please try again"}`,"error");}
+ revalidatePath("/dashboard", "layout");
 }
 export async function revokeBridge(form:FormData) {
  const {token}=await current();await backend().mutation(api.bridge.revoke,{token,deviceId:text(form,"deviceId") as Id<"bridgeDevices">});revalidatePath("/dashboard/settings/agents");
 }
 export async function launchFix(_previous:{url?:string;error?:string},form:FormData):Promise<{url?:string;error?:string}> {
- try {const {token}=await current(); const id=await backend().mutation(api.bridge.createFix,{token,reviewId:text(form,"reviewId") as Id<"reviews">,...(text(form,"findingId")?{findingId:text(form,"findingId") as Id<"findings">}:{}),agent:z.enum(["codex","claude","cursor"]).parse(text(form,"agent"))});return {url:`openreview://fix?request=${id}`};}
+ try {const {token}=await current(); const id=await backend().mutation(api.bridge.createFix,{token,reviewId:text(form,"reviewId") as Id<"reviews">,...(text(form,"findingId")?{findingId:text(form,"findingId") as Id<"findings">}:{}),agent:z.enum(localAgents).parse(text(form,"agent"))});return {url:`openreview://fix?request=${id}`};}
  catch(error){return {error:error instanceof Error ? error.message.slice(0,500):"Unable to create fix request"};}
+}
+// Cloud agents: prepare the hand-off, bind it to this browser, then post the comment as the user
+// (app/api/fixes/agent), re-authorizing GitHub first when no fresh token is at hand.
+export async function startCloudFix(form:FormData) {
+ const {token,user}=await current();
+ const reviewId=text(form,"reviewId"),findingId=text(form,"findingId"),finding=text(form,"finding");
+ const agent=z.string().refine(isCloudAgent).parse(text(form,"agent"));
+ let requestId:string;
+ try{requestId=await backend().mutation(api.cloudHandoff.prepare,{token,reviewId:reviewId as Id<"reviews">,...(findingId?{findingId:findingId as Id<"findings">}:{}),agent});}
+ catch(error){redirect(`/fix/${encodeURIComponent(reviewId)}?${new URLSearchParams({...(finding?{finding}:{}),error:error instanceof Error?error.message.replace(/^.*Uncaught Error: /s,"").split("\n")[0].slice(0,300):"Could not start the hand-off"})}`);}
+ (await cookies()).set(agentIntentCookie,await seal({requestId,userId:user._id,reviewId,...(finding?{finding}:{})},"10m"),{...cookieOptions,maxAge:600});
+ redirect(`/api/fixes/agent?request=${encodeURIComponent(requestId)}`);
+}
+// "Open a fix PR": OpenReview opens a pull request with its validated suggestion on a new branch.
+export async function openFixPullRequest(_previous:{url?:string;reused?:boolean;note?:string;error?:string},form:FormData):Promise<{url?:string;reused?:boolean;note?:string;error?:string}> {
+ try{const {token}=await current();return await backend().action(api.fixPullRequestJobs.open,{token,findingId:text(form,"findingId") as Id<"findings">});}
+ catch(error){return {error:error instanceof Error?error.message.replace(/^.*Uncaught Error: /s,"").split("\n")[0].slice(0,300):"Could not open a fix pull request"};}
 }
 export async function reviewAgain(form:FormData) {
  const {token}=await current();const review=await backend().query(api.reviews.detail,{token,reviewId:text(form,"reviewId") as Id<"reviews">});

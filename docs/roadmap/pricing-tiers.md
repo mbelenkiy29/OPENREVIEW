@@ -257,6 +257,7 @@ Workspaces that subscribed to Starter before a feature moved to Pro keep it unti
 **Depends on:** P1.1
 - Add an annual price per tier product ($120, $290 and $490 per seat per year), with a monthly/annual toggle on the plan cards.
 - Map each annual price ID to the same tier.
+- Referral coupon: a repeating coupon discounts the whole first annual invoice. Give annual prices a separate `once` coupon, or skip the referral coupon for them (see [billing.md](../billing.md#referral-program)).
 
 ### - [ ] P3.3 Stripe Tax
 **Depends on:** none (a human decision first)

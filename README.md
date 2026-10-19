@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/openreview-mark-reversed.svg">
+    <img src="brand/openreview-mark.svg" alt="OpenReview logo" width="96" height="96">
+  </picture>
+</p>
+
 # OpenReview
 
 OpenReview is an open-source, self-hostable, repository-aware AI pull request reviewer. It uses a GitHub App, Convex for durable application state and jobs, Next.js for the dashboard, and your model credentials. The same TypeScript review engine powers GitHub and the local CLI.
@@ -71,6 +78,7 @@ Each feature below has automated tests. The evidence level for each one (tests w
 - Analytics trends: reviews, findings, addressed rate and estimated time saved.
 - A diff viewer with inline findings.
 - Optional Stripe seat billing with review quotas. It is off unless `BILLING_ENABLED=true`.
+- An optional referral program for the hosted cloud: personal links, a Checkout discount, commissions with refund and dispute clawback, workspace credit, and optional cash payouts through Stripe Connect. It is off unless `REFERRALS_ENABLED=true` and billing is on. See [docs/billing.md](docs/billing.md#referral-program).
 - Self-hosting kit: a Helm chart, AWS Terraform, an offline mode (`OPENREVIEW_OFFLINE=true`) that only contacts your model, embedding, code-host and SSO endpoints, and a checksummed tree-sitter grammar bundle. See [docs/self-hosting-kit.md](docs/self-hosting-kit.md).
 
 **Command line**
@@ -121,14 +129,15 @@ Register your own GitHub App in GitHub Settings → Developer settings → GitHu
 * Setup URL: `APP_URL/api/github/callback`.
 * Webhook URL: `NEXT_PUBLIC_CONVEX_SITE_URL/github/webhook`.
 * Webhook secret: your `GITHUB_WEBHOOK_SECRET`.
-* Repository permissions: Contents **read**, Metadata **read**, Pull requests **read/write**, Issues **read**, Checks **read**. No code-write permission is required.
+* Repository permissions: Contents **read**, Metadata **read**, Pull requests **read/write**, Issues **read**, Checks **read**. No code-write permission is required; Contents **read/write** is optional and only enables fix pull requests (see below).
 * Subscribe to Installation, Installation repositories, Pull request, Pull request review, Pull request review comment, Issue comment, Push, and Repository events. Installation events are provided automatically where GitHub requires them.
-* Enable user authorization during installation if desired; use the App's client ID/secret for sign-in.
+* Leave **Request user authorization (OAuth) during installation** off. With it on, GitHub skips the Setup URL and the installation is not linked to a workspace. The App's client ID/secret are still used for sign-in.
+* Turn on **Redirect on update**, so changing an installation's repository access on GitHub returns to OpenReview and refreshes the repository list.
 * Generate a private key. Convert GitHub's PKCS#1 key to PKCS#8 with `openssl pkcs8 -topk8 -nocrypt -in github-key.pem -out app-key.pem`.
 
 Set `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` (PKCS#8, literal `\n` accepted), `GITHUB_WEBHOOK_SECRET`, `GITHUB_CLIENT_ID`, and `GITHUB_CLIENT_SECRET`. Synchronize App credentials to Convex. Keep the App private key on server infrastructure only. Installation tokens are minted as needed and never persisted.
 
-Sign in → create workspace → install App → choose authorized repositories in GitHub → save repository selection in workspace setup → configure behavior → enable selected repositories and start indexing → open a PR. Return to `/dashboard/onboarding` to resume saved selection and inspect progress, skipped files, revisions or retryable failures. Existing enabled repositories remain enabled when setup selection changes. Sign-in/installation state expires after ten minutes; sign in again if installation takes longer. GitHub webhooks need a public HTTPS backend URL; a localhost backend cannot receive public GitHub deliveries without a tunnel.
+Sign in → create workspace → install App → choose authorized repositories in GitHub → save repository selection in workspace setup → configure behavior → enable selected repositories and start indexing → open a PR. Return to `/dashboard/onboarding` to resume saved selection and inspect progress, skipped files, revisions or retryable failures. Existing enabled repositories remain enabled when setup selection changes. An installation started from OpenReview can take up to 30 minutes on GitHub; if the GitHub sign-in token expired meanwhile, OpenReview re-authorizes once and finishes linking. If an installation exists on GitHub but is not linked (it was installed from github.com, or took longer), use **Link an existing installation** on the setup, Repositories or Code providers page. GitHub webhooks need a public HTTPS backend URL; a localhost backend cannot receive public GitHub deliveries without a tunnel.
 
 Supported follow-ups from repository collaborators with write/admin/maintain permission: `@openreview explain this`, `@openreview suggest a fix`, `@openreview what code depends on this`, `@openreview review again`, and `@openreview review security`. `@openreview ignore this pattern` in a finding thread saves an inspectable repository preference. `@openreview fix this` in a finding thread replies with a committable suggestion, checked against the current head before it is published, plus the Fix with your agent link. `@openreview fix this in a new PR` also opens a fix pull request from a new `openreview/fix-*` branch targeting the pull request's branch. This only happens when a workspace admin has enabled Fix pull requests for the repository and the GitHub App has Contents: Read and write. The pull request's own branch is never written, and changes from forks are skipped. Dashboard feedback/settings can reset preferences.
 
