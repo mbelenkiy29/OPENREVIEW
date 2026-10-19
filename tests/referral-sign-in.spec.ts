@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { convexTest } from "convex-test";
+import { SignJWT } from "jose";
+import { createHash, randomBytes } from "node:crypto";
 import schema from "../convex/schema";
 import { api } from "../convex/_generated/api";
 
@@ -21,7 +23,7 @@ import { POST as requestMagicLink } from "../app/api/auth/email/route";
 
 const modules = import.meta.glob("../convex/**/*.ts");
 const base = "https://review.example.com", svc = "referral-routes-service";
-const env = { SESSION_SECRET: "referral-routes-secret-at-least-32-characters", SERVICE_SECRET: svc, APP_URL: base, BILLING_ENABLED: "true", REFERRALS_ENABLED: "true", RESEND_API_KEY: "re_test", EMAIL_FROM: "OpenReview <login@example.com>" };
+const env = { SESSION_SECRET: "referral-routes-secret-at-least-32-characters", SERVICE_SECRET: svc, APP_URL: base, BILLING_ENABLED: "true", REFERRALS_ENABLED: "true", REFERRAL_PAYOUTS_ENABLED: "true", RESEND_API_KEY: "re_test", EMAIL_FROM: "OpenReview <login@example.com>" };
 beforeEach(() => { Object.assign(process.env, env); holder.jar.clear(); });
 afterEach(() => { vi.restoreAllMocks(); for (const key of Object.keys(env)) delete process.env[key]; });
 
@@ -59,4 +61,19 @@ test("a magic-link request stores the referral code on the login token and keeps
   const response = await requestMagicLink(new Request(`${base}/api/auth/email`, { method: "POST", body: form }));
   expect(response.headers.get("location")).toBe(`${base}/signup?email=sent&referral=ABCD2345`);
   expect((await t.run((ctx) => ctx.db.query("loginTokens").collect())).map((token) => token.referralCode)).toEqual(["ABCD2345"]);
+});
+
+test("a refused or cancelled account link returns to the page it started from, never to plain sign-in", async () => {
+  const { t } = await setup();
+  // Carol signed in with Google 20 minutes ago, past the 15 minutes that linking needs while payouts are on.
+  const sid = randomBytes(32).toString("base64url");
+  const carol = await t.mutation(api.identity.signIn, { secret: svc, provider: "google", providerUserId: "g-carol", login: "carol", avatar: "", emailVerified: false, sessionHash: createHash("sha256").update(sid).digest("hex") });
+  await t.run(async (ctx) => { for (const s of await ctx.db.query("sessions").collect()) await ctx.db.patch(s._id, { createdAt: Date.now() - 20 * 60000 }); });
+  holder.jar.set("openreview_session", await new SignJWT({ sid }).setProtectedHeader({ alg: "HS256" }).setIssuer("openreview").setAudience("openreview").setSubject(carol).setIssuedAt().setExpirationTime("1h").sign(new TextEncoder().encode(env.SESSION_SECRET)));
+  const users = async () => (await t.run((ctx) => ctx.db.query("users").collect())).length, before = await users();
+  expect((await finish(await begin("link=1&next=/dashboard/settings/account"))).headers.get("location")).toBe(`${base}/dashboard/settings/account`);
+  expect(JSON.parse(decodeURIComponent(holder.jar.get("openreview_toast")!))).toMatchObject({ tone: "error" });
+  const state = await begin("link=1&next=/dashboard/settings/account");
+  expect((await finishOAuth(new Request(`${base}/api/auth/callback?error=access_denied&state=${state}`), "github", async () => { throw new Error("unused"); })).headers.get("location")).toBe(`${base}/dashboard/settings/account`);
+  expect(await users()).toBe(before);
 });

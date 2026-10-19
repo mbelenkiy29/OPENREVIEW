@@ -4,12 +4,12 @@ import { api } from "../../../../convex/_generated/api";
 import { backend } from "../../../../src/server";
 import { emailOnWeb } from "../../../../src/email";
 import { billingConfig, checkoutTrialEnd } from "../../../../src/billing";
-import { referralConfig, referralFact } from "../../../../src/referrals";
+import { referralConfig, referralDisclosure, referralFact } from "../../../../src/referrals";
 import { installHref, linkHref } from "../../../../src/github-install";
 import { providerDisplay, providerShort } from "../../../../src/provider-display";
 import { nextStep, resolveStep, type ConfigureStep } from "../../../../src/onboarding-steps";
 import { Live } from "../../live";
-import { reindex } from "../../actions";
+import { applyReferralCode, reindex } from "../../actions";
 import { WorkspaceInvitations } from "../../invitations";
 import { advanceSetup, checkoutFromSetup, continueOnTrial, createSetupWorkspace, finishSetup, inviteFromSetup, saveSetupStep, selectAndIndex } from "../actions";
 import { IndexGraph, Stage, TeamArt, TrialArt } from "../art";
@@ -142,6 +142,8 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
             {billing.referral?.discount && <><dt>Referral</dt><dd>{referralFact(billing.referral, referralConfig().discountLabel)}</dd></>}
           </dl>
         </article>
+        {/* Checkout ends the window for adding a code, so a referred workspace without the link adds it here. */}
+        {admin && !confirming && billing.referral?.canApply && <><form action={applyReferralCode} className="form-grid"><input type="hidden" name="organizationId" value={organizationId} /><label>Referral code<input name="code" defaultValue={query.referral ?? ""} required maxLength={64} autoComplete="off" spellCheck={false} /></label><button>Apply code</button></form><p className="muted">{referralDisclosure(null)}</p></>}
         {admin && (subscribed || (confirming && !required)
           ? <StepForm action={advanceSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="step" value="plan" /></StepForm>
           : confirming ? null

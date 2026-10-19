@@ -15,6 +15,7 @@ test("URLs keep only allowlisted query parameters and never a fragment", () => {
   assert.equal(sanitizeUrl("/r/abcd-2345"), "/r/[code]");
   assert.equal(sanitizeUrl("https://www.reddit.com/r/programming/comments/abc/openreview/"), "https://www.reddit.com/r/programming/comments/abc/openreview/");
   assert.equal(sanitizeUrl("https://www.reddit.com/r/devops"), "https://www.reddit.com/r/devops");
+  assert.equal(sanitizeUrl("https://www.reddit.com/r/HackerNews/"), "https://www.reddit.com/r/HackerNews/");
   assert.equal(sanitizeUrl("/signup?referral=ABCD2345"), "/signup");
   assert.equal(sanitizeUrl("/resources/r/x"), "/resources/r/x");
 });

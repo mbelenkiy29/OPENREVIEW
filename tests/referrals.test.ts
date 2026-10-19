@@ -124,8 +124,8 @@ test("balances per currency: released commissions net of clawbacks, minus redemp
 });
 
 test("money input parses dollars and cents, nothing else", () => {
-  for (const [input, cents] of [["25", 2500], ["$25.5", 2550], [" 25.05 ", 2505], ["1,000", 100000], ["0", 0]] as const) assert.equal(parseMoneyInput(input), cents, input);
-  for (const bad of ["", "abc", "-5", "1.234", "25.", "1e3", "12345678", null, 25]) assert.equal(parseMoneyInput(bad), null, String(bad));
+  for (const [input, cents] of [["25", 2500], ["$25.5", 2550], [" 25.05 ", 2505], ["1,000", 100000], ["1,234,567.89", 123456789], ["0", 0]] as const) assert.equal(parseMoneyInput(input), cents, input);
+  for (const bad of ["", "abc", "-5", "1.234", "25.", "1e3", "12345678", "12,345,678", "10,50", "50,00", "1,0,0", ",100", null, 25]) assert.equal(parseMoneyInput(bad), null, String(bad));
 });
 
 test("Stripe failures are classified for retries", () => {

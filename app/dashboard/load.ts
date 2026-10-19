@@ -29,9 +29,9 @@ export async function loadDashboard({
   const organization = activeWorkspace(user, jar);
   if (!organization?._id) redirect("/dashboard/onboarding/workspace");
   const filters = await searchParams;
-  // A new workspace on a billing deployment chooses a plan before anything else (Billing and
-  // Account settings stay reachable); the server enforces the same rule.
-  if (billingConfig().enabled && organization.planRequired && !organization.planSelectedAt && !(section[0] === "settings" && ["billing", "account"].includes(section[1] ?? ""))) redirect("/dashboard/onboarding/plan");
+  // A new workspace on a billing deployment chooses a plan before anything else (Billing, Account and
+  // the personal Referrals settings stay reachable); the server enforces the same rule.
+  if (billingConfig().enabled && organization.planRequired && !organization.planSelectedAt && !(section[0] === "settings" && ["billing", "account", "referrals"].includes(section[1] ?? ""))) redirect("/dashboard/onboarding/plan");
   // Admins of a workspace still in guided setup land there; deep links are never redirected.
   if (!section[0] && needsSetup(organization) && ["owner", "admin"].includes(organization.role)) redirect("/dashboard/onboarding");
   const aliases: Record<string, string[]> = { overview: ["analytics"], repositories: ["settings", "repositories"], reviews: ["pulls"], findings: ["pulls", "findings"], knowledge: ["memory", "knowledge"], rules: ["memory", "rules"], team: ["settings", "people"], usage: ["settings", "usage"] };

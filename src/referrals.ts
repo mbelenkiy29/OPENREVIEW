@@ -87,10 +87,11 @@ export function referralBalances(commissions: Commission[], redemptions: Redempt
   for (const r of redemptions) if (r.status !== "failed") { const b = of(r.currency); b.redeemed += r.amount; b.available -= r.amount; }
   return out;
 }
-/** "25", "$25.50" or "1,000" → cents; null for anything else. */
+/** "25", "$25.50" or "1,000" → cents; null for anything else. A comma only groups thousands: a decimal
+ *  comma ("10,50", from a localized keypad) is refused, never read as 1050. */
 export function parseMoneyInput(input: unknown): number | null {
-  const m = typeof input === "string" ? /^\$?(\d{1,7})(?:\.(\d{1,2}))?$/.exec(input.trim().replace(/,/g, "")) : null;
-  return m ? Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0")) : null;
+  const m = typeof input === "string" ? /^\$?(\d{1,7}|\d{1,3},\d{3}|\d,\d{3},\d{3})(?:\.(\d{1,2}))?$/.exec(input.trim()) : null;
+  return m ? Number(m[1].replace(/,/g, "")) * 100 + Number((m[2] ?? "").padEnd(2, "0")) : null;
 }
 /** How a failed Stripe write is retried. transient: retry with the same idempotency key (no answer,
  *  429, 409 key-in-use or lock, offline, config). indeterminate (5xx): the object may exist, so never

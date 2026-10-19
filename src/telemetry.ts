@@ -34,8 +34,8 @@ export function sanitizeUrl(value: string): string {
   try { url = new URL(value, "https://openreview.invalid"); } catch { return value; }
   for (const key of [...url.searchParams.keys()]) if (!keptParams.has(key)) url.searchParams.delete(key);
   url.hash = "";
-  // Only a code-shaped single segment: other sites' /r/ paths (Reddit threads) are kept.
-  if (/^\/r\/[2-9a-hjkmnp-tv-z-]{8,16}\/?$/i.test(url.pathname)) url.pathname = "/r/[code]";
+  // Only a code-shaped single segment off Reddit: subreddits (r/HackerNews) and their threads are kept.
+  if (/^\/r\/[2-9a-hjkmnp-tv-z-]{8,16}\/?$/i.test(url.pathname) && !/(^|\.)reddit\.com$/i.test(url.hostname)) url.pathname = "/r/[code]";
   return relative ? url.pathname + url.search : url.toString();
 }
 const looksLikeUrl = (value: string) => /^(https?:\/\/|\/)/.test(value);
