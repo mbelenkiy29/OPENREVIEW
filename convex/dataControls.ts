@@ -52,6 +52,7 @@ export const sharedTables: Partial<Record<TableNames, string>> = {
   slackEventReceipts: "Slack event-id dedupe", webhookDeliveries: "provider payloads not linked to a workspace; pruned deployment-wide after 14 days",
   workspaceDeletions: "deletion receipts",
   referralCodes: "personal referral codes", referrals: "referrer's attribution records; keep only the referred workspace's id",
+  referralCommissions: "referrer's earnings ledger (Stripe ids and amounts, no workspace content)",
 };
 
 // Files referenced by a row (any v.id("_storage") field, at any depth), deleted with it.

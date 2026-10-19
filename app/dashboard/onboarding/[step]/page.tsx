@@ -4,6 +4,7 @@ import { api } from "../../../../convex/_generated/api";
 import { backend } from "../../../../src/server";
 import { emailOnWeb } from "../../../../src/email";
 import { billingConfig, checkoutTrialEnd } from "../../../../src/billing";
+import { referralConfig, referralFact } from "../../../../src/referrals";
 import { installHref } from "../../../../src/github-install";
 import { providerDisplay, providerShort } from "../../../../src/provider-display";
 import { nextStep, resolveStep, type ConfigureStep } from "../../../../src/onboarding-steps";
@@ -132,6 +133,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
             <dt>{subscribed ? "Status" : "Trial"}</dt><dd>{subscribed ? <span className={`badge ${billing.status}`}>{billing.status.replaceAll("_", " ")}</span>
               : billing.trialStarted ? `${trialEnded ? "Ended" : "Ends"} ${day(billing.trialEndsAt)} · up to ${billing.trialReviews} reviews a month`
               : `${billing.trialDays} days from your first review · up to ${billing.trialReviews} reviews a month`}</dd>
+            {billing.referral?.discount && <><dt>Referral</dt><dd>{referralFact(billing.referral, referralConfig().discountLabel)}</dd></>}
           </dl>
         </article>
         {admin && (subscribed || confirming

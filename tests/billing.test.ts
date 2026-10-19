@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { STRIPE_API_VERSION, billingConfig, billingDecision, checkoutTrialEnd, formEncode, openSubscription, periodKey, seatCount, stripe, stripeKey, trialEndsFrom, verifyStripeSignature } from "../src/billing";
+import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, formEncode, openSubscription, periodKey, seatCount, stripe, stripeKey, trialEndsFrom, verifyStripeSignature } from "../src/billing";
 
 const config = billingConfig({ BILLING_ENABLED: "true", BILLING_TRIAL_REVIEWS: "3", BILLING_REVIEWS_PER_SEAT: "10", BILLING_GRACE_DAYS: "7" });
 const now = Date.UTC(2026, 9, 14), day = 86400000;
@@ -82,5 +82,8 @@ test("Stripe client: test-mode (restricted or secret) keys by default, pinned AP
   assert.equal(new Headers(seen?.init?.headers).get("authorization"), "Bearer sk_test_1");
   assert.equal(new Headers(seen?.init?.headers).get("stripe-version"), STRIPE_API_VERSION);
   await assert.rejects(stripe("/v1/customers", {}, "sk_test_1", (async () => Response.json({ error: { type: "card_error" } }, { status: 402 })) as typeof fetch), /402 card_error/);
+  // Errors carry Stripe's status, type, code and param, never the response body.
+  await assert.rejects(stripe("/v1/checkout/sessions", {}, "sk_test_1", (async () => Response.json({ error: { type: "invalid_request_error", code: "resource_missing", param: "discounts[0][coupon]", message: "No such coupon: 'secret-coupon'" } }, { status: 400 })) as typeof fetch), (error: unknown) => error instanceof StripeError && error.status === 400 && error.type === "invalid_request_error" && error.code === "resource_missing" && error.param === "discounts[0][coupon]" && error.message === "Stripe request failed (400 invalid_request_error resource_missing)");
+  await assert.rejects(stripe("/v1/customers", {}, "sk_test_1", (async () => new Response("<html>bad gateway</html>", { status: 502 })) as typeof fetch), (error: unknown) => error instanceof StripeError && error.message === "Stripe request failed (502)");
   await assert.rejects(stripe("https://evil.example", {}, "sk_test_1", ok), /Invalid Stripe API path/);
 });

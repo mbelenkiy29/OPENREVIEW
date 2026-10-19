@@ -598,6 +598,27 @@ export default defineSchema({
     voidReason: v.optional(v.string()),
     updatedAt: v.number(),
   }).index("by_referrer", ["referrerId"]).index("by_referred_user", ["referredUserId"]).index("by_referred_org", ["referredOrganizationId"]),
+  // The referrer's earnings: one row per paid invoice of a referred workspace (cents). Accrued by a
+  // job scheduled from the invoice.paid webhook, and redeemable once availableAt passes.
+  referralCommissions: defineTable({
+    referralId: v.id("referrals"),
+    referrerId: v.id("users"),
+    referredOrganizationId: org,
+    invoiceId: v.string(),
+    subscriptionId: v.string(),
+    currency: v.string(),
+    base: v.number(), // cash collected excluding tax
+    rateBps: v.number(),
+    amount: v.number(),
+    reversed: v.number(), // clawed back by refunds and disputes
+    status: v.union(v.literal("accrued"), v.literal("void")),
+    voidReason: v.optional(v.string()),
+    invoiceCreated: v.number(),
+    paidAt: v.number(),
+    availableAt: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_invoice", ["invoiceId"]).index("by_referrer", ["referrerId"]).index("by_referral", ["referralId"]),
   billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number() }).index("by_org_period", ["organizationId", "period"]),
   stripeEvents: defineTable({ eventId: v.string(), type: v.string(), outcome: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Slack app installs (one per Slack workspace); the bot token is encrypted with scope `<org>:slack`.

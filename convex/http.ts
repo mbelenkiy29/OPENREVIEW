@@ -61,7 +61,10 @@ http.route({
   }),
 });
 // Stripe webhooks (cloud billing): signed with STRIPE_WEBHOOK_SECRET, applied idempotently.
-const stripeObject = z.object({ id: z.string().max(255).optional(), customer: z.string().max(255).nullish(), subscription: z.string().max(255).nullish(), status: z.string().max(40).optional(), client_reference_id: z.string().max(255).nullish(), mode: z.string().optional(), metadata: z.record(z.string()).nullish(), current_period_end: z.number().optional(), parent: z.object({ subscription_details: z.object({ subscription: z.string().max(255).nullish() }).nullish() }).nullish(), items: z.object({ data: z.array(z.object({ id: z.string(), quantity: z.number().int().nonnegative().optional(), current_period_end: z.number().optional() })).max(20) }).optional() }).passthrough();
+// Invoice amounts feed referral commissions only: a wrong shape becomes undefined, never a 400.
+const lenientInt = z.number().int().nullish().catch(undefined);
+const defined = <T extends Record<string, unknown>>(o: T) => Object.fromEntries(Object.entries(o).filter(([, value]) => value !== undefined && value !== null)) as { [K in keyof T]?: NonNullable<T[K]> };
+const stripeObject = z.object({ amount_paid: lenientInt, amount_overpaid: lenientInt, total: lenientInt, total_excluding_tax: lenientInt, currency: z.string().max(10).nullish().catch(undefined), created: lenientInt, status_transitions: z.object({ paid_at: lenientInt }).nullish().catch(undefined), id: z.string().max(255).optional(), customer: z.string().max(255).nullish(), subscription: z.string().max(255).nullish(), status: z.string().max(40).optional(), client_reference_id: z.string().max(255).nullish(), mode: z.string().optional(), metadata: z.record(z.string()).nullish(), current_period_end: z.number().optional(), parent: z.object({ subscription_details: z.object({ subscription: z.string().max(255).nullish() }).nullish() }).nullish(), items: z.object({ data: z.array(z.object({ id: z.string(), quantity: z.number().int().nonnegative().optional(), current_period_end: z.number().optional() })).max(20) }).optional() }).passthrough();
 const stripeEvent = z.object({ id: z.string().regex(/^evt_[A-Za-z0-9_]{1,250}$/), type: z.string().max(100), created: z.number().int().positive(), data: z.object({ object: stripeObject }) }).passthrough();
 http.route({
   path: "/stripe/webhook",
@@ -81,7 +84,8 @@ http.route({
     } else if ((event.type === "invoice.payment_failed" || event.type === "invoice.paid") && o.customer) {
       // Newer API versions move an invoice's subscription under parent.subscription_details.
       const subscription = o.parent?.subscription_details?.subscription ?? o.subscription;
-      await ctx.runMutation(internal.billing.applyStripeEvent, { ...base, invoice: { customer: o.customer, ...(subscription ? { subscription } : {}) } });
+      const paidAt = o.status_transitions?.paid_at;
+      await ctx.runMutation(internal.billing.applyStripeEvent, { ...base, invoice: { customer: o.customer, ...(subscription ? { subscription } : {}), ...defined({ id: o.id, amountPaid: o.amount_paid, amountOverpaid: o.amount_overpaid, total: o.total, totalExcludingTax: o.total_excluding_tax, currency: o.currency, invoiceCreated: o.created && o.created * 1000, paidAt: paidAt && paidAt * 1000 }) } });
     } else await ctx.runMutation(internal.billing.applyStripeEvent, base);
     return new Response("ok", { status: 200 });
   }),

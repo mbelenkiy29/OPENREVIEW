@@ -33,4 +33,30 @@ export function normalizeReferralCode(input: unknown): string | null {
 /** The invitation line on the referral page and the sign-in screens. */
 export const referralInvite = (login: string | null, discount: string | null) => `${login ? `@${login} invited you` : "You were invited"} to OpenReview${discount ? `, and your workspace gets ${discount}` : ""}.`;
 /** What a referrer learns about the people who use their link, shown before anyone signs up. */
-export const referralDisclosure = (login: string | null) => `${login ? `@${login}` : "The person who invited you"} will see your GitHub username (or “email sign-up”), when you sign up, and when your workspace is created and subscribes, not your workspace details.`;
+export const referralDisclosure = (login: string | null) => `${login ? `@${login}` : "The person who invited you"} will see your GitHub username (or “email sign-up”), when you sign up, when your workspace is created and subscribes, and what they earn from its payments, but no other workspace details.`;
+
+// Commission math (cents). The base is the cash Stripe collected for an invoice, excluding tax pro
+// rata: credits and overpayments reduce it, and it never exceeds the invoice's pre-tax total.
+export function commissionBase({ amountPaid, amountOverpaid, total, totalExcludingTax }: { amountPaid: number; amountOverpaid?: number; total: number; totalExcludingTax?: number | null }) {
+  const cash = Math.max(0, amountPaid - (amountOverpaid ?? 0)), excl = totalExcludingTax ?? total;
+  return total > 0 && cash > 0 ? Math.min(excl, Math.floor(cash * excl / total)) : 0;
+}
+export const commissionAmount = (base: number, rateBps: number) => Math.floor(base * rateBps / 10000);
+/** The same time `months` later in UTC, clamped to the last day of a shorter month (31 Jan + 1 → 28 Feb). */
+export function addMonthsUTC(ms: number, months: number) {
+  const from = new Date(ms), to = new Date(ms);
+  to.setUTCDate(1); to.setUTCMonth(from.getUTCMonth() + months);
+  to.setUTCDate(Math.min(from.getUTCDate(), new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() + 1, 0)).getUTCDate()));
+  return to.getTime();
+}
+/** Coupon duration_in_months that discounts at least `paidMonths` monthly invoices. The coupon clock
+ *  starts with the subscription, so a carried trial uses up coupon time (months counted as 28 days). */
+export const couponMonthsNeeded = (paidMonths: number, trialDays: number) => paidMonths - 1 + Math.ceil((trialDays + 1) / 28);
+export const formatMoney = (cents: number, currency = REFERRAL_CURRENCY) => new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() }).format(cents / 100);
+/** The billing "Referral" fact: who invited the workspace and whether the discount applies at Checkout. */
+export const referralFact = (r: { invitedBy: string | null; discount: boolean }, discountLabel: string | null) => `Invited by ${r.invitedBy ? `@${r.invitedBy}` : "another OpenReview user"}${r.discount ? ` · ${discountLabel ?? "the referral discount"} applies at checkout` : ""}`;
+/** Sent once, when a referred workspace first pays. `name` is a GitHub username or null (never an email's local part). */
+export function conversionEmail(p: { name: string | null; rateBps: number; months: number; holdDays: number; url: string }) {
+  const who = p.name ? `@${p.name}` : "Someone you referred";
+  return { subject: `${who} subscribed to OpenReview`, text: `${who} just subscribed to OpenReview through your referral.\n\nYou earn ${p.rateBps / 100}% of what their workspace pays, excluding tax, for ${p.months} months from its first payment. Each commission becomes available ${p.holdDays} days after the payment.\n\nSee your referrals: ${p.url}` };
+}

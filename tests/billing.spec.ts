@@ -29,14 +29,16 @@ const subscription=(id:string,type:string,status:string,quantity:number,created:
 
 test('trial quota is enforced at enqueue; blocked reviews are recorded with the billing reason and counted',async()=>{
  process.env.BILLING_TRIAL_DAYS='60';
- const {t,alice,org,repo}=await setup();
+ const {t,alice,vera,org,repo}=await setup();
  const first=await enqueue(t,repo._id,1),second=await enqueue(t,repo._id,2),third=await enqueue(t,repo._id,3);
  expect((await reviewOf(t,first))?.status).toBe('queued');expect((await reviewOf(t,second))?.status).toBe('queued');
  expect(await reviewOf(t,third)).toMatchObject({status:'failed',error:'Billing: The trial includes 2 reviews per month. Subscribe in Settings → Billing for more.'});
  // Re-requesting an existing queued head does not count again.
  expect(await enqueue(t,repo._id,1)).toBe(first);
  const status=await t.query(api.billing.status,{token:alice.token,organizationId:org});
- expect(status).toMatchObject({enabled:true,plan:'trial',allowed:false,used:2,limit:2,blocked:1,activeSeats:2});
+ expect(status).toMatchObject({enabled:true,plan:'trial',allowed:false,used:2,limit:2,blocked:1,activeSeats:2,referral:null});
+ // The referral program is off by default (REFERRALS_ENABLED unset); a viewer never sees it either.
+ expect((await t.query(api.billing.status,{token:vera.token,organizationId:org})).referral).toBeNull();
  // A new month resets the counter; an expired trial blocks regardless.
  vi.setSystemTime(Date.UTC(2026,10,1,0,0,1));
  expect((await reviewOf(t,await enqueue(t,repo._id,4)))?.status).toBe('queued');
@@ -140,6 +142,8 @@ test('seats follow membership: viewers are free and changes resync the subscript
  // The untouched 14-day trial carries into the subscription, so the card is not charged until it ends.
  expect(Object.fromEntries(session)).toMatchObject({mode:'subscription',customer:'cus_1',client_reference_id:org,integration_identifier:expect.stringMatching(/^openreview-starter-seats-[a-z]{8}$/),'line_items[0][price]':'price_seat','line_items[0][quantity]':'2','subscription_data[metadata][organizationId]':org,'subscription_data[trial_end]':String(Math.floor((Date.now()+14*86400000)/1000)),success_url:'https://review.example.com/dashboard/settings/billing?checkout=success',cancel_url:'https://review.example.com/dashboard/settings/billing?checkout=cancelled'});
  expect(session.has('payment_method_types')).toBe(false);
+ // With the referral program off (the default) the request has exactly these fields: no discounts, no referral metadata.
+ expect([...session.keys()]).toEqual(['mode','customer','client_reference_id','integration_identifier','line_items[0][price]','line_items[0][quantity]','subscription_data[metadata][organizationId]','subscription_data[trial_end]','success_url','cancel_url']);
  // From guided setup, Checkout returns to the plan step.
  await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org,returnTo:'onboarding'});
  expect(Object.fromEntries(new URLSearchParams(calls.at(-1)!.body))).toMatchObject({success_url:'https://review.example.com/dashboard/onboarding/plan?checkout=success',cancel_url:'https://review.example.com/dashboard/onboarding/plan?checkout=cancelled'});

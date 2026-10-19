@@ -67,11 +67,15 @@ export function formEncode(params: Record<string, unknown>, prefix = ""): string
     return [`${encodeURIComponent(key)}=${encodeURIComponent(String(v))}`];
   });
 }
+/** A Stripe API error: the HTTP status and Stripe's error type, code and param, never the response body. */
+export class StripeError extends Error {
+  constructor(readonly status: number, readonly type?: string, readonly code?: string, readonly param?: string) { super(`Stripe request failed (${status}${type ? ` ${type}` : ""}${code ? ` ${code}` : ""})`); this.name = "StripeError"; }
+}
 export async function stripe<T>(path: string, params: Record<string, unknown>, key: string, fetchImpl: typeof fetch = fetch, idempotencyKey?: string): Promise<T> {
   if (!/^\/v1\/[a-z_/]+[a-zA-Z0-9_/]*$/.test(path)) throw new Error("Invalid Stripe API path");
   assertEgress("billing", "Stripe billing");
   const response = await fetchImpl("https://api.stripe.com" + path, { method: "POST", redirect: "error", headers: { authorization: `Bearer ${key}`, "stripe-version": STRIPE_API_VERSION, "content-type": "application/x-www-form-urlencoded", ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}) }, body: formEncode(params).join("&"), signal: AbortSignal.timeout(20000) });
-  const data = (await response.json().catch(() => null)) as T & { error?: { type?: string } } | null;
-  if (!response.ok || !data) throw new Error(`Stripe request failed (${response.status}${data?.error?.type ? ` ${data.error.type}` : ""})`);
+  const data = (await response.json().catch(() => null)) as T & { error?: { type?: string; code?: string; param?: string } } | null;
+  if (!response.ok || !data) throw new StripeError(response.status, data?.error?.type, data?.error?.code, data?.error?.param);
   return data;
 }

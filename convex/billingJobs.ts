@@ -1,7 +1,8 @@
 import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { checkoutTrialEnd, stripe, stripeKey } from "../src/billing";
+import { StripeError, checkoutTrialEnd, stripe, stripeKey } from "../src/billing";
+import { referralConfig } from "../src/referrals";
 
 // Stripe Checkout / Customer Portal sessions for workspace admins, and seat-quantity sync.
 const appOrigin = () => new URL(process.env.APP_URL ?? "http://localhost:3000").origin;
@@ -20,8 +21,20 @@ export const checkout = action({ args: { token: v.string(), organizationId: v.id
   }
   // The card is collected now; any remaining trial carries over, so the first charge waits for it.
   const back = appOrigin() + returnPaths[a.returnTo ?? "settings"], trialEnd = checkoutTrialEnd(context.trialEndsAt, Date.now());
-  const session = await stripe<{ url: string }>("/v1/checkout/sessions", { mode: "subscription", customer, client_reference_id: a.organizationId, integration_identifier: integrationIdentifier, line_items: [{ price, quantity: context.seats }], subscription_data: { metadata: { organizationId: a.organizationId }, ...(trialEnd ? { trial_end: trialEnd } : {}) }, success_url: `${back}?checkout=success`, cancel_url: `${back}?checkout=cancelled` }, key);
-  return session.url;
+  // A referred workspace that has not paid yet gets the referral coupon (never promotion codes).
+  const referral = referralConfig().enabled ? await ctx.runMutation(internal.referrals.prepareCheckout, { token: a.token, organizationId: a.organizationId }) : null;
+  const params = { mode: "subscription", customer, client_reference_id: a.organizationId, integration_identifier: integrationIdentifier, line_items: [{ price, quantity: context.seats }], subscription_data: { metadata: { organizationId: a.organizationId, ...(referral ? { referralId: referral.referralId } : {}) }, ...(trialEnd ? { trial_end: trialEnd } : {}) }, success_url: `${back}?checkout=success`, cancel_url: `${back}?checkout=cancelled` };
+  const create = (extra: Record<string, unknown> = {}) => stripe<{ url: string }>("/v1/checkout/sessions", { ...params, ...extra }, key);
+  if (!referral) return (await create()).url;
+  try { return (await create({ discounts: [{ coupon: referral.coupon }] })).url; }
+  catch (error) {
+    // A used-up, expired or deleted coupon must not block subscribing: retry once without it.
+    if (!(error instanceof StripeError) || error.status !== 400 || !["coupon_expired", "resource_missing"].includes(error.code ?? "")) throw error;
+    // resource_missing also covers other missing objects (then the retry fails the same way); param tells them apart.
+    // shortcut: no referralOps:report coupon-health check; operators watch for this log line instead.
+    console.log(JSON.stringify({ event: "referral.coupon_unavailable", code: error.code, param: error.param }));
+    return (await create()).url;
+  }
 } });
 export const portal = action({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<string> => {
   const context = await ctx.runQuery(internal.billing.checkoutContext, a);

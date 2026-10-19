@@ -86,6 +86,7 @@ import type * as rateLimit from "../rateLimit.js";
 import type * as reactionJobs from "../reactionJobs.js";
 import type * as reactions from "../reactions.js";
 import type * as recovery from "../recovery.js";
+import type * as referralJobs from "../referralJobs.js";
 import type * as referralLedger from "../referralLedger.js";
 import type * as referralOps from "../referralOps.js";
 import type * as referrals from "../referrals.js";
@@ -202,6 +203,7 @@ declare const fullApi: ApiFromModules<{
   reactionJobs: typeof reactionJobs;
   reactions: typeof reactions;
   recovery: typeof recovery;
+  referralJobs: typeof referralJobs;
   referralLedger: typeof referralLedger;
   referralOps: typeof referralOps;
   referrals: typeof referrals;

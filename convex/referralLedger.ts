@@ -1,6 +1,8 @@
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
-import { normalizeReferralCode, referralConfig } from "../src/referrals";
+import type { Doc, Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
+import { v, type ObjectType } from "convex/values";
+import { REFERRAL_CODE_WINDOW_DAYS, REFERRAL_CURRENCY, addMonthsUTC, commissionAmount, commissionBase, normalizeReferralCode, referralConfig } from "../src/referrals";
 
 // Referral helpers shared by sign-in, workspace creation and the referral functions (no endpoints).
 export async function codeOwner(ctx: QueryCtx, code: unknown) {
@@ -45,4 +47,67 @@ export async function verifiedEmail(ctx: QueryCtx, userId: Id<"users">): Promise
 export async function publicLogin(ctx: QueryCtx, userId: Id<"users">) {
   const user = await ctx.db.get(userId);
   return user?.githubId !== undefined ? user.login : null;
+}
+
+// Commission ledger (Phase 2): the coupon at Checkout and one commission per paid invoice.
+/** A workspace that has never paid: no subscription linked and no commission earned from it. */
+export async function neverPaid(ctx: QueryCtx, organizationId: Id<"organizations">) {
+  if ((await ctx.db.query("billingAccounts").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).first())?.subscriptionId) return false;
+  const referral = await referralOfWorkspace(ctx, organizationId);
+  return !referral || !await ctx.db.query("referralCommissions").withIndex("by_referral", (q) => q.eq("referralId", referral._id)).first();
+}
+export const codeWindowOpen = async (ctx: QueryCtx, organizationId: Id<"organizations">) => ((await ctx.db.get(organizationId))?.createdAt ?? 0) >= Date.now() - REFERRAL_CODE_WINDOW_DAYS * 86400000;
+/** The referral a Checkout from this workspace uses: the workspace's own, or else the caller's unpaid
+ *  one, which moves here only for the owner of a never-paid workspace created after the sign-up, and
+ *  only while the workspace it is on has never subscribed (a trial's $0 invoices pay nothing). The
+ *  coupon is withheld when the referrer is or was a member of the workspace. */
+export async function checkoutReferral(ctx: QueryCtx, userId: Id<"users">, role: string, organizationId: Id<"organizations">): Promise<{ referral: Doc<"referrals">; move: boolean; discount: boolean } | null> {
+  const coupon = referralConfig().couponId !== null, bound = await referralOfWorkspace(ctx, organizationId);
+  if (bound) return { referral: bound, move: false, discount: coupon && bound.status === "pending" && bound.firstPaidAt === undefined && !await everMember(ctx, organizationId, bound.referrerId) };
+  const mine = await ctx.db.query("referrals").withIndex("by_referred_user", (q) => q.eq("referredUserId", userId)).first(), organization = await ctx.db.get(organizationId);
+  if (!mine || !(mine.status === "signed_up" || (mine.status === "pending" && mine.firstPaidAt === undefined)) || role !== "owner" || !organization || organization.createdAt < mine.attributedAt || !await neverPaid(ctx, organizationId) || (mine.referredOrganizationId !== undefined && !await neverPaid(ctx, mine.referredOrganizationId)) || await everMember(ctx, organizationId, mine.referrerId)) return null;
+  // shortcut: two Checkout sessions left open at once (they expire after 24h) can both carry the coupon; expire the earlier session on a move if this is abused.
+  return { referral: mine, move: true, discount: coupon };
+}
+/** Settings → Billing for admins: who referred the workspace, whether Checkout applies the discount,
+ *  and whether a referral code can still be added. */
+export async function referralStatus(ctx: QueryCtx, userId: Id<"users">, role: string, organizationId: Id<"organizations">) {
+  const found = await checkoutReferral(ctx, userId, role, organizationId), live = found?.referral.status === "void" ? null : found;
+  return { referred: Boolean(live), invitedBy: live ? await publicLogin(ctx, live.referral.referrerId) : null, discount: live?.discount ?? false, canApply: !found && await codeWindowOpen(ctx, organizationId) && await neverPaid(ctx, organizationId) };
+}
+/** Voids a referral and its commissions still on hold; available ones stay (a later balance can go negative). */
+export async function voidReferralRows(ctx: MutationCtx, referral: Doc<"referrals">, reason: string) {
+  const now = Date.now(), voidReason = reason.slice(0, 200);
+  await ctx.db.patch(referral._id, { status: "void", voidedAt: now, voidReason, updatedAt: now });
+  for (const c of await ctx.db.query("referralCommissions").withIndex("by_referral", (q) => q.eq("referralId", referral._id)).collect()) if (c.status === "accrued" && c.availableAt > now) await ctx.db.patch(c._id, { status: "void", voidReason, updatedAt: now });
+}
+
+// What the Stripe webhook forwards about a paid invoice (cents; times in ms). All optional: old and
+// unexpected payloads still apply to billing, and accrual skips what it cannot use.
+// shortcut: livemode is not recorded; test and live mode run on separate Convex deployments.
+export const invoiceFacts = { customer: v.string(), subscription: v.optional(v.string()), id: v.optional(v.string()), amountPaid: v.optional(v.number()), amountOverpaid: v.optional(v.number()), total: v.optional(v.number()), totalExcludingTax: v.optional(v.number()), currency: v.optional(v.string()), invoiceCreated: v.optional(v.number()), paidAt: v.optional(v.number()) };
+/** Accrues the referrer's commission for one paid invoice. Runs in its own scheduled mutation, never in
+ *  the billing webhook, so a failure here cannot affect billing. Returns the outcome. */
+export async function accrueCommission(ctx: MutationCtx, f: ObjectType<typeof invoiceFacts>): Promise<string> {
+  const config = referralConfig();
+  if (!config.enabled || !f.id || !f.subscription || f.amountPaid === undefined || f.total === undefined || !f.currency || f.invoiceCreated === undefined) return "incomplete";
+  const invoiceId = f.id, account = await ctx.db.query("billingAccounts").withIndex("by_customer", (q) => q.eq("customerId", f.customer)).first();
+  // Subscription invoices only: one-off invoices for the same customer earn nothing.
+  if (!account || (account.subscriptionId && account.subscriptionId !== f.subscription)) return "unknown subscription";
+  const referral = await referralOfWorkspace(ctx, account.organizationId);
+  if (!referral || !["pending", "active", "ended"].includes(referral.status)) return "no referral";
+  if (await ctx.db.query("referralCommissions").withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId)).first()) return "duplicate";
+  if (f.currency !== REFERRAL_CURRENCY) { console.log(JSON.stringify({ event: "referral.currency_skipped", currency: f.currency.slice(0, 10) })); return "other currency"; }
+  const base = commissionBase({ amountPaid: f.amountPaid, amountOverpaid: f.amountOverpaid, total: f.total, totalExcludingTax: f.totalExcludingTax });
+  if (base <= 0) return "nothing paid";
+  // Self-referral: the referrer is, or once was, a member of the workspace they referred.
+  if (await everMember(ctx, account.organizationId, referral.referrerId)) { await voidReferralRows(ctx, referral, "referrer is or was a member of the workspace"); return "void"; }
+  // The window starts at the earliest paid invoice, so a late month-1 invoice moves it back.
+  const now = Date.now(), paidAt = f.paidAt ?? now, first = referral.firstPaidAt === undefined;
+  const windowStart = Math.min(referral.windowStart ?? Infinity, f.invoiceCreated), commissionEndsAt = addMonthsUTC(windowStart, config.months), ended = f.invoiceCreated >= commissionEndsAt;
+  await ctx.db.patch(referral._id, { windowStart, commissionEndsAt, ...(first ? { status: "active" as const, firstPaidAt: paidAt } : ended ? { status: "ended" as const } : {}), updatedAt: now });
+  if (first) await ctx.scheduler.runAfter(0, internal.referralJobs.sendConversionNotice, { referralId: referral._id });
+  if (ended) return "ended";
+  await ctx.db.insert("referralCommissions", { referralId: referral._id, referrerId: referral.referrerId, referredOrganizationId: account.organizationId, invoiceId, subscriptionId: f.subscription, currency: f.currency, base, rateBps: config.rateBps, amount: commissionAmount(base, config.rateBps), reversed: 0, status: "accrued", invoiceCreated: f.invoiceCreated, paidAt, availableAt: paidAt + config.holdDays * 86400000, createdAt: now, updatedAt: now });
+  return "accrued";
 }

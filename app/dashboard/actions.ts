@@ -300,6 +300,12 @@ export async function startCheckout(form: FormData) {
   catch { redirect("/dashboard/settings/billing?billing=error"); }
   redirect(url);
 }
+export async function applyReferralCode(form: FormData) {
+  const { token } = await current();
+  try { const result = await backend().mutation(api.referrals.applyCode, { token, organizationId: text(form, "organizationId") as Id<"organizations">, code: text(form, "code") }); await notify(result.ok ? "Referral code applied." : result.error, result.ok ? "success" : "error"); }
+  catch (e) { await notify(backendMessage(e, "Could not apply the referral code."), "error"); }
+  revalidatePath("/dashboard", "layout");
+}
 export async function openBillingPortal(form: FormData) {
   const { token } = await current();
   let url: string;

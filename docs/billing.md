@@ -53,6 +53,36 @@ On Vercel, Stripe can also be provisioned from the Vercel Marketplace. The keys 
    ```
    Each workspace returns to its trial with the same end date, and its next Checkout creates a live customer.
 5. **Old webhook:** cancel the test subscriptions and disable the test-mode webhook endpoint, so the sandbox stops sending events (and retries) that would now fail signature checks.
+6. **Referrals:** commissions don't record the Stripe mode. Keep `REFERRALS_ENABLED` off on a deployment until it is live, or void its test commissions with `referralOps:voidCommission`.
+
+## Referral program
+
+Off unless `REFERRALS_ENABLED=true` and `BILLING_ENABLED=true`, on both Convex and the web app. Every signed-in user gets a link (`/r/<code>`) under Settings → Referrals. A new account created through it is credited to the link's owner, and so is the first workspace it creates.
+
+- **Discount:** a referred workspace that has not paid yet gets the Stripe coupon `STRIPE_REFERRAL_COUPON_ID` at Checkout (`discounts`), and the subscription carries `metadata.referralId`. Promotion codes are never offered.
+- **Commission:** each paid subscription invoice of a referred workspace earns the referrer `REFERRAL_RATE_BPS` (default 2000 = 20%) of the cash collected, excluding tax pro rata. Credits and overpayments don't count, $0 invoices and invoices in another currency than USD earn nothing, and one-off invoices without a subscription are skipped.
+  - It lasts `REFERRAL_MONTHS` (default 12), counted from the earliest paid invoice. An invoice created after that ends the referral.
+  - Each commission is held `REFERRAL_HOLD_DAYS` (default 30) after the payment before it counts toward the referrer's balance.
+  - Commissions are computed in a job scheduled from the `invoice.paid` webhook, never in the webhook itself, so a referral problem cannot block billing.
+  - The referrer gets one email when the workspace first pays, if they have a verified email (an email, Google, GitLab or SSO sign-in, or a verified address in Settings → Notifications).
+- **Self-referral:** you can't use your own code. Checkout gives no coupon to a workspace the referrer is or ever was a member of, and the referral is voided at its next paid invoice, with its commissions still on hold.
+- **Codes in Settings → Billing:** owners and admins can add a referral code to a workspace that has none, within its first 30 days and before it has subscribed. The code's owner must not be, or ever have been, a member of the workspace, nor someone the caller referred, and a caller who was already referred can only bring that same referral. Five attempts per person per hour.
+- **Moving to another workspace:** until the workspace it is on subscribes, even to a trial, the referral follows the workspace its referred person subscribes from, if they own it, it was created after they signed up, and it has never paid.
+
+### Setup
+
+1. **Coupon:** create a coupon, for example `referral-20-3mo` with `percent_off=20`, `duration=repeating` and `duration_in_months=3`. Set its ID as `STRIPE_REFERRAL_COUPON_ID` on Convex, and describe it in `REFERRAL_DISCOUNT_LABEL` on the web app (for example `20% off the first 3 paid months`). Never create promotion codes for it.
+   - The coupon's months start when the subscription is created, which is the start of a carried trial. With `BILLING_TRIAL_DAYS` under 28, 3 months cover 3 paid monthly invoices. For longer trials, set `duration_in_months` to `2 + ceil((trialDays + 1) / 28)` (`couponMonthsNeeded(3, trialDays)` in `src/referrals.ts`) and word the label "at least the first 3 paid months".
+   - `max_redemptions` and `redeem_by` are optional. When the coupon is used up, expired or deleted, Checkout continues without the discount and logs `{"event":"referral.coupon_unavailable"}`.
+   - **Annual prices** (pricing-tiers P3.2): a repeating coupon discounts the whole first annual invoice. Use a separate `once` coupon for annual prices, or none.
+2. **Settings:** set `REFERRALS_ENABLED=true` on Convex and on the web app. `REFERRAL_RATE_BPS`, `REFERRAL_MONTHS` and `REFERRAL_HOLD_DAYS` are read on Convex.
+3. **Deploy order:** `npx convex deploy --cmd '<build>'` builds the web app first and pushes the Convex functions afterwards, and Vercel promotes the build only after both succeed, so forward deploys are safe. **Never roll Convex back past the referral sign-up release (Phase 1) without first setting `REFERRALS_ENABLED=false` on the web app**: the web app would send referral codes to functions that no longer accept them, and referred sign-ins would fail.
+
+### Operator tools
+
+- `npx convex run referralOps:voidReferral '{"referralId":"…","reason":"…"}'`: stops a referral (abuse found by hand). Its commissions still on hold are voided; available ones stay.
+- `npx convex run referralOps:voidCommission '{"commissionId":"…","reason":"…"}'`: voids one commission, for example after a credit note that only credited the customer balance (no refund).
+- A commission job that failed is not retried. Run `npx convex run referrals:accrue '{"customer":"cus_…","subscription":"sub_…","id":"in_…","amountPaid":…,"total":…,"totalExcludingTax":…,"currency":"usd","invoiceCreated":<ms>,"paidAt":<ms>}'` with the invoice's values from the Stripe Dashboard; an invoice that already has a commission is skipped.
 
 ## Guarantees
 
