@@ -58,15 +58,17 @@ export async function neverPaid(ctx: QueryCtx, organizationId: Id<"organizations
   return !referral || !await ctx.db.query("referralCommissions").withIndex("by_referral", (q) => q.eq("referralId", referral._id)).first();
 }
 export const codeWindowOpen = async (ctx: QueryCtx, organizationId: Id<"organizations">) => ((await ctx.db.get(organizationId))?.createdAt ?? 0) >= Date.now() - REFERRAL_CODE_WINDOW_DAYS * 86400000;
+// The person added this referral's code to this workspace (Settings → Billing), which may be older than the code.
+const codeAppliedHere = async (ctx: QueryCtx, organizationId: Id<"organizations">, userId: Id<"users">, referralId: Id<"referrals">) => Boolean(await ctx.db.query("auditEvents").withIndex("by_org_user", (q) => q.eq("organizationId", organizationId).eq("userId", userId)).filter((q) => q.and(q.eq(q.field("action"), "referral.code_applied"), q.eq(q.field("target"), referralId))).first());
 /** The referral a Checkout from this workspace uses: the workspace's own, or else the caller's unpaid
- *  one, which moves here only for the owner of a never-paid workspace created after the sign-up, and
- *  only while the workspace it is on has never subscribed (a trial's $0 invoices pay nothing). The
- *  coupon is withheld when the referrer is or was a member of the workspace. */
+ *  one, which moves here only for the owner of a never-paid workspace created after the sign-up (or the
+ *  one they added its code to), and only while the workspace it is on has never subscribed (a trial's
+ *  $0 invoices pay nothing). The coupon is withheld when the referrer is or was a member of the workspace. */
 export async function checkoutReferral(ctx: QueryCtx, userId: Id<"users">, role: string, organizationId: Id<"organizations">): Promise<{ referral: Doc<"referrals">; move: boolean; discount: boolean } | null> {
   const coupon = referralConfig().couponId !== null, bound = await referralOfWorkspace(ctx, organizationId);
   if (bound) return { referral: bound, move: false, discount: coupon && bound.status === "pending" && bound.firstPaidAt === undefined && !await everMember(ctx, organizationId, bound.referrerId) };
   const mine = await ctx.db.query("referrals").withIndex("by_referred_user", (q) => q.eq("referredUserId", userId)).first(), organization = await ctx.db.get(organizationId);
-  if (!mine || !(mine.status === "signed_up" || (mine.status === "pending" && mine.firstPaidAt === undefined)) || role !== "owner" || !organization || organization.createdAt < mine.attributedAt || !await neverPaid(ctx, organizationId) || (mine.referredOrganizationId !== undefined && !await neverPaid(ctx, mine.referredOrganizationId)) || await everMember(ctx, organizationId, mine.referrerId)) return null;
+  if (!mine || !(mine.status === "signed_up" || (mine.status === "pending" && mine.firstPaidAt === undefined)) || role !== "owner" || !organization || (organization.createdAt < mine.attributedAt && !await codeAppliedHere(ctx, organizationId, userId, mine._id)) || !await neverPaid(ctx, organizationId) || (mine.referredOrganizationId !== undefined && !await neverPaid(ctx, mine.referredOrganizationId)) || await everMember(ctx, organizationId, mine.referrerId)) return null;
   // shortcut: two Checkout sessions left open at once (they expire after 24h) can both carry the coupon; expire the earlier session on a move if this is abused.
   return { referral: mine, move: true, discount: coupon };
 }
@@ -99,8 +101,8 @@ export async function accrueCommission(ctx: MutationCtx, f: ObjectType<typeof in
   if (!referral || !["pending", "active", "ended"].includes(referral.status)) return "no referral";
   if (await ctx.db.query("referralCommissions").withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId)).first()) return "duplicate";
   if (f.currency !== REFERRAL_CURRENCY) { console.log(JSON.stringify({ event: "referral.currency_skipped", currency: f.currency.slice(0, 10) })); return "other currency"; }
-  const base = commissionBase({ amountPaid: f.amountPaid, amountOverpaid: f.amountOverpaid, total: f.total, totalExcludingTax: f.totalExcludingTax });
-  if (base <= 0) return "nothing paid";
+  // A trial's $0 invoice is not a payment.
+  if (f.total <= 0) return "nothing paid";
   // Self-referral: the referrer is, or once was, a member of the workspace they referred.
   if (await everMember(ctx, account.organizationId, referral.referrerId)) { await voidReferralRows(ctx, referral, "referrer is or was a member of the workspace"); return "void"; }
   // The window starts at the earliest paid invoice, so a late month-1 invoice moves it back.
@@ -109,6 +111,9 @@ export async function accrueCommission(ctx: MutationCtx, f: ObjectType<typeof in
   await ctx.db.patch(referral._id, { windowStart, commissionEndsAt, ...(first ? { status: "active" as const, firstPaidAt: paidAt } : ended ? { status: "ended" as const } : {}), updatedAt: now });
   if (first) await ctx.scheduler.runAfter(0, internal.referralJobs.sendConversionNotice, { referralId: referral._id });
   if (ended) return "ended";
+  // Paid from the customer balance (referral credit, an overpayment): it counts as paid, so no more coupon, but earns nothing.
+  const base = commissionBase({ amountPaid: f.amountPaid, amountOverpaid: f.amountOverpaid, total: f.total, totalExcludingTax: f.totalExcludingTax });
+  if (base <= 0) return "nothing paid";
   await ctx.db.insert("referralCommissions", { referralId: referral._id, referrerId: referral.referrerId, referredOrganizationId: account.organizationId, invoiceId, subscriptionId: f.subscription, currency: f.currency, base, rateBps: config.rateBps, amount: commissionAmount(base, config.rateBps), reversed: 0, status: "accrued", invoiceCreated: f.invoiceCreated, paidAt, availableAt: paidAt + config.holdDays * 86400000, createdAt: now, updatedAt: now });
   return "accrued";
 }
@@ -137,11 +142,13 @@ export async function applyChargeFacts(ctx: MutationCtx, invoiceId: string, char
   await ctx.db.patch(commission._id, { charges, reversed: reversalTarget(commission.amount, charges), updatedAt: Date.now() });
   return "applied";
 }
-/** A referrer's commissions and redemptions, for balances. */
+// shortcut: a referrer's oldest 5000 rows of each kind; add a running-balance table if a referrer ever gets close (referral.ledger_full).
+export const ledgerLimit = 5000;
+/** A referrer's commissions and redemptions, for balances. Missing commissions only under-count; redeeming
+ *  stops at ledgerLimit redemptions. */
 export async function ledgerFor(ctx: QueryCtx, userId: Id<"users">) {
-  // shortcut: 5000 rows each; add a running-balance table if a referrer ever gets close.
-  const commissions = await ctx.db.query("referralCommissions").withIndex("by_referrer", (q) => q.eq("referrerId", userId)).take(5000);
-  return { commissions, redemptions: await ctx.db.query("referralRedemptions").withIndex("by_user", (q) => q.eq("userId", userId)).take(5000) };
+  const commissions = await ctx.db.query("referralCommissions").withIndex("by_referrer", (q) => q.eq("referrerId", userId)).take(ledgerLimit);
+  return { commissions, redemptions: await ctx.db.query("referralRedemptions").withIndex("by_user", (q) => q.eq("userId", userId)).take(ledgerLimit) };
 }
 /** Referral credit applied to a workspace's bill (Settings → Billing), in cents. */
 export const referralCredit = async (ctx: QueryCtx, organizationId: Id<"organizations">) => (await ctx.db.query("referralRedemptions").withIndex("by_credit_org", (q) => q.eq("creditOrganizationId", organizationId)).take(1000)).reduce((sum, r) => sum + (r.status === "completed" ? r.amount : 0), 0);
@@ -157,9 +164,10 @@ export async function settleRedemption(ctx: MutationCtx, redemption: Doc<"referr
 export const payoutAccountOf = (ctx: QueryCtx, userId: Id<"users">) => ctx.db.query("referralPayoutAccounts").withIndex("by_user", (q) => q.eq("userId", userId)).first();
 /** An account's transfer status and earliest requirement deadline, as read from Stripe. */
 export const payoutStatus = { transfers: v.union(v.literal("active"), v.literal("pending"), v.literal("restricted"), v.literal("unsupported"), v.literal("unknown")), requirements: v.optional(v.string()) };
-// Setting up payouts and cashing out need a browser sign-in from the last 15 minutes, so an older
-// stolen session or an API key (no session) can't add a bank account or move money. A session started
-// by linking another provider keeps the linking session's sign-in time (signedInAt).
+// Setting up payouts, cashing out and linking another provider (identity.signIn) need a browser sign-in
+// from the last 15 minutes, so an older stolen session or an API key (no session) can't add a bank account,
+// move money, or add a sign-in method that would start a fresh session. A session started by linking keeps
+// the linking session's sign-in time (signedInAt).
 // shortcut: no security-notice emails and no first-payout delay; add them here if account takeover is seen despite this gate.
 export const recentSignIn = (session: Doc<"sessions"> | null) => session !== null && Date.now() - (session.signedInAt ?? session.createdAt) < 15 * 60000;
 export const signInAgain = { ok: false as const, error: "Sign in again to continue.", signIn: "/login?next=/dashboard/settings/referrals&reauth=1" };

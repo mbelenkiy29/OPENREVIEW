@@ -98,7 +98,7 @@ function payoutBranch(ctx: ActionCtx, r: Doc<"referralRedemptions">, account: st
   };
 }
 async function runRedemption(ctx: ActionCtx, redemptionId: Id<"referralRedemptions">): Promise<string> {
-  const leaseId = crypto.randomUUID(), r: Doc<"referralRedemptions"> | null = await ctx.runMutation(internal.referrals.leaseRedemption, { redemptionId, leaseId });
+  const leaseId = crypto.randomUUID(), r: (Doc<"referralRedemptions"> & { available: number }) | null = await ctx.runMutation(internal.referrals.leaseRedemption, { redemptionId, leaseId });
   if (!r) return "skipped";
   const release = async (outcome: string, error: unknown, attempt: boolean, indeterminate = false) => { await ctx.runMutation(internal.referrals.releaseRedemption, { redemptionId, leaseId, attempt, indeterminate, ...(error ? { error: error instanceof Error ? error.message : String(error) } : {}) }); return outcome; };
   const complete = async (stripeId: string) => { await ctx.runMutation(internal.referrals.completeRedemption, { redemptionId, stripeId }); return "completed"; };
@@ -112,6 +112,8 @@ async function runRedemption(ctx: ActionCtx, redemptionId: Id<"referralRedemptio
     if (r.indeterminateAt) return await release("indeterminate", null, false);
     // The payouts switch holds transfers (credits go on); the cron resumes them once it is back on.
     if (r.kind === "payout" && !referralConfig().payoutsEnabled) { await ctx.runMutation(internal.referrals.releaseRedemption, { redemptionId, leaseId, attempt: false, indeterminate: false, paused: true }); return "paused"; }
+    // As approveRedemption: a cash-out not yet sent when refunds or disputes took the balance below zero is cancelled.
+    if (r.kind === "payout" && r.available < 0) return await fail("Refunds or disputes since you asked for this cash-out left your balance below zero, so it wasn’t sent.");
     const problem = await branch.check();
     if (problem) return await fail(problem);
     posting = true;

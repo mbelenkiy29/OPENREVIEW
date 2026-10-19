@@ -177,6 +177,26 @@ test("Checkout moves an unpaid referral only for the owner of a never-paid works
   expect((await t.run((ctx) => ctx.db.query("referrals").collect())).filter((r) => r.referrerId === alice.userId)).toHaveLength(2);
 });
 
+test("a referral added with a code moves back to that workspace after a Checkout abandoned elsewhere", async () => {
+  const t = convexTest(schema, modules);
+  const { code } = await referred(t);
+  const frank = await signIn(t, 10, "frank"), frankCo = await workspace(t, frank, "Frank Co"), older = await workspace(t, frank, "Frank Old");
+  vi.advanceTimersByTime(60_000);
+  expect(await t.mutation(api.referrals.applyCode, { token: frank.token, organizationId: frankCo, code })).toEqual({ ok: true });
+  // Frank opens Checkout from a newer workspace, abandons it, and subscribes from the one he added the code to.
+  const stripe = mockStripe(), coupon = () => stripe.checkouts().at(-1)!.get("discounts[0][coupon]"), newer = await workspace(t, frank, "Frank Two");
+  await checkout(t, frank, newer);
+  expect((await referralOf(t, frank.userId)).referredOrganizationId).toBe(newer);
+  await checkout(t, frank, frankCo);
+  expect(coupon()).toBe("referral-20-3mo");
+  expect((await referralOf(t, frank.userId)).referredOrganizationId).toBe(frankCo);
+  expect((await t.query(api.billing.status, { token: frank.token, organizationId: frankCo })).referral).toMatchObject({ referred: true, discount: true, canApply: false });
+  // Another workspace created before the code was added still doesn't take it.
+  await checkout(t, frank, older);
+  expect(coupon()).toBeNull();
+  expect((await referralOf(t, frank.userId)).referredOrganizationId).toBe(frankCo);
+});
+
 test("billing status shows the referral to owners and admins only, and offers the code form while one can be added", async () => {
   const t = convexTest(schema, modules);
   const { alice, bob, org } = await referred(t);
@@ -309,6 +329,21 @@ test("each paid subscription invoice earns 20% of its pre-tax cash once; others 
   expect((await commissions(t))[0]).toMatchObject({ status: "void", voidReason: "credit note" });
   expect((await t.run((ctx) => ctx.db.query("auditEvents").collect())).filter((e) => e.action === "referral.commission_voided").map((e) => [e.organizationId, e.target])).toEqual([[org, commission._id]]);
   expect(await t.query(api.referrals.overview, { token: alice.token })).toMatchObject({ available: 0, onHold: 0 });
+});
+
+test("an invoice paid entirely from the customer balance earns nothing but counts as paid, so Checkout gives no coupon again", async () => {
+  const t = convexTest(schema, modules);
+  const { bob, org } = await referred(t);
+  const accountId = await linkStripe(t, org), created = Date.UTC(2026, 9, 14, 11), paidAt = Date.now();
+  await deliver(t, paid("in_credit", created, { amount_paid: 0, total: 9600, total_excluding_tax: 9600 }));
+  await run(t);
+  expect(await commissions(t)).toEqual([]);
+  expect(await referralOf(t, bob.userId)).toMatchObject({ status: "active", firstPaidAt: paidAt, windowStart: created });
+  // Bob cancels and subscribes again: no second round of the coupon.
+  await t.run((ctx) => ctx.db.patch(accountId, { status: "canceled" }));
+  const stripe = mockStripe();
+  await checkout(t, bob, org);
+  expect(stripe.checkouts()[0].get("discounts[0][coupon]")).toBeNull();
 });
 
 test("the 12-month window starts at the earliest paid invoice and ends the referral after it", async () => {

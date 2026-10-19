@@ -2,7 +2,7 @@ import { internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { audit } from "./auth";
-import { ledgerFor, settleRedemption, voidReferralRows } from "./referralLedger";
+import { ledgerFor, ledgerLimit, settleRedemption, voidReferralRows } from "./referralLedger";
 import { REFERRAL_CURRENCY, referralBalances } from "../src/referrals";
 
 // Operator tools for the referral program: `npx convex run referralOps:<fn> '{...}'`.
@@ -47,6 +47,7 @@ function inReview<T extends { status: string }>(redemption: T | null): T {
  *  or disputes during the review left the referrer's balance below zero (the cash-out is already counted). */
 export const approveRedemption = internalMutation({ args: { redemptionId: v.id("referralRedemptions") }, handler: async (ctx, a) => {
   const redemption = inReview(await ctx.db.get(a.redemptionId)), { commissions, redemptions } = await ledgerFor(ctx, redemption.userId);
+  if (redemptions.length >= ledgerLimit) throw new Error(`The referrer has ${ledgerLimit} or more redemptions, so their balance can't be computed; add the running-balance table before approving`);
   const available = referralBalances(commissions, redemptions, Date.now())[REFERRAL_CURRENCY]?.available ?? 0;
   if (available < 0) throw new Error(`Refunds or disputes since the request leave the referrer ${-available} cents short; reject the cash-out or wait for new commissions`);
   await ctx.db.patch(a.redemptionId, { status: "processing", keyIssuedAt: Date.now(), updatedAt: Date.now() });

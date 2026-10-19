@@ -4,7 +4,7 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { audit, authenticated, authenticatedSession, authorize, service } from "./auth";
 import { rateLimit } from "./rateLimit";
-import { accrueCommission, applyChargeFacts, chargeFacts, checkoutReferral, codeOwner, codeWindowOpen, everMember, invoiceFacts, ledgerFor, mayHaveCommission, neverPaid, payoutAccountOf, payoutStatus, payoutsOff, publicLogin, recentSignIn, referralOfWorkspace, settleRedemption, signInAgain, verifiedEmail } from "./referralLedger";
+import { accrueCommission, applyChargeFacts, chargeFacts, checkoutReferral, codeOwner, codeWindowOpen, everMember, invoiceFacts, ledgerFor, ledgerLimit, mayHaveCommission, neverPaid, payoutAccountOf, payoutStatus, payoutsOff, publicLogin, recentSignIn, referralOfWorkspace, settleRedemption, signInAgain, verifiedEmail } from "./referralLedger";
 import { REFERRAL_CODE_WINDOW_DAYS, REFERRAL_CURRENCY, REFERRAL_MIN_CREDIT_CENTS, REFERRAL_MIN_PAYOUT_CENTS, REFERRAL_PAYOUT_COUNTRIES, REFERRAL_PAYOUT_REVIEW_CENTS, generateReferralCode, referralBalances, referralConfig } from "../src/referrals";
 
 // Referral program, personal side: each signed-in user's code and the people who signed up with it.
@@ -119,7 +119,12 @@ export const customerMayHaveCommission = internalQuery({ args: { customer: v.str
 // referrer administers, which Stripe applies to its next invoices.
 const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`; // Convex-side messages avoid Intl (formatMoney)
 // Concurrent requests read the same ledger rows, so Convex retries one of them: no double spend.
-const availableFor = async (ctx: QueryCtx, userId: Id<"users">) => { const { commissions, redemptions } = await ledgerFor(ctx, userId); return { available: referralBalances(commissions, redemptions, Date.now())[REFERRAL_CURRENCY]?.available ?? 0, redemptions }; };
+// Past ledgerLimit redemptions, newer ones would go uncounted, so nothing more can be redeemed (fails closed).
+const availableFor = async (ctx: QueryCtx, userId: Id<"users">) => {
+  const { commissions, redemptions } = await ledgerFor(ctx, userId), full = redemptions.length >= ledgerLimit;
+  if (full) console.error(JSON.stringify({ event: "referral.ledger_full", userId }));
+  return { available: full ? 0 : referralBalances(commissions, redemptions, Date.now())[REFERRAL_CURRENCY]?.available ?? 0, redemptions };
+};
 const notAvailable = (available: number) => available > 0 ? `You have ${dollars(available)} available.` : "You have no earnings available to redeem yet.";
 /** Requests a credit from the caller's available balance. Rejections return {ok:false} rather than
  *  throw, so every attempt counts against the rate limit. */
@@ -180,12 +185,13 @@ export const updatePayoutAccount = internalMutation({ args: { accountId: v.strin
   if (row) await ctx.db.patch(row._id, { transfers: a.transfers, requirements: a.requirements, ...(a.transfers === "active" && row.onboardedAt === undefined ? { onboardedAt: Date.now() } : {}), updatedAt: Date.now() });
 } });
 /** Claims a processing redemption for one run for 5 minutes, so two runs never post at once. Returns
- *  the row, or null when it is not runnable. */
+ *  the row with, for a cash-out, the referrer's available balance (checked again before sending), or
+ *  null when it is not runnable. */
 export const leaseRedemption = internalMutation({ args: { redemptionId: v.id("referralRedemptions"), leaseId: v.string() }, handler: async (ctx, a) => {
   const r = await ctx.db.get(a.redemptionId), now = Date.now();
   if (!r || r.status !== "processing" || (r.leaseId && r.leaseId !== a.leaseId && (r.leaseUntil ?? 0) > now)) return null;
   await ctx.db.patch(r._id, { leaseId: a.leaseId, leaseUntil: now + 5 * 60000 });
-  return r;
+  return { ...r, available: r.kind === "payout" ? (await availableFor(ctx, r.userId)).available : 0 };
 } });
 /** Ends a run that did not settle the redemption: it stays processing for the next run. `attempt`
  *  counts a failed post; `indeterminate` (a 5xx) stops all further posts; `paused` marks a payout held

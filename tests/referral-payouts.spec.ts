@@ -116,7 +116,7 @@ test("payout steps refuse other countries, sign-ins older than 15 minutes, API k
   expect(calls).toEqual([]);
 });
 
-test("linking another provider to an older session doesn't count as a fresh sign-in", async () => {
+test("linking another provider needs a recent sign-in, so an older session can't add a way to sign in fresh", async () => {
   const t = convexTest(schema, modules);
   const { alice } = await setup(t);
   await linkAccount(t, alice);
@@ -126,16 +126,24 @@ test("linking another provider to an older session doesn't count as a fresh sign
     expect(await t.mutation(api.identity.signIn, { secret: svc, avatar: "", provider, providerUserId, login: "someone", emailVerified: false, sessionHash: createHash("sha256").update(sid).digest("hex"), linkToken: token })).toBe(alice.userId);
     return jwt(alice.userId, sid);
   };
-  // Someone holding Alice's 16-minute-old session links their own GitHub account: the new session is just as old.
+  // Someone holding Alice's 16-minute-old session (or her API key) tries to link their own GitHub account, to sign in with it later.
   vi.setSystemTime(Date.now() + 16 * 60000);
-  const linked = await link(alice.token, "github", "99");
-  expect(await start(t, linked)).toEqual(signInAgain);
-  expect(await t.mutation(api.referrals.requestPayout, { token: linked, amount: 5000 })).toEqual(signInAgain);
-  expect(await t.action(api.referralJobs.payoutDashboardLink, { token: linked })).toEqual(signInAgain);
+  for (const token of [alice.token, alice.apiToken]) await expect(link(token, "github", "99")).rejects.toThrow(/Sign in again to link another account/);
+  // Signing in with that GitHub account is someone else, with nothing to cash out.
+  const mallory = await signIn(t, 99, "mallory");
+  expect(mallory.userId).not.toBe(alice.userId);
+  expect(await t.action(api.referralJobs.payoutDashboardLink, { token: mallory.token })).toEqual({ ok: false, error: "Finish setting up payouts with Stripe first." });
   expect(calls).toEqual([]);
-  // A link made right after a real sign-in keeps that sign-in's time.
+  // A link made right after a real sign-in works, and its session keeps that sign-in's time.
   const again = await signIn(t, 1, "alice", "alice@example.com");
-  expect(await t.action(api.referralJobs.payoutDashboardLink, { token: await link(again.token, "gitlab", "77") })).toMatchObject({ ok: true });
+  vi.setSystemTime(Date.now() + 10 * 60000);
+  const linked = await link(again.token, "gitlab", "77");
+  expect(await t.action(api.referralJobs.payoutDashboardLink, { token: linked })).toMatchObject({ ok: true });
+  vi.setSystemTime(Date.now() + 6 * 60000);
+  expect(await t.action(api.referralJobs.payoutDashboardLink, { token: linked })).toEqual(signInAgain);
+  // With payouts off, a fresh sign-in unlocks nothing, so linking works from any valid session as before.
+  process.env.REFERRAL_PAYOUTS_ENABLED = "false";
+  expect(await link(again.token, "github", "55")).toBeTruthy();
 });
 
 test("the account status is re-read from Stripe: onboardedAt is set once, and a restricted account gets an update link", async () => {
@@ -315,6 +323,24 @@ test("with payouts switched off, a cash-out pauses without a transfer, isn't rep
   expect((await redemptions(t))[0]).toMatchObject({ status: "completed", stripeId: "tr_1" });
   expect(posts(calls).map((c) => c.key)).toEqual([`referral-transfer:${paused._id}:1`]);
   expect(log).not.toHaveBeenCalled();
+});
+
+test("a paused cash-out isn't sent once refunds or disputes have left the balance below zero", async () => {
+  const t = convexTest(schema, modules);
+  const { alice } = await setup(t);
+  await linkAccount(t, alice);
+  const calls = transferStripe();
+  expect(await request(t, alice, 40000)).toEqual({ ok: true, review: false });
+  process.env.REFERRAL_PAYOUTS_ENABLED = "false";
+  await run(t);
+  // While it waits, Bob's invoice is refunded: Alice is $400 short.
+  await t.run(async (ctx) => { const [c] = await ctx.db.query("referralCommissions").collect(); await ctx.db.patch(c._id, { reversed: 60000 }); });
+  expect(await overview(t, alice)).toMatchObject({ available: -40000 });
+  process.env.REFERRAL_PAYOUTS_ENABLED = "true";
+  await t.action(internal.referralJobs.reconcileRedemptions, {});
+  expect((await redemptions(t))[0]).toMatchObject({ status: "failed", error: "Refunds or disputes since you asked for this cash-out left your balance below zero, so it wasn’t sent." });
+  expect(posts(calls)).toEqual([]);
+  expect(await overview(t, alice)).toMatchObject({ available: 0, redeemed: 0 });
 });
 
 test("while payouts are off, paused cash-outs don't crowd credits out of the reconcile batch", async () => {

@@ -7,7 +7,7 @@ import { internal } from "./_generated/api";
 import { audit, authenticated, authenticatedSession, authorize, service } from "./auth";
 import { rateLimit } from "./rateLimit";
 import { scheduleSeatSync } from "./billing";
-import { recordReferralSignup } from "./referralLedger";
+import { recentSignIn, recordReferralSignup } from "./referralLedger";
 import { emailAddress } from "../src/email";
 import { normalizeReferralCode, referralConfig } from "../src/referrals";
 import { sessionHash } from "../src/session-hash";
@@ -58,8 +58,11 @@ export const signIn = mutation({ args: { secret: v.string(), provider, providerU
   if (!a.providerUserId || a.providerUserId.length > 200 || (a.provider === "github" && !/^\d{1,20}$/.test(a.providerUserId))) throw new Error("Invalid provider identity");
   let userId: Id<"users">, signedInAt: number | undefined;
   if (a.linkToken) {
-    // Linking proves only the new provider account, not who is signed in: the new session keeps the old sign-in time (0 for a token without a session).
+    // Linking proves only the new provider account, not who is signed in, and that account can later sign in
+    // fresh: while referral payouts are on it needs the same recent sign-in as payouts, and the new session
+    // keeps the old sign-in time.
     const { user: current, session } = await authenticatedSession(ctx, a.linkToken);
+    if (referralConfig().payoutsEnabled && !recentSignIn(session)) throw new Error("Sign in again to link another account");
     signedInAt = session?.signedInAt ?? session?.createdAt ?? 0;
     const existing = await ctx.db.query("identities").withIndex("by_provider_user", (q) => q.eq("provider", a.provider).eq("providerUserId", a.providerUserId)).unique();
     if (existing && existing.userId !== current._id) throw new Error("This account is already linked to another OpenReview user");

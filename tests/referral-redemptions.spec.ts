@@ -213,6 +213,20 @@ test("credit requests: admins of a workspace with a Stripe customer, within the 
   expect(await request(t, alice, aliceCo, 1000)).toEqual({ ok: false, error: "This deployment doesn’t run the referral program." });
 });
 
+test("past 5000 redemption rows nothing more can be redeemed, since newer rows would go uncounted", async () => {
+  const t = convexTest(schema, modules);
+  const { alice, aliceCo } = await setup(t);
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const row = { userId: alice.userId, kind: "credit" as const, amount: 1000, currency: "usd", customerId: "cus_alice", status: "failed" as const, idempotencyKey: "k", keyIssuedAt: 1, attempts: 0, createdAt: 1, updatedAt: 1 };
+  await t.run(async (ctx) => { for (let i = 0; i < 4999; i++) await ctx.db.insert("referralRedemptions", row); });
+  // One under the limit, $20 is still available; at the limit, nothing is.
+  expect(await request(t, alice, aliceCo, 2000)).toEqual({ ok: true });
+  expect(await request(t, alice, aliceCo, 1000)).toEqual({ ok: false, error: "You have no earnings available to redeem yet." });
+  expect(log.mock.calls.map(([line]) => JSON.parse(String(line)))).toContainEqual({ event: "referral.ledger_full", userId: alice.userId });
+  const review = await t.run((ctx) => ctx.db.insert("referralRedemptions", { ...row, kind: "payout", amount: 5000, customerId: undefined, accountId: "acct_1Alice", status: "review" }));
+  await expect(t.mutation(internal.referralOps.approveRedemption, { redemptionId: review })).rejects.toThrow(/5000 or more redemptions/);
+});
+
 test("a credit looks Stripe up, then posts a negative balance transaction with its stored key, once", async () => {
   const t = convexTest(schema, modules);
   const { alice, aliceCo } = await setup(t);
