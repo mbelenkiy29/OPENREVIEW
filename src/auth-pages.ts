@@ -2,6 +2,7 @@
 // after a redirect back to the page. Signing up and signing in are the same flows: an account is
 // created the first time a provider identity signs in.
 import { offline } from "./egress";
+import { normalizeReferralCode } from "./referrals";
 
 export type AuthMode = "login" | "signup";
 export type AuthProviderId = "github" | "google" | "gitlab";
@@ -16,6 +17,12 @@ export function authProviders(env: Record<string, string | undefined> = process.
 
 /** The page a sign-in redirect returns to: the sign-up page only when the visitor started there. */
 export const authPagePath = (from: string | null | undefined) => (from === "signup" ? "/signup" : "/login");
+/** The query string sign-in links and redirects carry ("" when empty). `next` must already be safe;
+ *  a referral code is kept only in canonical form, so a malformed one is dropped. */
+export function authQuery({ next, referral, ...result }: { next?: string; referral?: string | null; error?: string; email?: string }) {
+  const code = normalizeReferralCode(referral), query = new URLSearchParams(Object.entries({ ...result, next, referral: code }).filter((e): e is [string, string] => Boolean(e[1])));
+  return query.size ? `?${query}` : "";
+}
 
 export type AuthMessage = { tone: "alert" | "status"; text: string };
 export function authMessage(query: { error?: string; email?: string; signedout?: string }): AuthMessage | null {

@@ -51,6 +51,7 @@ export const sharedTables: Partial<Record<TableNames, string>> = {
   oauthClients: "MCP client registry shared by all workspaces", stripeEvents: "Stripe event ids kept for replay protection (no review data)",
   slackEventReceipts: "Slack event-id dedupe", webhookDeliveries: "provider payloads not linked to a workspace; pruned deployment-wide after 14 days",
   workspaceDeletions: "deletion receipts",
+  referralCodes: "personal referral codes", referrals: "referrer's attribution records; keep only the referred workspace's id",
 };
 
 // Files referenced by a row (any v.id("_storage") field, at any depth), deleted with it.

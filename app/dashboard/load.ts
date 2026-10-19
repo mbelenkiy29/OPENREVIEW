@@ -42,7 +42,7 @@ export async function loadDashboard({
     const query = new URLSearchParams(Object.entries(filters).filter((e): e is [string,string] => e[1] !== undefined));
     redirect(`/dashboard/settings/${filters.repository ? "review" : "repositories"}${query.size ? "?"+query : ""}`);
   }
-  if(route === "settings" && !settingsNavigation.some(([key])=>key === section[1]))notFound();
+  if(route === "settings" && !settingsNavigation().some(([key])=>key === section[1]))notFound();
   const view = route === "analytics" ? "overview" : route === "pulls" ? section[1] === "findings" ? "findings" : "reviews" : route === "memory" ? section[1] === "knowledge" ? "knowledge" : "rules" : route === "settings" ? ({ repositories: "repositories", people: "team", usage: "usage" }[section[1] ?? ""] ?? "settings") : route;
   const reviewDetailId = route === "pulls" && section[1] !== "findings" ? section[1] : undefined;
   const requestedRepository = filters.repository;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { authMessage, authPagePath, authProviders } from "../src/auth-pages";
+import { authMessage, authPagePath, authProviders, authQuery } from "../src/auth-pages";
 
 test("sign-in pages offer only the providers configured on this deployment, GitHub first", () => {
   assert.deepEqual(authProviders({}), []);
@@ -15,6 +15,15 @@ test("email sign-in returns to the page it started from; anything else goes to s
   assert.equal(authPagePath("login"), "/login");
   assert.equal(authPagePath("https://evil.example"), "/login");
   assert.equal(authPagePath(null), "/login");
+});
+
+test("sign-in links and redirects carry the next page and a canonical referral code, nothing else", () => {
+  assert.equal(authQuery({}), "");
+  assert.equal(authQuery({ next: "/invite?token=abc" }), "?next=%2Finvite%3Ftoken%3Dabc");
+  assert.equal(authQuery({ next: "/dashboard", referral: "abcd-2345" }), "?next=%2Fdashboard&referral=ABCD2345");
+  assert.equal(authQuery({ email: "sent", referral: "ABCD2345" }), "?email=sent&referral=ABCD2345", "the result comes first, as before");
+  assert.equal(authQuery({ error: "signin", referral: "not a code" }), "?error=signin", "a malformed code is dropped");
+  assert.equal(authQuery({ email: "error", referral: null }), "?email=error");
 });
 
 test("redirect results become one plain message, errors first", () => {

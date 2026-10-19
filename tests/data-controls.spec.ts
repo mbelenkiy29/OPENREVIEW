@@ -87,6 +87,8 @@ test("workspace deletion: owner-only with a grace period, cancellable, then a re
   await t.run((ctx) => ctx.db.insert("organizationMembers", { organizationId: acme.organizationId, userId: adminId, role: "admin" }));
   const admin = await new SignJWT({}).setSubject(adminId).setProtectedHeader({ alg: "HS256" }).setIssuer("openreview").setAudience("openreview").setExpirationTime("30d").sign(new TextEncoder().encode(process.env.SESSION_SECRET));
   const rivalBefore = await owned(t, rival.organizationId, rival.repo._id);
+  // A referral that bound Acme belongs to its referrer (Rival's owner): it keeps only Acme's id.
+  const referralId = await t.run((ctx) => ctx.db.insert("referrals", { referrerId: rival.userId, referredUserId: acme.userId, referredOrganizationId: acme.organizationId, source: "link", status: "pending", attributedAt: Date.now(), boundAt: Date.now(), updatedAt: Date.now() }));
   // Only the owner, and only with the exact name.
   await expect(t.mutation(api.dataControls.requestDeletion, { token: admin, organizationId: acme.organizationId, confirmName: "Acme" })).rejects.toThrow(/Only the workspace owner/);
   await expect(t.mutation(api.dataControls.requestDeletion, { token: acme.token, organizationId: acme.organizationId, confirmName: "acme" })).rejects.toThrow(/exactly/);
@@ -103,6 +105,10 @@ test("workspace deletion: owner-only with a grace period, cancellable, then a re
   await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
   const receipt = (await t.run((ctx) => ctx.db.query("workspaceDeletions").collect())).find((d) => d.status === "done")!;
   expect(receipt.counts).toMatchObject({ codeChunks: 230, reviews: 1, findings: 1, reviewFindings: 1, chatMessages: 1, oauthTokens: 1, indexSkippedFiles: 1, organizations: 1 });
+  expect(await owned(t, acme.organizationId, acme.repo._id)).toEqual({});
+  expect(await t.run((ctx) => ctx.db.get(referralId))).toMatchObject({ referredOrganizationId: acme.organizationId, status: "pending" });
+  // Voiding it afterwards does not recreate Acme's audit log.
+  await t.mutation(internal.referralOps.voidReferral, { referralId, reason: "abuse" });
   expect(await owned(t, acme.organizationId, acme.repo._id)).toEqual({});
   expect(await t.run(async (ctx) => Promise.all(acme.storage.map((id) => ctx.storage.get(id))))).toEqual([null, null, null]);
   // Rows reached through parents are gone too (reviewFindings, chat messages, tokens, skipped files).

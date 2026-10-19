@@ -3,7 +3,7 @@ import { assertEgress } from "./egress";
 // A workspace's app-level trial starts with its first billable action (first review or checkout).
 // The Starter plan is a per-seat subscription with unlimited reviews under a monthly fair-use limit.
 export type BillingConfig = { enabled: boolean; trialDays: number; trialReviews: number; reviewsPerSeat: number; graceDays: number };
-const int = (value: string | undefined, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isInteger(n) && n >= min && n <= max ? n : fallback; };
+export const int = (value: string | undefined, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isInteger(n) && n >= min && n <= max ? n : fallback; };
 export function billingConfig(env: Record<string, string | undefined> = process.env): BillingConfig {
   return { enabled: env.BILLING_ENABLED === "true", trialDays: int(env.BILLING_TRIAL_DAYS, 14, 0, 365), trialReviews: int(env.BILLING_TRIAL_REVIEWS, 200, 0, 1_000_000), reviewsPerSeat: int(env.BILLING_REVIEWS_PER_SEAT, 500, 1, 1_000_000), graceDays: int(env.BILLING_GRACE_DAYS, 7, 0, 60) };
 }

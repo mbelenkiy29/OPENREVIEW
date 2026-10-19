@@ -123,7 +123,7 @@ export default defineSchema({
   repositoryClusters: defineTable({ organizationId: org, name: v.string(), repositoryIds: v.array(repo), createdAt: v.number() }).index("by_org", ["organizationId"]),
   // Proposed clusters (from manifests and names); applied only when an admin approves one.
   clusterSuggestions: defineTable({ organizationId: org, key: v.string(), name: v.string(), repositoryIds: v.array(repo), reasons: v.array(v.object({ kind: v.string(), detail: v.string() })), score: v.number(), status: v.string() /* suggested | approved | dismissed | stale */, clusterId: v.optional(v.id("repositoryClusters")), decidedBy: v.optional(v.id("users")), createdAt: v.number(), updatedAt: v.number() }).index("by_org_status", ["organizationId", "status"]).index("by_org_key", ["organizationId", "key"]),
-  auditEvents: defineTable({ organizationId: org, userId: v.optional(v.id("users")), action: v.string(), target: v.string(), createdAt: v.number() }).index("by_org", ["organizationId"]),
+  auditEvents: defineTable({ organizationId: org, userId: v.optional(v.id("users")), action: v.string(), target: v.string(), createdAt: v.number() }).index("by_org", ["organizationId"]).index("by_org_user", ["organizationId", "userId"]),
   // A developer's own third-party agent credentials (Devin), encrypted by the web server with
   // CREDENTIAL_ENCRYPTION_KEY under the scope `<userId>:<kind>`; Convex never sees the plain value.
   personalCredentials: defineTable({ userId: v.id("users"), kind: v.string(), ciphertext: v.string(), updatedAt: v.number() }).index("by_user_kind", ["userId", "kind"]),
@@ -259,7 +259,7 @@ export default defineSchema({
     revokedAt: v.optional(v.number()),
     createdAt: v.number(),
   }).index("by_token", ["tokenHash"]).index("by_org", ["organizationId"]),
-  loginTokens: defineTable({ email: v.string(), tokenHash: v.string(), expiresAt: v.number(), usedAt: v.optional(v.number()), createdAt: v.number() }).index("by_token", ["tokenHash"]),
+  loginTokens: defineTable({ email: v.string(), tokenHash: v.string(), expiresAt: v.number(), usedAt: v.optional(v.number()), createdAt: v.number(), referralCode: v.optional(v.string()) }).index("by_token", ["tokenHash"]),
   // onboarding: guided setup progress for workspaces created with it (absent on older workspaces,
   // which are never sent to setup). reviewsPaused marks automatic reviews held off while indexing.
   organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), createdAt: v.number() }),
@@ -577,6 +577,27 @@ export default defineSchema({
     lastEventCreated: v.optional(v.number()),
     updatedAt: v.number(),
   }).index("by_org", ["organizationId"]).index("by_customer", ["customerId"]),
+  // Referral program (REFERRALS_ENABLED and BILLING_ENABLED only). One personal code per user. A
+  // referral attributes a newly created user to the code's owner, then binds their first workspace.
+  // The workspace is stored as referredOrganizationId: the referrer's records outlive its deletion.
+  referralCodes: defineTable({ userId: v.id("users"), code: v.string(), createdAt: v.number() }).index("by_code", ["code"]).index("by_user", ["userId"]),
+  referrals: defineTable({
+    referrerId: v.id("users"),
+    referredUserId: v.id("users"),
+    referredOrganizationId: v.optional(org),
+    source: v.union(v.literal("link"), v.literal("code")),
+    status: v.union(v.literal("signed_up"), v.literal("pending"), v.literal("active"), v.literal("ended"), v.literal("void")),
+    attributedAt: v.number(),
+    boundAt: v.optional(v.number()),
+    // Set from the first paid invoice; commissions accrue from windowStart until commissionEndsAt.
+    firstPaidAt: v.optional(v.number()),
+    windowStart: v.optional(v.number()),
+    commissionEndsAt: v.optional(v.number()),
+    noticeSentAt: v.optional(v.number()),
+    voidedAt: v.optional(v.number()),
+    voidReason: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_referrer", ["referrerId"]).index("by_referred_user", ["referredUserId"]).index("by_referred_org", ["referredOrganizationId"]),
   billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number() }).index("by_org_period", ["organizationId", "period"]),
   stripeEvents: defineTable({ eventId: v.string(), type: v.string(), outcome: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Slack app installs (one per Slack workspace); the bot token is encrypted with scope `<org>:slack`.

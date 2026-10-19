@@ -30,7 +30,7 @@ The hosted site can report errors to [Sentry](https://sentry.io) and product ana
 - **Self-hosted:** without `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` there is no banner.
 - **Sentry:** sets no cookies and is not gated.
 
-**URLs:** before any event leaves the browser or server, each URL keeps only a short allowlist of query parameters (`utm_*`, `ref`, `checkout`, `billing`, `signedout`) and loses its fragment. Invitation tokens, sign-in codes, error messages and repository filters are never sent.
+**URLs:** before any event leaves the browser or server, each URL keeps only a short allowlist of query parameters (`utm_*`, `ref`, `checkout`, `billing`, `signedout`) and loses its fragment. Invitation tokens, sign-in codes, error messages and repository filters are never sent. Referral links (`/r/<code>`) are reported as `/r/[code]`, in errors and performance traces alike, because a code identifies the person who shared it. Clicks aren't captured on those pages or on sign-up pages opened from them.
 
 **Same-origin delivery:** events go through this site's own origin, so ad blockers that block Sentry and PostHog domains don't drop them:
 - `/lighthouse` → Sentry.

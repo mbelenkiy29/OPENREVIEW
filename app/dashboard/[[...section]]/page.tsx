@@ -10,6 +10,7 @@ import { ChatPanel } from "../chat";
 import { NotificationsPanel } from "../notifications";
 import { BillingPanel } from "../billing";
 import { AccountPanel } from "../account";
+import { ReferralsPanel } from "../referrals";
 import { EmailInvitations } from "../email-invitations";
 import { ScopePanel, AuditPanel } from "../scopes";
 import { AgentSettings } from "../agents";
@@ -44,7 +45,7 @@ export default async function Dashboard(props: {
         <header>
           <div>
             <p className="muted">{organization.name}{selectedTeam&&" / "+selectedTeam.name}</p>
-            <h1>{view === "overview" ? "Analytics" : view === "reviews" ? "Pull Requests" : route === "memory" ? ({clusters:"Cross-repository context",preferences:"Learned preferences",integrations:"Integrations",rules:"Custom rules",knowledge:"Knowledge Base"}[section[1]??"rules"]??"Memory") : route === "settings" ? settingsNavigation.find(([key])=>key===section[1])?.[1] : navigation.find((n) => n.toLowerCase() === view)}</h1>
+            <h1>{view === "overview" ? "Analytics" : view === "reviews" ? "Pull Requests" : route === "memory" ? ({clusters:"Cross-repository context",preferences:"Learned preferences",integrations:"Integrations",rules:"Custom rules",knowledge:"Knowledge Base"}[section[1]??"rules"]??"Memory") : route === "settings" ? settingsNavigation().find(([key])=>key===section[1])?.[1] : navigation.find((n) => n.toLowerCase() === view)}</h1>
           </div>
           <Live active={active} />
         </header>
@@ -62,6 +63,7 @@ export default async function Dashboard(props: {
         {route === "settings" && section[1] === "agents" && <AgentSettings token={user.token} organizationId={organization._id} />}
         {route === "settings" && section[1] === "automation" && (isAdmin?<RuntimeSettings token={user.token} organizationId={organization._id}/>:<p>Workspace admin access required.</p>)}
         {route === "settings" && section[1] === "account" && <AccountPanel token={user.token}/>}
+        {route === "settings" && section[1] === "referrals" && <ReferralsPanel token={user.token}/>}
         {route === "settings" && section[1] === "people" && isAdmin && <EmailInvitations token={user.token} organizationId={organization._id} status={filters.emailInvite}/>}
         {route === "settings" && section[1] === "people" && isAdmin && <SsoSettings token={user.token} organizationId={organization._id}/>}
         {route === "settings" && section[1] === "data" && <DataControls token={user.token} organizationId={organization._id}/>}

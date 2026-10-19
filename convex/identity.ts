@@ -7,7 +7,9 @@ import { internal } from "./_generated/api";
 import { audit, authenticated, authorize, service } from "./auth";
 import { rateLimit } from "./rateLimit";
 import { scheduleSeatSync } from "./billing";
+import { recordReferralSignup } from "./referralLedger";
 import { emailAddress } from "../src/email";
+import { normalizeReferralCode, referralConfig } from "../src/referrals";
 import { sessionHash } from "../src/session-hash";
 
 // Identities, sessions, email invitations and magic links.
@@ -19,14 +21,16 @@ const provider = v.union(...providers.map((p) => v.literal(p)) as [ReturnType<ty
 const sessionDays = 7;
 const hex64 = /^[a-f0-9]{64}$/;
 type Profile = { provider: (typeof providers)[number] | "sso"; providerUserId: string; login: string; avatar: string; email?: string; emailVerified: boolean };
-export async function linkIdentity(ctx: MutationCtx, p: Profile): Promise<Id<"users">> {
+export async function linkIdentity(ctx: MutationCtx, p: Profile): Promise<Id<"users">> { return (await resolveIdentity(ctx, p)).userId; }
+// The user a provider identity signs in as; `created` only when this sign-in made a new user.
+export async function resolveIdentity(ctx: MutationCtx, p: Profile): Promise<{ userId: Id<"users">; created: boolean }> {
   const now = Date.now(), email = p.email ? emailAddress.safeParse(p.email).data : undefined;
   const existing = await ctx.db.query("identities").withIndex("by_provider_user", (q) => q.eq("provider", p.provider).eq("providerUserId", p.providerUserId)).unique();
   if (existing) {
     await ctx.db.patch(existing._id, { lastLoginAt: now, ...(email ? { email, emailVerified: p.emailVerified } : {}) });
     if (p.avatar) await ctx.db.patch(existing.userId, { avatar: p.avatar });
     if (p.provider === "github") await ctx.db.patch(existing.userId, { login: p.login });
-    return existing.userId;
+    return { userId: existing.userId, created: false };
   }
   let userId: Id<"users"> | undefined;
   if (p.provider === "github") {
@@ -34,9 +38,10 @@ export async function linkIdentity(ctx: MutationCtx, p: Profile): Promise<Id<"us
     if (legacy) { userId = legacy._id; await ctx.db.patch(legacy._id, { login: p.login, ...(p.avatar ? { avatar: p.avatar } : {}) }); }
   }
   if (!userId && email && p.emailVerified) userId = (await ctx.db.query("identities").withIndex("by_email", (q) => q.eq("email", email)).filter((q) => q.eq(q.field("emailVerified"), true)).first())?.userId;
+  const created = !userId;
   if (!userId) userId = await ctx.db.insert("users", { login: p.login.slice(0, 100), avatar: p.avatar, ...(p.provider === "github" ? { githubId: Number(p.providerUserId) } : {}), createdAt: now });
   await ctx.db.insert("identities", { userId, provider: p.provider, providerUserId: p.providerUserId, ...(email ? { email } : {}), emailVerified: Boolean(email && p.emailVerified), createdAt: now, lastLoginAt: now });
-  return userId;
+  return { userId, created };
 }
 async function startSession(ctx: MutationCtx, userId: Id<"users">, hash: string, providerName: string, userAgent?: string) {
   if (!hex64.test(hash)) throw new Error("Invalid session");
@@ -45,8 +50,9 @@ async function startSession(ctx: MutationCtx, userId: Id<"users">, hash: string,
 
 // OAuth sign-in (GitHub, GitLab, Google): the web server verified the provider response.
 // With `linkToken` (the caller is already signed in), the provider account is attached to that
-// user explicitly; it may not already belong to someone else.
-export const signIn = mutation({ args: { secret: v.string(), provider, providerUserId: v.string(), login: v.string(), avatar: v.string(), email: v.optional(v.string()), emailVerified: v.boolean(), sessionHash: v.string(), userAgent: v.optional(v.string()), linkToken: v.optional(v.string()) }, handler: async (ctx, a): Promise<Id<"users">> => {
+// user explicitly; it may not already belong to someone else. `referralCode` (from a referral link)
+// counts only when this sign-in creates the user.
+export const signIn = mutation({ args: { secret: v.string(), provider, providerUserId: v.string(), login: v.string(), avatar: v.string(), email: v.optional(v.string()), emailVerified: v.boolean(), sessionHash: v.string(), userAgent: v.optional(v.string()), linkToken: v.optional(v.string()), referralCode: v.optional(v.string()) }, handler: async (ctx, a): Promise<Id<"users">> => {
   service(a.secret);
   if (a.provider === "email") throw new Error("Email sign-in uses magic links");
   if (!a.providerUserId || a.providerUserId.length > 200 || (a.provider === "github" && !/^\d{1,20}$/.test(a.providerUserId))) throw new Error("Invalid provider identity");
@@ -57,7 +63,11 @@ export const signIn = mutation({ args: { secret: v.string(), provider, providerU
     if (existing && existing.userId !== current._id) throw new Error("This account is already linked to another OpenReview user");
     if (!existing) { const email = a.email ? emailAddress.safeParse(a.email).data : undefined; await ctx.db.insert("identities", { userId: current._id, provider: a.provider, providerUserId: a.providerUserId, ...(email ? { email } : {}), emailVerified: Boolean(email && a.emailVerified), createdAt: Date.now(), lastLoginAt: Date.now() }); }
     userId = current._id;
-  } else userId = await linkIdentity(ctx, { provider: a.provider, providerUserId: a.providerUserId, login: a.login, avatar: a.avatar, email: a.email, emailVerified: a.emailVerified });
+  } else {
+    const resolved = await resolveIdentity(ctx, { provider: a.provider, providerUserId: a.providerUserId, login: a.login, avatar: a.avatar, email: a.email, emailVerified: a.emailVerified });
+    userId = resolved.userId;
+    if (resolved.created) await recordReferralSignup(ctx, userId, a.referralCode);
+  }
   await startSession(ctx, userId, a.sessionHash, a.provider, a.userAgent);
   return userId;
 } });
@@ -94,11 +104,13 @@ export async function revokeMemberAccess(ctx: MutationCtx, organizationId: Id<"o
   for (const device of await ctx.db.query("bridgeDevices").withIndex("by_user", (q) => q.eq("userId", userId)).take(200)) if (device.organizationId === organizationId && !device.revoked) await ctx.db.patch(device._id, { revoked: true });
 }
 
-// Magic links (email sign-in): hashes only; single use; 15 minutes.
-export const storeLoginToken = internalMutation({ args: { email: v.string(), tokenHash: v.string() }, handler: async (ctx, a) => {
+// Magic links (email sign-in): hashes only; single use; 15 minutes. A referral code rides on the token
+// and counts only if the link creates the user.
+export const storeLoginToken = internalMutation({ args: { email: v.string(), tokenHash: v.string(), referralCode: v.optional(v.string()) }, handler: async (ctx, a) => {
   if (!hex64.test(a.tokenHash)) throw new Error("Invalid token");
   await rateLimit(ctx, `magic-link:${a.email}`, 3, 600000);
-  await ctx.db.insert("loginTokens", { email: a.email, tokenHash: a.tokenHash, expiresAt: Date.now() + 15 * 60000, createdAt: Date.now() });
+  const referralCode = referralConfig().enabled ? normalizeReferralCode(a.referralCode) : null;
+  await ctx.db.insert("loginTokens", { email: a.email, tokenHash: a.tokenHash, expiresAt: Date.now() + 15 * 60000, createdAt: Date.now(), ...(referralCode ? { referralCode } : {}) });
 } });
 export const consumeLoginToken = mutation({ args: { secret: v.string(), tokenHash: v.string(), sessionHash: v.string(), userAgent: v.optional(v.string()) }, handler: async (ctx, a): Promise<Id<"users"> | null> => {
   service(a.secret);
@@ -106,7 +118,8 @@ export const consumeLoginToken = mutation({ args: { secret: v.string(), tokenHas
   const token = await ctx.db.query("loginTokens").withIndex("by_token", (q) => q.eq("tokenHash", a.tokenHash)).unique();
   if (!token || token.usedAt || token.expiresAt <= Date.now()) return null;
   await ctx.db.patch(token._id, { usedAt: Date.now() });
-  const userId = await linkIdentity(ctx, { provider: "email", providerUserId: token.email, login: token.email.split("@")[0], avatar: "", email: token.email, emailVerified: true });
+  const { userId, created } = await resolveIdentity(ctx, { provider: "email", providerUserId: token.email, login: token.email.split("@")[0], avatar: "", email: token.email, emailVerified: true });
+  if (created) await recordReferralSignup(ctx, userId, token.referralCode);
   await startSession(ctx, userId, a.sessionHash, "email", a.userAgent);
   return userId;
 } });

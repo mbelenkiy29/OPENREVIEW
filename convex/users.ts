@@ -4,6 +4,7 @@ import { linkIdentity } from "./identity";
 import { v } from "convex/values";
 import { authenticated, authorize, service, audit } from "./auth";
 import { rateLimit } from "./rateLimit";
+import { bindReferralOnWorkspace } from "./referralLedger";
 
 export const login = mutation({
   args: {
@@ -65,6 +66,7 @@ export const createOrganization = mutation({
       userId: user._id,
       role: "owner",
     });
+    await bindReferralOnWorkspace(ctx, user._id, organizationId);
     return organizationId;
   },
 });
