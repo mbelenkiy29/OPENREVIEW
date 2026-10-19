@@ -60,6 +60,12 @@ test("model keys: admins save a checked, encrypted workspace key that every mode
   // With the key: the workspace's provider and default model, no operator routing and no budget reservation.
   expect(await draft()).toEqual({ apiKey: "sk-ant-good", provider: "anthropic", model: "claude-sonnet-5-5", budget: false });
 
+  // Offline mode: no new keys, and the saved one is ignored for the operator's own model.
+  process.env.OPENREVIEW_OFFLINE = "true";
+  await expect(save(admin.token, "sk-ant-good")).rejects.toThrow(/offline mode/);
+  expect(await draft()).toEqual({ apiKey: "sk-platform", provider: "openai", model: "gpt-platform-rules", budget: true });
+  delete process.env.OPENREVIEW_OFFLINE;
+
   // Only admins remove it; afterwards calls return to the platform key.
   await expect(t.mutation(api.modelKeys.remove, { token: member.token, organizationId })).rejects.toThrow(/Forbidden/);
   await t.mutation(api.modelKeys.remove, { token: admin.token, organizationId });

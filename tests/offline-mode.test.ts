@@ -42,7 +42,7 @@ test("egress policy: online by default; offline keeps only model, embedding, SCM
   const env = { OPENREVIEW_OFFLINE: "true" };
   assert.equal(offline(env), true);
   for (const kind of ["model", "embedding", "scm", "sso"] as const) assert.equal(egressAllowed(kind, env), true, kind);
-  for (const kind of ["advisories", "integrations", "slack", "email", "billing", "handoff", "identity", "oauth-client-metadata", "tips"] as const) {
+  for (const kind of ["advisories", "integrations", "slack", "email", "billing", "handoff", "identity", "oauth-client-metadata", "tips", "workspace-model"] as const) {
     assert.equal(egressAllowed(kind, env), false, kind);
     assert.equal(egressAllowed(kind, {}), true, kind);
     assert.throws(() => assertEgress(kind, "Thing", env), (e: unknown) => e instanceof OfflineError && e.kind === kind && /offline mode/.test(e.message));

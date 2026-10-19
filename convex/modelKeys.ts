@@ -3,6 +3,7 @@ import type { QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { audit, authorize } from "./auth";
+import { rateLimit } from "./rateLimit";
 
 // A workspace's own model provider key (bring your own key). modelKeyJobs.save checks and encrypts it;
 // only budgetModel decrypts it, and `status` never returns it.
@@ -20,6 +21,8 @@ export const save = internalMutation({ args: { token: v.string(), organizationId
   if (existing) await ctx.db.replace(existing._id, row); else await ctx.db.insert("modelKeys", row);
   await audit(ctx, a.organizationId, user._id, "model_key.saved", a.provider);
 } });
+// Each save sends the key to the provider, so a workspace cannot use it to test many keys from our servers.
+export const checkRate = internalMutation({ args: { organizationId: v.id("organizations") }, handler: (ctx, a) => rateLimit(ctx, `model-key:${a.organizationId}`, 5, 3600000) });
 export const remove = mutation({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
   const key = await keyOf(ctx, a.organizationId);
