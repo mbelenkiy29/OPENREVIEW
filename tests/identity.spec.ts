@@ -11,7 +11,7 @@ beforeEach(()=>{vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date']});
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();delete process.env.RESEND_API_KEY;delete process.env.EMAIL_FROM;});
 
 const session=()=>{const sid=randomBytes(32).toString('base64url');return {sid,hash:createHash('sha256').update(sid).digest('hex')};};
-const jwt=(userId:string,sid?:string,issuedAt=Math.floor(Date.now()/1000))=>new SignJWT(sid?{sid}:{}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(userId).setIssuedAt(issuedAt).setExpirationTime('7d').sign(new TextEncoder().encode(secret));
+const jwt=(userId:string,sid?:string,issuedAt=Math.floor(Date.now()/1000),key=secret)=>new SignJWT(sid?{sid}:{}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(userId).setIssuedAt(issuedAt).setExpirationTime('7d').sign(new TextEncoder().encode(key));
 type T=ReturnType<typeof convexTest>;
 async function signIn(t:T,profile:{provider:'github'|'gitlab'|'google';providerUserId:string;login:string;email?:string;emailVerified:boolean},linkToken?:string){
  const s=session();const userId=await t.mutation(api.identity.signIn,{secret:svc,avatar:'',...profile,sessionHash:s.hash,userAgent:'Vitest',...(linkToken?{linkToken}:{})});
@@ -70,6 +70,11 @@ test('server-side sessions: individual revocation, sign out everywhere, expiry, 
  await expect(t.query(api.users.me,{token:phone.token})).rejects.toThrow();
  // A forged session ID is rejected.
  expect(await valid(t,await jwt(laptop.userId,randomBytes(32).toString('base64url')))).toBe(false);
+ // A real session ID under a bad signature can neither list sessions nor sign that session out.
+ const badSignature=await jwt(laptop.userId,laptop.sid,undefined,'not-the-session-secret-but-32-chars-long');
+ await expect(t.query(api.identity.sessions,{token:badSignature})).rejects.toThrow();
+ await t.mutation(api.identity.signOut,{token:badSignature});
+ expect(await valid(t,laptop.token)).toBe(true);
  // Sign out: only this browser.
  const tablet=await signIn(t,{provider:'google',providerUserId:'g-1',login:'dev',email:'dev@example.com',emailVerified:true});
  await t.mutation(api.identity.signOut,{token:laptop.token});
