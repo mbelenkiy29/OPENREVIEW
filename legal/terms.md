@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Effective October 17, 2026**
+**Effective November 16, 2026**
 
 These terms govern your use of the hosted OpenReview service at [openreview.tech](https://openreview.tech) (the "Service"). The Service is operated by Michael Belenkiy ("we", "us"). By signing in or using the Service you agree to these terms. If you use the Service on behalf of an organization, you confirm that you can accept these terms for it, and "you" includes that organization.
 
@@ -45,6 +45,18 @@ You agree not to:
 - **Taxes:** prices do not include taxes, which may be added where required.
 
 Payments are processed by Stripe under Stripe's terms.
+
+### Referral program
+
+When we run a referral program, these rules apply to it:
+- **Eligibility:** any signed-in user can refer others with their personal link or code. A referral counts only for an account newly created through the link, or for a workspace whose owner or admin adds the code within its first 30 days and before it subscribes. Each workspace can have one referral.
+- **No self-referral:** you may not refer yourself, an account you control, or a workspace you are or were a member of. We may void any referral we reasonably believe breaks these rules or is abusive, along with commissions still on hold, and close or suspend access to the program.
+- **Commission:** you earn the percentage of each paid subscription invoice of a referred workspace, excluding tax, credits and overpayments, shown in the product (currently 20% for 12 months from its first payment). The referred workspace gets the discount shown on the referral page at checkout.
+- **Hold:** each commission is held for 30 days after the payment before you can redeem it.
+- **Clawback:** when a payment is refunded, the matching share of its commission is taken back. For a disputed payment, it is taken back while the dispute is open or if it is lost, and restored if the dispute is decided in our favor. If you already redeemed it, your balance becomes negative and future commissions offset it first. We do not otherwise ask you to repay it.
+- **Credits:** you can apply your available balance, in US dollars, as credit on the bill of a workspace you own or administer, subject to the minimum shown in the product. Credit reduces that workspace's future invoices, has no cash value and cannot be transferred or reversed once applied. You are responsible for any taxes on what you earn.
+- **Cash payouts:** where we offer them, you can cash out your available balance, in US dollars, to a bank account in a supported country (currently the United States) through an account you set up with Stripe, subject to the minimum shown in the product. Stripe provides that account under its own terms and verifies your identity. We may review a cash-out before sending it, and decline it if we reasonably believe it breaks these rules, in which case the amount stays in your balance. Payouts once sent are not reversed. You must give Stripe accurate tax information, and we may report what we paid you to tax authorities as the law requires.
+- **Changes and termination:** we may change or end the program by giving the notice described in section 14.
 
 ## 7. Third-party services
 
