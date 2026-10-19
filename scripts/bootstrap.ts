@@ -21,7 +21,9 @@ const backendEnv =
   env
     .split("\n")
     .filter((line) =>
-      /^(SESSION_SECRET|SERVICE_SECRET|CREDENTIAL_ENCRYPTION_KEY|APP_URL|SCM_ALLOWED_HOSTS|ORIGIN_APP_ID|LINEAR_CLIENT_ID|ATLASSIAN_CLIENT_|GITHUB_|LLM_|EMBEDDING_|OSV_)/.test(line),
+      /^(SESSION_SECRET|SERVICE_SECRET|CREDENTIAL_ENCRYPTION_KEY|APP_URL|SCM_ALLOWED_HOSTS|ORIGIN_APP_ID|LINEAR_CLIENT_ID|ATLASSIAN_CLIENT_|GITHUB_|LLM_|EMBEDDING_|OSV_)/.test(line) ||
+      // Billing settings only when set, so a blank line copied from .env.example never clears a key set on Convex directly.
+      /^(STRIPE_|BILLING_|REFERRAL)[A-Z_]*=\S/.test(line),
     )
     .join("\n") + "\n";
 await writeFile(".env.backend", backendEnv, { mode: 0o600 });
