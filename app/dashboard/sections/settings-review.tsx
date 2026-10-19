@@ -44,7 +44,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                   <input type="hidden" name="organizationId" value={organization._id} />
                   <label>Provider<select name="provider" defaultValue={modelKey?.provider ?? "anthropic"}><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option></select></label>
                   <label>API key<input name="key" type="password" autoComplete="off" required maxLength={500} /></label>
-                  <label>Model (required for OpenRouter)<input name="model" maxLength={200} placeholder="Provider default" defaultValue={modelKey?.model ?? ""} /></label>
+                  <label>Model (required for OpenRouter)<input name="model" maxLength={200} placeholder="Provider default" /></label>
                   <button className="primary">{modelKey ? "Replace key" : "Save key"}</button>
                 </form>
               </section>

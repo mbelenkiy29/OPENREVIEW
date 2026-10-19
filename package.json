@@ -16,7 +16,7 @@
     "test:e2e": "tsx scripts/browser.ts",
     "test:smoke": "tsx scripts/smoke.ts",
     "setup:local": "tsx scripts/bootstrap.ts",
-    "stripe:listen": "stripe listen --forward-to http://127.0.0.1:3211/stripe/webhook --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.payment_failed,invoice.paid,charge.refunded,charge.dispute.created,charge.dispute.closed",
+    "stripe:listen": "tsx scripts/stripe-listen.ts",
     "mcp": "tsx src/mcp.ts",
     "runtime:worker": "tsx scripts/runtime-worker.ts",
     "demo": "tsx scripts/demo.ts"

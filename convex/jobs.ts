@@ -703,7 +703,8 @@ export const review = internalAction({
         verdict: result.metadata.verdict,
         requirementsNotMet: result.metadata.requirementsNotMet,
         modeDecision: tier,
-        aiAuthored: aiAuthored ? { ...aiAuthored, ...(routed.routed ? { model: routed.model } : {}) } : undefined,
+        // The model that ran: a workspace's own key keeps its own model whatever the routing asked for.
+        aiAuthored: aiAuthored ? { ...aiAuthored, ...(routed.routed ? { model: modelProvider.modelFor("review") } : {}) } : undefined,
         coverageLimits: result.metadata.coverageLimits,
         findings: [...result.findings,...(result.metadata.carriedForward??[])],
         resolved: result.metadata.resolvedFingerprints,
