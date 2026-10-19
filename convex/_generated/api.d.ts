@@ -54,6 +54,8 @@ import type * as knowledge from "../knowledge.js";
 import type * as knowledgeJobs from "../knowledgeJobs.js";
 import type * as mcpApi from "../mcpApi.js";
 import type * as memory from "../memory.js";
+import type * as modelKeyJobs from "../modelKeyJobs.js";
+import type * as modelKeys from "../modelKeys.js";
 import type * as notificationJobs from "../notificationJobs.js";
 import type * as notifications from "../notifications.js";
 import type * as notionData from "../notionData.js";
@@ -167,6 +169,8 @@ declare const fullApi: ApiFromModules<{
   knowledgeJobs: typeof knowledgeJobs;
   mcpApi: typeof mcpApi;
   memory: typeof memory;
+  modelKeyJobs: typeof modelKeyJobs;
+  modelKeys: typeof modelKeys;
   notificationJobs: typeof notificationJobs;
   notifications: typeof notifications;
   notionData: typeof notionData;

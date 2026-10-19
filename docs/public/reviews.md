@@ -62,6 +62,15 @@ A review that stops because a newer commit arrived ends neutral as "Superseded b
 
 On the hosted cloud, if the workspace's plan does not cover another review, OpenReview posts one short comment on that pull request. The comment names no plan details and points admins to Settings → Billing. Later blocked reviews on the same pull request stay quiet, and reviews requested from the dashboard never post one.
 
+## Your own model key
+
+Workspace owners and admins can run the workspace on their own Anthropic, OpenAI or OpenRouter account under Settings → API Keys → **Model provider key**. OpenReview checks the key with the provider before saving it, stores it encrypted, and never shows it again.
+
+- Reviews, chat, fixes, knowledge and rule suggestions for the workspace then use that key, and the provider bills the usage to your account.
+- Without a model, Anthropic keys use `claude-sonnet-5-5` (and `claude-haiku-5-5` for summaries), and OpenAI keys use `gpt-4.1`. OpenRouter needs a model, such as `anthropic/claude-sonnet-5-5`.
+- Model choices in workspace, team and repository settings apply only to OpenReview's own model.
+- If the provider rejects the key or the account runs out of credit, reviews fail with the provider's error. They never fall back to OpenReview's model. Remove the key to switch back.
+
 ## Agent-authored pull requests (experimental)
 
 OpenReview recognises pull requests written by coding agents from explicit signals only, never from code style: a known agent bot author (for example `copilot-swe-agent[bot]` or `devin-ai-integration[bot]`), a `Co-Authored-By` trailer naming an agent with its address (Claude, Cursor Agent, Codex, Copilot, Devin, Aider), an agent branch prefix (`claude/`, `copilot/`, `cursor/`, `codex/`, `devin/`, `jules/`), or a marker the agent writes into the description. Set **Review model for agent-authored pull requests** (`aiAuthoredModel`, empty by default) to review those pull requests with a different model; it inherits from workspace and team settings like other review settings. The review page shows which signal matched and the model used. On GitHub, commit trailers are read from the pull request's commits; other providers use the author, branch and description.

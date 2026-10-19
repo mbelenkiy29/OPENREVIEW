@@ -27,7 +27,7 @@ export const answer = internalAction({ args: { messageId: v.id("chatMessages") }
       question: job.question,
       history: job.history,
       repositories: job.repositories.map(({ repo }) => ({ name: repo.fullName, tools: chatToolbox(ctx, repo) })),
-      model: budgetModel(ctx),
+      model: await budgetModel(ctx, job.message.organizationId),
       usage,
       onEvent: (event) => ctx.runMutation(internal.chat.event, { messageId: a.messageId, ...event }),
     });

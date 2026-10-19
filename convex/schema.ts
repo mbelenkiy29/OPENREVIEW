@@ -127,6 +127,9 @@ export default defineSchema({
   // A developer's own third-party agent credentials (Devin), encrypted by the web server with
   // CREDENTIAL_ENCRYPTION_KEY under the scope `<userId>:<kind>`; Convex never sees the plain value.
   personalCredentials: defineTable({ userId: v.id("users"), kind: v.string(), ciphertext: v.string(), updatedAt: v.number() }).index("by_user_kind", ["userId", "kind"]),
+  // A workspace's own model provider key (bring your own key), encrypted with CREDENTIAL_ENCRYPTION_KEY
+  // under the scope `<organizationId>:model`. When present, every model call for the workspace uses it.
+  modelKeys: defineTable({ organizationId: org, provider: v.union(v.literal("anthropic"), v.literal("openai"), v.literal("openrouter")), credentials: v.string(), model: v.optional(v.string()), updatedBy: v.id("users"), updatedAt: v.number() }).index("by_org", ["organizationId"]),
   personalSettings: defineTable({ userId: v.id("users"), agent: v.union(v.literal("codex"), v.literal("claude"), v.literal("cursor")), updatedAt: v.number() }).index("by_user", ["userId"]),
   bridgeDevices: defineTable({ tokenHash: v.string(), code: v.string(), userId: v.optional(v.id("users")), organizationId: v.optional(org), name: v.string(), expiresAt: v.number(), revoked: v.boolean(), createdAt: v.number(), lastSeen: v.optional(v.number()) }).index("by_hash", ["tokenHash"]).index("by_code", ["code"]).index("by_user", ["userId"]),
   fixRequests: defineTable({ userId: v.id("users"), organizationId: org, repositoryId: repo, reviewId: review, headSha: v.string(), findingIds: v.optional(v.array(v.id("findings"))), agent: v.string(), prompt: v.string(), status: v.string(), error: v.optional(v.string()), deviceId: v.optional(v.id("bridgeDevices")), expiresAt: v.number(), createdAt: v.number(), updatedAt: v.number() }).index("by_user", ["userId"]).index("by_review", ["reviewId"]),

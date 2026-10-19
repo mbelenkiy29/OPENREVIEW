@@ -2,6 +2,9 @@
 
 ## Unreleased — October 2026
 
+### Your own model key
+- Workspace owners and admins can run reviews, chat and fixes on their own Anthropic, OpenAI or OpenRouter key under Settings → API Keys. The key is checked, stored encrypted and never shown again, and the provider bills its usage.
+
 ### Pull request reviews
 - On GitHub the review summary now goes at the end of the pull request description and is replaced on every review. The author's own text is kept, and reviews never read the block back. Choose "one comment" under Settings → Review to keep the previous behavior.
 - A more compact summary on GitHub:

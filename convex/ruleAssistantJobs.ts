@@ -17,7 +17,7 @@ export const run = internalAction({ args: { runId: v.id("ruleAssistantRuns") }, 
     ? { kind: "draft", description: run.description ?? "", scope: { ...(run.repositoryId ? { repositoryId: run.repositoryId } : {}), ...(run.teamId ? { teamId: run.teamId } : {}), ...(run.repositoryPattern ? { repositoryPattern: run.repositoryPattern } : {}) }, rules: job.rules }
     : run.kind === "refine" ? { kind: "refine", rules: job.rules } : { kind: "suggest", rules: job.rules, findings: job.findings, conventions: job.conventions };
   try {
-    const result = await runRuleAssistant(input, budgetModel(ctx));
+    const result = await runRuleAssistant(input, await budgetModel(ctx, run.organizationId));
     if (job.usageRepositoryId && result.usage.length) {
       const total = result.usage.reduce((t, u) => ({ inputTokens: t.inputTokens + u.inputTokens, outputTokens: t.outputTokens + u.outputTokens, estimatedCost: t.estimatedCost + u.estimatedCost, durationMs: t.durationMs + u.latencyMs }), { inputTokens: 0, outputTokens: 0, estimatedCost: 0, durationMs: 0 });
       await ctx.runMutation(internal.usage.record, { repositoryId: job.usageRepositoryId, kind: "rule-assistant", ...total });

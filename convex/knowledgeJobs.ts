@@ -52,7 +52,7 @@ export const generate = internalAction({
         });
         return;
       }
-      const result = await budgetModel(ctx).generate(
+      const result = await (await budgetModel(ctx, data.repo.organizationId)).generate(
         {
           task: "knowledge",
           system:

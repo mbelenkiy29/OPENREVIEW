@@ -421,6 +421,21 @@ export async function createApiKey(
   revalidatePath("/dashboard/settings/keys");
   return key;
 }
+export async function saveModelKey(form: FormData) {
+  const { token } = await current();
+  const model = text(form, "model");
+  try {
+    await backend().action(api.modelKeyJobs.save, { token, organizationId: text(form, "organizationId") as Id<"organizations">, provider: z.enum(["anthropic", "openai", "openrouter"]).parse(form.get("provider")), key: text(form, "key"), ...(model ? { model } : {}) });
+    await notify("Model key saved. This workspace now runs on it.");
+  } catch (e) { await notify(backendMessage(e, "Could not save the model key."), "error"); }
+  revalidatePath("/dashboard/settings/keys");
+}
+export async function removeModelKey(form: FormData) {
+  const { token } = await current();
+  await backend().mutation(api.modelKeys.remove, { token, organizationId: text(form, "organizationId") as Id<"organizations"> });
+  await notify("Model key removed. This workspace uses OpenReview's model again.");
+  revalidatePath("/dashboard/settings/keys");
+}
 export async function revokeApiKey(form: FormData) {
   const { token } = await current();
   await backend().mutation(api.apiKeys.revoke, {
