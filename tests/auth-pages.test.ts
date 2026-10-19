@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { authMessage, authPagePath, authProviders, authQuery } from "../src/auth-pages";
+import { authMessage, authPagePath, authProviders, authQuery, keepsAuthPage } from "../src/auth-pages";
 
 test("sign-in pages offer only the providers configured on this deployment, GitHub first", () => {
   assert.deepEqual(authProviders({}), []);
@@ -24,6 +24,12 @@ test("sign-in links and redirects carry the next page and a canonical referral c
   assert.equal(authQuery({ email: "sent", referral: "ABCD2345" }), "?email=sent&referral=ABCD2345", "the result comes first, as before");
   assert.equal(authQuery({ error: "signin", referral: "not a code" }), "?error=signin", "a malformed code is dropped");
   assert.equal(authQuery({ email: "error", referral: null }), "?email=error");
+});
+
+test("signed-in visitors still see a result on the sign-in page (e.g. a failed account link)", () => {
+  assert.equal(keepsAuthPage({}), false);
+  assert.equal(keepsAuthPage({ error: "signin" }), true);
+  assert.equal(keepsAuthPage({ email: "sent" }), true);
 });
 
 test("redirect results become one plain message, errors first", () => {

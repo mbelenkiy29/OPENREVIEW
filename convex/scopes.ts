@@ -8,7 +8,7 @@ import { settingsValidator } from "./schema";
 import { defaults,deploymentDefaults,validSummarySections,validReviewEngine,validCheckFailureSeverity,validTriggerSettings,validPublicationSettings,scopeDefaults } from "../src/review-settings";
 import { categories } from "../src/engine/types";
 const keys=Object.keys(defaults);
-export async function providerTeam(ctx:MutationCtx,organizationId:Id<"organizations">,kind:string,instance:string,group:{externalId:string;name:string},userId:Id<"users">){
+export async function providerTeam(ctx:MutationCtx,organizationId:Id<"organizations">,kind:string,instance:string,group:{externalId:string;name:string},userId?:Id<"users">){
  if(!group.externalId.trim()||group.externalId.length>200||!group.name.trim()||group.name.length>100)throw new Error("Invalid provider group identity");
  const url=new URL(instance);
  if(url.protocol!=="https:"||url.username||url.password||url.search||url.hash)throw new Error("Invalid provider group instance");

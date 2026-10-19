@@ -40,6 +40,18 @@ try {
   await page.getByRole("link", { name: "Get started" }).first().waitFor();
   await page.getByRole("heading", { name: "How it works" }).waitFor();
   await page.screenshot({ path: "output/playwright/home.png", fullPage: true, caret: "initial" });
+  // The landing demos are interactive: the hero window switches sections, chat answers a sample
+  // question with citations, and the summary demo re-reviews a pushed fix.
+  const hero = page.getByRole("figure", { name: /dashboard for a sample workspace/ });
+  await hero.getByRole("button", { name: "Analytics", exact: true }).click();
+  await hero.getByLabel("Repository").selectOption("acme/api");
+  await hero.getByText("$2.10").waitFor();
+  await hero.getByRole("button", { name: "Chat", exact: true }).click();
+  await hero.locator(".demo-suggestions").getByRole("button", { name: "Which tests cover charge()?" }).click();
+  await hero.locator(".chat-message.assistant").last().getByRole("list", { name: "Citations" }).waitFor();
+  const summaryDemo = page.getByRole("figure", { name: /re-reviews a newly pushed fix/ });
+  await summaryDemo.getByRole("button", { name: "Re-review current PR" }).click();
+  await summaryDemo.getByText("0 findings · Score 5/5").first().waitFor();
   for (const [path, heading] of [["/docs/quickstart", "Quickstart"], ["/docs/api", "Public API"], ["/docs/configuration", "Repository configuration as code"], ["/changelog", "Changelog"]]) {
     await page.goto(url + path);
     await page.getByRole("heading", { name: heading, level: 1 }).first().waitFor();
@@ -129,12 +141,25 @@ try {
   await page.emulateMedia({ reducedMotion: "reduce" });
   assert.equal(await page.locator(".wizard-panel").evaluate((e) => getComputedStyle(e).animationName), "none", "Setup animates under reduced motion");
   await page.emulateMedia({ reducedMotion: "no-preference" });
+  // Fixes can start with a cloud agent: the preview follows the choice.
+  await page.locator('select[name="handoff"]').selectOption("cloud");
+  await page.locator('select[name="cloudAgent"]').selectOption("copilot");
+  await page.getByText("Fix with Copilot", { exact: true }).waitFor();
+  await page.locator('select[name="handoff"]').selectOption("bridge");
   await page.keyboard.press("Control+Enter");
   await page.waitForURL("**/dashboard/onboarding/team");
   await page.keyboard.press("Control+Enter");
   await page.waitForURL("**/dashboard/onboarding/done");
+  const billing = (await backend.query(api.billing.status, { token, organizationId })).enabled;
+  if (billing) {
+    // A workspace from before plans were required keeps the optional plan step (trial without a card).
+    await page.goto(`${url}/dashboard/onboarding/plan`);
+    await page.getByRole("heading", { name: "Choose your plan", level: 1 }).waitFor();
+    await page.getByRole("button", { name: /Continue on the trial/ }).click();
+    await page.waitForURL("**/dashboard/onboarding/connect");
+  }
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const step of ["connect", "indexing", "summary", "comments", "triggers", "tools", "team", "done"]) {
+  for (const step of [...(billing ? ["plan"] : []), "connect", "indexing", "summary", "comments", "triggers", "tools", "team", "done"]) {
     await page.goto(`${url}/dashboard/onboarding/${step}`);
     await page.locator("[data-wizard-heading]").waitFor();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `Setup step ${step} overflows at 390 px`);
@@ -145,6 +170,34 @@ try {
   await page.getByRole("button", { name: /^Go to dashboard/ }).click();
   await page.waitForURL("**/dashboard/analytics");
   assert.ok((await backend.query(api.onboarding.status, { token, organizationId })).onboarding?.completedAt, "Setup completion was not recorded");
+  // A new workspace on a billing deployment must choose a plan first: every dashboard page leads to the
+  // plan step, which only offers Checkout (card required). Then switch back to the fixture workspace.
+  if (billing) {
+    const required = await backend.mutation(api.users.createOrganization, { token, name: "Plan gate check" });
+    const asWorkspace = (id: string) => context.addCookies([{ name: "openreview_workspace", value: id, url, sameSite: "Lax" }]);
+    await asWorkspace(required);
+    await page.goto(`${url}/dashboard/analytics`);
+    await page.waitForURL("**/dashboard/onboarding/plan");
+    await page.getByRole("heading", { name: "Choose your plan", level: 1 }).waitFor();
+    await page.getByRole("button", { name: /Start free trial/ }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /Continue on the trial/ }).count(), 0, "A required plan can be skipped");
+    await page.goto(`${url}/dashboard/onboarding/connect`);
+    await page.waitForURL("**/dashboard/onboarding/plan");
+    await asWorkspace(organizationId);
+  }
+  // Fix agents: settings list the cloud agents and what each needs; the link page answers without a raw error.
+  await page.goto(`${url}/dashboard/settings/agents`);
+  await page.getByRole("heading", { name: "Personal fix agent" }).waitFor();
+  await page.getByRole("heading", { name: "Cloud agents" }).waitFor();
+  for (const mention of ["@claude", "@codex", "@copilot", "@cursor"]) await page.getByText(mention, { exact: true }).waitFor();
+  const link = await page.request.get(`${url}/dashboard/github-link?organization=${organizationId}&returnTo=%2Fdashboard%2Frepositories`, { maxRedirects: 0 });
+  assert.ok(link.status() === 200 || (link.status() === 307 && /purpose=github-install/.test(link.headers().location ?? "")), `Link page answered ${link.status()}`);
+  // A signed-out developer following a Fix link from a pull request returns there after signing in.
+  const signedOut = await browser.newContext();
+  const outPage = await signedOut.newPage();
+  await outPage.goto(`${url}/fix/missing-review?finding=fp1`);
+  await outPage.waitForURL((u) => u.pathname === "/login" && u.searchParams.get("next") === "/fix/missing-review?finding=fp1");
+  await signedOut.close();
   // Walk every page in the main navigation and in each section's secondary navigation.
   const settled = () =>
     page.waitForFunction(
@@ -192,7 +245,7 @@ try {
     organizationId,
   });
   await page.goto(`${url}/dashboard/settings?repository=${repository._id}`);
-  await page.getByLabel("Minimum confidence").fill("0.92");
+  await page.getByLabel("Minimum confidence", { exact: true }).fill("0.92");
   await page.getByRole("button", { name: "Save review settings" }).click();
   await page.waitForTimeout(500);
   assert.equal(
@@ -255,10 +308,10 @@ try {
   );
   // Dark theme at mobile and desktop widths: no overflow, no console errors.
   await page.emulateMedia({ colorScheme: "dark" });
-  for (const path of ["/dashboard", "/dashboard/chat", "/dashboard/settings/billing", "/docs/quickstart"]) {
+  for (const path of ["/", "/dashboard", "/dashboard/chat", "/dashboard/settings/billing", "/docs/quickstart"]) {
     await page.goto(url + path);
     await settled();
-    await page.screenshot({ path: `output/playwright/dark-mobile${path.replaceAll("/", "-")}.png`, fullPage: true, caret: "initial" });
+    await page.screenshot({ path: `output/playwright/dark-mobile${path === "/" ? "-home" : path.replaceAll("/", "-")}.png`, fullPage: true, caret: "initial" });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `Dark mobile ${path} overflows horizontally`);
   }
   await page.setViewportSize({ width: 1365, height: 900 });
@@ -267,7 +320,7 @@ try {
   await page.screenshot({ path: "output/playwright/dark-desktop.png", fullPage: true, caret: "initial" });
   assert.deepEqual(errors, [], `Browser errors: ${errors.join("; ")}`);
   console.log(
-    `Browser verification passed: landing, docs, changelog, guided setup (all steps, previews, reduced motion, 390 px), repository selection, ${dashboardPages} dashboard pages (main and secondary navigation), persisted settings/rules, Memory page filters, Chat page, mobile layout and dark theme. GitHub OAuth and real indexing still require external credentials.`,
+    `Browser verification passed: landing (interactive demos), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px), repository selection, ${dashboardPages} dashboard pages (main and secondary navigation), persisted settings/rules, Memory page filters, Chat page, mobile layout and dark theme. GitHub OAuth and real indexing still require external credentials.`,
   );
 } finally {
   await browser.close();

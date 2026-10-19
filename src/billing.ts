@@ -1,6 +1,7 @@
 import { assertEgress } from "./egress";
 // Cloud billing (Stripe). Disabled unless BILLING_ENABLED=true, which is the self-host default.
-// A workspace's app-level trial starts with its first billable action (first review or checkout).
+// New workspaces start the trial through Stripe Checkout with a card (planRequired); workspaces from
+// before that keep an app-level trial that starts with the first review or checkout.
 // The Starter plan is a per-seat subscription with unlimited reviews under a monthly fair-use limit.
 export type BillingConfig = { enabled: boolean; trialDays: number; trialReviews: number; reviewsPerSeat: number; graceDays: number };
 export const int = (value: string | undefined, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isInteger(n) && n >= min && n <= max ? n : fallback; };

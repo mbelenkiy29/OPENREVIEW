@@ -26,10 +26,26 @@ async function ensureAccount(ctx: MutationCtx, organizationId: Id<"organizations
 async function usageOf(ctx: QueryCtx, organizationId: Id<"organizations">, period: string) {
   return ctx.db.query("billingUsage").withIndex("by_org_period", (q) => q.eq("organizationId", organizationId).eq("period", period)).unique();
 }
+export const choosePlanMessage = "Choose a plan for this workspace first: a workspace admin starts the free trial under Setup → Choose your plan";
+/** A workspace that must choose a plan (new, on a billing deployment) and has no Stripe-confirmed choice yet. */
+export async function planMissing(ctx: QueryCtx, organizationId: Id<"organizations">) {
+  if (!billingConfig().enabled) return false;
+  const organization = await ctx.db.get(organizationId);
+  return Boolean(organization?.planRequired && !organization.planSelectedAt);
+}
+// The plan counts as chosen once Stripe confirms a subscription (a trial with a card, or paid).
+async function recordPlanSelected(ctx: MutationCtx, organizationId: Id<"organizations">, status: string) {
+  if (!["trialing", "active", "past_due", "checkout"].includes(status)) return;
+  const organization = await ctx.db.get(organizationId);
+  if (!organization || organization.planSelectedAt) return;
+  await ctx.db.patch(organizationId, { planSelectedAt: Date.now(), plan: "starter" });
+  await ctx.db.insert("auditEvents", { organizationId, action: "billing.plan_selected", target: "starter", createdAt: Date.now() });
+}
 // Called by reviews.enqueue: counts an allowed review, or records a blocked one with its reason.
 export async function reviewAllowance(ctx: MutationCtx, organizationId: Id<"organizations">): Promise<{ allowed: true } | { allowed: false; reason: string }> {
   const config = billingConfig();
   if (!config.enabled) return { allowed: true };
+  if (await planMissing(ctx, organizationId)) return { allowed: false, reason: "Billing: " + choosePlanMessage };
   const account = await ensureAccount(ctx, organizationId), now = Date.now(), period = periodKey(now);
   const usage = await usageOf(ctx, organizationId, period);
   const decision = billingDecision(account, usage?.reviews ?? 0, now, config);
@@ -46,8 +62,9 @@ export const status = query({ args: { token: v.string(), organizationId: v.id("o
   const account = stored ?? { status: "trial", seats: 0, trialEndsAt: trialEndsFrom(Date.now(), config) } as Pick<Doc<"billingAccounts">, "status" | "seats" | "trialEndsAt"> & Partial<Doc<"billingAccounts">>;
   const usage = await usageOf(ctx, a.organizationId, periodKey(Date.now()));
   const decision = billingDecision({ status: account.status, seats: account.seats, trialEndsAt: account.trialEndsAt, pastDueSince: account.pastDueSince, subscriptionId: account.subscriptionId }, usage?.reviews ?? 0, Date.now(), config);
+  const organization = await ctx.db.get(a.organizationId);
   const admin = ["owner", "admin"].includes(member.role), referrals = admin && referralConfig().enabled;
-  return { enabled: true as const, admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: decision.used, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: account.trialEndsAt, trialStarted: Boolean(stored), trialDays: config.trialDays, trialReviews: config.trialReviews, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, reviewsPerSeat: config.reviewsPerSeat, hasCustomer: Boolean(account.customerId) };
+  return { enabled: true as const, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: decision.used, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: account.trialEndsAt, trialStarted: Boolean(stored), trialDays: config.trialDays, trialReviews: config.trialReviews, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, reviewsPerSeat: config.reviewsPerSeat, hasCustomer: Boolean(account.customerId) };
 } });
 
 export const checkoutContext = internalQuery({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
@@ -77,6 +94,8 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
     const account = await ensureAccount(ctx, organizationId);
     if (account.customerId && account.customerId !== a.checkout.customer) return record("customer mismatch");
     await ctx.db.patch(account._id, { customerId: a.checkout.customer, ...(a.checkout.subscription ? { subscriptionId: a.checkout.subscription } : {}), updatedAt: Date.now() });
+    // A completed subscription Checkout collected the card and created the subscription.
+    if (a.checkout.subscription) await recordPlanSelected(ctx, organizationId, "checkout");
     return record("linked");
   }
   if (a.subscription) {
@@ -87,6 +106,7 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
     if (account.lastEventCreated && a.created < account.lastEventCreated) return record("stale");
     const deleted = a.type === "customer.subscription.deleted";
     await ctx.db.patch(account._id, { subscriptionId: s.id, subscriptionItemId: s.itemId, status: deleted ? "canceled" : s.status, seats: s.quantity, currentPeriodEnd: s.currentPeriodEnd, pastDueSince: s.status === "past_due" ? account.pastDueSince ?? a.created : undefined, lastEventCreated: a.created, updatedAt: Date.now() });
+    if (!deleted) await recordPlanSelected(ctx, account.organizationId, s.status);
     return record(deleted ? "canceled" : s.status);
   }
   if (a.invoice) {

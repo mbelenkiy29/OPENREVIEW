@@ -1,2 +1,5 @@
+import { createRequire } from 'node:module';
 import { defineConfig } from 'vitest/config';
-export default defineConfig({ test: { include: ['tests/**/*.spec.ts'], environment: 'node' } });
+// Next resolves `server-only` itself; route-handler specs load those modules under Node.
+const require = createRequire(import.meta.url);
+export default defineConfig({ resolve: { alias: { 'server-only': require.resolve('next/dist/compiled/server-only/empty.js') } }, test: { include: ['tests/**/*.spec.ts'], environment: 'node' } });

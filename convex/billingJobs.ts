@@ -19,14 +19,17 @@ export const checkout = action({ args: { token: v.string(), organizationId: v.id
     customer = (await stripe<{ id: string }>("/v1/customers", { metadata: { organizationId: a.organizationId } }, key, fetch, `customer:${a.organizationId}`)).id;
     await ctx.runMutation(internal.billing.linkCustomer, { organizationId: a.organizationId, customerId: customer });
   }
-  // The card is collected now; any remaining trial carries over, so the first charge waits for it.
+  // The card is always collected, even for a trial; any remaining trial carries over, so the first
+  // charge waits for it.
+  // Checkout also takes a promotion code (for example a single-use code for a free month; docs/billing.md).
   const back = appOrigin() + returnPaths[a.returnTo ?? "settings"], trialEnd = checkoutTrialEnd(context.trialEndsAt, Date.now());
-  // A referred workspace that has not paid yet gets the referral coupon (never promotion codes).
+  // A referred workspace that has not paid yet gets the referral coupon. Stripe takes either discounts or
+  // allow_promotion_codes, so the coupon replaces promotion codes for that one session.
   const referral = referralConfig().enabled ? await ctx.runMutation(internal.referrals.prepareCheckout, { token: a.token, organizationId: a.organizationId }) : null;
-  const params = { mode: "subscription", customer, client_reference_id: a.organizationId, integration_identifier: integrationIdentifier, line_items: [{ price, quantity: context.seats }], subscription_data: { metadata: { organizationId: a.organizationId, ...(referral ? { referralId: referral.referralId } : {}) }, ...(trialEnd ? { trial_end: trialEnd } : {}) }, success_url: `${back}?checkout=success`, cancel_url: `${back}?checkout=cancelled` };
+  const params = { mode: "subscription", customer, client_reference_id: a.organizationId, payment_method_collection: "always", integration_identifier: integrationIdentifier, allow_promotion_codes: true, line_items: [{ price, quantity: context.seats }], subscription_data: { metadata: { organizationId: a.organizationId, ...(referral ? { referralId: referral.referralId } : {}) }, ...(trialEnd ? { trial_end: trialEnd } : {}) }, success_url: `${back}?checkout=success`, cancel_url: `${back}?checkout=cancelled` };
   const create = (extra: Record<string, unknown> = {}) => stripe<{ url: string }>("/v1/checkout/sessions", { ...params, ...extra }, key);
   if (!referral) return (await create()).url;
-  try { return (await create({ discounts: [{ coupon: referral.coupon }] })).url; }
+  try { return (await create({ allow_promotion_codes: undefined, discounts: [{ coupon: referral.coupon }] })).url; }
   catch (error) {
     // A used-up, expired or deleted coupon must not block subscribing: retry once without it.
     if (!(error instanceof StripeError) || error.status !== 400 || !["coupon_expired", "resource_missing"].includes(error.code ?? "")) throw error;

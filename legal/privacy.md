@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Effective November 2, 2026**
+**Effective October 17, 2026**
 
 This policy explains what information the hosted OpenReview service at [openreview.tech](https://openreview.tech) collects, how it is used and shared, and the choices you have. OpenReview is operated by Michael Belenkiy ("we", "us"). Questions and requests go to [mbelenkiy29@gmail.com](mailto:mbelenkiy29@gmail.com).
 
@@ -8,7 +8,7 @@ OpenReview is also open-source software. If you run it on your own infrastructur
 
 ## Information we collect
 
-**Account information.** When you sign in with GitHub we receive your username, account ID, avatar image URL and, when GitHub provides it, your email address and whether it is verified. If other sign-in methods are offered (GitLab, Google or an emailed sign-in link), we receive the equivalent details from that provider.
+**Account information.** When you sign in with GitHub we keep your username, account ID and avatar image URL from your GitHub profile. We don't ask GitHub for access to your email addresses, and we don't store an email address from GitHub. If you sign in with GitLab or Google, we also receive your email address and whether that provider has verified it. If you sign in with an emailed link, we receive the email address you enter.
 
 **Workspace information.** This includes:
 - workspace and team names, members and their roles;
@@ -27,7 +27,7 @@ OpenReview is also open-source software. If you run it on your own infrastructur
 
 **Billing information.** Payments are handled by Stripe. We receive and store your Stripe customer and subscription identifiers, plan status, seat count and billing dates. We never receive or store full card numbers.
 
-**Referral information.** If you use the referral program, we keep your referral code, who signed up or added a workspace through it and when, the referred workspace's identifier, the commissions earned from its paid invoices (Stripe invoice and charge identifiers, amounts, refunds and disputes), and the credits you applied, with the workspace and Stripe customer balance transaction they went to. If you cash out, Stripe collects your identity, tax and bank details directly for your Stripe account; to start that account we send Stripe your verified email address and your OpenReview user ID, and we store only the account's identifier, country and payout status, and the transfers we sent to it.
+**Referral information (from November 2, 2026).** If you use the referral program, we keep your referral code, who signed up or added a workspace through it and when, the referred workspace's identifier, the commissions earned from its paid invoices (Stripe invoice and charge identifiers, amounts, refunds and disputes), and the credits you applied, with the workspace and Stripe customer balance transaction they went to. If you cash out, Stripe collects your identity, tax and bank details directly for your Stripe account; to start that account we send Stripe your verified email address and your OpenReview user ID, and we store only the account's identifier, country and payout status, and the transfers we sent to it.
 - **What a referrer sees:** the GitHub username of each person they referred, or "Email sign-up" for anyone without one, when they signed up, when their workspace subscribed, and what the referrer earned from each of its payments, including any share taken back after a refund or dispute. Referrers never see email addresses, workspace names or workspace content.
 - **What a referred person sees:** the referrer's GitHub username, if they have one, on the referral page.
 
@@ -40,7 +40,10 @@ Our hosting providers keep server logs that include IP addresses.
 
 **Error reports and analytics.** We use Sentry to learn about errors and PostHog to understand how the site is used.
 - **Sentry receives:** error reports with technical details, and performance timings for a sample of page loads.
-- **PostHog receives:** page views, and clicks on public pages such as the home page and documentation.
+- **PostHog receives:**
+  - page views;
+  - clicks on public pages such as the home page and documentation;
+  - four product milestones, each sent once: signing up, creating a workspace, connecting the first repository, and the first completed review.
 - **What identifies you:** after you sign in, both tools identify you only by an internal user ID and workspace ID.
 - **What is never sent:**
   - the text of what you click or read on signed-in pages;
@@ -49,6 +52,12 @@ Our hosting providers keep server logs that include IP addresses.
   - session recordings;
   - private details from page addresses, such as invitation links and sign-in codes.
 - **Your permission comes first:** PostHog runs only after you accept the analytics cookie. Sentry sets no cookies.
+
+**Feedback boards.** Feature requests, bug reports, votes, comments and the public roadmap are run by UserJot, through the feedback button on every page and the board at [/feedback](/feedback).
+- **UserJot receives:** what you post, vote on or comment, and the address of the site you sent it from (never the page path).
+- **What identifies you:** when you are signed in, your internal user ID, your username, your profile picture and your verified email, so your posts are attributed to you and you hear back when a request ships. Signed-out visitors are anonymous until they sign in to UserJot.
+- **Who can see it:** posts, votes and comments on the public boards, with your name and picture, are visible to anyone who visits them.
+- **In your browser:** the UserJot widget keeps its own session in your browser so it remembers you between visits.
 
 **Cookies.** Most of our cookies are needed for the service to work:
 - your sign-in session;
@@ -97,6 +106,7 @@ We share information only as needed to run the service, with:
 | OSV.dev | Checking package names and versions from dependency changes for known vulnerabilities (no source code is sent) |
 | Sentry | Error reports and performance monitoring |
 | PostHog | Product analytics |
+| UserJot | Feedback boards, roadmap and the feedback widget |
 | Linear, Atlassian, Notion, Slack | Only when your workspace connects them |
 | An email delivery provider | Only when email sign-in or email notifications are turned on |
 

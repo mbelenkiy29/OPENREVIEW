@@ -24,6 +24,10 @@ export function authQuery({ next, referral, ...result }: { next?: string; referr
   return query.size ? `?${query}` : "";
 }
 
+/** Results (an error or an emailed link) stay on the page even for signed-in visitors, so a failed
+ *  attempt to link another sign-in method is shown instead of skipped. */
+export const keepsAuthPage = (query: { error?: string; email?: string }) => Boolean(query.error || query.email);
+
 export type AuthMessage = { tone: "alert" | "status"; text: string };
 export function authMessage(query: { error?: string; email?: string; signedout?: string; reauth?: string }): AuthMessage | null {
   if (query.error === "sso") return { tone: "alert", text: "Single sign-on isn’t set up for that email domain, or the sign-in couldn’t be verified. Ask your workspace admin." };

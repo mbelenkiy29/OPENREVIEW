@@ -16,6 +16,7 @@ async function setup(){
  const id=await t.mutation(api.users.login,{secret:'pr-replies-service',githubId:41,login:'alice',avatar:''});
  const token=await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(id).setExpirationTime('1d').sign(new TextEncoder().encode(secret));
  const organizationId=await t.mutation(api.users.createOrganization,{token,name:'Acme'});
+ await t.run(ctx=>ctx.db.patch(organizationId,{planRequired:undefined})); // a workspace from before plans were required
  await t.mutation(api.repositories.connect,{token,secret:'pr-replies-service',organizationId,installationId:41,account:'acme',accountId:1,repositories:[{id:4101,fullName:'acme/shop',defaultBranch:'main'}]});
  const [repo]=await t.query(api.repositories.list,{token,organizationId});
  await t.run(ctx=>ctx.db.patch(repo._id,{enabled:true}));

@@ -73,6 +73,7 @@ test("Checkout adds the coupon only for a referred workspace that has not paid, 
   expect(discounted.get("subscription_data[metadata][referralId]")).toBe(referralId);
   expect(discounted.get("subscription_data[metadata][organizationId]")).toBe(org);
   for (const key of ["payment_method_types[0]", "allow_promotion_codes"]) expect(discounted.has(key)).toBe(false);
+  expect(discounted.get("payment_method_collection")).toBe("always");
   // A workspace nobody referred: the same request as with the program off, byte for byte.
   const own = await workspace(t, alice, "Alice Co");
   await checkout(t, alice, own);
@@ -80,7 +81,7 @@ test("Checkout adds the coupon only for a referred workspace that has not paid, 
   await checkout(t, alice, own);
   const [, on, off] = stripe.checkouts();
   expect(on.toString()).toBe(off.toString());
-  expect([...on.keys()]).toEqual(["mode", "customer", "client_reference_id", "integration_identifier", "line_items[0][price]", "line_items[0][quantity]", "subscription_data[metadata][organizationId]", "subscription_data[trial_end]", "success_url", "cancel_url"]);
+  expect([...on.keys()]).toEqual(["mode", "customer", "client_reference_id", "payment_method_collection", "integration_identifier", "allow_promotion_codes", "line_items[0][price]", "line_items[0][quantity]", "subscription_data[metadata][organizationId]", "subscription_data[trial_end]", "success_url", "cancel_url"]);
   // The program off, or the workspace's first payment made: no coupon.
   await checkout(t, bob, org);
   expect(stripe.checkouts().at(-1)!.has("discounts[0][coupon]")).toBe(false);

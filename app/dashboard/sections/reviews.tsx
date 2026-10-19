@@ -135,6 +135,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 <section>
                   <h2>Verified findings</h2>
                   {detail.canFix && <FixButton reviewId={detail.review._id} agent={personalAgent} label="Fix All" />}
+                  {detail.canFix && <p><Link href={`/fix/${detail.review._id}`}>More ways to fix: cloud agents, deep links, Devin, fix pull request</Link></p>}
                   {detail.canFix && <Copy
                     value={fixPrompt(
                       repoName(detail.review.repositoryId),
@@ -174,6 +175,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                       ))}
                       <p>Suggested fix: {finding.suggestedFix}</p>
                       {finding.canFix && <FixButton reviewId={detail.review._id} agent={personalAgent} findingId={finding._id} />}
+                      {finding.canFix && <p><Link href={`/fix/${detail.review._id}?finding=${encodeURIComponent(finding.fingerprint)}`}>More ways to fix this</Link></p>}
                     </article>
                   ))}
                 </section>

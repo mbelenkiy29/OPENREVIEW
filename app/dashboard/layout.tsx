@@ -17,5 +17,8 @@ async function Identity() {
   const jar = await cookies(), token = jar.get("openreview_session")?.value;
   const me = token ? await backend().query(api.users.me, { token }).catch(() => null) : null;
   if (!me) return null;
-  return <TelemetryIdentity userId={me.user._id} workspaceId={activeWorkspace(me, jar)?._id} />;
+  const workspace = activeWorkspace(me, jar);
+  // Product milestones not yet sent to analytics; the browser sends them only after consent.
+  const milestones = posthogToken && token ? await backend().query(api.analyticsMilestones.pending, { token, organizationId: workspace?._id }).catch(() => []) : [];
+  return <TelemetryIdentity userId={me.user._id} workspaceId={workspace?._id} milestones={milestones} />;
 }

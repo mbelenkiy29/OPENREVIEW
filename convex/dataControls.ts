@@ -223,12 +223,20 @@ export const retention = internalMutation({ args: { organizationId: v.id("organi
   if (more) await ctx.scheduler.runAfter(0, internal.dataControls.retention, a);
   return { reviews: reviewsDeleted, transcripts, more };
 } });
-// Webhook payloads carry no workspace link; processed deliveries are pruned after 14 days.
-export const pruneWebhookPayloads = internalMutation({ args: {}, handler: async (ctx) => {
-  const cutoff = Date.now() - 14 * 86_400_000;
-  const old = (await ctx.db.query("webhookDeliveries").withIndex("by_status", (q) => q.eq("status", "completed")).take(500)).filter((d) => d.updatedAt < cutoff).slice(0, 200);
-  for (const d of old) await remove(ctx, "webhookDeliveries", d as never);
-  return old.length;
+// Webhook payloads are pruned 14 days after their last processing attempt, whatever its outcome (completed,
+// failed after retries, or abandoned). GitHub deliveries carry no workspace link and are deleted with their
+// payload files. Other providers' events keep their row, which dedupes redeliveries and lists the delivery,
+// and lose the body. Full batches continue right away, so a busy deployment never falls behind.
+export const pruneWebhookPayloads = internalMutation({ args: {}, handler: async (ctx): Promise<{ deliveries: number; events: number }> => {
+  const now = Date.now(), cutoff = now - 14 * 86_400_000;
+  const deliveries = await ctx.db.query("webhookDeliveries").withIndex("by_updated", (q) => q.lt("updatedAt", cutoff)).take(200);
+  for (const d of deliveries) await remove(ctx, "webhookDeliveries", d as never);
+  // Events retried by an admin since they arrived count from that retry.
+  const scanned = await ctx.db.query("providerEvents").withIndex("by_body_deleted", (q) => q.eq("bodyDeletedAt", undefined).lt("createdAt", cutoff)).take(500);
+  const events = scanned.filter((e) => (e.updatedAt ?? e.createdAt) < cutoff).slice(0, 200);
+  for (const e of events) await ctx.db.patch(e._id, { body: "", bodyDeletedAt: now });
+  if (deliveries.length === 200 || events.length === 200) await ctx.scheduler.runAfter(0, internal.dataControls.pruneWebhookPayloads, {});
+  return { deliveries: deliveries.length, events: events.length };
 } });
 
 // ---- Data sharing: the only cross-workspace read. Workspaces are private unless an admin opted in;
