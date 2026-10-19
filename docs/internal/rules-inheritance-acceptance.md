@@ -8,7 +8,7 @@ The durable regression seeds 205 workspace rules, a public local rule, a private
 
 Current local validation: 177 Node + 147 Convex = 324 tests, lint, typecheck and production build pass. Logs: ignored `output/setup/rules-inheritance-*.log`. Native deployment and browser acceptance are recorded after completion below.
 
-Production release `dpl_GiJNHT54V5fRnbDJMheWCm8JxC75` is READY at https://openreview-flame-two.vercel.app. Its hosted build deployed the new query to tidy-ocelot-457, with no schema changes or deleted indexes.
+Production release `<deployment-id>` is READY at `<vercel-url>`. Its hosted build deployed the new query to `<prod-deployment>`, with no schema changes or deleted indexes.
 
 Computer use temporarily moved the existing **disabled** “Native portal acceptance: integer cents” acceptance rule from openreview-incremental-acceptance to workspace scope. The all-repository view displayed **Workspace default**. Filtering mbelenkiy29/openreview-acceptance displayed the same disabled rule as **Inherited from workspace**, with the selected repository retained and preselected for creation. At 390×844 the viewport/document/body widths were all 390; keyboard Tab from Apply filter advanced without submitting an edit.
 

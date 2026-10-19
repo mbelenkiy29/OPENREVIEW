@@ -1,6 +1,6 @@
 # Repository identities in portal scopes and filters
 
-October 4, 2026. Final production release `dpl_HyWePnH6LknWGBDZmK3nDpgcQDZ7` is verified READY at https://openreview-flame-two.vercel.app with Convex tidy-ocelot-457 deployed. It supersedes the initial release `dpl_9Q49eNVLyZrHbphNqqRJAkcAo4d3` for this change.
+October 4, 2026. Final production release `<deployment-id>` is verified READY at `<vercel-url>` with Convex `<prod-deployment>` deployed. It supersedes the initial release `<deployment-id>` for this change.
 
 The onboarding identity correction is now shared by the dashboard and scope-management read models through `convex/repositoryIdentity.ts`. Each repository is authorized by the existing workspace/team visibility checks before identity enrichment; foreign connection identity is withheld. Added fields contain kind, connection name, instance and external ID, never connection credentials or webhook secrets. The existing public repository-list response remains unchanged. Selection values remain repository IDs, and every policy/cluster/integration mutation retains its existing authorization and validation.
 
@@ -18,7 +18,7 @@ Artifacts under `output/setup/`: `portal-provider-regression.log`, lint/types/ba
 
 ## Remaining card, table and detail presentations
 
-October 4 follow-up release `dpl_GjNZNo5iFZ721VademZDxL3mKKob` is READY at the same production alias. Repository management cards, PR catalog status cards, PR row captions/tooltips, review detail, knowledge entries/failures, usage rows and repository review settings now display the authorized provider identity. This uses the existing enriched dashboard repositories without new queries or credentials. Fix prompt repository names remain unchanged.
+October 4 follow-up release `<deployment-id>` is READY at the same production alias. Repository management cards, PR catalog status cards, PR row captions/tooltips, review detail, knowledge entries/failures, usage rows and repository review settings now display the authorized provider identity. This uses the existing enriched dashboard repositories without new queries or credentials. Fix prompt repository names remain unchanged.
 
 Native desktop readback shows eight identified repository cards, including both distinct Gitea connections with the same repository name. At 390px, all eight identity paragraphs fit 320px card content and document width remains 390px. PR list has 18 identified rows; review detail, knowledge, usage and review settings also retain 390px document width. The GitHub PR #4 detail still shows completed review on `40d7a953b03946632f2e643096b4227b6a705483` and zero findings. The viewport override was reset; final browser warning/error logs are empty. No buttons that index, review, save policy or change scope were clicked.
 
