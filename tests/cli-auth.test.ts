@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { accessToken, browserSignIn, logout, readLogin, saveLogin, serverUrl, type BrowserLogin } from "../src/cli-auth";
+import { accessToken, browserSignIn, logout, readLogin, replaceLogin, saveLogin, serverUrl, type BrowserLogin } from "../src/cli-auth";
 import { remoteReview } from "../src/remote-review";
 import { ART } from "../src/cli-banner";
 import { markFrames, playBanner, stageReporter } from "../src/cli-animation";
@@ -88,6 +88,19 @@ test("saved logins are owner-only; concurrent runs refresh a stale token once an
   assert.equal(new URLSearchParams(calls.at(-1)!.body).get("token"), "orr_refresh_token_1");
   assert.equal(await readLogin(file), null);
   await assert.rejects(readFile(file));
+});
+
+test("replacing a browser sign-in with an API key revokes the browser sign-in first", async () => {
+  const file = await tempFile(), calls: Call[] = [];
+  await saveLogin({ url: issuer, clientId: "client-1", tokenEndpoint: metadata.token_endpoint, revocationEndpoint: metadata.revocation_endpoint, resource: `${issuer}/api/mcp`, accessToken: "ora_access_token_0", refreshToken: "orr_refresh_token_0", expiresAt: Date.now() + 600_000 }, file);
+  const admin = { url: issuer, apiKey: "or_admin_key_123456" };
+  await replaceLogin(admin, { file, fetch: server(calls) });
+  assert.deepEqual(calls.map((c) => [c.url, new URLSearchParams(c.body).get("token")]), [[metadata.revocation_endpoint, "orr_refresh_token_0"]]);
+  assert.deepEqual(await readLogin(file), admin);
+  assert.equal((await stat(file)).mode & 0o777, 0o600);
+  // Replacing an API key has nothing to revoke.
+  await replaceLogin({ ...admin, apiKey: "or_admin_key_654321" }, { file, fetch: server(calls) });
+  assert.equal(calls.length, 1);
 });
 
 test("remote review: matches the checkout's repository, uploads changed files, reports stages and returns findings", async () => {

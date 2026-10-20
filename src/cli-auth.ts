@@ -129,7 +129,12 @@ export async function accessToken(login: SavedLogin, options: { file?: string; f
 export async function logout(options: { file?: string; fetch?: Fetch } = {}) {
   const file = options.file ?? configFile, login = await readLogin(file);
   if (login && "refreshToken" in login && login.revocationEndpoint)
-    await (options.fetch ?? fetch)(login.revocationEndpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: login.refreshToken, client_id: login.clientId }) }).catch(() => undefined);
+    await (options.fetch ?? fetch)(login.revocationEndpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: login.refreshToken, client_id: login.clientId }), signal: AbortSignal.timeout(20_000) }).catch(() => undefined);
   await rm(file, { force: true });
   return login;
+}
+// Saves a new login in place of the current one, revoking a browser sign-in it replaces.
+export async function replaceLogin(login: SavedLogin, options: { file?: string; fetch?: Fetch } = {}) {
+  await logout(options);
+  await saveLogin(login, options.file);
 }
