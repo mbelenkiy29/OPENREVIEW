@@ -218,6 +218,7 @@ export default defineSchema({
     userId: v.id("users"),
     provider: v.string(), // github | gitlab | google | email | sso (providerUserId = <connectionId>:<subject>)
     providerUserId: v.string(),
+    login: v.optional(v.string()), // github only: the login GitHub reported at the last sign-in or link
     email: v.optional(v.string()),
     emailVerified: v.boolean(),
     createdAt: v.number(),

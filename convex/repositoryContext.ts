@@ -5,17 +5,20 @@ import { connectionDigest } from "./indexAuthority";
 import {personalIdentityProviders} from "../src/personal-providers";
 import {providerIdentityAuthority} from "./providerIdentities";
 import { p4IdentityAuthority } from "./p4Identities";
+import { githubAccounts } from "./identity";
 import type { Doc, Id } from "./_generated/dataModel";
 
 import {repositoryContextValidator,type RepositoryContext} from "./repositoryContextTypes";
 export {repositoryContextValidator,type RepositoryContext} from "./repositoryContextTypes";
+// The GitHub ID is immutable; a stored login must also still match the PR author's.
+const holdsGithub=async(ctx:QueryCtx,user:Doc<"users">,id:string,login:string)=>(await githubAccounts(ctx,user)).some(g=>g.id===id&&(!g.login||g.login===login));
 const identityRef=v.object({id:v.id("p4Identities"),generation:v.number()});
 
 export async function validateRepositoryContext(ctx:QueryCtx|MutationCtx,receipt:RepositoryContext){
  const {repo,user}=await repositoryAccess(ctx,receipt.userId,receipt.repositoryId);
  if(receipt.nativeActor){const native=await p4IdentityAuthority(ctx,receipt.nativeActor.id,receipt.nativeActor.generation);if(native.repo._id!==repo._id||native.identity.userId!==user._id||native.identity.username!==receipt.actor)throw new Error("Native context author changed");}
  else if(receipt.providerActor){const linked=await providerIdentityAuthority(ctx,receipt.providerActor.id,repo._id,receipt.providerActor.generation);if(linked.identity.userId!==user._id||linked.identity.username!==receipt.actor||linked.identity.externalId!==receipt.providerActor.externalId)throw new Error("Provider context author changed");}
- else if(repo.connectionId||!receipt.githubActorId||String(user.githubId)!==receipt.githubActorId||user.login!==receipt.actor)throw new Error("Context author or provider identity changed");
+ else if(repo.connectionId||!receipt.githubActorId||!(await holdsGithub(ctx,user,receipt.githubActorId,receipt.actor)))throw new Error("Context author or provider identity changed");
  const allowed=new Set<string>();
  for(const reference of receipt.clusters){
   const cluster=await ctx.db.get(reference.id);
@@ -52,7 +55,7 @@ async function reviewAuthor(ctx:QueryCtx,repo:Doc<"repositories">,a:ReviewAuthor
  else if(a.nativeActor){const native=await p4IdentityAuthority(ctx,a.nativeActor.id,a.nativeActor.generation);if(native.repo._id!==repo._id||native.identity.username!==a.actor)throw new Error("Native context author mismatch");userId=native.identity.userId;}
  else{
   if(!a.authorExternalId||!/^([1-9][0-9]*)$/.test(a.authorExternalId))return "GitHub review author has no verified immutable account ID.";
-  for(const m of await ctx.db.query("organizationMembers").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()){const u=await ctx.db.get(m.userId);if(u?.login===a.actor&&String(u.githubId)===a.authorExternalId){userId=m.userId;githubActorId=a.authorExternalId;break;}}
+  for(const m of await ctx.db.query("organizationMembers").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()){const u=await ctx.db.get(m.userId);if(u&&await holdsGithub(ctx,u,a.authorExternalId,a.actor)){userId=m.userId;githubActorId=a.authorExternalId;break;}}
  }
  if(!userId)return "review author is not linked to a workspace identity.";
  await repositoryAccess(ctx,userId,repo._id);

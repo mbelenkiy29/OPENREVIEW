@@ -13,7 +13,9 @@ const connectionOf = (ctx: QueryCtx, organizationId: Id<"organizations">) => ctx
 const verifiedDomains = async (ctx: QueryCtx, connectionId: Id<"ssoConnections">) => (await ctx.db.query("ssoDomains").withIndex("by_connection", (q) => q.eq("connectionId", connectionId)).take(50)).filter((d) => d.verifiedAt).map((d) => d.domain);
 const httpsUrl = (value: string) => { try { const u = new URL(value); return u.protocol === "https:" && !u.username && !u.password && value.length <= 500; } catch { return false; } };
 const challenge = () => { const bytes = new Uint8Array(16); crypto.getRandomValues(bytes); return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join(""); };
-const idpFields = ["protocol", "samlEntryPoint", "samlIdpCert", "samlIdpIssuer", "oidcIssuer", "oidcClientId", "oidcClientSecret"] as const;
+// Fields that say who the IdP is. The SAML certificate is one: whoever holds its key signs any assertion. The OIDC
+// client secret is not: ID tokens come from the issuer's token endpoint, so rotating the secret keeps trust.
+const idpFields = ["protocol", "samlEntryPoint", "samlIdpCert", "samlIdpIssuer", "oidcIssuer", "oidcClientId"] as const;
 // SSO identities are `<connectionId>:<subject>`; ";" sorts right after ":", so this range is exactly that prefix.
 async function forgetSubjects(ctx: MutationCtx, connectionId: Id<"ssoConnections">) {
   const rows = await ctx.db.query("identities").withIndex("by_provider_user", (q) => q.eq("provider", "sso").gt("providerUserId", `${connectionId}:`).lt("providerUserId", `${connectionId};`)).take(200);
