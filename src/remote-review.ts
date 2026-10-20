@@ -14,12 +14,12 @@ export async function findRepository(call: McpCall, remote: string | undefined) 
 }
 export async function remoteReview(call: McpCall, input: RemoteReview, io: { stage: (name: string) => void; wait: (ms: number) => Promise<void>; timeoutMs?: number }) {
   const repo = await findRepository(call, input.remote);
-  const files = input.files.filter((f) => f.content.length <= localReviewLimits.fileChars).slice(0, localReviewLimits.files);
+  const files = input.files.map(({ path, sha, content }) => ({ path, sha, content }));
   const fileChars = files.reduce((sum, f) => sum + f.content.length, 0);
-  if (input.diff.length > localReviewLimits.diffChars || fileChars > localReviewLimits.totalFileChars)
+  if (input.diff.length > localReviewLimits.diffChars || files.length > localReviewLimits.files || files.some((f) => f.content.length > localReviewLimits.fileChars) || fileChars > localReviewLimits.totalFileChars || Buffer.byteLength(JSON.stringify({ diff: input.diff, files })) > localReviewLimits.uploadBytes)
     throw new Error("These changes are too large for a server review. Narrow --base, or run openreview review --local.");
   io.stage("uploading");
-  const { reviewId } = await call("review_local_changes", { repositoryId: repo._id, baseSha: input.baseSha, headSha: input.headSha, title: input.title.slice(0, 300), ...(input.mode ? { mode: input.mode } : {}), security: input.security, ...(input.instructions ? { instructions: input.instructions } : {}), diff: input.diff, files: files.map(({ path, sha, content }) => ({ path, sha, content })) }) as { reviewId: string };
+  const { reviewId } = await call("review_local_changes", { repositoryId: repo._id, baseSha: input.baseSha, headSha: input.headSha, title: input.title.slice(0, 300), ...(input.mode ? { mode: input.mode } : {}), security: input.security, ...(input.instructions ? { instructions: input.instructions } : {}), diff: input.diff, files }) as { reviewId: string };
   let last = "";
   for (const deadline = Date.now() + (io.timeoutMs ?? 20 * 60_000); ;) {
     const progress = await call("get_local_review", { reviewId }) as LocalReviewProgress;

@@ -66,8 +66,9 @@ export async function browserSignIn(server: string, io: LoginIo): Promise<Browse
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     if (url.pathname !== "/callback") { res.writeHead(404).end(); return; }
     const params = url.searchParams, iss = params.get("iss");
-    const result = params.get("state") !== state ? { error: "The sign-in response did not match this request" }
-      : iss && iss.replace(/\/+$/, "") !== metadata.issuer.replace(/\/+$/, "") ? { error: "The sign-in response came from a different server" }
+    // A stray or forged callback must not end the sign-in; keep waiting for the real one.
+    if (params.get("state") !== state) { res.writeHead(400).end(); return; }
+    const result = iss && iss.replace(/\/+$/, "") !== metadata.issuer.replace(/\/+$/, "") ? { error: "The sign-in response came from a different server" }
       : params.get("error") ? { error: params.get("error_description") ?? params.get("error")! }
       : params.get("code") ? { code: params.get("code")! } : { error: "The sign-in response had no code" };
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(`<!doctype html><meta charset="utf-8"><title>OpenReview CLI</title><body style="font:16px system-ui;padding:3rem">${"code" in result ? "Signed in. You can close this tab and return to your terminal." : "Sign-in failed. Return to your terminal for details."}</body>`);
@@ -128,7 +129,12 @@ export async function accessToken(login: SavedLogin, options: { file?: string; f
 export async function logout(options: { file?: string; fetch?: Fetch } = {}) {
   const file = options.file ?? configFile, login = await readLogin(file);
   if (login && "refreshToken" in login && login.revocationEndpoint)
-    await (options.fetch ?? fetch)(login.revocationEndpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: login.refreshToken, client_id: login.clientId }) }).catch(() => undefined);
+    await (options.fetch ?? fetch)(login.revocationEndpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: login.refreshToken, client_id: login.clientId }), signal: AbortSignal.timeout(20_000) }).catch(() => undefined);
   await rm(file, { force: true });
   return login;
+}
+// Saves a new login in place of the current one, revoking a browser sign-in it replaces.
+export async function replaceLogin(login: SavedLogin, options: { file?: string; fetch?: Fetch } = {}) {
+  await logout(options);
+  await saveLogin(login, options.file);
 }
