@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, formEncode, nextPeriodStart, openSubscription, periodKey, seatCount, stripe, stripeGet, stripeKey, stripeV2, trialEndsFrom, verifyStripeSignature } from "../src/billing";
 
-const config = billingConfig({ BILLING_ENABLED: "true", BILLING_TRIAL_USAGE_USD: "3", BILLING_USAGE_PER_SEAT_USD: "10", BILLING_GRACE_DAYS: "7" });
+const config = billingConfig({ BILLING_ENABLED: "true", BILLING_FREE_USAGE_USD: "3", BILLING_USAGE_PER_SEAT_USD: "10", BILLING_GRACE_DAYS: "7" });
 const now = Date.UTC(2026, 9, 14), day = 86400000, usd = 1e6;
 
 test("billing configuration defaults to disabled and validates numbers", () => {
@@ -13,8 +13,7 @@ test("billing configuration defaults to disabled and validates numbers", () => {
   assert.equal(billingConfig({ BILLING_USAGE_PER_SEAT_USD: "abc" }).usagePerSeatMicros, 6 * usd);
   assert.equal(billingConfig({ BILLING_USAGE_PER_SEAT_USD: "0.25" }).usagePerSeatMicros, 250_000);
   assert.equal(billingConfig({ BILLING_FREE_USAGE_USD: "" }).freeUsageMicros, 3 * usd, "empty is the default, not $0");
-  assert.equal(billingConfig({ BILLING_TRIAL_USAGE_USD: "2" }).freeUsageMicros, 2 * usd, "the older variable name still sets the free allowance");
-  assert.equal(billingConfig({ BILLING_TRIAL_USAGE_USD: "2", BILLING_FREE_USAGE_USD: "4" }).freeUsageMicros, 4 * usd);
+  assert.equal(billingConfig({ BILLING_TRIAL_USAGE_USD: "50" }).freeUsageMicros, 3 * usd, "the old trial allowance does not become a monthly Free allowance");
   assert.equal(periodKey(now), "2026-10");
   assert.equal(nextPeriodStart(now), Date.UTC(2026, 10, 1));
   assert.equal(nextPeriodStart(Date.UTC(2026, 11, 31, 23)), Date.UTC(2027, 0, 1));

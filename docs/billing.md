@@ -19,7 +19,8 @@ The plan catalog is `src/plans.ts`. Security checks, every provider, and the CLI
   - **Free** is recorded at once (`billing.chooseFreePlan`, admins only).
   - **Starter and Pro** open Stripe Checkout with a `BILLING_TRIAL_DAYS` (default 14) day trial, and the card is always collected (`payment_method_collection: always`). The choice is recorded only when Stripe confirms it: `checkout.session.completed` with a subscription, or a subscription that is trialing, active or past due.
   - Either way the choice is stored in `organizations.planSelectedAt` and `plan`, and audited as `billing.plan_selected`. Until then the dashboard sends everyone to the plan step (Billing, Account and Referrals settings stay open), and the server refuses indexing, reviews, advancing and finishing setup.
-- **Free:** any workspace without a subscription, including workspaces from before plans were required and cancelled subscriptions. Free never expires; its allowance resets each month. `BILLING_TRIAL_USAGE_USD` is the older name of `BILLING_FREE_USAGE_USD`.
+- **Existing subscriptions (grandfathered):** subscriptions from before Pro existed keep every Pro feature while they stay on Starter (`billingAccounts.legacy`). Run once right after deploying plans: `npx convex run billing:grandfatherSubscriptions '{"confirm":"grandfather-pre-plan-subscriptions"}' --prod`.
+- **Free:** any workspace without a subscription, including workspaces from before plans were required and cancelled subscriptions. Free never expires; its allowance resets each month. `BILLING_TRIAL_USAGE_USD` is no longer read: a generous trial allowance must not become a monthly gift.
 - **Which paid plan:** the subscription's seat price decides it (`billingAccounts.plan`): `STRIPE_SEAT_PRICE_ID` / `STRIPE_SEAT_ANNUAL_PRICE_ID` is Starter, and `STRIPE_PRO_PRICE_ID` / `STRIPE_PRO_ANNUAL_PRICE_ID` is Pro. An unknown price keeps the recorded plan, and a subscription with none recorded is Starter. Checkout uses the monthly prices; customers switch plan or billing interval in the Customer Portal.
 - **Gated features:** each one is skipped, never failed.
   - A deep review runs at standard, with a coverage note.
@@ -61,7 +62,7 @@ When billing is on, guided setup adds a **Choose your plan** step after inviting
 - **Continue on Free:** no card. Upgrade later in Settings → Billing.
 - **Choose Starter** or **Start Pro trial:** opens Stripe Checkout and returns to the step.
 
-Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
+The trial clock starts when the workspace first opens Checkout (its Stripe customer is created), however long it was on Free; each workspace gets one trial. Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
 
 When a review is blocked, it is recorded as failed with a `Billing:` reason, visible on the pull request's review page. Blocked reviews are also counted on **Settings → Billing**.
 
@@ -107,7 +108,7 @@ On Vercel, Stripe can also be provisioned from the Vercel Marketplace. The keys 
    ```bash
    npx convex run billing:forgetStripeLinks '{"confirm":"switch-stripe-mode"}' --prod
    ```
-   Each workspace returns to its trial with the same end date, and its next Checkout creates a live customer.
+   Each workspace returns to Free, and its next Checkout creates a live customer with a fresh trial.
 5. **Old webhook:** cancel the test subscriptions and disable the test-mode webhook endpoint, so the sandbox stops sending events (and retries) that would now fail signature checks.
 6. **Referrals:** commissions, credits and payout accounts don't record the Stripe mode. Keep `REFERRALS_ENABLED` off on a deployment until it is live. A deployment where any test invoice earned a commission (any `referralCommissions` row) must not be switched to live, even after voiding them: its referrals stay marked as paid, so live Checkout gives no coupon, the commission window counts from the test invoice and the conversion email is not sent again. Use a separate deployment. If referrals were on but no commission was ever earned, only delete its `referralPayoutAccounts` rows (test `acct_…` IDs don't exist in live mode). Add the three charge events to the live webhook endpoint too, and enable Connect in live mode.
 

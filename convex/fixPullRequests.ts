@@ -29,7 +29,7 @@ export const availability = query({
     if (!review) throw new Error("Review not found");
     const { repo } = await authorizeRepository(ctx, a.token, review.repositoryId);
     const settings = await effectiveSettings(ctx, repo);
-    return { github: !repo.connectionId && !review.nativeP4, enabled: settings.fixPullRequests === true, permission: await contentsPermission(ctx, repo) };
+    return { github: !repo.connectionId && !review.nativeP4, enabled: settings.fixPullRequests === true, entitled: await hasEntitlement(ctx, review.organizationId, "fix.pullRequests"), permission: await contentsPermission(ctx, repo) };
   },
 });
 export const authorizeOpen = internalMutation({

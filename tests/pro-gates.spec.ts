@@ -223,3 +223,23 @@ test('Pro still learns conventions and fetches linked requirements',async()=>{
  expect(result.files.map(f=>f.path)).toEqual([expect.stringContaining('/linear/')]);
  expect(result.coverage).not.toContain(upgradeNote['context.requirements']);
 });
+
+test('a Starter subscription from before Pro (legacy) keeps its API keys and requirements context',async()=>{
+ const {t,id,org,repo,billing}=await setup();
+ const raw='or_legacy_ci_key_123';
+ await t.run(async ctx=>{
+  await ctx.db.insert('apiKeys',{organizationId:org,userId:id,hash:createHash('sha256').update(raw).digest('hex'),name:'CI',prefix:raw.slice(0,11),createdAt:0,revoked:false,scopes:['read']});
+  await ctx.db.insert('billingAccounts',{organizationId:org,customerId:'cus_1',subscriptionId:'sub_1',status:'active',seats:1,trialEndsAt:Date.now(),updatedAt:Date.now()});
+  await ctx.db.insert('integrationConnections',{organizationId:org,kind:'linear',externalId:'lin',name:'Linear',credentials:'x',expiresAt:Date.now()+day,active:true,generation:1,teamIds:['team'],projectIds:[],repositoryIds:[repo._id],createdAt:Date.now()});
+ });
+ billing(true);
+ const request=()=>new Request('http://localhost/api/repositories',{headers:{authorization:'Bearer '+raw}});
+ const requirements=()=>t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,references:'ENG-1',actor:'stranger'});
+ // Starter without the migration: gated like any Starter workspace.
+ expect((await listRepositories(request())).status).toBe(402);
+ expect((await requirements()).coverage).toEqual([upgradeNote['context.requirements']]);
+ expect(await t.mutation(internal.billing.grandfatherSubscriptions,{confirm:'grandfather-pre-plan-subscriptions'})).toBe(1);
+ expect((await listRepositories(request())).status).toBe(200);
+ expect((await requirements()).coverage).not.toContain(upgradeNote['context.requirements']);
+ expect(await t.query(internal.billing.entitlement,{organizationId:org,key:'api.access'})).toBe(true);
+});

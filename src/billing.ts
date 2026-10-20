@@ -9,8 +9,7 @@ export type BillingConfig = { enabled: boolean; trialDays: number; freeUsageMicr
 export const int = (value: string | undefined, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isInteger(n) && n >= min && n <= max ? n : fallback; };
 const usd = (value: string | undefined, fallback: number) => { const n = Number(value); return Math.round((value?.trim() && Number.isFinite(n) && n >= 0 && n <= 100_000 ? n : fallback) * 1e6); };
 export function billingConfig(env: Record<string, string | undefined> = process.env): BillingConfig {
-  // BILLING_TRIAL_USAGE_USD is the older name of the free allowance.
-  return { enabled: env.BILLING_ENABLED === "true", trialDays: int(env.BILLING_TRIAL_DAYS, 14, 0, 365), freeUsageMicros: usd(env.BILLING_FREE_USAGE_USD?.trim() ? env.BILLING_FREE_USAGE_USD : env.BILLING_TRIAL_USAGE_USD, 3), usagePerSeatMicros: usd(env.BILLING_USAGE_PER_SEAT_USD, 6), proUsagePerSeatMicros: usd(env.BILLING_PRO_USAGE_PER_SEAT_USD, 12), graceDays: int(env.BILLING_GRACE_DAYS, 7, 0, 60) };
+  return { enabled: env.BILLING_ENABLED === "true", trialDays: int(env.BILLING_TRIAL_DAYS, 14, 0, 365), freeUsageMicros: usd(env.BILLING_FREE_USAGE_USD, 3), usagePerSeatMicros: usd(env.BILLING_USAGE_PER_SEAT_USD, 6), proUsagePerSeatMicros: usd(env.BILLING_PRO_USAGE_PER_SEAT_USD, 12), graceDays: int(env.BILLING_GRACE_DAYS, 7, 0, 60) };
 }
 // Billed seats: owners, admins and members; viewers are free.
 export const seatCount = (members: { role: string }[]) => members.filter((m) => m.role !== "viewer").length;

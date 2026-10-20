@@ -8,6 +8,8 @@ test("only Pro unlocks the costly features, and self-hosted (billing off) unlock
     assert.equal(entitled("starter", key), false, key);
     assert.equal(entitled("free", key), false, key);
     assert.equal(entitled("disabled", key), true, key);
+    assert.equal(entitled("starter", key, true), true, "a grandfathered Starter subscription keeps it");
+    assert.equal(entitled("free", key, true), false, "grandfathering ends when the subscription does");
   }
 });
 
