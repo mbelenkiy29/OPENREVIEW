@@ -17,6 +17,7 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
     {filters.checkout === "cancelled" && <p role="status">Checkout was cancelled; nothing was charged.</p>}
     {filters.billing === "error" && <p role="alert">Billing could not be opened. Check that you are a workspace admin and try again.</p>}
     {!s.allowed && <p role="alert">{s.reason}</p>}
+    {s.allowed && percent >= 80 && <p role="status">{percent >= 100 ? "This workspace used all of its included usage this month; extra usage is on, up to the monthly cap." : `This workspace used ${percent}% of its included usage this month. ${subscribed && s.capUsd > 0 ? "Extra usage covers what comes after it, up to the monthly cap." : `Reviews pause when it runs out${subscribed ? " unless an admin turns on extra usage" : "; upgrade for more"}.`}`}</p>}
     <section aria-labelledby="plan-heading">
       <h2 id="plan-heading">{s.planName} plan</h2>
       <dl className="facts">

@@ -370,3 +370,76 @@ test('a workspace reservation that is never settled stops counting after expiry 
  expect(await t.run(async ctx=>(await ctx.db.get(fresh!))!.status)).toBe('reserved');
  expect(await reserve(t,org)).toBeTruthy();
 });
+
+// Usage alerts: each $0.005 call below is 10% of a $0.05 allowance.
+const halfCent={...quote,inputTokenCeiling:500,outputTokenCeiling:500};
+async function use(t:Awaited<ReturnType<typeof setup>>['t'],organizationId:Id<'organizations'>,calls:number){for(let i=0;i<calls;i++){const id=await t.mutation(internal.inferenceBudget.reserve,{...halfCent,organizationId});if(!id)throw Error('No reservation');await t.mutation(internal.inferenceBudget.settle,{id,inputTokens:500,outputTokens:500});}await t.finishAllScheduledFunctions(vi.runAllTimers);}
+function fakeEmail(){
+ Object.assign(process.env,{RESEND_API_KEY:'re_fixture',EMAIL_FROM:'OpenReview <alerts@example.com>'});
+ const sent:{to:string[];subject:string;text:string}[]=[];
+ vi.spyOn(globalThis,'fetch').mockImplementation(async(input,init)=>{if(String(input)!=='https://api.resend.com/emails')return new Response('unexpected',{status:500});sent.push(JSON.parse(String(init?.body)));return Response.json({id:'email_'+sent.length});});
+ return sent;
+}
+async function alertSetup(){
+ const s=await setup(),{t,org,alice,bob,vera,members}=s;
+ // Every member has a verified email; only the owner (alice) and the admin (bob) may get alerts.
+ await t.run(async ctx=>{await ctx.db.patch(members.bob,{role:'admin'});for(const [u,email] of [[alice.id,'alice@acme.test'],[bob.id,'bob@acme.test'],[vera.id,'vera@acme.test']] as const)await ctx.db.insert('notificationPreferences',{organizationId:org,userId:u,email,emailVerifiedAt:1,reviewCompleted:'off',highSeverity:'off',updatedAt:0});});
+ return s;
+}
+const recipients=(mail:{to:string[]}[])=>mail.flatMap(m=>m.to).sort();
+
+test('Free usage alerts email owners and admins once at 80% and once at 100% each month, never viewers',async()=>{
+ process.env.BILLING_FREE_USAGE_USD='0.05';
+ const sent=fakeEmail(),{t,org}=await alertSetup();
+ await use(t,org,7);
+ expect(sent).toHaveLength(0);
+ await use(t,org,1);
+ expect(recipients(sent)).toEqual(['alice@acme.test','bob@acme.test']);
+ expect(sent[0]).toMatchObject({subject:"Acme used 80% of this month's included OpenReview usage",text:expect.stringContaining('Reviews pause when it runs out.')});
+ // 90% sends nothing; 100% sends the paused email once, and a repeated alert job does not resend it.
+ await use(t,org,1);
+ expect(sent).toHaveLength(2);
+ await use(t,org,1);
+ expect(sent).toHaveLength(4);
+ expect(sent[2]).toMatchObject({subject:"Acme used all of this month's included OpenReview usage",text:"Acme has used $0.05 of its $0.05 of included model usage this month. Usage resets on November 1.\n\nReviews are paused until November 1. A workspace admin can upgrade to Starter or Pro in Settings → Billing for more usage.\n\nhttps://review.example.com/dashboard/settings/billing"});
+ const usage=await t.run(ctx=>ctx.db.query('billingUsage').first());
+ expect(usage?.alertsSent).toEqual([80,100]);
+ await t.action(internal.notificationJobs.usageAlert,{usageId:usage!._id,threshold:100});
+ expect(sent).toHaveLength(4);
+ // The next month starts over.
+ vi.setSystemTime(Date.UTC(2026,10,2,12));
+ await use(t,org,8);
+ expect(sent).toHaveLength(6);
+ expect(recipients(sent.slice(4))).toEqual(['alice@acme.test','bob@acme.test']);
+});
+
+test('paid usage alerts say how much of the extra usage cap is left, or that extra usage is off',async()=>{
+ const sent=fakeEmail(),{t,org}=await alertSetup();
+ await t.run(ctx=>ctx.db.insert('billingAccounts',{organizationId:org,customerId:'cus_1',subscriptionId:'sub_1',status:'active',seats:5,spendCapUsd:0.02,trialEndsAt:Date.now(),updatedAt:Date.now()}));
+ // Starter includes $0.01 per seat here: $0.05 for five seats.
+ await use(t,org,8);
+ await use(t,org,2);
+ expect(sent.map(m=>m.subject)).toEqual(Array(2).fill("Acme used 80% of this month's included OpenReview usage").concat(Array(2).fill("Acme used all of this month's included OpenReview usage")));
+ expect(sent[2].text).toContain('Extra usage is on: $0.02 of the $0.02 monthly cap is left.');
+ // Extra usage past 100% sends nothing more.
+ await use(t,org,1);
+ expect(sent).toHaveLength(4);
+ const usage=await t.run(ctx=>ctx.db.query('billingUsage').first());
+ await t.run(ctx=>ctx.db.patch(usage!._id,{overageMicros:10000}));
+ expect((await t.query(internal.notifications.usageAlertTargets,{usageId:usage!._id,threshold:100}))?.text).toContain('Extra usage is on: $0.01 of the $0.02 monthly cap is left.');
+ const account=await t.run(ctx=>ctx.db.query('billingAccounts').first());
+ await t.run(ctx=>ctx.db.patch(account!._id,{spendCapUsd:0}));
+ expect((await t.query(internal.notifications.usageAlertTargets,{usageId:usage!._id,threshold:100}))?.text).toContain('Extra usage is off, so reviews are paused until November 1.');
+});
+
+test('no usage alert is sent with billing off',async()=>{
+ const sent=fakeEmail(),{t,org}=await alertSetup();
+ // A reservation made while billing was on settles after it is switched off: no alert.
+ process.env.BILLING_FREE_USAGE_USD='0.005';
+ const id=await t.mutation(internal.inferenceBudget.reserve,{...halfCent,organizationId:org});
+ delete process.env.BILLING_ENABLED;
+ await t.mutation(internal.inferenceBudget.settle,{id:id!,inputTokens:500,outputTokens:500});
+ await t.finishAllScheduledFunctions(vi.runAllTimers);
+ expect((await t.run(ctx=>ctx.db.query('billingUsage').first()))?.alertsSent).toBeUndefined();
+ expect(sent).toHaveLength(0);
+});
