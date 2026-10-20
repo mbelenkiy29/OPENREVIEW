@@ -120,4 +120,7 @@ test('pull requests record when OpenReview first saw them and when the merge web
  await merge(d2+3600000);await merge(d2+7200000);
  const pr=await t.run(ctx=>ctx.db.query('pullRequests').withIndex('by_repo_number',q=>q.eq('repositoryId',web._id).eq('number',7)).unique());
  expect([pr?.openedAt,pr?.mergedAt]).toEqual([d1,d2+3600000]);
+ // First seen already merged (e.g. a provider poll): no open time, so no zero-length merge time.
+ await t.mutation(internal.pulls.observe,{repositoryId:web._id,number:8,title:'Eight',author:'ana',url:'u',headSha:'c'.repeat(40),baseSha:'b'.repeat(40),state:'merged',observedAt:d2});
+ expect((await t.run(ctx=>ctx.db.query('pullRequests').withIndex('by_repo_number',q=>q.eq('repositoryId',web._id).eq('number',8)).unique()))?.openedAt).toBeUndefined();
 });

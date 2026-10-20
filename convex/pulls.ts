@@ -41,7 +41,8 @@ export async function observePull(ctx:MutationCtx,a:PullObservation,options?:{na
  const data={...metadata,organizationId:repo.organizationId,nativeObservedAt:observedAt,updatedAt:Date.now()};
  if(old){await ctx.db.patch(old._id,data);return old._id;}
  // shortcut: openedAt is first sight, not the provider's created_at (not in changeMetadataSchema); add it there if merge times need to be exact.
- return ctx.db.insert("pullRequests",{...data,openedAt:observedAt});
+ // A PR first seen already closed or merged has no known open time.
+ return ctx.db.insert("pullRequests",{...data,...(a.state==="open"?{openedAt:observedAt}:{})});
 }
 export const observe=internalMutation({args:observationFields,handler:observePull});
 

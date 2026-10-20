@@ -262,7 +262,7 @@ export const recordPr = internalMutation({
       state: args.state,
       updatedAt: Date.now(),
     };
-    const prId = existing?._id ?? (await ctx.db.insert("pullRequests", { ...data, openedAt: Date.now() }));
+    const prId = existing?._id ?? (await ctx.db.insert("pullRequests", { ...data, ...(args.state === "open" ? { openedAt: Date.now() } : {}) }));
     // Native intake owns current metadata; a delayed review only owns its revision.
     if (existing?.nativeObservedAt === undefined) {
       if (existing) await ctx.db.patch(existing._id, data);
