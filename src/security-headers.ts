@@ -11,6 +11,8 @@ export const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "X-Frame-Options", value: "DENY" },
+  // HTTPS only, here and on subdomains; set by the app so self-hosted deployments send it too (browsers ignore it over http).
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
 ];
 
 /** Paths middleware.ts never runs on. Its matcher repeats them literally (tests/security-headers.test.ts). */
