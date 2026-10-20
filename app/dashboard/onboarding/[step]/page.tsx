@@ -131,8 +131,9 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
             <header><h2 id={`plan-${card.plan}`}>{card.name}</h2><p className="price">{card.price}</p></header>
             <ul>{card.points.map((point) => <li key={point}>{point}</li>)}</ul>
             {billing.plan === card.plan && (paid || billing.planSelected) && <p><span className="badge active">Current plan</span></p>}
+            {card.plan === "free" && !paid && billing.freeElsewhere && <p className="muted">Free is one workspace per owner, and an owner of this workspace already has &ldquo;{billing.freeElsewhere}&rdquo; on Free. Choose Starter or Pro here, or use &ldquo;{billing.freeElsewhere}&rdquo; for free reviews.</p>}
             {admin && !paid && !confirming && (card.plan === "free"
-              ? <form action={continueOnFree}><input type="hidden" name="organizationId" value={organizationId} /><button>Continue on Free</button></form>
+              ? !billing.freeElsewhere && <form action={continueOnFree}><input type="hidden" name="organizationId" value={organizationId} /><button>Continue on Free</button></form>
               : <form id={card.plan === "pro" ? "wizard-form" : undefined} action={checkoutFromSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value={card.plan} />{card.plan === "starter" && <button>Choose Starter</button>}</form>)}
           </article>)}
         </div>

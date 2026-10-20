@@ -6,7 +6,7 @@
 
 ### Plans
 - Three plans:
-  - **Free:** no card, with a monthly usage allowance per workspace that never expires.
+  - **Free:** no card, with a monthly usage allowance that never expires, for one workspace per owner. Other new workspaces you own choose Starter or Pro; workspaces from before plans keep Free.
   - **Starter:** per seat.
   - **Pro:** per seat, with more usage and with deep reviews, generated reproduction tests and fix pull requests. Pro also includes requirements checks from Linear, Jira, Confluence and Notion, learned conventions, API keys, analytics older than 30 days, SSO and the audit log.
 - On other plans, Pro settings stay visible but disabled, with a link to Settings → Billing. SSO that is already set up keeps working, conventions you approved keep applying, and existing API keys are kept: they answer with an upgrade message until you upgrade.
