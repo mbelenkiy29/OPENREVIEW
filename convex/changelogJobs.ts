@@ -46,7 +46,8 @@ export const confirm = action({ args: { secret: v.string(), token: v.string() },
   const contact = `/contacts/${encodeURIComponent(email)}`;
   const updated = await resend(contact, "PATCH", { unsubscribed: false });
   const added = updated.ok ? await resend(`${contact}/segments/${id}`, "POST") : updated;
-  if (!added.ok) throw new Error(`Email provider returned HTTP ${added.status}`);
+  // 409 on the segment add means the create already put the contact in it.
+  if (!added.ok && !(updated.ok && added.status === 409)) throw new Error(`Email provider returned HTTP ${added.status}`);
   return true;
 } });
 

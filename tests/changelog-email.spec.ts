@@ -11,7 +11,7 @@ afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();for(const k of env)delete
 // Resend and the live feed, faked: a create for a contact that already exists answers 409, or 200 without changing it.
 function fakeResend(){
  const mails:{to:string;text:string}[]=[],broadcasts:Record<string,unknown>[]=[],calls:string[]=[],contacts=new Map<string,{unsubscribed:boolean;segments:Set<string>}>();
- const state={feed:'',existingCreate:409};
+ const state={feed:'',existingCreate:409,segmentConflict:false};
  vi.spyOn(globalThis,'fetch').mockImplementation(async(u:string|URL|Request,init?:RequestInit)=>{
   const url=new URL(String(u)),method=init?.method??'GET',body=init?.body?JSON.parse(String(init.body)):{};
   calls.push(`${method} ${url.pathname}`);
@@ -24,7 +24,9 @@ function fakeResend(){
   }
   const [,,email,,segment]=url.pathname.split('/'),contact=contacts.get(decodeURIComponent(email));
   if(!contact)return Response.json({name:'not_found'},{status:404});
-  if(method==='PATCH')contact.unsubscribed=body.unsubscribed;else contact.segments.add(segment);
+  if(method==='PATCH')contact.unsubscribed=body.unsubscribed;
+  else if(state.segmentConflict&&contact.segments.has(segment))return Response.json({name:'conflict'},{status:409});
+  else contact.segments.add(segment);
   return Response.json({id:'c'});
  });
  return {mails,broadcasts,calls,contacts,state};
@@ -85,6 +87,16 @@ test('the weekly digest sends one broadcast with only the new entries, never the
  r.state.feed=feed(md.replace('- RSS feed.\n','- RSS feed.\n- Changelog by email.\n'));
  expect(await t.action(internal.changelogJobs.digest,{})).toBe('0 sections sent');
  expect(r.broadcasts).toHaveLength(1);
+});
+
+test('a new subscriber is confirmed when the segment add answers 409, since the create already added them',async()=>{
+ const t=convexTest(schema,modules),r=fakeResend();
+ Object.assign(process.env,{RESEND_API_KEY:'re_fixture',EMAIL_FROM:'OpenReview <noreply@example.com>',RESEND_CHANGELOG_SEGMENT_ID:'seg_1'});
+ r.state.segmentConflict=true;
+ await t.action(api.changelogJobs.subscribe,{secret:svc,email:'new@example.com'});
+ expect(await t.action(api.changelogJobs.confirm,{secret:svc,token:confirmToken(r.mails[0].text)})).toBe(true);
+ expect(r.calls.slice(-3)).toEqual(['POST /contacts','PATCH /contacts/new%40example.com','POST /contacts/new%40example.com/segments/seg_1']);
+ expect(r.contacts.get('new@example.com')).toEqual({unsubscribed:false,segments:new Set(['seg_1'])});
 });
 
 test('changelog sign-ups are capped at 100 an hour across all addresses',async()=>{
