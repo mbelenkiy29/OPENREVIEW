@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { api } from "../../../../convex/_generated/api";
 import { backend } from "../../../../src/server";
 import { emailOnWeb } from "../../../../src/email";
-import { billingConfig, checkoutTrialEnd } from "../../../../src/billing";
+import { billingConfig, checkoutTrialEnd, usdText } from "../../../../src/billing";
 import { referralConfig, referralDisclosure, referralFact } from "../../../../src/referrals";
 import { installHref, linkHref } from "../../../../src/github-install";
 import { providerDisplay, providerShort } from "../../../../src/provider-display";
@@ -128,7 +128,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
         <article className="wizard-plan" aria-labelledby="plan-name">
           <header><h2 id="plan-name">Starter</h2><p className="price">{price ?? "Per seat, billed monthly"}</p></header>
           <ul>
-            <li>Unlimited reviews, with a fair-use limit of {billing.reviewsPerSeat} per seat each month</li>
+            <li>{usdText(billing.usagePerSeatMicros)} of model usage per seat each month, with optional extra usage</li>
             <li>Review summaries, inline findings and chat on every pull request</li>
             <li>Every connected provider and repository</li>
             <li>Owners, admins and members are seats; viewers are free</li>
@@ -136,9 +136,9 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
           <dl className="facts">
             <dt>Seats</dt><dd>{billing.activeSeats} active</dd>
             <dt>{subscribed ? "Status" : "Trial"}</dt><dd>{subscribed ? <span className={`badge ${billing.status}`}>{billing.status.replaceAll("_", " ")}</span>
-              : billing.trialStarted ? `${trialEnded ? "Ended" : "Ends"} ${day(billing.trialEndsAt)} · up to ${billing.trialReviews} reviews a month`
+              : billing.trialStarted ? `${trialEnded ? "Ended" : "Ends"} ${day(billing.trialEndsAt)} · ${usdText(billing.trialUsageMicros)} of model usage a month`
               : required ? `${billing.trialDays} days from today · card required, charged when the trial ends`
-              : `${billing.trialDays} days from your first review · up to ${billing.trialReviews} reviews a month`}</dd>
+              : `${billing.trialDays} days from your first review · ${usdText(billing.trialUsageMicros)} of model usage a month`}</dd>
             {billing.referral?.discount && <><dt>Referral</dt><dd>{referralFact(billing.referral, referralConfig().discountLabel)}</dd></>}
           </dl>
         </article>
@@ -156,7 +156,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
       <Stage caption={subscribed ? `starter plan · ${billing.activeSeats} ${billing.activeSeats === 1 ? "seat" : "seats"}`
         : required && !billing.trialStarted ? `${billing.trialDays}-day trial · starts when you add a card`
         : !billing.trialStarted ? `${billing.trialDays}-day trial · starts with your first review`
-        : trialEnded ? "trial ended" : `trial · ${billing.trialDays - elapsed} days left · ${billing.used} of ${billing.trialReviews} reviews used`}>
+        : trialEnded ? "trial ended" : `trial · ${billing.trialDays - elapsed} days left · ${Math.min(100, Math.round((billing.used / Math.max(1, billing.trialUsageMicros)) * 100))}% of usage used`}>
         <TrialArt days={billing.trialDays} elapsed={elapsed} subscribed={subscribed || confirming} />
       </Stage>
     </WizardFrame>;

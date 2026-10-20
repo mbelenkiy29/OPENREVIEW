@@ -365,6 +365,12 @@ export async function openBillingPortal(form: FormData) {
   catch { redirect("/dashboard/settings/billing?billing=error"); }
   redirect(url);
 }
+export async function setSpendingCap(form: FormData) {
+  const { token } = await current();
+  try { await backend().mutation(api.billing.setSpendingCap, { token, organizationId: text(form, "organizationId") as Id<"organizations">, capUsd: Number(text(form, "capUsd")) }); await notify("Extra usage cap saved."); }
+  catch { await notify("Could not save the extra usage cap.", "error"); }
+  revalidatePath("/dashboard/settings/billing");
+}
 export async function saveSlackChannel(form: FormData) {
   const { token } = await current();
   await backend().mutation(api.notifications.saveChannel, { token, organizationId: text(form, "organizationId") as Id<"organizations">, channelId: text(form, "channelId"), repositoryIds: form.getAll("repositoryIds").map(String) as Id<"repositories">[], events: form.getAll("events").map(String), qa: form.has("qa") });

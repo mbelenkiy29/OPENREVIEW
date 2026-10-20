@@ -5,7 +5,7 @@ import { SiteFooter, SiteHeader, sourceRepository } from "./site-chrome";
 import { AgentReplica, AnalyticsReplica, ChatReplica, FindingReplica, ReviewReplica, SummaryReplica } from "./landing/replicas";
 import { Copy } from "./dashboard/live";
 import { ScrollTable } from "./dashboard/scroll-table";
-import { billingConfig } from "../src/billing";
+import { billingConfig, usdText } from "../src/billing";
 import { homeStructuredData, jsonLd } from "../src/structured-data";
 
 export const metadata: Metadata = { alternates: { canonical: "/" } };
@@ -112,7 +112,7 @@ export default function Home() {
         <h2 id="pricing-heading">Pricing</h2>
         <div className="feature-grid two">
           <article className="feature-card"><h3>Free trial</h3><p className="price">Free for {billing.trialDays} days</p><p>Everything in Starter. Add a card when you set up your workspace; nothing is charged until the trial ends, and you can cancel before then.</p><p className="pricing-action"><Link className="button primary" href="/signup">Start free trial</Link></p></article>
-          <article className="feature-card"><h3>Starter</h3><p className="price">{process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>Unlimited reviews, with a fair-use limit of {billing.reviewsPerSeat} per seat each month. Owners, admins and members are seats; viewers are free.</p><p className="pricing-action"><Link className="button" href="/signup">Choose Starter</Link></p></article>
+          <article className="feature-card"><h3>Starter</h3><p className="price">{process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.usagePerSeatMicros)} of model usage per seat each month, then optional pay-as-you-go extra usage up to a cap you set. Owners, admins and members are seats; viewers are free.</p><p className="pricing-action"><Link className="button" href="/signup">Choose Starter</Link></p></article>
         </div>
       </section>}
 
