@@ -112,8 +112,8 @@ test("SSO: changing the identity provider drops domain trust and pauses sign-in 
   await saml(admin.token, "https://idp.acme.com/sso", cert);
   expect((await t.query(api.sso.settings, { token: owner.token, organizationId: org })).domains[0].verified).toBe(true);
 
-  // An admin re-points the connection at an IdP they control.
-  await saml(admin.token, "https://idp.attacker.example/sso", cert.replace("test", "evil"));
+  // An admin swaps in a signing certificate they hold: same sign-in URL, but they can now sign any assertion.
+  await saml(admin.token, "https://idp.acme.com/sso", cert.replace("test", "evil"));
   const after = await t.query(api.sso.settings, { token: owner.token, organizationId: org });
   expect([after.connection!.enforce, after.domains[0].verified, after.domains[0].txtValue === before.txtValue]).toEqual([false, false, false]);
   // Neither the owner's verified email nor the owner's existing SSO subject signs in as the owner.
@@ -159,4 +159,35 @@ test("SSO: after an IdP change, proving a different domain does not let the new 
   expect([replay.userId === owner.id, replay.member]).toEqual([false, false]);
   // New subjects on the proven domain still sign in.
   expect((await login("evil-1", "someone@attacker.example")).userId).not.toBe(owner.id);
+});
+
+test("SSO: rotating the OIDC client secret keeps domain trust and SSO identities; changing the issuer resets both", async () => {
+  const t = convexTest(schema, modules);
+  const sid = randomBytes(32).toString("base64url");
+  const ownerId = await t.mutation(api.identity.signIn, { secret, provider: "github", providerUserId: "501", login: "owner", avatar: "", email: "owner@acme.com", emailVerified: true, sessionHash: sessionHash(sid) });
+  const token = await jwt(ownerId, sid);
+  const org = await t.mutation(api.users.createOrganization, { token, name: "Acme" });
+  const oidc = (oidcIssuer: string, oidcClientSecret?: string) => t.mutation(api.sso.saveConnection, { token, organizationId: org, protocol: "oidc", name: "Entra", active: true, jitRole: "none", oidcIssuer, oidcClientId: "client-1", ...(oidcClientSecret ? { oidcClientSecret } : {}) });
+  await oidc("https://login.acme.com", "iv.secret-1.tag");
+  const connectionId = (await t.query(api.sso.settings, { token, organizationId: org })).connection!._id as Id<"ssoConnections">;
+  const domainId = await t.mutation(api.sso.addDomain, { token, organizationId: org, domain: "acme.com" });
+  const before = (await t.query(api.sso.settings, { token, organizationId: org })).domains[0];
+  dns.records.set(before.txtName, [[before.txtValue]]);
+  expect(await t.action(api.ssoJobs.verifyDomain, { token, domainId })).toBe(true);
+  await t.mutation(api.sso.setEnforcement, { token, organizationId: org, enforce: true });
+  const login = (subject: string, email: string) => t.mutation(api.sso.signIn, { secret, connectionId, subject, email, name: subject, sessionHash: sessionHash(randomBytes(32).toString("base64url")) });
+  expect((await login("entra-owner", "owner@acme.com")).userId).toBe(ownerId);
+
+  await oidc("https://login.acme.com", "iv.secret-2.tag");
+  const rotated = await t.query(api.sso.settings, { token, organizationId: org });
+  expect([rotated.connection!.enforce, rotated.domains[0].verified, rotated.domains[0].txtValue]).toEqual([true, true, before.txtValue]);
+  // The owner's SSO subject is still linked: it signs in as the owner even with an email on no verified domain.
+  expect((await login("entra-owner", "owner@elsewhere.example")).userId).toBe(ownerId);
+
+  // A different issuer is a different IdP, even with the saved secret kept.
+  await oidc("https://login.attacker.example");
+  const moved = await t.query(api.sso.settings, { token, organizationId: org });
+  expect([moved.connection!.enforce, moved.domains[0].verified]).toEqual([false, false]);
+  await expect(login("entra-owner", "owner@acme.com")).rejects.toThrow(/identity provider changed/);
+  expect(await t.run((ctx) => ctx.db.query("identities").withIndex("by_provider_user", (q) => q.eq("provider", "sso").eq("providerUserId", `${connectionId}:entra-owner`)).unique())).toBeNull();
 });
