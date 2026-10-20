@@ -50,7 +50,8 @@ export const portal = action({ args: { token: v.string(), organizationId: v.id("
 export const syncSeats = internalAction({ args: { organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<string> => {
   const target = await ctx.runQuery(internal.billing.seatSyncTarget, a);
   if (!target || target.seats === target.billed) return "unchanged";
-  await stripe(`/v1/subscriptions/${target.subscriptionId}`, { items: [{ id: target.itemId, quantity: target.seats }], proration_behavior: "create_prorations" }, stripeKey(), fetch, `seats:${target.subscriptionId}:${target.seats}:${target.billed}`);
+  // No idempotency key: an absolute quantity is safe to repeat, and a key would replay an earlier identical change.
+  await stripe(`/v1/subscriptions/${target.subscriptionId}`, { items: [{ id: target.itemId, quantity: target.seats }], proration_behavior: "create_prorations" }, stripeKey());
   return "updated";
 } });
 // Extra usage → Stripe meter event (POST /v1/billing/meter_events). The row id is the event identifier,

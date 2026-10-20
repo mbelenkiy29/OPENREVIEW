@@ -17,5 +17,6 @@ crons.interval(
 );
 crons.interval("Apply workspace retention settings",{hours:24},internal.dataControls.retentionSweep,{});
 crons.interval("Prune processed webhook payloads older than 14 days",{hours:6},internal.dataControls.pruneWebhookPayloads,{});
+crons.interval("Expire inference reservations that were never settled",{minutes:5},internal.inferenceBudget.expireStale,{});
 crons.interval("Retry referral credits and payouts stuck in processing",{minutes:15},internal.referralJobs.reconcileRedemptions,{});
 export default crons;
