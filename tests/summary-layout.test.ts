@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {disclosureLayout,threadLinks,withDescriptionSummary,withoutDescriptionSummary,descriptionStart,descriptionEnd} from "../src/summary-layout";
+import {compactLayout,disclosureLayout,threadLinks,withDescriptionSummary,withoutDescriptionSummary,descriptionStart,descriptionEnd} from "../src/summary-layout";
 import {agentPrompt,codeSpan,fenced,findingComment,reviewFooter,reviewSummary} from "../src/review-summary";
 import type {Finding} from "../src/engine/types";
 
@@ -80,4 +80,32 @@ test("summary counts read naturally and the risk line has one confidence number"
  assert.match(summary,/### Risk assessment\nhigh risk\n\nMoney paths changed\./);
  assert.match(summary,/### Prompt for your coding agent\n```text\n/);
  assert.doesNotMatch(reviewSummary(data([])),/Prompt for your coding agent/,"no prompt without findings");
+});
+
+test("compact layout: summary, score, important files and diagram first; the rest collapsed; prompt and one-line footer last",()=>{
+ const summary=reviewSummary(data([finding(),finding({fingerprint:"cd34",title:"Old caller breaks",outsideDiff:true})]))+reviewFooter(3,"other");
+ const layout=compactLayout(summary,"[`abc1234`](https://github.com/o/r/commit/abc1234)","\n\n[View review](https://x)");
+ assert.match(layout,/^### OpenReview Summary\n\nAdds receipt lines\.\n\n### Confidence Score: 2\/5\n\n\*\*Needs changes\*\*\n\nA high-severity defect changes every total\./);
+ assert.match(layout,/### Important Files Changed\n\n\| Filename \| Overview \|/);
+ assert.match(layout,/### Sequence Diagram\n\n```mermaid/);
+ assert.match(layout,/<details open><summary><strong>Comments Outside Diff<\/strong><\/summary>/);
+ for(const label of ["Issues","Risk assessment","Coverage"])assert.match(layout,new RegExp("<details><summary><strong>"+label+"</strong></summary>"),label);
+ // Sections holding only reviewSummary's "nothing recorded" text are left out.
+ for(const label of ["Resolved findings","Skipped files","Test source","Test execution"])assert.doesNotMatch(layout,new RegExp("<strong>"+label+"</strong>"),label);
+ const empty=compactLayout(reviewSummary({...data([]),assessment:undefined}),"`abc1234`");
+ for(const label of ["Issues","Risk assessment","Resolved findings","Skipped files","Test source","Test execution"])assert.doesNotMatch(empty,new RegExp("<strong>"+label+"</strong>"),label);
+ assert.match(empty,/<strong>Coverage<\/strong>/);
+ assert.match(layout,/<details><summary>Prompt To Fix All With AI<\/summary>\n\n```text/);
+ assert.match(layout,/\n\n\[View review\]\(https:\/\/x\)\n\n<sub>Reviews \(3\): Last reviewed commit: \[`abc1234`\]\(https:\/\/github\.com\/o\/r\/commit\/abc1234\) · Comment `@openreview review` to re-run it\.<\/sub>$/);
+ const order=["### OpenReview Summary","### Confidence Score","### Important Files Changed","### Sequence Diagram","Comments Outside Diff","<strong>Issues","Prompt To Fix All","<sub>"].map(h=>layout.indexOf(h));
+ assert.deepEqual([...order].sort((a,b)=>a-b),order);
+ assert.match(compactLayout(reviewSummary(data([]),["overview"]),"`abc1234`"),/^### OpenReview Summary\n\nAdds receipt lines\.\n\n\*\*Needs changes\*\*\n\n<details>/,"no score section: the verdict line stays");
+});
+
+test("compact inline comment: badge and title, prose, folded fix prompt; no labels, evidence or confidence",()=>{
+ const body=findingComment(finding(),"compact",undefined,{agentPrompt:true});
+ assert.match(body,/^\*\*🟠 P1 · Totals become dollars\*\*\n\n`total\(\)` now divides cents by 100\. Customers are charged a hundredth\.\n\nKeep integer cents\./);
+ assert.match(body,/<details><summary>Prompt To Fix With AI<\/summary>\n\n```text/);
+ assert.match(body,/<!-- openreview-finding:ab12 -->$/);
+ for(const absent of [/\*\*Impact:\*\*/,/\*\*Fix:\*\*/,/Evidence:/,/% confidence/])assert.doesNotMatch(body,absent);
 });

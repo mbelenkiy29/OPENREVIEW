@@ -34,6 +34,8 @@ OpenReview reads review configuration from the repository. Server reviews always
 }
 ```
 
+`commentStyle` is `concise`, `detailed` or `compact`. `compact` keeps inline comments to the badge, title, prose, suggestion and a folded "Prompt To Fix With AI". On GitHub it also lays out the summary as: summary, confidence score, important files, sequence diagram, then every other section collapsed, the fix-all prompt, and a one-line footer. Collapsed sections with nothing to report (no findings, nothing resolved or skipped, no test source, no risk assessment, tests not executed) are left out; Coverage is always shown. Compact summaries have no fixed section list, so a tool that reads them should look sections up by heading and treat a missing one as empty. The `concise` and `detailed` styles still show every selected section.
+
 ## Directory cascade
 
 `.openreview/` folders can sit at any depth. Each one applies to the files under its parent directory, read from the base revision like everything else:
