@@ -47,6 +47,16 @@ export const portal = action({ args: { token: v.string(), organizationId: v.id("
   if (!context.customerId) throw new Error("Start a subscription first");
   return (await stripe<{ url: string }>("/v1/billing_portal/sessions", { customer: context.customerId, return_url: `${appOrigin()}/dashboard/settings/billing` }, stripeKey())).url;
 } });
+// Switches the seat price in place (the Customer Portal cannot update subscriptions with a metered item).
+// legacy is left alone, so a grandfathered Starter that comes back from Pro keeps its features.
+export const changePlan = action({ args: { token: v.string(), organizationId: v.id("organizations"), plan: v.union(v.literal("starter"), v.literal("pro")) }, handler: async (ctx, a): Promise<string> => {
+  const context = await ctx.runQuery(internal.billing.checkoutContext, { token: a.token, organizationId: a.organizationId });
+  if (!context.subscriptionId || !context.subscriptionItemId || !["active", "trialing", "past_due"].includes(context.status)) throw new Error("Start a subscription first");
+  if (context.plan === a.plan) throw new Error(`This workspace is already on ${a.plan === "pro" ? "Pro" : "Starter"}`);
+  await stripe(`/v1/subscriptions/${context.subscriptionId}`, { items: [{ id: context.subscriptionItemId, price: priceFor(a.plan) }], proration_behavior: "create_prorations" }, stripeKey(), fetch, `plan:${a.organizationId}:${a.plan}:${Math.floor(Date.now() / 60000)}`);
+  await ctx.runMutation(internal.billing.auditPlanChange, { organizationId: a.organizationId, userId: context.userId, plan: a.plan });
+  return "requested";
+} });
 export const syncSeats = internalAction({ args: { organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<string> => {
   const target = await ctx.runQuery(internal.billing.seatSyncTarget, a);
   if (!target || target.seats === target.billed) return "unchanged";

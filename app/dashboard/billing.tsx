@@ -3,7 +3,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { backend } from "../../src/server";
 import { checkoutTrialEnd, usdText } from "../../src/billing";
 import { formatMoney, referralConfig, referralDisclosure, referralFact } from "../../src/referrals";
-import { applyReferralCode, openBillingPortal, setSpendingCap, startCheckout } from "./actions";
+import { applyReferralCode, changePlan, openBillingPortal, setSpendingCap, startCheckout } from "./actions";
 
 const day = (ms: number) => new Date(ms).toLocaleDateString("en-US", { timeZone: "UTC", dateStyle: "medium" });
 // Settings → Billing: plan, the monthly usage meter (dollars for admins only), extra usage, seats, and
@@ -27,15 +27,17 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
         {subscribed && <><dt>Extra usage</dt><dd>{s.capUsd > 0 ? (s.admin ? `${usdText(s.overage)} of a ${usdText(s.capUsd * 1e6)} monthly cap` : "On") : "Off: reviews pause when the included usage runs out"}</dd></>}
         <dt>Reviews this month</dt><dd>{s.reviews}{s.blocked ? ` · ${s.blocked} blocked` : ""}</dd>
         <dt>Seats</dt><dd>{s.activeSeats} active (owners, admins and members; viewers are free){s.billedSeats !== null ? ` · ${s.billedSeats} billed` : ""}</dd>
-        <dt>Plans</dt><dd>Free: {usdText(s.freeUsageMicros)} of model usage per workspace each month · Starter{process.env.BILLING_SEAT_PRICE_LABEL ? ` (${process.env.BILLING_SEAT_PRICE_LABEL})` : ""}: {usdText(s.usagePerSeatMicros)} per seat · Pro{process.env.BILLING_PRO_PRICE_LABEL ? ` (${process.env.BILLING_PRO_PRICE_LABEL})` : ""}: {usdText(s.proUsagePerSeatMicros)} per seat, plus deep reviews, generated reproduction tests, fix pull requests, requirements checks, learned conventions, API keys, analytics older than 30 days, SSO and the audit log. Pricier models use usage faster; switch plans in Manage billing.</dd>
+        <dt>Plans</dt><dd>Free: {usdText(s.freeUsageMicros)} of model usage per workspace each month · Starter{process.env.BILLING_SEAT_PRICE_LABEL ? ` (${process.env.BILLING_SEAT_PRICE_LABEL})` : ""}: {usdText(s.usagePerSeatMicros)} per seat · Pro{process.env.BILLING_PRO_PRICE_LABEL ? ` (${process.env.BILLING_PRO_PRICE_LABEL})` : ""}: {usdText(s.proUsagePerSeatMicros)} per seat, plus deep reviews, generated reproduction tests, fix pull requests, requirements checks, learned conventions, API keys, analytics older than 30 days, SSO and the audit log. Pricier models use usage faster.</dd>
         {s.referral?.referred && <><dt>Referral</dt><dd>{referralFact(s.referral, referralConfig().discountLabel)}</dd></>}
         {s.referralCredit ? <><dt>Referral credit</dt><dd>{formatMoney(s.referralCredit)} applied from referral earnings · Stripe takes it off the next invoices</dd></> : null}
       </dl>
       {s.admin ? <div className="row">
         {!subscribed && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="pro" /><button className="primary">{checkoutTrialEnd(s.trialEndsAt, Date.now()) ? "Start Pro trial" : "Upgrade to Pro"}</button></form>}
         {!subscribed && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="starter" /><button>{checkoutTrialEnd(s.trialEndsAt, Date.now()) ? "Start Starter trial" : "Choose Starter"}</button></form>}
+        {subscribed && <form action={changePlan}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value={s.plan === "pro" ? "starter" : "pro"} /><button className={s.plan === "pro" ? undefined : "primary"}>{s.plan === "pro" ? "Switch to Starter" : "Switch to Pro"}</button></form>}
         {s.hasCustomer && <form action={openBillingPortal}><input type="hidden" name="organizationId" value={organizationId} /><button>Manage billing</button></form>}
       </div> : <p className="muted">Only workspace owners and admins can change billing.</p>}
+      {s.admin && subscribed && <p className="muted">Switching plans takes effect now and is prorated: the price difference for the rest of this period is on the next invoice.</p>}
       {s.admin && subscribed && <form action={setSpendingCap} className="filter-bar"><input type="hidden" name="organizationId" value={organizationId} /><label>Extra usage cap per month (USD, 0 = off)<input type="number" name="capUsd" min={0} max={1000000} step="0.01" defaultValue={s.capUsd} required /></label><button>Save cap</button><span className="muted">Usage past the included amount is billed at the end of the period, up to this cap.</span></form>}
     </section>
     {s.referral?.canApply && <section aria-labelledby="referral-code-heading">

@@ -152,11 +152,13 @@ export const status = query({ args: { token: v.string(), organizationId: v.id("o
 } });
 
 export const checkoutContext = internalQuery({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
-  await authorize(ctx, a.token, a.organizationId, true);
+  const { user } = await authorize(ctx, a.token, a.organizationId, true);
   if (!billingConfig().enabled) throw new Error("Billing is disabled on this deployment");
   const account = await accountOf(ctx, a.organizationId);
-  return { customerId: account?.customerId ?? null, subscriptionId: account?.subscriptionId ?? null, status: account?.status ?? "trial", trialEndsAt: paidTrialEndsAt(account, Date.now()), seats: Math.max(1, seatCount(await members(ctx, a.organizationId))) };
+  return { userId: user._id, customerId: account?.customerId ?? null, subscriptionId: account?.subscriptionId ?? null, subscriptionItemId: account?.subscriptionItemId ?? null, plan: account?.plan === "pro" ? "pro" as const : "starter" as const, status: account?.status ?? "trial", trialEndsAt: paidTrialEndsAt(account, Date.now()), seats: Math.max(1, seatCount(await members(ctx, a.organizationId))) };
 } });
+// The webhook records the new plan from the seat price; this only audits who asked for it.
+export const auditPlanChange = internalMutation({ args: { organizationId: v.id("organizations"), userId: v.id("users"), plan: v.union(v.literal("starter"), v.literal("pro")) }, handler: (ctx, a) => audit(ctx, a.organizationId, a.userId, "billing.plan_change_requested", a.plan) });
 export const linkCustomer = internalMutation({ args: { organizationId: v.id("organizations"), customerId: v.string() }, handler: async (ctx, a) => {
   const account = await ensureAccount(ctx, a.organizationId);
   if (account.customerId && account.customerId !== a.customerId) throw new Error("Workspace already has a billing customer");
