@@ -5,6 +5,7 @@ import {createHmac} from 'node:crypto';
 import schema from '../convex/schema';
 import {api,internal} from '../convex/_generated/api';
 import type {Id} from '../convex/_generated/dataModel';
+import {STALE_RESERVATION_MS} from '../convex/inferenceBudget';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='billing-session-secret-at-least-32-characters',whsec='whsec_billing_fixture';
 const env={SESSION_SECRET:secret,SERVICE_SECRET:'billing-service',BILLING_ENABLED:'true',BILLING_TRIAL_USAGE_USD:'0.02',BILLING_USAGE_PER_SEAT_USD:'0.01',BILLING_GRACE_DAYS:'7',STRIPE_WEBHOOK_SECRET:whsec,STRIPE_SECRET_KEY:'sk_test_fixture',STRIPE_SEAT_PRICE_ID:'price_seat',APP_URL:'https://review.example.com'};
@@ -266,4 +267,16 @@ test('a workspace without saved scope settings gets one holding only the model o
  await t.run(async ctx=>{for(const s of await ctx.db.query('scopeSettings').collect())await ctx.db.delete(s._id);});
  await t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:'gpt-4.1-mini'});
  expect(await t.run(ctx=>ctx.db.query('scopeSettings').collect())).toEqual([expect.objectContaining({organizationId:org,overrideKeys:['model'],settings:expect.objectContaining({model:'gpt-4.1-mini'})})]);
+});
+
+test('a workspace reservation that is never settled stops counting after expiry and is not billed',async()=>{
+ const {t,alice,org}=await setup();
+ // The trial's $0.02 holds two calls in flight; neither reports usage.
+ const old=await reserve(t,org),fresh=await reserve(t,org);
+ await expect(reserve(t,org)).rejects.toThrow(/included usage is used up/);
+ await t.run(ctx=>ctx.db.patch(old!,{createdAt:Date.now()-STALE_RESERVATION_MS-1}));
+ await t.mutation(internal.inferenceBudget.expireStale,{});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({used:0,reserved:10000,allowed:true});
+ expect(await t.run(async ctx=>(await ctx.db.get(fresh!))!.status)).toBe('reserved');
+ expect(await reserve(t,org)).toBeTruthy();
 });
