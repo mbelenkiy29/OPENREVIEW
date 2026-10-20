@@ -18,7 +18,8 @@ import { validateRuntime } from "../scripts/sandbox";
 import { memoryToolbox } from "./engine/agent";
 import { cacheDirectory, localAgentState, stateFile } from "./local-review-state";
 import { inlineReport } from "./inline-output";
-import { remoteReview } from "./remote-review";
+import { findRepository, remoteReview } from "./remote-review";
+import { reviewStatusExit } from "./cli-review";
 import { repositoryFromRemote } from "./onboard";
 import { accessToken, browserSignIn, defaultServer, logout, readLogin, saveLogin, serverUrl, type SavedLogin } from "./cli-auth";
 import { playBanner, stageReporter } from "./cli-animation";
@@ -34,8 +35,21 @@ async function git(...args: string[]) {
 }
 const version = process.env.OPENREVIEW_CLI_VERSION ?? "dev";
 const apiKeyLogin = z.object({ url: z.string().url(), apiKey: z.string().min(16) });
+// OPENREVIEW_API_KEY (CI) wins over the saved login, so a key never has to be written to disk or argv.
+async function currentLogin(): Promise<SavedLogin | null> {
+  const apiKey = process.env.OPENREVIEW_API_KEY;
+  return apiKey ? apiKeyLogin.parse({ url: serverUrl(process.env.OPENREVIEW_URL ?? defaultServer), apiKey }) : readLogin();
+}
+// The key from stdin when piped, else a prompt that does not echo it.
+async function readSecret(prompt: string) {
+  if (!process.stdin.isTTY) { let text = ""; for await (const chunk of process.stdin) text += chunk; return text.trim(); }
+  const { Writable } = await import("node:stream");
+  process.stderr.write(prompt);
+  const terminal = (await import("node:readline/promises")).createInterface({ input: process.stdin, output: new Writable({ write: (_chunk, _encoding, done) => done() }), terminal: true });
+  try { return (await terminal.question("")).trim(); } finally { terminal.close(); process.stderr.write("\n"); }
+}
 async function signedIn(hint = "Run openreview login."): Promise<SavedLogin> {
-  const login = await readLogin();
+  const login = await currentLogin();
   if (!login) throw new Error(`Not signed in. ${hint}`);
   return login;
 }
@@ -60,6 +74,8 @@ async function main() {
       mode: { type: "string" },
       url: { type: "string" },
       token: { type: "string" },
+      "api-key": { type: "boolean" },
+      instructions: { type: "string" },
       help: { type: "boolean" },
       yes: { type: "boolean" },
       workspace: { type: "string" },
@@ -80,13 +96,15 @@ async function main() {
   if (values.help || !command) {
     await playBanner({ version, details: ["AI code review for your commits and pull requests"] });
     console.log(
-      "OpenReview\n\nopenreview login [--url https://review.example.com]   sign in through your browser\nopenreview login --url <server> --token <api-key>   sign in with an API key (CI)\nopenreview logout\nopenreview onboard [--url <server> --token <admin-api-key>] [--repositories all|owner/name,...] [--no-rules] [--workspace <name>] [--yes --json]\nopenreview review [--base main] [--json | --agent | --inline] [--security] [--mode fast|standard|deep]\nopenreview review --local [--engine pipeline|agentic] [--resume]\nopenreview status\nopenreview resolve --pr <number> [--max 3] [--push] [--fix-agent claude|codex]\nopenreview p4 index --help\nopenreview runtime --image <image@sha256:digest> --command <test-command> [--timeout 120]\n\nSigned in, review runs on your OpenReview workspace with its model, rules and plan. With --local, or when signed out, it runs on this machine with LLM_PROVIDER, LLM_MODEL and LLM_API_KEY (or a configured compatible endpoint).",
+      "OpenReview\n\nopenreview login [--url https://review.example.com]   sign in through your browser\nopenreview login --api-key [--url <server>]   sign in with an API key read from a prompt or stdin (or set OPENREVIEW_API_KEY in CI)\nopenreview logout\nopenreview onboard [--url <server> --api-key] [--repositories all|owner/name,...] [--no-rules] [--workspace <name>] [--yes --json]\nopenreview review [--base main] [--json | --agent | --inline] [--security] [--mode fast|standard|deep] [--instructions <text>]\nopenreview review status --pr <number> [--json]   exit 0 reviewed, 1 none, 2 bad usage, 3 running, 4 failed, 5 cancelled\nopenreview review --local [--engine pipeline|agentic] [--resume]\nopenreview status (alias: whoami)\nopenreview resolve --pr <number> [--max 3] [--push] [--fix-agent claude|codex]\nopenreview p4 index --help\nopenreview runtime --image <image@sha256:digest> --command <test-command> [--timeout 120]\n\nSigned in, review runs on your OpenReview workspace with its model, rules and plan. With --local, or when signed out, it runs on this machine with LLM_PROVIDER, LLM_MODEL and LLM_API_KEY (or a configured compatible endpoint).",
     );
     return;
   }
   if (command === "login") {
-    if (values.token) {
-      const config = apiKeyLogin.parse({ url: serverUrl(values.url ?? process.env.OPENREVIEW_URL ?? defaultServer), apiKey: values.token });
+    if (values.token) process.stderr.write("Warning: --token puts the key in your shell history and process list. Use openreview login --api-key (prompt or stdin) or OPENREVIEW_API_KEY.\n");
+    const apiKey = values.token ?? (values["api-key"] ? await readSecret("API key: ") : undefined);
+    if (apiKey !== undefined) {
+      const config = apiKeyLogin.parse({ url: serverUrl(values.url ?? process.env.OPENREVIEW_URL ?? defaultServer), apiKey });
       const response = await fetch(new URL("/api/repositories", config.url), { headers: { authorization: `Bearer ${config.apiKey}` } });
       if (!response.ok) throw new Error(`Login failed: HTTP ${response.status}. Generate an API key in dashboard Settings.`);
       await saveLogin(config);
@@ -108,12 +126,12 @@ async function main() {
     // Uses the saved login, or --url/--token (validated and saved like `openreview login`).
     // Onboarding uses the admin REST API, so it needs an admin API key rather than a browser sign-in.
     let config;
-    if (values.url || values.token) {
-      config = apiKeyLogin.parse({ url: values.url ? serverUrl(values.url) : values.url, apiKey: values.token });
+    if (values.url || values.token || values["api-key"]) {
+      config = apiKeyLogin.parse({ url: values.url ? serverUrl(values.url) : values.url, apiKey: values.token ?? (values["api-key"] ? await readSecret("Admin API key: ") : undefined) });
       await saveLogin(config);
     } else {
-      const saved = await readLogin();
-      if (!saved || !("apiKey" in saved)) throw new Error("Onboarding needs an admin API key. Run openreview onboard --url <server> --token <admin-api-key> (create the key in dashboard Settings → API keys).");
+      const saved = await currentLogin();
+      if (!saved || !("apiKey" in saved)) throw new Error("Onboarding needs an admin API key. Run openreview onboard --url <server> --api-key, or set OPENREVIEW_API_KEY (create the key in dashboard Settings → API keys).");
       config = saved;
     }
     const { onboard, httpApi } = await import("./onboard");
@@ -177,7 +195,7 @@ async function main() {
     if (evidence.exitCode !== 0) process.exitCode = 1;
     return;
   }
-  if (command === "status") {
+  if (command === "status" || command === "whoami") {
     const login = await signedIn("Local review also works with LLM environment variables: openreview review --local.");
     const remoteTools = await mcp(login);
     try {
@@ -187,6 +205,22 @@ async function main() {
     return;
   }
   if (command !== "review") throw new Error(`Unknown command: ${command}`);
+  if (positionals[1] === "status") {
+    const prNumber = Number(values.pr);
+    if (!Number.isInteger(prNumber) || prNumber < 1) { console.error("OpenReview: Pass --pr <number>"); process.exitCode = 2; return; }
+    const login = await currentLogin();
+    if (!login) { console.error("OpenReview: Not signed in. Run openreview login."); process.exitCode = 1; return; }
+    const remoteTools = await mcp(login);
+    try {
+      const repo = await findRepository(remoteTools.call, repositoryFromRemote((await git("remote", "get-url", "origin").catch(() => "")).trim()));
+      const status = await remoteTools.call("get_review_status", { repositoryId: repo._id, prNumber }) as { repository: string; review: { status: string; verdict: string | null; coversCurrentHead: boolean | null; headSha: string } | null; unresolved: number };
+      process.exitCode = reviewStatusExit(status.review);
+      const r = status.review;
+      console.log(values.json ? JSON.stringify(status, null, 2) : `${status.repository}#${prNumber}: ` + (r ? [r.status, r.verdict, r.coversCurrentHead === false ? `reviewed ${r.headSha.slice(0, 7)}, not the current head` : "", `${status.unresolved} open finding${status.unresolved === 1 ? "" : "s"}`].filter(Boolean).join(" · ") : "no review yet"));
+    } finally { await remoteTools.close(); }
+    return;
+  }
+  if (positionals.length > 1) throw new Error(`Unknown review command: ${positionals[1]}`);
   const root = (await git("rev-parse", "--show-toplevel")).trim();
   const baseRef = values.base!;
   if (baseRef.startsWith("-") || !/^[a-zA-Z0-9_./-]+$/.test(baseRef))
@@ -225,7 +259,7 @@ async function main() {
         eligibleFile({ path: e.path, sha: e.sha, content: "" }),
     );
   const progress = values.json || values.agent ? undefined : stageReporter();
-  const login = values.local ? null : await readLogin();
+  const login = values.local ? null : await currentLogin();
   let result: { summary: string; findings: Finding[] };
   const files: SourceFile[] = [];
   try {
@@ -236,7 +270,7 @@ async function main() {
       for (const entry of entries.filter((e) => changed.has(e.path))) files.push({ ...entry, content: await git("show", `HEAD:${entry.path}`) });
       const remoteTools = await mcp(login);
       try {
-        result = await remoteReview(remoteTools.call, { remote: repositoryFromRemote((await git("remote", "get-url", "origin").catch(() => "")).trim()), baseSha, headSha, title, ...(mode ? { mode } : {}), security: Boolean(values.security), diff: diffText, files }, { stage: (stage) => progress?.stage(stage), wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) });
+        result = await remoteReview(remoteTools.call, { remote: repositoryFromRemote((await git("remote", "get-url", "origin").catch(() => "")).trim()), baseSha, headSha, title, ...(mode ? { mode } : {}), security: Boolean(values.security), ...(values.instructions ? { instructions: values.instructions } : {}), diff: diffText, files }, { stage: (stage) => progress?.stage(stage), wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) });
       } finally { await remoteTools.close(); }
     } else {
       if (entries.length > 5000)
@@ -320,7 +354,7 @@ async function main() {
         mode,
         settings: {
           ...(repoConfig.settings.ignoredPaths ? { ignoredPaths: repoConfig.settings.ignoredPaths } : {}),
-          ...(repoConfig.settings.instructions || repoConfig.directories.length ? { instructions: applyRepoConfig({ instructions: repoConfig.settings.instructions ?? "" }, repoConfig).settings.instructions } : {}),
+          ...(repoConfig.settings.instructions || repoConfig.directories.length || values.instructions ? { instructions: [repoConfig.settings.instructions || repoConfig.directories.length ? applyRepoConfig({ instructions: repoConfig.settings.instructions ?? "" }, repoConfig).settings.instructions : "", values.instructions].filter(Boolean).join("\n\n") } : {}),
           ...(repoConfig.settings.categories ? { categories: repoConfig.settings.categories } : {}),
           ...(values.security ? { categories: ["security" as const] } : {}),
         },

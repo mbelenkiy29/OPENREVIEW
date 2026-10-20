@@ -108,13 +108,14 @@ test('the job reviews the upload with index context, records cli-review usage, d
   return {summary:'One issue.',findings:[{filePath:'src/pay.ts',startLine:2,endLine:2,severity:'medium',category:'logic',title:'Quantity is hard-coded',description:'Always charges two.',evidence:[],suggestedFix:'Pass the quantity.',confidence:0.9,fingerprint:'f1',agent:'logic',commitSha:'b'.repeat(40)}],diagrams:[]} as never;
  });
  const before=await uploads(t);
- const [,started]=await json(await startRoute(request('/api/reviews/local',keys.write,upload(shop._id,{mode:'deep',security:true}))));
+ const [,started]=await json(await startRoute(request('/api/reviews/local',keys.write,upload(shop._id,{mode:'deep',security:true,instructions:'Focus on the retry logic.'}))));
  expect(await json(await progressRoute(request('/api/reviews/local/'+started.reviewId,keys.read),params(started.reviewId)))).toEqual([200,{id:started.reviewId,status:'queued',stage:null,error:null,result:null}]);
  await t.action(internal.cliReviewJobs.run,{id:started.reviewId});
  expect(input?.files.map(f=>f.path)).toContain('src/pay.ts');
  expect(input?.files.find(f=>f.path==='src/pay.ts')?.content).toContain('total(cents, 2)');
  expect(input?.settings?.categories).toEqual(['security']);
  expect(input?.mode).toBe('deep');
+ expect(input?.settings?.instructions).toContain('Focus on the retry logic.');
  expect(input?.diff.map(f=>f.path)).toEqual(['src/pay.ts']);
  const [status,body]=await json(await progressRoute(request('/api/reviews/local/'+started.reviewId,keys.read),params(started.reviewId)));
  expect(status).toBe(200);

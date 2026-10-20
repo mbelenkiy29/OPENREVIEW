@@ -104,7 +104,7 @@ export const run = internalAction({
             maxComments: effective.maxComments,
             ignoredPaths: effective.ignoredPaths,
             categories: row.security ? ["security"] : effective.categories.map((c) => z.enum(categories).parse(c)),
-            instructions: effective.instructions,
+            instructions: [effective.instructions, row.instructions].filter(Boolean).join("\n\n"),
             summarySections: effective.summarySections,
             securityScan: effective.securityScan !== false,
           },
