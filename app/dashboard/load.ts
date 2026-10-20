@@ -80,6 +80,10 @@ export async function loadDashboard({
             filters.since && Number.isFinite(Date.parse(filters.since))
               ? Date.parse(filters.since)
               : undefined,
+          until:
+            filters.until && Number.isFinite(Date.parse(filters.until))
+              ? Date.parse(filters.until) + 86400000 - 1
+              : undefined,
         })
       : null;
   const visibleFindings = findingsPage?.page ?? data.findings.map(f=>({...f,canFix:false}));

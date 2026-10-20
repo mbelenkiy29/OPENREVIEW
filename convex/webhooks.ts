@@ -129,6 +129,7 @@ export const lifecycle = internalMutation({
         await ctx.db.patch(pr._id, {
           state: args.state,
           ...(args.observedAt !== undefined ? { nativeObservedAt: args.observedAt } : {}),
+          ...((args.state === "merged" || (args.state === "closed" && args.merged)) && pr.mergedAt === undefined ? { mergedAt: args.observedAt ?? Date.now() } : {}),
           updatedAt: Date.now(),
         });
       for (const review of await ctx.db

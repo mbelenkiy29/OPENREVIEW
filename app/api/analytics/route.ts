@@ -26,6 +26,6 @@ export async function GET(request: Request) {
   if("error" in period)return new Response("Invalid filters or access",{status:400});
   if(await historyLocked(user.token,org._id,period.since))return new Response(upgradeNote["analytics.history"],{status:402});
   try {const r=await backend().query(api.analytics.report,{token:user.token,organizationId:org._id,...period,...(q.get("team")?{teamId:q.get("team") as Id<"teams">}:{}),...(q.get("repository")?{repositoryId:q.get("repository") as Id<"repositories">}:{}),...(q.get("author")?{author:q.get("author")!}:{})});
-    return new Response("date,reviews,findings,cost\n"+r.daily.map(d=>`${d.date},${d.reviews},${d.findings},${d.cost.toFixed(6)}`).join("\n"),{headers:{"content-type":"text/csv","content-disposition":'attachment; filename="openreview-analytics.csv"',"cache-control":"no-store"}});
+    return new Response("date,reviews,findings,critical,high,medium,low,cost\n"+r.daily.map(d=>`${d.date},${d.reviews},${d.findings},${d.critical},${d.high},${d.medium},${d.low},${d.cost.toFixed(6)}`).join("\n"),{headers:{"content-type":"text/csv","content-disposition":'attachment; filename="openreview-analytics.csv"',"cache-control":"no-store"}});
   } catch {return new Response("Invalid filters or access",{status:400});}
 }

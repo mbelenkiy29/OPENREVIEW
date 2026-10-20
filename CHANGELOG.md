@@ -4,6 +4,16 @@
 
 ## October 2026
 
+### Analytics
+- The Analytics tab now follows Greptile's layout:
+  - Time period presets: this week, month, quarter or year, or custom dates.
+  - Four cards: Total PRs, Total Reviews, average merge time and bugs caught.
+  - Six charts, each with a leaderboard: reviews, bugs caught by severity, time to merge, top contributors, addressed rate, and comment ratings with the most upvoted comments.
+- Model cost, tokens, time saved and fixed-before-merge now sit in a Cost & impact section at the bottom.
+- "View all bugs" opens Findings for the same period. Findings gained an Until date filter.
+- Merge times are recorded for pull requests merged from now on.
+- The CSV export adds a count per severity.
+
 ### Plans
 - Three plans:
   - **Free:** no card, with a monthly usage allowance that never expires, for one workspace per owner. Other new workspaces you own choose Starter or Pro; workspaces from before plans keep Free.
