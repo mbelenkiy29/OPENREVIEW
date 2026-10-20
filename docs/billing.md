@@ -8,13 +8,26 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 - **Trial (older workspaces):** workspaces from before plans were required have no `planRequired` flag and keep the app-level trial: `BILLING_TRIAL_DAYS` days, starting at the first review or first Checkout, with no card.
 - **Starter (per seat):**
   - A Stripe subscription whose quantity is the number of active seats. Owners, admins and members are seats; viewers are free.
-  - Reviews are unlimited under a monthly fair-use limit of seats × `BILLING_REVIEWS_PER_SEAT` (default 500).
+  - Each seat includes `BILLING_USAGE_PER_SEAT_USD` (default $6) of model usage per UTC calendar month; the trial includes `BILLING_TRIAL_USAGE_USD` (default $5) a month. See [Usage](#usage).
   - The landing page, the setup plan step and Settings → Billing show `BILLING_SEAT_PRICE_LABEL` (for example `$12 per seat / month`). Set it on the web app and keep it in sync with the Stripe price.
 - **Seat changes:** accepting an invitation or changing a member's role resyncs the subscription quantity, with prorations.
 - **Past due:** reviews continue for `BILLING_GRACE_DAYS` (default 7) after the first failed payment, then pause until an invoice is paid.
 - **Cancelled:** the workspace falls back to any remaining trial.
 
 Higher tiers (Pro, Business) are planned in [roadmap/pricing-tiers.md](roadmap/pricing-tiers.md).
+
+## Usage
+
+Usage is the inference cost of the workspace's model calls (reviews, chat, Slack answers, fixes, knowledge, indexing embeddings), priced by `INFERENCE_PRICES` or the built-in prices, so pricier models use it faster. Workspaces that bring their own model key are not metered.
+
+- **Enforcement:** every model call reserves its worst-case cost before it is sent (`inferenceBudget.reserve`, which also checks the deployment-wide cap) and settles the real cost after (`billingUsage.usedMicros`). A call that would pass the allowance is refused before anything is sent, with a `Billing:` reason that says when usage resets (the first of the next UTC month). New reviews are blocked once the allowance is used.
+- **Extra usage:** on the Starter plan an admin sets a monthly cap in Settings → Billing (0 = off, audited as `billing.spending_cap`). Usage past the included amount, up to the cap, is recorded in `billingUsage.overageMicros` and reported to Stripe as meter events (`billingMeterEvents`, retried with backoff, the row id as the idempotent identifier).
+- **Meter:** Settings → Billing shows the percentage used and the reset date; admins also see dollars.
+- **Stripe setup:** create a Meter (event name `STRIPE_METER_EVENT`, sum of `value`) and a metered price on it with the markup in `unit_amount_decimal` (the value is micro-dollars of cost: $1.25 per $1 of cost is 0.000125 cents per unit). Set `STRIPE_USAGE_PRICE_ID`; Checkout then adds it next to the seat price. Existing subscriptions need the price added (Customer Portal or Dashboard) before their extra usage is invoiced.
+
+## Model choice
+
+Workspace and team defaults and repository settings pick the review model from the operator's priced list: the `INFERENCE_PRICES` entries for `LLM_PROVIDER` (for example `openrouter:anthropic/claude-sonnet-5-5`). Chat, Slack answers, fixes and knowledge use the workspace default. A saved model that leaves the list falls back to the operator's `LLM_MODEL`. Only list models that support tool calls and `response_format` JSON.
 
 ## Choosing a plan during setup
 

@@ -217,7 +217,7 @@ export const indexBatch = internalAction({
         if (process.env.EMBEDDING_MODEL) {
           // Chunk-level embeddings at definition boundaries; unchanged blobs with the current
           // model are skipped, so re-index backfills are idempotent.
-          const embedder = new Embeddings(inferenceBilling(ctx)), started = Date.now();
+          const embedder = new Embeddings(inferenceBilling(ctx, data.repo.organizationId)), started = Date.now();
           const state = await ctx.runQuery(internal.embeddings.chunkState, { repositoryId: data.repo._id, path: file.path });
           if (state?.sha !== file.sha || state.model !== embedder.model) {
             // Variable declarations (including locals) are not chunk boundaries.

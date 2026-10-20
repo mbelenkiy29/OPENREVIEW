@@ -98,7 +98,7 @@ export const findingValidator = v.object({
 });
 export default defineSchema({
   inferenceBudgets: defineTable({limitMicros:v.number(),baselineMicros:v.number(),source:v.string(),committedMicros:v.number(),reservedMicros:v.number(),createdAt:v.number()}),
-  inferenceReservations: defineTable({budgetId:v.id("inferenceBudgets"),provider:v.string(),model:v.string(),baseUrl:v.string(),inputTokenCeiling:v.number(),outputTokenCeiling:v.number(),inputPrice:v.number(),outputPrice:v.number(),cacheReadPrice:v.optional(v.number()),cacheWritePrice:v.optional(v.number()),reservedMicros:v.number(),status:v.string(),createdAt:v.number(),inputTokens:v.optional(v.number()),outputTokens:v.optional(v.number()),cacheReadTokens:v.optional(v.number()),cacheWriteTokens:v.optional(v.number()),settledMicros:v.optional(v.number()),settledAt:v.optional(v.number())}).index("by_budget",["budgetId"]),
+  inferenceReservations: defineTable({budgetId:v.optional(v.id("inferenceBudgets")),usageId:v.optional(v.id("billingUsage")),provider:v.string(),model:v.string(),baseUrl:v.string(),inputTokenCeiling:v.number(),outputTokenCeiling:v.number(),inputPrice:v.number(),outputPrice:v.number(),cacheReadPrice:v.optional(v.number()),cacheWritePrice:v.optional(v.number()),reservedMicros:v.number(),status:v.string(),createdAt:v.number(),inputTokens:v.optional(v.number()),outputTokens:v.optional(v.number()),cacheReadTokens:v.optional(v.number()),cacheWriteTokens:v.optional(v.number()),settledMicros:v.optional(v.number()),settledAt:v.optional(v.number())}).index("by_budget",["budgetId"]),
   reviewFindings: defineTable({reviewId:review,findingId:v.id("findings"),snapshot:findingValidator}).index("by_review",["reviewId"]),
   integrationConnections:defineTable({organizationId:org,kind:v.union(v.literal("linear"),v.literal("atlassian"),v.literal("notion")),sites:v.optional(v.array(v.object({id:v.string(),name:v.string(),url:v.string(),scopes:v.array(v.string())}))),jiraProjectIds:v.optional(v.array(v.string())),confluenceSpaceIds:v.optional(v.array(v.string())),externalId:v.string(),name:v.string(),credentials:v.string(),expiresAt:v.number(),active:v.boolean(),generation:v.number(),teamIds:v.array(v.string()),projectIds:v.array(v.string()),repositoryIds:v.array(repo),refreshLease:v.optional(v.string()),refreshExpiresAt:v.optional(v.number()),error:v.optional(v.string()),createdAt:v.number()}).index("by_org",["organizationId"]).index("by_account",["organizationId","kind","externalId"]),
   integrationRevocations:defineTable({connectionId:v.id("integrationConnections"),organizationId:org,credentials:v.string(),attempts:v.number(),createdAt:v.number(),status:v.string(),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number())}).index("by_connection",["connectionId"]),
@@ -596,6 +596,8 @@ export default defineSchema({
     currentPeriodEnd: v.optional(v.number()),
     pastDueSince: v.optional(v.number()),
     lastEventCreated: v.optional(v.number()),
+    // Monthly extra-usage cap in dollars, set by an admin; 0 or unset means no usage past the included amount.
+    spendCapUsd: v.optional(v.number()),
     updatedAt: v.number(),
   }).index("by_org", ["organizationId"]).index("by_customer", ["customerId"]),
   // Referral program (REFERRALS_ENABLED and BILLING_ENABLED only). One personal code per user. A
@@ -678,7 +680,10 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]).index("by_account", ["accountId"]),
-  billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number() }).index("by_org_period", ["organizationId", "period"]),
+  // Usage in micro-dollars of inference cost: settled, reserved by in-flight calls, and the part past the included usage.
+  billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number(), usedMicros: v.optional(v.number()), reservedMicros: v.optional(v.number()), overageMicros: v.optional(v.number()) }).index("by_org_period", ["organizationId", "period"]),
+  // Extra usage waiting to be reported to Stripe as meter events (identifier = this row id).
+  billingMeterEvents: defineTable({ organizationId: org, period: v.string(), micros: v.number(), status: v.string() /* pending | reported | skipped | failed */, attempts: v.number(), error: v.optional(v.string()), createdAt: v.number(), reportedAt: v.optional(v.number()) }).index("by_org_status", ["organizationId", "status"]),
   stripeEvents: defineTable({ eventId: v.string(), type: v.string(), outcome: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Slack app installs (one per Slack workspace); the bot token is encrypted with scope `<org>:slack`.
   slackInstallations: defineTable({
