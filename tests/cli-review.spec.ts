@@ -1,3 +1,4 @@
+import { upgradeNote } from "../src/plans";
 import {afterEach,beforeEach,expect,test,vi} from 'vitest';
 import {convexTest} from 'convex-test';
 import {SignJWT} from 'jose';
@@ -130,6 +131,17 @@ test('the job reviews the upload with index context, records cli-review usage, d
  // A day later the row is gone.
  await t.mutation(internal.cliReviews.remove,{id:started.reviewId});
  expect((await progressRoute(request('/api/reviews/local/'+started.reviewId,keys.read),params(started.reviewId))).status).toBe(404);
+});
+
+test('on a plan without deep reviews, a deep CLI review runs at standard with a coverage note',async()=>{
+ const {t,shop,keys}=await setup();
+ let input:ReviewInput|undefined;
+ vi.mocked(reviewChange).mockImplementation(async(reviewInput)=>{input=reviewInput;return {summary:'Clean.',findings:[]} as never;});
+ const [,started]=await json(await startRoute(request('/api/reviews/local',keys.write,upload(shop._id,{mode:'deep'}))));
+ process.env.BILLING_ENABLED='true';
+ await t.action(internal.cliReviewJobs.run,{id:started.reviewId});
+ expect(input?.mode).toBe('standard');
+ expect(input?.coverageLimits).toContain(upgradeNote['review.deep']);
 });
 
 test('a failing engine and a review that never finishes end as failed and drop the upload',async()=>{

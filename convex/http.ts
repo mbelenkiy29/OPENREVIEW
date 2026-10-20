@@ -85,7 +85,7 @@ http.route({
     else if (event.type.startsWith("customer.subscription.") && o.id && o.customer && o.status) {
       // The seat item: a subscription can also carry the metered extra-usage price.
       const item = o.items?.data.find((i) => i.price?.id !== process.env.STRIPE_USAGE_PRICE_ID) ?? o.items?.data[0];
-      await ctx.runMutation(internal.billing.applyStripeEvent, { ...base, subscription: { id: o.id, customer: o.customer, status: o.status, quantity: item?.quantity ?? 1, ...(item ? { itemId: item.id } : {}), ...((item?.current_period_end ?? o.current_period_end) ? { currentPeriodEnd: (item?.current_period_end ?? o.current_period_end)! * 1000 } : {}), ...(o.metadata?.organizationId ? { organizationId: o.metadata.organizationId } : {}) } });
+      await ctx.runMutation(internal.billing.applyStripeEvent, { ...base, subscription: { id: o.id, customer: o.customer, status: o.status, quantity: item?.quantity ?? 1, ...(item ? { itemId: item.id } : {}), ...(item?.price?.id ? { price: item.price.id } : {}), ...((item?.current_period_end ?? o.current_period_end) ? { currentPeriodEnd: (item?.current_period_end ?? o.current_period_end)! * 1000 } : {}), ...(o.metadata?.organizationId ? { organizationId: o.metadata.organizationId } : {}) } });
     } else if ((event.type === "invoice.payment_failed" || event.type === "invoice.paid") && o.customer) {
       // Newer API versions move an invoice's subscription under parent.subscription_details.
       const subscription = o.parent?.subscription_details?.subscription ?? o.subscription;

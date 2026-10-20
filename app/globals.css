@@ -3154,6 +3154,11 @@ input.switch:checked::before {
 }
 
 /* Plan step: one plan card */
+.wizard-plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
 .wizard-plan {
   display: flex;
   flex-direction: column;

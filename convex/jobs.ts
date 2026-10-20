@@ -39,6 +39,7 @@ import { applyGeneratedTests, reproduceSystem, testCandidates, testDraftSchema }
 import { knowledgeTokenBudgets, selectKnowledge } from "../src/knowledge-context";
 import { detectAiAuthored, reviewModelFor } from "../src/ai-authored";
 import { modes, resolveTier, tiers } from "../src/review-tier";
+import { upgradeNote } from "../src/plans";
 import { repositoryGuidance, selectPacks } from "../src/guidance-packs";
 import { AzureDevOps } from "../src/azure-devops";
 import { semanticChunks, sourceChunks } from "../src/engine/chunks";
@@ -467,9 +468,12 @@ export const review = internalAction({
         return { ...(resolved.settings.categories ? { categories: resolved.settings.categories } : {}), minimumConfidence: thresholds.minimumConfidence, severityThreshold: z.enum(severities).parse(thresholds.severityThreshold), ignored: resolved.ignored, ...(resolved.ignoredBy ? { ignoredBy: resolved.ignoredBy } : {}) };
       };
       // K2: comment > label > configured tier (raised by touched folders); the admin cap applies last.
-      const tier = resolveTier({ configured: z.enum(modes).parse(effective.mode), diff: pr.diff, requested: state.review.requestedMode ? { mode: state.review.requestedMode, source: state.review.requestedModeSource ?? "comment" } : undefined, cap: z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep") });
+      // A plan without deep reviews caps the tier at standard, below any admin cap.
+      const deepAllowed = await ctx.runQuery(internal.billing.entitlement, { organizationId: repo.organizationId, key: "review.deep" }), adminCap = z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep");
+      const tier = resolveTier({ configured: z.enum(modes).parse(effective.mode), diff: pr.diff, requested: state.review.requestedMode ? { mode: state.review.requestedMode, source: state.review.requestedModeSource ?? "comment" } : undefined, cap: deepAllowed || adminCap !== "deep" ? adminCap : "standard" });
+      const planCapped = !deepAllowed && tier.requested === "deep";
       const touchedDirectories = pr.diff.flatMap((f) => { const d = directorySettings(f.path); return d && !d.ignored ? [d] : []; });
-      const configNotes = [...repoConfig.warnings, ...guidance.rejected, ...(configured.blocked.length ? [`Repository config values for ${configured.blocked.join(", ")} were not applied because an administrator locked them.`] : [])];
+      const configNotes = [...repoConfig.warnings, ...guidance.rejected, ...(planCapped ? [upgradeNote["review.deep"]] : []), ...(configured.blocked.length ? [`Repository config values for ${configured.blocked.join(", ")} were not applied because an administrator locked them.`] : [])];
       // Incremental review when the last reviewed head is an ancestor of this head.
       const previousHead = await ctx.runQuery(internal.reviews.previousHead, args);
       const comparison = previousHead && github.compare ? await github.compare(repo.fullName, previousHead, pr.head.sha).catch(() => "unavailable" as const) : undefined;

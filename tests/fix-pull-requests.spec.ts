@@ -101,3 +101,14 @@ test("Gitea explains that fix pull requests are not available instead of blaming
   const gitea = new Gitea("https://gitea.example.com", "token");
   expect(await gitea.openFixPullRequest("o/r", 1, { branch: "openreview/fix-1-abc", expectedHead: head, path: "a.ts", blobSha: "s", content: "", title: "t", body: "b", message: "m" })).toEqual({ skipped: "fix pull requests are not available for Gitea yet" });
 });
+
+test("fix pull requests are a Pro feature when billing is on", async () => {
+  const { t, token, organizationId, findingId, openFix } = await setup();
+  process.env.BILLING_ENABLED = "true";
+  try {
+    await expect(t.action(api.fixPullRequestJobs.open, { token, findingId })).rejects.toThrow(/Pro plan/);
+    expect(openFix).not.toHaveBeenCalled();
+    await t.run((ctx) => ctx.db.insert("billingAccounts", { organizationId, customerId: "cus_1", subscriptionId: "sub_1", plan: "pro", status: "active", seats: 1, trialEndsAt: Date.now(), updatedAt: Date.now() }));
+    expect(await t.action(api.fixPullRequestJobs.open, { token, findingId })).toEqual({ url: "https://github.com/alice/fixes/pull/4", reused: false });
+  } finally { delete process.env.BILLING_ENABLED; }
+});

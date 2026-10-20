@@ -4,24 +4,41 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 
 ## Plans
 
-- **Choosing a plan (new workspaces):** a workspace created while billing is on (`organizations.planRequired`) must choose a plan before anything else. Setup goes workspace → **Choose your plan** → connect. The plan step starts Stripe Checkout for the Starter plan with a `BILLING_TRIAL_DAYS` (default 14) day trial, and the card is always collected (`payment_method_collection: always`). The choice is recorded (`organizations.planSelectedAt`, `plan`, audit `billing.plan_selected`) only when Stripe confirms it: `checkout.session.completed` with a subscription, or a subscription that is trialing, active or past due. Until then the dashboard sends everyone to the plan step (Billing, Account and Referrals settings stay open), and the server refuses indexing, reviews, advancing and finishing setup.
-- **Trial (older workspaces):** workspaces from before plans were required have no `planRequired` flag and keep the app-level trial: `BILLING_TRIAL_DAYS` days, starting at the first review or first Checkout, with no card.
-- **Starter (per seat):**
-  - A Stripe subscription whose quantity is the number of active seats. Owners, admins and members are seats; viewers are free.
-  - Each seat includes `BILLING_USAGE_PER_SEAT_USD` (default $6) of model usage per UTC calendar month; the trial includes `BILLING_TRIAL_USAGE_USD` (default $5) a month. See [Usage](#usage).
-  - The landing page, the setup plan step and Settings → Billing show `BILLING_SEAT_PRICE_LABEL` (for example `$12 per seat / month`). Set it on the web app and keep it in sync with the Stripe price.
-- **Seat changes:** accepting an invitation or changing a member's role resyncs the subscription quantity, with prorations.
-- **Past due:** reviews continue for `BILLING_GRACE_DAYS` (default 7) after the first failed payment, then pause until an invoice is paid.
-- **Cancelled:** the workspace falls back to any remaining trial.
+| | Free | Starter | Pro |
+|---|---|---|---|
+| Price | $0, no card | `BILLING_SEAT_PRICE_LABEL` per seat (we sell $12/month) | `BILLING_PRO_PRICE_LABEL` per seat (we sell $24/month) |
+| Included model usage per month | `BILLING_FREE_USAGE_USD` per workspace (default $3) | `BILLING_USAGE_PER_SEAT_USD` per seat (default $6), pooled | `BILLING_PRO_USAGE_PER_SEAT_USD` per seat (default $12), pooled |
+| Extra usage | none | up to the admin cap | up to the admin cap |
+| Deep reviews, generated reproduction tests, fix pull requests | | | ✓ |
 
-Higher tiers (Pro, Business) are planned in [roadmap/pricing-tiers.md](roadmap/pricing-tiers.md).
+The plan catalog is `src/plans.ts`. Security checks, every provider, the CLI and MCP are on every plan. With billing off every feature is unlocked.
+
+- **Choosing a plan (new workspaces):** a workspace created while billing is on (`organizations.planRequired`) must choose a plan before anything else. Setup goes workspace → **Choose your plan** → connect.
+  - **Free** is recorded at once (`billing.chooseFreePlan`, admins only).
+  - **Starter and Pro** open Stripe Checkout with a `BILLING_TRIAL_DAYS` (default 14) day trial, and the card is always collected (`payment_method_collection: always`). The choice is recorded only when Stripe confirms it: `checkout.session.completed` with a subscription, or a subscription that is trialing, active or past due.
+  - Either way the choice is stored in `organizations.planSelectedAt` and `plan`, and audited as `billing.plan_selected`. Until then the dashboard sends everyone to the plan step (Billing, Account and Referrals settings stay open), and the server refuses indexing, reviews, advancing and finishing setup.
+- **Free:** any workspace without a subscription, including workspaces from before plans were required and cancelled subscriptions. Free never expires; its allowance resets each month. `BILLING_TRIAL_USAGE_USD` is the older name of `BILLING_FREE_USAGE_USD`.
+- **Which paid plan:** the subscription's seat price decides it (`billingAccounts.plan`): `STRIPE_SEAT_PRICE_ID` / `STRIPE_SEAT_ANNUAL_PRICE_ID` is Starter, and `STRIPE_PRO_PRICE_ID` / `STRIPE_PRO_ANNUAL_PRICE_ID` is Pro. An unknown price keeps the recorded plan, and a subscription with none recorded is Starter. Checkout uses the monthly prices; customers switch plan or billing interval in the Customer Portal.
+- **Gated features:** each one is skipped, never failed.
+  - A deep review runs at standard, with a coverage note.
+  - Generated reproduction tests are not drafted.
+  - A fix pull request request replies that it is a Pro feature. The validated suggestion is still posted.
+- **Seats:** owners, admins and members are seats; viewers are free. Accepting an invitation or changing a member's role resyncs the subscription quantity, with prorations.
+- **Past due:** reviews continue for `BILLING_GRACE_DAYS` (default 7) after the first failed payment, then pause until an invoice is paid.
+
+**Stripe setup:**
+- Create a Product "OpenReview Pro" with a $24 monthly price and a $240 yearly price.
+- Add a $120 yearly price to the Starter product.
+- Set `STRIPE_PRO_PRICE_ID`, `STRIPE_PRO_ANNUAL_PRICE_ID` and `STRIPE_SEAT_ANNUAL_PRICE_ID` on Convex.
+- Set `BILLING_PRO_PRICE_LABEL` on the web app.
+- In the Customer Portal configuration, turn on switching between these prices and turn off quantity changes.
 
 ## Usage
 
 Usage is the inference cost of the workspace's model calls (reviews, chat, Slack answers, fixes, knowledge, indexing embeddings), priced by `INFERENCE_PRICES` or the built-in prices, so pricier models use it faster. Workspaces that bring their own model key are not metered.
 
 - **Enforcement:** every model call reserves its worst-case cost before it is sent (`inferenceBudget.reserve`, which also checks the deployment-wide cap) and settles the real cost after (`billingUsage.usedMicros`). A call that would pass the allowance is refused before anything is sent, with a `Billing:` reason that says when usage resets (the first of the next UTC month). New reviews are blocked once the allowance is used.
-- **Extra usage:** on the Starter plan an admin sets a monthly cap in Settings → Billing (0 = off, audited as `billing.spending_cap`). Usage past the included amount, up to the cap, is recorded in `billingUsage.overageMicros` and reported to Stripe as meter events (`billingMeterEvents`, retried with backoff, the row id as the idempotent identifier).
+- **Extra usage:** on Starter and Pro an admin sets a monthly cap in Settings → Billing (0 = off, audited as `billing.spending_cap`). Usage past the included amount, up to the cap, is recorded in `billingUsage.overageMicros` and reported to Stripe as meter events (`billingMeterEvents`, retried with backoff, the row id as the idempotent identifier).
 - **Meter:** Settings → Billing shows the percentage used and the reset date; admins also see dollars.
 - **Stripe setup:** create a Meter (event name `STRIPE_METER_EVENT`, sum of `value`) and a metered price on it with the markup in `unit_amount_decimal` (the value is micro-dollars of cost: $1.25 per $1 of cost is 0.000125 cents per unit). Set `STRIPE_USAGE_PRICE_ID`; Checkout then adds it next to the seat price. Existing subscriptions need the price added (Customer Portal or Dashboard) before their extra usage is invoiced.
 
@@ -31,9 +48,9 @@ Workspace and team defaults and repository settings pick the review model from t
 
 ## Choosing a plan during setup
 
-When billing is on, guided setup adds a **Choose your plan** step after inviting the team. It shows the Starter plan, the seat count and the trial, and offers two choices:
-- **Add payment method:** opens Stripe Checkout and returns to the step.
-- **Continue on the trial:** subscribe later in Settings → Billing.
+When billing is on, guided setup adds a **Choose your plan** step after inviting the team. It shows the Free, Starter and Pro cards and the seat count:
+- **Continue on Free:** no card. Upgrade later in Settings → Billing.
+- **Choose Starter** or **Start Pro trial:** opens Stripe Checkout and returns to the step.
 
 Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
 

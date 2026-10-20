@@ -1,4 +1,6 @@
 import { internalMutation, internalQuery, query } from "./_generated/server";
+import { hasEntitlement } from "./billing";
+import { upgradeNote } from "../src/plans";
 import type { QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -46,6 +48,7 @@ export const authorizeOpen = internalMutation({
     if (latest?._id !== review._id || review.status !== "completed") throw new Error("Open a fix pull request from the latest completed review");
     const settings = await effectiveSettings(ctx, repo);
     if (settings.fixPullRequests !== true) throw new Error("Fix pull requests are turned off for this repository; a workspace admin can allow them in repository settings");
+    if (!await hasEntitlement(ctx, review.organizationId, "fix.pullRequests")) throw new Error(upgradeNote["fix.pullRequests"]);
     if (!eligibleFixFinding(finding, review, latest._id, settings.minimumConfidence)) throw new Error("This finding can no longer be fixed at this revision");
     const identity = await ctx.db.query("identities").withIndex("by_user", (q) => q.eq("userId", user._id)).filter((q) => q.eq(q.field("provider"), "github")).first();
     const githubId = identity ? Number(identity.providerUserId) : user.githubId;

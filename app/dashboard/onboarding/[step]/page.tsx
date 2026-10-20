@@ -11,7 +11,7 @@ import { nextStep, resolveStep, type ConfigureStep } from "../../../../src/onboa
 import { Live } from "../../live";
 import { applyReferralCode, reindex } from "../../actions";
 import { WorkspaceInvitations } from "../../invitations";
-import { advanceSetup, checkoutFromSetup, continueOnTrial, createSetupWorkspace, finishSetup, inviteFromSetup, saveSetupStep, selectAndIndex } from "../actions";
+import { advanceSetup, checkoutFromSetup, continueOnFree, createSetupWorkspace, finishSetup, inviteFromSetup, saveSetupStep, selectAndIndex } from "../actions";
 import { IndexGraph, Stage, TeamArt, TrialArt } from "../art";
 import { CommentsStep, SummaryStep, ToolsStep, TriggersStep } from "../configure";
 import { loadSetup } from "../setup";
@@ -105,59 +105,49 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
   }
 
   if (step === "plan" && billing?.enabled) {
-    // A new workspace must choose: the trial starts through Stripe Checkout with a card, and setup
-    // continues only after Stripe confirms it. Older workspaces keep the optional step.
+    // A new workspace must choose. Free continues at once; Starter and Pro start through Stripe Checkout
+    // with a card (any remaining trial carries over), and setup continues once Stripe confirms it.
     const required = billing.planRequired && !billing.planSelected;
-    const now = Date.now(), subscribed = billing.plan === "starter" || billing.planSelected, confirming = query.checkout === "success" && !subscribed;
-    const trialEnded = billing.trialStarted && billing.trialEndsAt <= now, carries = Boolean(checkoutTrialEnd(billing.trialEndsAt, now));
-    const day = (ms: number) => new Date(ms).toLocaleDateString("en-US", { timeZone: "UTC", dateStyle: "medium" });
+    const now = Date.now(), paid = billing.plan === "starter" || billing.plan === "pro", confirming = query.checkout === "success" && !paid;
+    const carries = Boolean(checkoutTrialEnd(billing.trialEndsAt, now)), trialLeft = Math.ceil((billing.trialEndsAt - now) / 86400000);
     const elapsed = billing.trialStarted ? Math.max(0, Math.min(billing.trialDays, Math.floor((now - billing.trialEndsAt) / 86400000) + billing.trialDays)) : 0;
-    const price = process.env.BILLING_SEAT_PRICE_LABEL;
-    return <WizardFrame step="plan" {...frame} nextLabel={subscribed ? "Continue" : confirming ? "Waiting for Stripe…" : required ? "Start free trial" : carries ? "Add payment method" : "Subscribe"}>
+    const percent = Math.min(100, Math.round((billing.used / Math.max(1, billing.limit ?? 1)) * 100));
+    const cards = [
+      { plan: "free", name: "Free", price: "$0", points: [`${usdText(billing.freeUsageMicros)} of model usage per workspace each month`, "Fast and standard reviews with security checks", "Every provider, the CLI and MCP", "No card needed"] },
+      { plan: "starter", name: "Starter", price: process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly", points: [`${usdText(billing.usagePerSeatMicros)} of model usage per seat each month, pooled`, "Optional extra usage up to a cap you set", "Owners, admins and members are seats; viewers are free"] },
+      { plan: "pro", name: "Pro", price: process.env.BILLING_PRO_PRICE_LABEL ?? "Per seat, billed monthly", points: [`${usdText(billing.proUsagePerSeatMicros)} of model usage per seat each month, pooled`, "Deep reviews", "Generated reproduction tests", "Fix pull requests"] },
+    ] as const;
+    return <WizardFrame step="plan" {...frame} nextLabel={paid ? "Continue" : confirming ? "Waiting for Stripe…" : carries ? `Start ${trialLeft}-day Pro trial` : "Choose Pro"}>
       <div className="wizard-panel">
-        <Heading step="plan">{subscribed ? "Your workspace is on the Starter plan. Seats follow your team, so there is nothing else to set up."
-          : required ? `Choose a plan to start. The Starter plan comes with ${billing.trialDays} days free: add a card now and nothing is charged until the trial ends. Cancel anytime in Settings → Billing before then.`
-          : trialEnded ? "The free trial has ended. Subscribe to the Starter plan to keep reviews running."
-          : carries ? `Every workspace starts with ${billing.trialDays} days free. Add a payment method now and nothing is charged until the trial ends, or keep exploring and subscribe later in Settings → Billing.`
-          : `Your trial ends ${day(billing.trialEndsAt)}. Subscribing now starts the Starter plan right away, or keep exploring and subscribe later in Settings → Billing.`}</Heading>
+        <Heading step="plan">{paid ? `Your workspace is on the ${billing.planName} plan. Seats follow your team, so there is nothing else to set up.`
+          : `Choose a plan. Free needs no card. ${carries ? `Starter and Pro come with ${trialLeft} days free: add a card now and nothing is charged until the trial ends.` : "Starter and Pro are billed per seat each month."} Change plans anytime in Settings → Billing.`}</Heading>
         <ReadOnlyNote admin={admin} />
         {confirming && <p role="status" className="setup-note">Payment method saved. Your subscription appears here as soon as Stripe confirms it.</p>}
         {query.checkout === "cancelled" && <p role="status" className="setup-note">Checkout was cancelled; nothing was charged.</p>}
-        {query.billing === "error" && <p role="alert" className="wizard-error">Stripe Checkout could not be opened. Try again{required ? "" : ", or continue on the trial and subscribe later in Settings → Billing"}.</p>}
+        {query.billing === "error" && <p role="alert" className="wizard-error">Stripe Checkout could not be opened. Try again, or continue on Free.</p>}
         {required && !confirming && admin && <p className="muted">Repositories, indexing and reviews start after you choose a plan.</p>}
-        <article className="wizard-plan" aria-labelledby="plan-name">
-          <header><h2 id="plan-name">Starter</h2><p className="price">{price ?? "Per seat, billed monthly"}</p></header>
-          <ul>
-            <li>{usdText(billing.usagePerSeatMicros)} of model usage per seat each month, with optional extra usage</li>
-            <li>Review summaries, inline findings and chat on every pull request</li>
-            <li>Every connected provider and repository</li>
-            <li>Owners, admins and members are seats; viewers are free</li>
-          </ul>
-          <dl className="facts">
-            <dt>Seats</dt><dd>{billing.activeSeats} active</dd>
-            <dt>{subscribed ? "Status" : "Trial"}</dt><dd>{subscribed ? <span className={`badge ${billing.status}`}>{billing.status.replaceAll("_", " ")}</span>
-              : billing.trialStarted ? `${trialEnded ? "Ended" : "Ends"} ${day(billing.trialEndsAt)} · ${usdText(billing.trialUsageMicros)} of model usage a month`
-              : required ? `${billing.trialDays} days from today · card required, charged when the trial ends`
-              : `${billing.trialDays} days from your first review · ${usdText(billing.trialUsageMicros)} of model usage a month`}</dd>
-            {billing.referral?.discount && <><dt>Referral</dt><dd>{referralFact(billing.referral, referralConfig().discountLabel)}</dd></>}
-          </dl>
-        </article>
+        <div className="wizard-plans">
+          {cards.map((card) => <article key={card.plan} className="wizard-plan" aria-labelledby={`plan-${card.plan}`}>
+            <header><h2 id={`plan-${card.plan}`}>{card.name}</h2><p className="price">{card.price}</p></header>
+            <ul>{card.points.map((point) => <li key={point}>{point}</li>)}</ul>
+            {billing.plan === card.plan && (paid || billing.planSelected) && <p><span className="badge active">Current plan</span></p>}
+            {admin && !paid && !confirming && (card.plan === "free"
+              ? <form action={continueOnFree}><input type="hidden" name="organizationId" value={organizationId} /><button>Continue on Free</button></form>
+              : <form id={card.plan === "pro" ? "wizard-form" : undefined} action={checkoutFromSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value={card.plan} />{card.plan === "starter" && <button>Choose Starter</button>}</form>)}
+          </article>)}
+        </div>
+        <dl className="facts">
+          <dt>Seats</dt><dd>{billing.activeSeats} active</dd>
+          {billing.referral?.discount && <><dt>Referral</dt><dd>{referralFact(billing.referral, referralConfig().discountLabel)}</dd></>}
+        </dl>
         {/* Checkout ends the window for adding a code, so a referred workspace without the link adds it here. */}
         {admin && !confirming && billing.referral?.canApply && <><form action={applyReferralCode} className="form-grid"><input type="hidden" name="organizationId" value={organizationId} /><label>Referral code<input name="code" defaultValue={query.referral ?? ""} required maxLength={64} autoComplete="off" spellCheck={false} /></label><button>Apply code</button></form><p className="muted">{referralDisclosure(null)}</p></>}
-        {admin && (subscribed || (confirming && !required)
-          ? <StepForm action={advanceSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="step" value="plan" /></StepForm>
-          : confirming ? null
-          : <>
-            <form id="wizard-form" action={checkoutFromSetup}><input type="hidden" name="organizationId" value={organizationId} /></form>
-            {!required && <form action={continueOnTrial}><input type="hidden" name="organizationId" value={organizationId} /><button>{trialEnded ? "Continue without subscribing" : "Continue on the trial"}</button></form>}
-          </>)}
+        {admin && (paid || (confirming && !required)) && <StepForm action={advanceSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="step" value="plan" /></StepForm>}
         <Live active={confirming} />
       </div>
-      <Stage caption={subscribed ? `starter plan · ${billing.activeSeats} ${billing.activeSeats === 1 ? "seat" : "seats"}`
-        : required && !billing.trialStarted ? `${billing.trialDays}-day trial · starts when you add a card`
-        : !billing.trialStarted ? `${billing.trialDays}-day trial · starts with your first review`
-        : trialEnded ? "trial ended" : `trial · ${billing.trialDays - elapsed} days left · ${Math.min(100, Math.round((billing.used / Math.max(1, billing.trialUsageMicros)) * 100))}% of usage used`}>
-        <TrialArt days={billing.trialDays} elapsed={elapsed} subscribed={subscribed || confirming} />
+      <Stage caption={paid ? `${billing.plan} plan · ${billing.activeSeats} ${billing.activeSeats === 1 ? "seat" : "seats"}`
+        : carries ? `${trialLeft}-day trial on Starter or Pro` : `${billing.plan} plan · ${percent}% of this month's usage used`}>
+        <TrialArt days={billing.trialDays} elapsed={elapsed} subscribed={paid || confirming} />
       </Stage>
     </WizardFrame>;
   }
@@ -172,7 +162,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
         <div><dt>Reviews</dt><dd>{d.automatic ? "Automatic on new pull requests" : "On request or trigger label"}{d.rereview ? ", re-reviewed on new commits" : ""}</dd></div>
         <div><dt>Flagging</dt><dd>{["Custom thresholds", "Quiet", "Balanced", "Thorough"][d.strictness ?? 0]} · up to {d.maxComments} inline comments</dd></div>
         <div><dt>Summary</dt><dd>{(d.summarySections ?? []).filter((s) => s !== "tips").length} sections · {d.commentStyle} comments</dd></div>
-        {billing?.enabled && <div><dt>Plan</dt><dd>{billing.plan === "starter" ? "Starter" : `Free trial · ${billing.trialStarted ? `ends ${new Date(billing.trialEndsAt).toLocaleDateString("en-US", { timeZone: "UTC", dateStyle: "medium" })}` : `${billing.trialDays} days from your first review`}`}</dd></div>}
+        {billing?.enabled && <div><dt>Plan</dt><dd>{billing.planName}</dd></div>}
       </dl>
       <p className="row"><Link href="/dashboard/pulls">Review existing pull requests</Link><Link href="/dashboard/settings/review">Fine-tune per repository</Link></p>
       {admin

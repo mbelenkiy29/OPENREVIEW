@@ -6,17 +6,17 @@ import { StripeError, checkoutTrialEnd, stripe, stripeKey } from "../src/billing
 // Extra usage is metered in micro-dollars of inference cost; the markup lives in the Stripe price.
 const usagePrice = () => { const id = process.env.STRIPE_USAGE_PRICE_ID; return id && /^price_[A-Za-z0-9]+$/.test(id) ? id : undefined; };
 import { referralConfig } from "../src/referrals";
+import { priceFor } from "../src/plans";
 
 // Stripe Checkout / Customer Portal sessions for workspace admins, and seat-quantity sync.
 const appOrigin = () => new URL(process.env.APP_URL ?? "http://localhost:3000").origin;
 const returnPaths = { settings: "/dashboard/settings/billing", onboarding: "/dashboard/onboarding/plan" } as const;
 // Tags these sessions in the Stripe Dashboard so this flow can be compared with others.
 const integrationIdentifier = "openreview-starter-seats-qkvmhzrt";
-export const checkout = action({ args: { token: v.string(), organizationId: v.id("organizations"), returnTo: v.optional(v.union(v.literal("settings"), v.literal("onboarding"))) }, handler: async (ctx, a): Promise<string> => {
+export const checkout = action({ args: { token: v.string(), organizationId: v.id("organizations"), returnTo: v.optional(v.union(v.literal("settings"), v.literal("onboarding"))), plan: v.optional(v.union(v.literal("starter"), v.literal("pro"))) }, handler: async (ctx, a): Promise<string> => {
   const context = await ctx.runQuery(internal.billing.checkoutContext, { token: a.token, organizationId: a.organizationId });
   if (context.subscriptionId && ["active", "trialing", "past_due"].includes(context.status)) throw new Error("This workspace already has a subscription; manage it in the billing portal");
-  const key = stripeKey(), price = process.env.STRIPE_SEAT_PRICE_ID;
-  if (!price || !/^price_[A-Za-z0-9]+$/.test(price)) throw new Error("Configure STRIPE_SEAT_PRICE_ID");
+  const key = stripeKey(), price = priceFor(a.plan ?? "starter");
   let customer = context.customerId;
   if (!customer) {
     customer = (await stripe<{ id: string }>("/v1/customers", { metadata: { organizationId: a.organizationId } }, key, fetch, `customer:${a.organizationId}`)).id;
