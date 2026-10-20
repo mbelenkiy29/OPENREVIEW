@@ -3,16 +3,17 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, formEncode, nextPeriodStart, openSubscription, periodKey, seatCount, stripe, stripeGet, stripeKey, stripeV2, trialEndsFrom, verifyStripeSignature } from "../src/billing";
 
-const config = billingConfig({ BILLING_ENABLED: "true", BILLING_TRIAL_USAGE_USD: "3", BILLING_USAGE_PER_SEAT_USD: "10", BILLING_GRACE_DAYS: "7" });
+const config = billingConfig({ BILLING_ENABLED: "true", BILLING_FREE_USAGE_USD: "3", BILLING_USAGE_PER_SEAT_USD: "10", BILLING_GRACE_DAYS: "7" });
 const now = Date.UTC(2026, 9, 14), day = 86400000, usd = 1e6;
 
 test("billing configuration defaults to disabled and validates numbers", () => {
-  assert.deepEqual(billingConfig({}), { enabled: false, trialDays: 14, trialUsageMicros: 5 * usd, usagePerSeatMicros: 6 * usd, graceDays: 7 });
+  assert.deepEqual(billingConfig({}), { enabled: false, trialDays: 14, freeUsageMicros: 3 * usd, usagePerSeatMicros: 6 * usd, proUsagePerSeatMicros: 12 * usd, graceDays: 7 });
   assert.equal(billingConfig({ BILLING_ENABLED: "yes" }).enabled, false);
   assert.equal(billingConfig({ BILLING_TRIAL_DAYS: "-1", BILLING_USAGE_PER_SEAT_USD: "abc" }).trialDays, 14);
   assert.equal(billingConfig({ BILLING_USAGE_PER_SEAT_USD: "abc" }).usagePerSeatMicros, 6 * usd);
   assert.equal(billingConfig({ BILLING_USAGE_PER_SEAT_USD: "0.25" }).usagePerSeatMicros, 250_000);
-  assert.equal(billingConfig({ BILLING_TRIAL_USAGE_USD: "" }).trialUsageMicros, 5 * usd, "empty is the default, not $0");
+  assert.equal(billingConfig({ BILLING_FREE_USAGE_USD: "" }).freeUsageMicros, 3 * usd, "empty is the default, not $0");
+  assert.equal(billingConfig({ BILLING_TRIAL_USAGE_USD: "50" }).freeUsageMicros, 3 * usd, "the old trial allowance does not become a monthly Free allowance");
   assert.equal(periodKey(now), "2026-10");
   assert.equal(nextPeriodStart(now), Date.UTC(2026, 10, 1));
   assert.equal(nextPeriodStart(Date.UTC(2026, 11, 31, 23)), Date.UTC(2027, 0, 1));
@@ -23,14 +24,14 @@ test("seats count owners, admins and members; viewers are free", () => {
   assert.equal(seatCount([]), 0);
 });
 
-test("usage decisions: trial, included Starter usage, extra usage cap, past-due grace, and lapsed subscriptions", () => {
+test("usage decisions: Free, included Starter and Pro usage, extra usage cap, past-due grace, and lapsed subscriptions", () => {
   const trial = { status: "trial", seats: 0, trialEndsAt: now + 5 * day };
   assert.equal(billingDecision(trial, 999 * usd, now, billingConfig({})).allowed, true, "disabled billing never blocks");
-  assert.deepEqual(billingDecision(trial, 2 * usd, now, config), { allowed: true, plan: "trial", limit: 3 * usd, used: 2 * usd, capMicros: 0, overage: false });
+  assert.deepEqual(billingDecision(trial, 2 * usd, now, config), { allowed: true, plan: "free", limit: 3 * usd, used: 2 * usd, capMicros: 0, overage: false });
   assert.equal(billingDecision(trial, 2 * usd, now, config, usd).allowed, true, "a request that exactly uses the rest fits");
-  assert.match(billingDecision(trial, 2 * usd, now, config, usd + 1).reason!, /trial's included usage is used up/);
-  assert.match(billingDecision(trial, 3 * usd, now, config).reason!, /trial's included usage is used up/, "the enqueue pre-check stops at the limit");
-  assert.match(billingDecision({ ...trial, trialEndsAt: now }, 0, now, config).reason!, /free trial has ended/);
+  assert.match(billingDecision(trial, 2 * usd, now, config, usd + 1).reason!, /Free plan's \$3\.00 of usage for this month\. Usage resets on November 1/);
+  assert.match(billingDecision(trial, 3 * usd, now, config).reason!, /Free plan's/, "the enqueue pre-check stops at the limit");
+  assert.equal(billingDecision({ ...trial, trialEndsAt: now - 90 * day }, 0, now, config).allowed, true, "Free never expires");
   const team = { status: "active", seats: 4, trialEndsAt: now - day, subscriptionId: "sub_1" };
   assert.deepEqual(billingDecision(team, 39 * usd, now, config), { allowed: true, plan: "starter", limit: 40 * usd, used: 39 * usd, capMicros: 0, overage: false });
   assert.match(billingDecision(team, 40 * usd, now, config).reason!, /used its included usage for this month\. Usage resets on November 1; a workspace admin can turn on extra usage/);
@@ -40,8 +41,10 @@ test("usage decisions: trial, included Starter usage, extra usage cap, past-due 
   assert.match(billingDecision(capped, 44 * usd, now, config, usd + 1).reason!, /extra usage cap of \$5\.00 this month\. Usage resets on November 1/);
   assert.equal(billingDecision({ ...team, status: "past_due", pastDueSince: now - 6 * day }, 0, now, config).allowed, true, "within grace");
   assert.match(billingDecision({ ...team, status: "past_due", pastDueSince: now - 7 * day }, 0, now, config).reason!, /grace period has ended/);
-  assert.match(billingDecision({ ...team, status: "canceled" }, 0, now, config).reason!, /free trial has ended/);
-  assert.equal(billingDecision({ ...team, status: "canceled", trialEndsAt: now + day }, 0, now, config).plan, "trial", "a lapsed subscription falls back to any remaining trial");
+  assert.equal(billingDecision({ ...team, status: "canceled" }, 0, now, config).plan, "free", "a lapsed subscription falls back to Free");
+  const pro = { ...team, plan: "pro" };
+  assert.deepEqual(billingDecision(pro, 0, now, config), { allowed: true, plan: "pro", limit: 4 * 12 * usd, used: 0, capMicros: 0, overage: false }, "Pro includes its own usage per seat");
+  assert.equal(billingDecision({ ...team, plan: "unknown" }, 0, now, config).plan, "starter", "an unrecorded plan on a subscription is Starter");
   assert.equal(billingDecision({ ...team, seats: 0 }, 9, now, config).limit, 10 * usd, "at least one seat");
 });
 

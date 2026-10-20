@@ -596,6 +596,10 @@ export default defineSchema({
     customerId: v.optional(v.string()),
     subscriptionId: v.optional(v.string()),
     subscriptionItemId: v.optional(v.string()),
+    // The subscription's paid plan (starter | pro) from its seat price; unset on a subscription means starter.
+    plan: v.optional(v.string()),
+    // A subscription from before plans existed: while it stays on Starter it keeps every entitlement.
+    legacy: v.optional(v.boolean()),
     status: v.string(), // trial | active | trialing | past_due | unpaid | canceled | incomplete | incomplete_expired | paused
     seats: v.number(),
     trialEndsAt: v.number(),

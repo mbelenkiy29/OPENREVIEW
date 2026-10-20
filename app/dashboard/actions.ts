@@ -316,7 +316,7 @@ export async function setMinutesPerFinding(form: FormData) {
 export async function startCheckout(form: FormData) {
   const { token } = await current();
   let url: string;
-  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: text(form, "organizationId") as Id<"organizations"> }); }
+  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: text(form, "organizationId") as Id<"organizations">, plan: z.enum(["starter", "pro"]).catch("starter").parse(text(form, "plan")) }); }
   catch { redirect("/dashboard/settings/billing?billing=error"); }
   redirect(url);
 }

@@ -16,6 +16,7 @@ import { categories, severities, type ModelProvider, type ModelUsage, type Sourc
 import { applyRepoConfig, loadRepoConfig, type LoadedRepoConfig } from "../src/repo-config";
 import { effectiveThresholds } from "../src/triggers";
 import { modes, resolveTier, tiers } from "../src/review-tier";
+import { upgradeNote } from "../src/plans";
 import { repositoryGuidance, selectPacks } from "../src/guidance-packs";
 import { knowledgeTokenBudgets, selectKnowledge } from "../src/knowledge-context";
 import { osvClient, osvEnabled } from "../src/osv";
@@ -45,7 +46,9 @@ export const run = internalAction({
       // Repository config as code from the base revision, as for pull requests; an unpushed base has none.
       const repoConfig = await provider(ctx, repo).then((scm) => loadRepoConfig(scm, repo.fullName, row.baseSha)).catch((): LoadedRepoConfig => ({ settings: {}, rules: [], files: [], directories: [], warnings: [] }));
       const effective = applyRepoConfig(settings, repoConfig, [...touched]).settings;
-      const tier = resolveTier({ configured: z.enum(modes).catch("standard").parse(effective.mode), diff, requested: row.mode ? { mode: z.enum(tiers).parse(row.mode), source: "comment" } : undefined, cap: z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep") });
+      // A plan without deep reviews caps the tier at standard, below any admin cap.
+      const deepAllowed = await ctx.runQuery(internal.billing.entitlement, { organizationId: repo.organizationId, key: "review.deep" }), adminCap = z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep");
+      const tier = resolveTier({ configured: z.enum(modes).catch("standard").parse(effective.mode), diff, requested: row.mode ? { mode: z.enum(tiers).parse(row.mode), source: "comment" } : undefined, cap: deepAllowed || adminCap !== "deep" ? adminCap : "standard" });
       // Context outside the changed files comes from the index of the default branch.
       const paths = [...touched];
       const graph = await ctx.runQuery(internal.context.related, { repositoryId: repo._id, paths, identifiers: [...new Set(diff.flatMap((f) => f.patch.match(/[A-Za-z_]\w{3,}/g) ?? []))].slice(0, 100) });
@@ -82,7 +85,7 @@ export const run = internalAction({
       const result = await reviewChange(
         {
           repository: repo.fullName,
-          coverageLimits: [...repoConfig.warnings, ...(semantic.note ? [semantic.note] : []), "Reviewed from the OpenReview CLI: files outside this change come from the indexed default branch."],
+          coverageLimits: [...repoConfig.warnings, ...(!deepAllowed && tier.requested === "deep" ? [upgradeNote["review.deep"]] : []), ...(semantic.note ? [semantic.note] : []), "Reviewed from the OpenReview CLI: files outside this change come from the indexed default branch."],
           baseSha: row.baseSha,
           headSha: row.headSha,
           title: row.title,
