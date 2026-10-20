@@ -4,6 +4,16 @@
 
 ## October 2026
 
+### Dashboard look
+- The dashboard now has a cleaner, Greptile-style look:
+  - Neutral greys in light and dark mode.
+  - Main tabs with icons and an underline for the current page.
+  - A role badge next to the workspace name.
+  - A bold stat strip, and chart cards with small caps headers and leaderboards underneath.
+  - Settings groups separated by dividers.
+  - Compact Analytics filters.
+- The public site keeps its existing style.
+
 ### Analytics
 - The Analytics tab now follows Greptile's layout:
   - Time period presets: this week, month, quarter or year, or custom dates.
