@@ -17,6 +17,13 @@ export class Embeddings {
     );
     const input = inputs.map(i => i.slice(0, 8000));
     const reservation = await this.billing?.reserve({ provider: "openai", model: this.model, baseUrl: base.toString().replace(/\/$/, ""), inputTokenCeiling: input.reduce((sum, text) => sum + Buffer.byteLength(text, "utf8") + 1024, 0), outputTokenCeiling: 0 });
+    const settle = async (inputTokens: number) => {
+      if (!reservation) return;
+      try { await this.billing!.settle(reservation, { inputTokens, outputTokens: 0 }); }
+      catch { console.error(JSON.stringify({ event: "embedding.billing_receipt_unavailable" })); }
+    };
+    // As in HttpModel.post: an error status or network error is not billed and frees the reservation;
+    // a timeout may still be billed and keeps it.
     const response = await fetch(
       base.toString().replace(/\/$/, "") + "/embeddings",
       {
@@ -33,14 +40,16 @@ export class Embeddings {
         }),
         signal: AbortSignal.timeout(60000),
       },
-    );
-    if (!response.ok)
+    ).catch(async (error) => {
+      if (error instanceof TypeError) await settle(0);
+      throw error;
+    });
+    if (!response.ok) {
+      await settle(0);
       throw new Error(`Embedding provider HTTP ${response.status}`);
-    const raw = await response.json();
-    if (reservation && Number.isSafeInteger(raw.usage?.total_tokens)) {
-      try { await this.billing!.settle(reservation, { inputTokens: raw.usage.total_tokens, outputTokens: 0 }); }
-      catch { console.error(JSON.stringify({ event: "embedding.billing_receipt_unavailable" })); }
     }
+    const raw = await response.json();
+    if (Number.isSafeInteger(raw.usage?.total_tokens)) await settle(raw.usage.total_tokens);
     const result = z
       .object({
         data: z.array(
