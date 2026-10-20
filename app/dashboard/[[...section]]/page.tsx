@@ -9,6 +9,7 @@ import { PreferencesPanel } from "../preferences";
 import { ChatPanel } from "../chat";
 import { NotificationsPanel } from "../notifications";
 import { BillingPanel } from "../billing";
+import { ModelPanel } from "../model-panel";
 import { AccountPanel } from "../account";
 import { ReferralsPanel } from "../referrals";
 import { EmailInvitations } from "../email-invitations";
@@ -67,6 +68,7 @@ export default async function Dashboard(props: {
         {route === "settings" && section[1] === "people" && isAdmin && <EmailInvitations token={user.token} organizationId={organization._id} status={filters.emailInvite}/>}
         {route === "settings" && section[1] === "people" && isAdmin && <SsoSettings token={user.token} organizationId={organization._id}/>}
         {route === "settings" && section[1] === "data" && <DataControls token={user.token} organizationId={organization._id}/>}
+        {route === "settings" && section[1] === "model" && <ModelPanel token={user.token} organizationId={organization._id} admin={isAdmin}/>}
         {route === "settings" && section[1] === "billing" && <BillingPanel token={user.token} organizationId={organization._id} filters={filters}/>}
         {route === "settings" && section[1] === "notifications" && <NotificationsPanel token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters}/>}
         {route === "chat" && <ChatPanel token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters}/>}

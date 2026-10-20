@@ -71,6 +71,23 @@ export const workspaceModel=internalQuery({args:{organizationId:v.id("organizati
  const scope=(await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect()).find(s=>!s.teamId);
  return scope?.overrideKeys.includes("model")&&scope.settings.model||null;
 }});
+// Settings → AI Model: the workspace's pick from the operator's priced list (reviews, chat and fixes use it).
+export const modelChoice=query({args:{token:v.string(),organizationId:v.id("organizations")},handler:async(ctx,a)=>{
+ await authorize(ctx,a.token,a.organizationId);
+ const scope=(await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect()).find(s=>!s.teamId);
+ const ownKey=await ctx.db.query("modelKeys").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).first();
+ return {model:scope?.overrideKeys.includes("model")&&scope.settings.model||null,models:allowedModels(),defaultModel:process.env.LLM_MODEL||null,ownKey:Boolean(ownKey)};
+}});
+// An empty model returns the workspace to the operator's default. Teams and repositories can still override it.
+export const setWorkspaceModel=mutation({args:{token:v.string(),organizationId:v.id("organizations"),model:v.string()},handler:async(ctx,a)=>{
+ const {user}=await authorize(ctx,a.token,a.organizationId,true);
+ if(!validModelSettings({model:a.model}))throw new Error("Choose a model from this deployment's list");
+ const scope=(await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect()).find(s=>!s.teamId);
+ const overrideKeys=[...(scope?.overrideKeys??[]).filter(k=>k!=="model"),...(a.model?["model"]:[])];
+ if(scope)await ctx.db.patch(scope._id,{settings:{...scope.settings,model:a.model},overrideKeys});
+ else await ctx.db.insert("scopeSettings",{organizationId:a.organizationId,settings:{...deploymentDefaults(),model:a.model},overrideKeys});
+ await audit(ctx,a.organizationId,user._id,"settings.model",a.model||"default");
+}});
 export const save=mutation({args:{token:v.string(),organizationId:v.id("organizations"),teamId:v.optional(v.id("teams")),settings:settingsValidator,overrideKeys:v.array(v.string())},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true);if(a.teamId&&(await ctx.db.get(a.teamId))?.organizationId!==a.organizationId)throw new Error("Team not accessible");
  const s=a.settings;assertValidSettings(s,a.overrideKeys);
