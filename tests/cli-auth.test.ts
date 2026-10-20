@@ -48,13 +48,25 @@ test("browser sign-in: registers a loopback client, uses PKCE and state, and exc
   assert.deepEqual({ ...login, expiresAt: 0 }, { url: issuer, clientId: "client-1", tokenEndpoint: metadata.token_endpoint, revocationEndpoint: metadata.revocation_endpoint, resource: `${issuer}/api/mcp`, accessToken: "ora_access_token_1", refreshToken: "orr_refresh_token_1", expiresAt: 0 });
 });
 
-test("browser sign-in refuses a response for another request or from another server", async () => {
-  for (const [query, message] of [["code=x&state=wrong", /did not match/], ["code=x&state={state}&iss=https%3A%2F%2Fevil.example", /different server/], ["error=access_denied&error_description=Denied&state={state}", /Denied/]] as const) {
+test("browser sign-in refuses a response from another server", async () => {
+  for (const [query, message] of [["code=x&state={state}&iss=https%3A%2F%2Fevil.example", /different server/], ["error=access_denied&error_description=Denied&state={state}", /Denied/]] as const) {
     await assert.rejects(browserSignIn(issuer, { fetch: server([]), print: () => {}, open: (url) => { const u = new URL(url); void fetch(`${u.searchParams.get("redirect_uri")}?${query.replace("{state}", u.searchParams.get("state")!)}`); } }), message);
   }
   await assert.rejects(browserSignIn(issuer, { fetch: server([]), print: () => {}, open: () => {}, timeoutMs: 50 }), /Timed out/);
   assert.throws(() => serverUrl("http://review.example.com"), /HTTPS/);
   assert.equal(serverUrl("http://localhost:3000/path"), "http://localhost:3000");
+});
+
+test("browser sign-in answers a callback with the wrong state with 400 and keeps waiting for the real one", async () => {
+  const calls: Call[] = [];
+  let stray: number | undefined;
+  const login = await browserSignIn(issuer, {
+    fetch: server(calls), print: () => {},
+    open: (url) => { const u = new URL(url), redirect = u.searchParams.get("redirect_uri"); void (async () => { stray = (await fetch(`${redirect}?code=forged&state=wrong`)).status; await fetch(`${redirect}?code=the-code&state=${u.searchParams.get("state")}`); })(); },
+  });
+  assert.equal(stray, 400);
+  assert.equal(new URLSearchParams(calls.find((c) => c.url === metadata.token_endpoint)!.body).get("code"), "the-code");
+  assert.equal(login.accessToken, "ora_access_token_1");
 });
 
 test("saved logins are owner-only; concurrent runs refresh a stale token once and share it; logout revokes and deletes", async () => {
