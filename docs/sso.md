@@ -37,3 +37,4 @@ People sign in from the landing page with **Use single sign-on**. Their email do
   - An email asserted by an IdP counts as verified only on a domain this workspace proved with DNS.
   - For OIDC, it must also not be marked `email_verified: false`.
   - An IdP therefore cannot take over accounts at other domains.
+- **Changing the identity provider** (protocol, sign-in URL, certificate, entity ID, issuer, client ID or secret) unverifies every domain with a new TXT token, turns the SSO requirement off and forgets every SSO sign-in made through the old IdP (people sign in again and relink by verified email). SSO sign-in pauses until a domain is verified again, so an admin cannot point the connection at an IdP they control and sign in as existing users.

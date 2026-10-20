@@ -544,7 +544,7 @@ export const review = internalAction({
       const permittedHistory=new Set(history.filter(f=>hasCurrentRepositoryEvidence(f,cross.files)).map(f=>f.title+"\0"+f.filePath));
       historicalFindings=historicalFindings.filter(f=>permittedHistory.has(f.title+"\0"+f.filePath));
       const clusterHints=cross.hints;
-      const requirements=await ctx.runAction(internal.integrationJobs.requirements,{repositoryId:repo._id,references:[pr.title,pr.body??"",pr.head.ref].join("\n")});
+      const requirements=await ctx.runAction(internal.integrationJobs.requirements,{repositoryId:repo._id,references:[pr.title,pr.body??"",pr.head.ref].join("\n"),actor:pr.user.login,authorExternalId:pr.authorExternalId});
       sources.push(...requirements.files);
       const integrationContext={repositoryId:repo._id,scopes:requirements.scopes,repositoryContext:cross.receipt??undefined};
       const existingFindings = state.findings.filter(f=>hasCurrentRepositoryEvidence(f,cross.files)).map((f) => ({

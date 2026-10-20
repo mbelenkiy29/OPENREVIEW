@@ -63,9 +63,12 @@ export const revoke=internalAction({args:{id:v.id("integrationRevocations")},han
  try{await revokeLinear(linearCredentials.parse(JSON.parse(decryptCredential(r.credentials,r.organizationId+":linear"))));await ctx.runMutation(internal.integrations.revocationResult,{id:a.id,lease,success:true});}
  catch{await ctx.runMutation(internal.integrations.revocationResult,{id:a.id,lease,success:false});}
 }});
-export const requirements=internalAction({args:{repositoryId:v.id("repositories"),references:v.string()},handler:async(ctx,a):Promise<{files:SourceFile[];scopes:{id:Id<"integrationConnections">;generation:number}[];coverage:string[]}>=>{
+export const requirements=internalAction({args:{repositoryId:v.id("repositories"),references:v.string(),actor:v.string(),authorExternalId:v.optional(v.string()),nativeActor:v.optional(v.object({id:v.id("p4Identities"),generation:v.number()})),nativeAuthor:v.optional(v.boolean())},handler:async(ctx,a):Promise<{files:SourceFile[];scopes:{id:Id<"integrationConnections">;generation:number}[];coverage:string[]}>=>{
  // Offline mode: no ticket or document lookups; say so once when the repository has connections.
  if(!egressAllowed("integrations")){const any=await ctx.runQuery(internal.integrations.forRepository,{repositoryId:a.repositoryId});return {files:[],scopes:[],coverage:any.length?["Offline mode (OPENREVIEW_OFFLINE=true): linked tickets and documents were not fetched."]:[]};}
+ // Anyone can open a PR naming ENG-1; private tracker text is fetched only for a verified workspace author.
+ const denied=await ctx.runQuery(internal.repositoryContext.requirementsAuthor,{repositoryId:a.repositoryId,actor:a.actor,authorExternalId:a.authorExternalId,nativeActor:a.nativeActor,nativeAuthor:a.nativeAuthor});
+ if(denied){const any=await ctx.runQuery(internal.integrations.forRepository,{repositoryId:a.repositoryId});return {files:[],scopes:[],coverage:any.length?["Linked tickets and documents were not fetched: "+denied]:[]};}
  const connections=await ctx.runQuery(internal.integrations.forRepository,{repositoryId:a.repositoryId,kind:"linear"});
  const identifiers=[...new Set(a.references.match(/\b[A-Z0-9][A-Z0-9_]{0,49}-[1-9]\d{0,9}\b/g)??[])];
  const files:SourceFile[]=[],coverage:string[]=[],scopes=connections.map(c=>({id:c._id,generation:c.generation}));
@@ -85,8 +88,8 @@ export const requirements=internalAction({args:{repositoryId:v.id("repositories"
  }
  await ctx.runQuery(internal.integrations.validate,{repositoryId:a.repositoryId,scopes});
  if(connections.length&&!identifiers.length)coverage.push("No Linear issue identifiers were referenced in the PR title, description or branch; no requirements were fetched.");
- const atlassian=await ctx.runAction(internal.atlassianJobs.requirements,a);
- const notion=await ctx.runAction(internal.notionJobs.requirements,a);
+ const atlassian=await ctx.runAction(internal.atlassianJobs.requirements,{repositoryId:a.repositoryId,references:a.references});
+ const notion=await ctx.runAction(internal.notionJobs.requirements,{repositoryId:a.repositoryId,references:a.references});
  const combined=boundRequirementsContext([...files,...atlassian.files,...notion.files]);
  return {files:combined.files,scopes:[...scopes,...atlassian.scopes,...notion.scopes],coverage:[...new Set([...coverage,...atlassian.coverage,...notion.coverage,...combined.coverage])]};
 }});

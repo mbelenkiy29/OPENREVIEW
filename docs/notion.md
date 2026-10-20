@@ -1,6 +1,6 @@
 # Notion requirements context
 
-OpenReview can use Notion pages as read-only requirements context when a pull request links to them.
+OpenReview can use Notion pages as read-only requirements context when a pull request links to them. Pages are fetched only when the PR author is a verified workspace member (see [Linear](linear.md)), which is not possible yet for Azure DevOps, so Azure DevOps reviews skip document context.
 
 ## Setup (operator)
 
