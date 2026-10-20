@@ -101,7 +101,7 @@ test("remote review: matches the checkout's repository, uploads changed files, r
     polls++;
     return polls === 1 ? { id: "rev1", status: "running", stage: "reviewing", error: null, result: null } : { id: "rev1", status: "completed", stage: "reviewing", error: null, result: { summary: "Clean.", findings: [] } };
   };
-  const input = { remote: "acme/shop", baseSha: "a".repeat(40), headSha: "b".repeat(40), title: "Add pay", security: false, diff: "diff --git a/x b/x", files: [{ path: "x", sha: "s", content: "x" }, { path: "big", sha: "s", content: "x".repeat(200_001) }] };
+  const input = { remote: "acme/shop", baseSha: "a".repeat(40), headSha: "b".repeat(40), title: "Add pay", security: false, diff: "diff --git a/x b/x", files: [{ path: "x", sha: "s", content: "x" }] };
   const result = await remoteReview(call, input, { stage: (s) => stages.push(s), wait: async () => {} });
   assert.deepEqual(result, { repository: "Acme/Shop", summary: "Clean.", findings: [] });
   assert.deepEqual(stages, ["uploading", "reviewing"]);
@@ -110,6 +110,9 @@ test("remote review: matches the checkout's repository, uploads changed files, r
   await assert.rejects(remoteReview(call, { ...input, remote: "acme/other" }, { stage: () => {}, wait: async () => {} }), /not a repository in your OpenReview workspace/);
   await assert.rejects(remoteReview(async (name) => name === "list_repositories" ? [{ _id: "repo1", fullName: "acme/shop" }] : name === "review_local_changes" ? { reviewId: "r" } : { status: "failed", error: "Billing: limit reached" }, input, { stage: () => {}, wait: async () => {} }), /Billing: limit reached/);
   await assert.rejects(remoteReview(call, { ...input, diff: "x".repeat(1_000_001) }, { stage: () => {}, wait: async () => {} }), /too large/);
+  // A changed file the server would not take is refused, not silently left out of the review.
+  await assert.rejects(remoteReview(call, { ...input, files: [...input.files, { path: "big", sha: "s", content: "x".repeat(200_001) }] }, { stage: () => {}, wait: async () => {} }), /too large/);
+  await assert.rejects(remoteReview(call, { ...input, files: Array.from({ length: 301 }, (_, i) => ({ path: `f${i}`, sha: "s", content: "x" })) }, { stage: () => {}, wait: async () => {} }), /too large/);
   // Under every character limit, but over 4 MB once multi-byte characters are encoded.
   await assert.rejects(remoteReview(call, { ...input, diff: "é".repeat(900_000), files: Array.from({ length: 10 }, (_, i) => ({ path: `f${i}`, sha: "s", content: "€".repeat(100_000) })) }, { stage: () => {}, wait: async () => {} }), /too large/);
 });
