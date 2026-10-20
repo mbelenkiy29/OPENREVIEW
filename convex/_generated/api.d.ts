@@ -26,6 +26,8 @@ import type * as bridge from "../bridge.js";
 import type * as bridgeJobs from "../bridgeJobs.js";
 import type * as budgetModel from "../budgetModel.js";
 import type * as cache from "../cache.js";
+import type * as changelog from "../changelog.js";
+import type * as changelogJobs from "../changelogJobs.js";
 import type * as chat from "../chat.js";
 import type * as chatJobs from "../chatJobs.js";
 import type * as cloudHandoff from "../cloudHandoff.js";
@@ -150,6 +152,8 @@ declare const fullApi: ApiFromModules<{
   bridgeJobs: typeof bridgeJobs;
   budgetModel: typeof budgetModel;
   cache: typeof cache;
+  changelog: typeof changelog;
+  changelogJobs: typeof changelogJobs;
   chat: typeof chat;
   chatJobs: typeof chatJobs;
   cloudHandoff: typeof cloudHandoff;

@@ -46,7 +46,7 @@ export const sharedTables: Partial<Record<TableNames, string>> = {
   users: "personal account; may belong to other workspaces", identities: "personal sign-in methods", sessions: "personal browser sessions",
   personalCredentials: "personal agent keys", personalSettings: "personal preferences", cliSessions: "personal CLI sessions", loginTokens: "magic-link tokens keyed by email",
   inferenceBudgets: "deployment-wide model budget", inferenceReservations: "deployment-wide budget reservations",
-  rateLimits: "short-lived counters", providerReceipts: "one-time install receipts that expire", ssoRequests: "SAML request ids that expire in 10 minutes",
+  rateLimits: "short-lived counters", changelogDigests: "which public changelog entries were last emailed", providerReceipts: "one-time install receipts that expire", ssoRequests: "SAML request ids that expire in 10 minutes",
   oauthClients: "MCP client registry shared by all workspaces", stripeEvents: "Stripe event ids kept for replay protection (no review data)",
   slackEventReceipts: "Slack event-id dedupe", webhookDeliveries: "provider payloads not linked to a workspace; pruned deployment-wide after 14 days",
   workspaceDeletions: "deletion receipts",
