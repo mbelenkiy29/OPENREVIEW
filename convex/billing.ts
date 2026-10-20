@@ -168,8 +168,7 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
   if (a.invoice) {
     const account = await byCustomer(a.invoice.customer);
     if (!account || (a.invoice.subscription && account.subscriptionId && a.invoice.subscription !== account.subscriptionId)) return record("unknown customer");
-    if (a.type === "invoice.payment_failed") await ctx.db.patch(account._id, { status: "past_due", pastDueSince: account.pastDueSince ?? a.created, updatedAt: Date.now() });
-    if (a.type === "invoice.paid" && account.status === "past_due") await ctx.db.patch(account._id, { status: "active", pastDueSince: undefined, updatedAt: Date.now() });
+    // Past due and recovery come from customer.subscription.updated, which carries the ordering guard above.
     // Referral commissions accrue in their own job, so a referral bug can never fail this webhook.
     if (a.type === "invoice.paid" && referralConfig().enabled && a.invoice.id && a.invoice.subscription) await ctx.scheduler.runAfter(0, internal.referrals.accrue, { ...a.invoice, paidAt: a.invoice.paidAt ?? a.created });
     return record(a.type);
