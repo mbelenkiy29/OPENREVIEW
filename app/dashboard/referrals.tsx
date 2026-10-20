@@ -23,7 +23,7 @@ export async function ReferralsPanel({ token, payouts }: { token: string; payout
   return <>
     <section aria-labelledby="referral-link-heading">
       <h2 id="referral-link-heading">Your referral link</h2>
-      <p>Share this link. When someone creates an OpenReview account through it, they’re credited to you, along with the first workspace they create.</p>
+      <p>Share this link. When someone creates an OpenReview account through it, they’re credited to you, along with the first workspace they create. You earn {o.rateBps / 100}% of what that workspace pays, excluding tax, for {o.months} months from its first payment.</p>
       <dl className="facts">
         <dt>Link</dt><dd><code>{link}</code></dd>
         <dt>Code</dt><dd><code>{o.code}</code></dd>

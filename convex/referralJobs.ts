@@ -49,15 +49,32 @@ export const resolveChargeEvent = internalAction({ args: { ...chargeEvent, attem
     const payments = await listAll<{ id: string; invoice: string | { id: string } }>("/v1/invoice_payments", { payment: { type: "payment_intent", payment_intent: paymentIntent }, status: "paid" }, key);
     const outcomes = [];
     for (const p of payments) outcomes.push(await ctx.runMutation(internal.referrals.applyChargeEvent, { invoiceId: typeof p.invoice === "string" ? p.invoice : p.invoice.id, charge: facts }));
-    if (outcomes.includes("applied")) return "applied";
-    // A refund can arrive before its invoice's commission (a late invoice.paid): look again on the retry ladder below.
-    // shortcut: no verifyDue re-check (deferred); a commission created after the last retry (a hand-run accrue) keeps the refund unless voided by hand.
-    if (a.customer && payments.length && outcomes.every((o) => o === "no commission") && attempt < 4) { await ctx.scheduler.runAfter(60000 * 4 ** attempt, internal.referralJobs.resolveChargeEvent, { ...a, attempt: attempt + 1 }); return "retrying"; }
-    return "no commission";
+    // A refund or dispute can come before its invoice's commission (a late invoice.paid): checkInvoiceCharges looks again once it accrues.
+    return outcomes.includes("applied") ? "applied" : "no commission";
   } catch (error) {
     // Stripe already has our 200 for the event, so a failed read is retried here (1, 4, 16 and 64 minutes), then logged.
     if (attempt < 4) { await ctx.scheduler.runAfter(60000 * 4 ** attempt, internal.referralJobs.resolveChargeEvent, { ...a, attempt: attempt + 1 }); return "retrying"; }
     console.error(JSON.stringify({ event: "referral.charge_unresolved", kind: a.kind, reason: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
+    throw error;
+  }
+} });
+/** Scheduled once a commission accrues: a refund or dispute of its invoice handled before then (a webhook
+ *  outage and redelivery, a late invoice.paid) had no commission to take back. Each refunded or disputed
+ *  charge of the invoice's PaymentIntents goes through resolveChargeEvent. Stripe read failures retry as there. */
+export const checkInvoiceCharges = internalAction({ args: { invoiceId: v.string(), attempt: v.optional(v.number()) }, handler: async (ctx, { attempt = 0, invoiceId }): Promise<string> => {
+  try {
+    const key = stripeKey(), payments = await listAll<{ id: string; payment: { type: string; payment_intent?: unknown } }>("/v1/invoice_payments", { invoice: invoiceId, status: "paid" }, key);
+    let queued = 0;
+    for (const { payment } of payments) {
+      if (payment.type !== "payment_intent" || typeof payment.payment_intent !== "string") continue;
+      for (const c of await listAll<{ id: string; amount_refunded: number; disputed: boolean }>("/v1/charges", { payment_intent: payment.payment_intent }, key)) {
+        if (c.amount_refunded > 0 || c.disputed) { await ctx.scheduler.runAfter(0, internal.referralJobs.resolveChargeEvent, { chargeId: c.id, kind: c.disputed ? "dispute" : "refund", paymentIntent: payment.payment_intent }); queued++; }
+      }
+    }
+    return queued ? "queued" : "clean";
+  } catch (error) {
+    if (attempt < 4) { await ctx.scheduler.runAfter(60000 * 4 ** attempt, internal.referralJobs.checkInvoiceCharges, { invoiceId, attempt: attempt + 1 }); return "retrying"; }
+    console.error(JSON.stringify({ event: "referral.invoice_unchecked", reason: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
     throw error;
   }
 } });

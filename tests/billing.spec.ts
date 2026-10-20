@@ -7,7 +7,7 @@ import {api,internal} from '../convex/_generated/api';
 import type {Id} from '../convex/_generated/dataModel';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='billing-session-secret-at-least-32-characters',whsec='whsec_billing_fixture';
-const env={SESSION_SECRET:secret,SERVICE_SECRET:'billing-service',BILLING_ENABLED:'true',BILLING_TRIAL_REVIEWS:'2',BILLING_REVIEWS_PER_SEAT:'2',BILLING_GRACE_DAYS:'7',STRIPE_WEBHOOK_SECRET:whsec,STRIPE_SECRET_KEY:'sk_test_fixture',STRIPE_SEAT_PRICE_ID:'price_seat',APP_URL:'https://review.example.com'};
+const env={SESSION_SECRET:secret,SERVICE_SECRET:'billing-service',BILLING_ENABLED:'true',BILLING_TRIAL_USAGE_USD:'0.02',BILLING_USAGE_PER_SEAT_USD:'0.01',BILLING_GRACE_DAYS:'7',STRIPE_WEBHOOK_SECRET:whsec,STRIPE_SECRET_KEY:'sk_test_fixture',STRIPE_SEAT_PRICE_ID:'price_seat',APP_URL:'https://review.example.com'};
 beforeEach(()=>{vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date']});vi.setSystemTime(Date.UTC(2026,9,14,12));Object.assign(process.env,env);});
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();for(const k of [...Object.keys(env),'BILLING_TRIAL_DAYS'])if(!['SESSION_SECRET','SERVICE_SECRET'].includes(k))delete process.env[k];});
 
@@ -24,22 +24,36 @@ async function setup(){
  const members=await t.run(async ctx=>{await ctx.db.patch(repo._id,{enabled:true});return {bob:await ctx.db.insert('organizationMembers',{organizationId:org,userId:bob.id,role:'member'}),vera:await ctx.db.insert('organizationMembers',{organizationId:org,userId:vera.id,role:'viewer'})};});
  return {t,alice,bob,vera,org,repo,members};
 }
+// One model call: gpt-4.1 at $2/$8 per million reserves $0.01 for 1000 + 1000 tokens and settles what was used.
+const quote={provider:'openai',model:'gpt-4.1',baseUrl:'https://api.openai.com/v1',inputTokenCeiling:1000,outputTokenCeiling:1000};
+const reserve=(t:Awaited<ReturnType<typeof setup>>['t'],organizationId:Id<'organizations'>)=>t.mutation(internal.inferenceBudget.reserve,{...quote,organizationId});
+async function spend(t:Awaited<ReturnType<typeof setup>>['t'],organizationId:Id<'organizations'>,tokens=1000){const id=await reserve(t,organizationId);if(!id)throw Error('No reservation');await t.mutation(internal.inferenceBudget.settle,{id,inputTokens:tokens,outputTokens:tokens});}
 const enqueue=(t:Awaited<ReturnType<typeof setup>>['t'],repositoryId:Id<'repositories'>,pr:number)=>t.mutation(internal.reviews.enqueue,{repositoryId,prNumber:pr,headSha:String(pr).padStart(40,'a'),trigger:'automatic'});
 const reviewOf=(t:Awaited<ReturnType<typeof setup>>['t'],id:Id<'reviews'>|null)=>t.run(ctx=>ctx.db.get(id!));
 function signed(event:Record<string,unknown>,key=whsec){const body=JSON.stringify(event),ts=Math.floor(Date.now()/1000);return {body,headers:{'content-type':'application/json','stripe-signature':`t=${ts},v1=${createHmac('sha256',key).update(`${ts}.${body}`).digest('hex')}`}};}
 const deliver=(t:Awaited<ReturnType<typeof setup>>['t'],event:Record<string,unknown>,key?:string)=>{const {body,headers}=signed(event,key);return t.fetch('/stripe/webhook',{method:'POST',headers,body});};
 const subscription=(id:string,type:string,status:string,quantity:number,created:number,org?:string)=>({id,type,created,data:{object:{id:'sub_1',customer:'cus_1',status,metadata:org?{organizationId:org}:{},items:{data:[{id:'si_1',quantity,current_period_end:created+30*86400}]}}}});
 
-test('trial quota is enforced at enqueue; blocked reviews are recorded with the billing reason and counted',async()=>{
+test('trial usage is enforced on every model call and at enqueue; blocked reviews are recorded with the billing reason and counted',async()=>{
  process.env.BILLING_TRIAL_DAYS='60';
  const {t,alice,vera,org,repo}=await setup();
- const first=await enqueue(t,repo._id,1),second=await enqueue(t,repo._id,2),third=await enqueue(t,repo._id,3);
- expect((await reviewOf(t,first))?.status).toBe('queued');expect((await reviewOf(t,second))?.status).toBe('queued');
- expect(await reviewOf(t,third)).toMatchObject({status:'failed',error:'Billing: The trial includes 2 reviews per month. Subscribe in Settings → Billing for more.'});
+ const first=await enqueue(t,repo._id,1);
+ expect((await reviewOf(t,first))?.status).toBe('queued');
+ // The trial includes $0.02 a month: one call fits, two concurrent ones cannot both reserve, and the
+ // refusal comes before anything is sent.
+ await spend(t,org);
+ const racing=await Promise.allSettled([reserve(t,org),reserve(t,org)]);
+ expect(racing.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+ expect(String((racing.find(r=>r.status==='rejected') as PromiseRejectedResult).reason)).toMatch(/trial's included usage is used up/);
+ const held=(racing.find(r=>r.status==='fulfilled') as PromiseFulfilledResult<Id<'inferenceReservations'>|null>).value!;
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({used:10000,reserved:10000,allowed:false});
+ await t.mutation(internal.inferenceBudget.settle,{id:held,inputTokens:1000,outputTokens:1000});
+ const blocked=await enqueue(t,repo._id,2);
+ expect(await reviewOf(t,blocked)).toMatchObject({status:'failed',error:"Billing: The trial's included usage is used up. Subscribe in Settings → Billing to keep reviewing."});
  // Re-requesting an existing queued head does not count again.
  expect(await enqueue(t,repo._id,1)).toBe(first);
  const status=await t.query(api.billing.status,{token:alice.token,organizationId:org});
- expect(status).toMatchObject({enabled:true,plan:'trial',allowed:false,used:2,limit:2,blocked:1,activeSeats:2,referral:null});
+ expect(status).toMatchObject({enabled:true,plan:'trial',allowed:false,used:20000,reserved:0,limit:20000,reviews:1,blocked:1,activeSeats:2,referral:null,resetsAt:Date.UTC(2026,10,1)});
  // The referral program is off by default (REFERRALS_ENABLED unset); a viewer never sees it either.
  expect((await t.query(api.billing.status,{token:vera.token,organizationId:org})).referral).toBeNull();
  // A new month resets the counter; an expired trial blocks regardless.
@@ -57,7 +71,7 @@ test('the trial starts with the first review, so workspaces created before billi
  expect(before).toMatchObject({plan:'trial',allowed:true,trialStarted:false,trialDays:14,trialEndsAt:Date.now()+14*86400000});
  expect((await reviewOf(t,await enqueue(t,repo._id,1)))?.status).toBe('queued');
  const started=await t.query(api.billing.status,{token:alice.token,organizationId:org});
- expect(started).toMatchObject({trialStarted:true,trialEndsAt:Date.UTC(2026,10,28,12),used:1});
+ expect(started).toMatchObject({trialStarted:true,trialEndsAt:Date.UTC(2026,10,28,12),reviews:1});
  vi.setSystemTime(Date.UTC(2026,10,28,12));
  expect((await reviewOf(t,await enqueue(t,repo._id,2)))?.error).toMatch(/free trial has ended/);
 });
@@ -107,10 +121,10 @@ test('signed Stripe webhooks link the workspace, apply once, and ignore replays 
  await deliver(t,subscription('evt_sub_new','customer.subscription.updated','active',3,created+20,org));
  expect(await outcomes()).toEqual([['evt_checkout','linked'],['evt_sub_new','active'],['evt_sub_old','stale']]);
  expect(await t.run(ctx=>ctx.db.query('billingAccounts').collect())).toEqual([expect.objectContaining({organizationId:org,customerId:'cus_1',subscriptionId:'sub_1',subscriptionItemId:'si_1',status:'active',seats:3})]);
- // Starter plan: unlimited under a fair-use limit of 3 seats × 2 reviews.
- for(let pr=1;pr<=6;pr++)expect((await reviewOf(t,await enqueue(t,repo._id,pr)))?.status).toBe('queued');
- expect((await reviewOf(t,await enqueue(t,repo._id,7)))?.error).toMatch(/fair-use limit of 6 reviews this month \(2 per seat\)/);
- expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'starter',limit:6,used:6});
+ // Starter plan: 3 seats × $0.01 of included usage a month.
+ for(let pr=1;pr<=3;pr++){expect((await reviewOf(t,await enqueue(t,repo._id,pr)))?.status).toBe('queued');await spend(t,org);}
+ expect((await reviewOf(t,await enqueue(t,repo._id,4)))?.error).toMatch(/used its included usage for this month\. Usage resets on November 1/);
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'starter',limit:30000,used:30000,reviews:3});
  // A subscription for another workspace cannot hijack this customer.
  await deliver(t,subscription('evt_spoof','customer.subscription.updated','active',99,created+30,'k57abc0000000000000000organizations'));
  expect((await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0].seats).toBe(3);
@@ -197,4 +211,59 @@ test('a new workspace must choose a plan: nothing indexes, reviews or finishes s
  expect(await t.mutation(api.onboarding.advance,{token:alice.token,organizationId:fresh,step:'plan'})).toBe('connect');
  // Workspaces from before plans were required are untouched.
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:repo.organizationId})).toMatchObject({planRequired:false,planMissing:false});
+});
+
+test('extra usage runs past the included amount up to the admin cap and is metered to Stripe once',async()=>{
+ const {t,alice,bob,org}=await setup();
+ await t.run(ctx=>ctx.db.insert('billingAccounts',{organizationId:org,customerId:'cus_1',subscriptionId:'sub_1',status:'active',seats:1,trialEndsAt:Date.now(),updatedAt:Date.now()}));
+ // 1 seat includes $0.01: a half-size call leaves $0.005, and the next full call does not fit without extra usage.
+ await spend(t,org,500);
+ await expect(reserve(t,org)).rejects.toThrow(/turn on extra usage in Settings → Billing/);
+ await expect(t.mutation(api.billing.setSpendingCap,{token:bob.token,organizationId:org,capUsd:1})).rejects.toThrow();
+ await expect(t.mutation(api.billing.setSpendingCap,{token:alice.token,organizationId:org,capUsd:-1})).rejects.toThrow(/between/);
+ await t.mutation(api.billing.setSpendingCap,{token:alice.token,organizationId:org,capUsd:0.01});
+ // Only the part past the included usage is extra: $0.005 of this $0.01 call.
+ await spend(t,org);
+ await expect(reserve(t,org)).rejects.toThrow(/extra usage cap of \$0\.01 this month/);
+ const [event]=await t.run(ctx=>ctx.db.query('billingMeterEvents').collect());
+ expect(event).toMatchObject({organizationId:org,period:'2026-10',micros:5000,status:'pending'});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({used:15000,limit:10000,overage:5000,capUsd:0.01});
+ expect(await t.run(ctx=>ctx.db.query('auditEvents').filter(q=>q.eq(q.field('action'),'billing.spending_cap')).collect())).toHaveLength(1);
+ const bodies:string[]=[];vi.spyOn(globalThis,'fetch').mockImplementation(async(_url,init)=>{bodies.push(String(init?.body));return Response.json({});});
+ expect(await t.action(internal.billingJobs.reportUsage,{id:event._id})).toBe('reported');
+ expect(await t.action(internal.billingJobs.reportUsage,{id:event._id})).toBe('done');
+ expect(bodies).toHaveLength(1);
+ expect(bodies[0]).toContain(`identifier=${event._id}`);expect(bodies[0]).toContain('payload%5Bvalue%5D=5000');expect(bodies[0]).toContain('payload%5Bstripe_customer_id%5D=cus_1');
+ // A new month starts from zero.
+ vi.setSystemTime(Date.UTC(2026,10,1,0,0,1));
+ expect(await reserve(t,org)).toBeTruthy();
+});
+
+test('workspaces pick models from the operator price list',async()=>{
+ const {t,alice,bob,org,repo}=await setup();
+ process.env.LLM_PROVIDER='openrouter';process.env.INFERENCE_PRICES=JSON.stringify({'openrouter:openai/gpt-4.1':{input:2,output:8},'openrouter:anthropic/claude-sonnet-5-5':{input:3,output:15},'openai:gpt-4.1':{input:2,output:8}});
+ try{
+  expect((await t.query(api.scopes.list,{token:alice.token,organizationId:org})).models.map(m=>m.model)).toEqual(['openai/gpt-4.1','anthropic/claude-sonnet-5-5']);
+  const current=await t.query(api.settings.repository,{token:alice.token,repositoryId:repo._id});
+  expect(current.models).toHaveLength(2);
+  await expect(t.mutation(api.scopes.save,{token:alice.token,organizationId:org,settings:{...current.settings,model:'meta/unpriced'},overrideKeys:['model']})).rejects.toThrow(/model from this deployment's list/);
+  await expect(t.mutation(api.repositories.configure,{token:alice.token,repositoryId:repo._id,enabled:true,settings:{...current.settings,aiAuthoredModel:'meta/unpriced'}})).rejects.toThrow(/model from this deployment's list/);
+  expect(await t.query(internal.scopes.workspaceModel,{organizationId:org})).toBeNull();
+  await t.mutation(api.scopes.save,{token:alice.token,organizationId:org,settings:{...current.settings,model:'anthropic/claude-sonnet-5-5'},overrideKeys:['model']});
+  expect(await t.query(internal.scopes.workspaceModel,{organizationId:org})).toBe('anthropic/claude-sonnet-5-5');
+  // Settings → AI Model: admins pick or reset; members only see it; other scope overrides are kept.
+  await expect(t.mutation(api.scopes.setWorkspaceModel,{token:bob.token,organizationId:org,model:'openai/gpt-4.1'})).rejects.toThrow();
+  await expect(t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:'meta/unpriced'})).rejects.toThrow(/model from this deployment's list/);
+  await t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:'openai/gpt-4.1'});
+  expect(await t.query(api.scopes.modelChoice,{token:bob.token,organizationId:org})).toMatchObject({model:'openai/gpt-4.1',ownKey:false,models:[{model:'openai/gpt-4.1'},{model:'anthropic/claude-sonnet-5-5'}]});
+  await t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:''});
+  expect(await t.query(internal.scopes.workspaceModel,{organizationId:org})).toBeNull();
+ }finally{delete process.env.LLM_PROVIDER;delete process.env.INFERENCE_PRICES;}
+});
+
+test('a workspace without saved scope settings gets one holding only the model override',async()=>{
+ const {t,alice,org}=await setup();
+ await t.run(async ctx=>{for(const s of await ctx.db.query('scopeSettings').collect())await ctx.db.delete(s._id);});
+ await t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:'gpt-4.1-mini'});
+ expect(await t.run(ctx=>ctx.db.query('scopeSettings').collect())).toEqual([expect.objectContaining({organizationId:org,overrideKeys:['model'],settings:expect.objectContaining({model:'gpt-4.1-mini'})})]);
 });

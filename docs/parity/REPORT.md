@@ -755,7 +755,7 @@ Commit SHAs and the full test lists are in the ledger. "Fakes" means fake provid
 
 ## Needs-human checklist for round 2 (priority order)
 
-The ledger number for each step is in brackets; the exact sub-steps are in the ledger. A read-only go-live audit on October 14 found that production (`https://openreview-flame-two.vercel.app`, Convex `tidy-ocelot-457`) still serves a manual deploy from October 4 that matches the round-1 baseline. None of `main` (round 1, G1–J5) or round 2 is live yet. Never paste secret values into chat, logs or commits.
+The ledger number for each step is in brackets; the exact sub-steps are in the ledger. A read-only go-live audit on October 14 found that production (`<vercel-url>`, Convex `<prod-deployment>`) still serves a manual deploy from October 4 that matches the round-1 baseline. None of `main` (round 1, G1–J5) or round 2 is live yet. Never paste secret values into chat, logs or commits.
 
 ### Before anything else
 

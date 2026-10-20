@@ -3,3 +3,6 @@ packages:
 allowBuilds:
   esbuild: true
   iframe-resizer: false
+overrides:
+  # @atlaskit/editor-prosemirror pins 1.41.5 exactly; 1.42.3 fixes CVE-2026-104847 (XSS on paste).
+  prosemirror-view: 1.42.3

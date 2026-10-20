@@ -38,7 +38,13 @@ export const runtimeEvidenceSchema = z.object({
   memoryMb: z.literal(512),
   cpus: z.literal(1),
 });
-export const findingSchema = z
+// Models often send null for an optional field they leave empty (Claude Haiku: "ruleId": null). A finding
+// has no nullable fields, so null means absent instead of failing the whole specialist.
+const withoutNulls = (value: unknown): unknown =>
+  Array.isArray(value) ? value.map(withoutNulls)
+  : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null).map(([k, v]) => [k, withoutNulls(v)]))
+  : value;
+const finding = z
   .object({
     title: z.string().min(5).max(200),
     description: z.string().min(15).max(5000),
@@ -78,6 +84,8 @@ export const findingSchema = z
     }).optional(),
   })
   .refine((f) => f.endLine >= f.startLine, "Invalid line range");
+// Typed as the inner schema: removing nulls changes no other input, and generate() infers from z.ZodType<T>.
+export const findingSchema = z.preprocess(withoutNulls, finding) as unknown as typeof finding;
 export type Candidate = z.infer<typeof findingSchema>;
 export type Finding = Candidate & {
   fingerprint: string;

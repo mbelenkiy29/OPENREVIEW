@@ -11,7 +11,7 @@ import { DocsSearch } from "../docs-search";
 import { ScrollTable } from "../../dashboard/scroll-table";
 import { SiteFooter, SiteHeader } from "../../site-chrome";
 
-// Public documentation, rendered at build time from Markdown in docs/.
+// Public documentation, rendered from Markdown in docs/.
 export const dynamicParams = false;
 export function generateStaticParams() { return [{ slug: [] }, ...docPages.map((d) => ({ slug: [d.slug] }))]; }
 const pageFor = (slug: string[] = []) => (slug.length === 0 ? docPages[0] : slug.length === 1 ? docBySlug(slug[0]) : undefined);

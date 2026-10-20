@@ -18,7 +18,7 @@ import { referralConfig } from "../../src/referrals";
 // Read per request: Referrals appears only while the referral program is on (unknown keys 404).
 const settingsGroups = () => [
   { label: "Repositories", links: [["repositories", "Add/Remove Repos"], ["providers", "Code Providers"]] },
-  { label: "Agent Config", links: [["review", "Code Review"], ["agents", "Personal agents"], ["automation", "Runtime & Approval"]] },
+  { label: "Agent Config", links: [["review", "Code Review"], ["model", "AI Model"], ["agents", "Personal agents"], ["automation", "Runtime & Approval"]] },
   { label: "Admin", links: [["teams", "Teams & Inheritance"], ["people", "People"], ["usage", "Usage"], ["billing", "Billing"], ["notifications", "Notifications"], ["data", "Data & deletion"]] },
   { label: "Developer", links: [["keys", "API Keys"], ["audit", "Audit Log"]] },
   { label: "Personal", links: [["account", "Account & sessions"], ...(referralConfig().enabled ? [["referrals", "Referrals"]] : [])] },

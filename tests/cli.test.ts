@@ -166,6 +166,20 @@ test("installed CLI reviews committed Git changes and emits clean agent JSON wit
   }
 });
 
+test("stripe:listen forwards sandbox webhooks to the backend .env.local names", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "openreview-stripe-listen-test-"));
+  try {
+    const bin = path.join(directory, "bin");
+    await mkdir(bin);
+    await writeFile(path.join(bin, "stripe"), '#!/bin/sh\necho "$*" > stripe-args\n', { mode: 0o755 });
+    await writeFile(path.join(directory, ".env.local"), "NEXT_PUBLIC_CONVEX_URL=http://127.0.0.1:3214\nNEXT_PUBLIC_CONVEX_SITE_URL=http://127.0.0.1:3215\n");
+    await execute(process.execPath, ["--import", path.resolve("node_modules/tsx/dist/loader.mjs"), path.resolve("scripts/stripe-listen.ts")], { cwd: directory, env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+    assert.match(await readFile(path.join(directory, "stripe-args"), "utf8"), /^listen --forward-to http:\/\/127\.0\.0\.1:3215\/stripe\/webhook --events checkout\.session\.completed,.*,charge\.dispute\.closed\n$/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("local bootstrap fills blank secrets, preserves configured secrets, synchronizes embeddings and restricts file permissions", async () => {
   const directory = await mkdtemp(
     path.join(tmpdir(), "openreview-bootstrap-test-"),
@@ -173,7 +187,8 @@ test("local bootstrap fills blank secrets, preserves configured secrets, synchro
   try {
     const bin = path.join(directory, "bin");
     await mkdir(bin);
-    await writeFile(path.join(bin, "pnpm"), "#!/bin/sh\nexit 0\n", {
+    // The fake pnpm records each `convex env set` and what the forced billing file held.
+    await writeFile(path.join(bin, "pnpm"), '#!/bin/sh\necho "$*" >> pnpm-calls\ncase "$*" in *--force*) cat .env.backend.billing > billing-sent;; esac\nexit 0\n', {
       mode: 0o755,
     });
     await writeFile(
@@ -206,6 +221,10 @@ test("local bootstrap fills blank secrets, preserves configured secrets, synchro
     const backend = await readFile(path.join(directory, ".env.backend"), "utf8");
     assert.ok(backend.includes("STRIPE_SECRET_KEY=rk_test_fixture") && backend.includes("REFERRALS_ENABLED=true"));
     assert.ok(!backend.includes("STRIPE_WEBHOOK_SECRET"), "a blank billing setting is not synchronized");
+    // Only the billing lines overwrite what the backend has; every other setting must still match.
+    assert.equal(await readFile(path.join(directory, "pnpm-calls"), "utf8"), "exec convex env set --force --from-file .env.backend.billing\nexec convex env set --from-file .env.backend\n");
+    assert.equal(await readFile(path.join(directory, "billing-sent"), "utf8"), "STRIPE_SECRET_KEY=rk_test_fixture\nREFERRALS_ENABLED=true\n");
+    await assert.rejects(stat(path.join(directory, ".env.backend.billing")), "the billing file is removed");
     assert.equal(
       (await stat(path.join(directory, ".env.local"))).mode & 0o777,
       0o600,

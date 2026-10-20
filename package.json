@@ -16,7 +16,7 @@
     "test:e2e": "tsx scripts/browser.ts",
     "test:smoke": "tsx scripts/smoke.ts",
     "setup:local": "tsx scripts/bootstrap.ts",
-    "stripe:listen": "stripe listen --forward-to http://127.0.0.1:3211/stripe/webhook --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.payment_failed,invoice.paid,charge.refunded,charge.dispute.created,charge.dispute.closed",
+    "stripe:listen": "tsx scripts/stripe-listen.ts",
     "mcp": "tsx src/mcp.ts",
     "runtime:worker": "tsx scripts/runtime-worker.ts",
     "demo": "tsx scripts/demo.ts"
@@ -28,7 +28,7 @@
     "@fontsource-variable/inter": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@fontsource/eb-garamond": "^5.3.0",
-    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@node-saml/node-saml": "5.1.0",
     "@sentry/nextjs": "11.6.0",
     "convex": "^1.46.0",
@@ -46,7 +46,7 @@
     "tree-sitter-wasms": "0.1.13",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
-    "undici": "7.29.1",
+    "undici": "7.30.1",
     "web-tree-sitter": "0.22.6",
     "zod": "^3.25.76",
     "zod-to-json-schema": "3.25.2"

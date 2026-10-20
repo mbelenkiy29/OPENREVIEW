@@ -28,8 +28,8 @@ export const ensureCode = mutation({ args: { token: v.string() }, handler: async
 
 const statusLabels = { signed_up: "signed up", pending: "workspace created", active: "subscribed", ended: "commission ended", void: "void" } as const;
 export const overview = query({ args: { token: v.string() }, handler: async (ctx, a) => {
-  const user = await authenticated(ctx, a.token);
-  if (!referralConfig().enabled) return { enabled: false as const };
+  const user = await authenticated(ctx, a.token), config = referralConfig();
+  if (!config.enabled) return { enabled: false as const };
   const code = await ctx.db.query("referralCodes").withIndex("by_user", (q) => q.eq("userId", user._id)).first();
   // shortcut: the oldest 500 referrals only; paginate when a referrer brings in more.
   const referrals = await ctx.db.query("referrals").withIndex("by_referrer", (q) => q.eq("referrerId", user._id)).take(500);
@@ -49,9 +49,9 @@ export const overview = query({ args: { token: v.string() }, handler: async (ctx
   const memberships = (await ctx.db.query("organizationMembers").withIndex("by_user", (q) => q.eq("userId", user._id)).take(100)).filter((m) => m.role === "owner" || m.role === "admin");
   const workspaces = (await Promise.all(memberships.map(async (m) => (await ctx.db.query("billingAccounts").withIndex("by_org", (q) => q.eq("organizationId", m.organizationId)).first())?.customerId ? { organizationId: m.organizationId, name: await workspaceName(m.organizationId) } : null))).filter((w) => w !== null);
   // Cash payouts, when the deployment offers them: the caller's Stripe account as last read (the page refreshes it first).
-  const account = referralConfig().payoutsEnabled ? await payoutAccountOf(ctx, user._id) : undefined; // undefined: payouts off; null: no account yet
+  const account = config.payoutsEnabled ? await payoutAccountOf(ctx, user._id) : undefined; // undefined: payouts off; null: no account yet
   const payouts = account === undefined ? null : { state: !account ? "none" as const : account.transfers === "active" ? "active" as const : account.onboardedAt ? "restricted" as const : "incomplete" as const, countries: REFERRAL_PAYOUT_COUNTRIES, minPayout: REFERRAL_MIN_PAYOUT_CENTS, reviewAbove: REFERRAL_PAYOUT_REVIEW_CENTS };
-  return { enabled: true as const, code: code?.code ?? null, login: await publicLogin(ctx, user._id), notified: Boolean(await verifiedEmail(ctx, user._id)), signedUp: live.length, subscribed: live.filter((r) => r.status === "active" || r.status === "ended").length, pending: live.filter((r) => r.status === "signed_up" || r.status === "pending").length, currency: REFERRAL_CURRENCY, ...balance, holdDays: referralConfig().holdDays, minCredit: REFERRAL_MIN_CREDIT_CENTS, people: people.reverse(), activity, workspaces, payouts };
+  return { enabled: true as const, code: code?.code ?? null, login: await publicLogin(ctx, user._id), notified: Boolean(await verifiedEmail(ctx, user._id)), signedUp: live.length, subscribed: live.filter((r) => r.status === "active" || r.status === "ended").length, pending: live.filter((r) => r.status === "signed_up" || r.status === "pending").length, currency: REFERRAL_CURRENCY, ...balance, rateBps: config.rateBps, months: config.months, holdDays: config.holdDays, minCredit: REFERRAL_MIN_CREDIT_CENTS, people: people.reverse(), activity, workspaces, payouts };
 } });
 
 /** What a referral link shows before sign-up (web server only): the owner's GitHub username or null.
@@ -77,7 +77,9 @@ export const applyCode = mutation({ args: { token: v.string(), organizationId: v
   if (!await neverPaid(ctx, a.organizationId)) return fail("A referral code can’t be added to a workspace that has subscribed.");
   if (await everMember(ctx, a.organizationId, owner.userId)) return fail("The code’s owner is or was a member of this workspace.");
   const referredUser = (userId: Id<"users">) => ctx.db.query("referrals").withIndex("by_referred_user", (q) => q.eq("referredUserId", userId)).first();
-  if ((await referredUser(owner.userId))?.referrerId === user._id) return fail("You referred the code’s owner, so you can’t use their code.");
+  // Reciprocal codes, per workspace: any member, past or present, may have referred the code's owner.
+  const ownersReferrer = (await referredUser(owner.userId))?.referrerId;
+  if (ownersReferrer && await everMember(ctx, a.organizationId, ownersReferrer)) return fail("Someone in this workspace referred the code’s owner, so their code can’t be used here.");
   // One referral per person: an existing one binds here only if it is unbound and from the same referrer.
   const mine = await referredUser(user._id), now = Date.now(), bind = { referredOrganizationId: a.organizationId, status: "pending" as const, boundAt: now, updatedAt: now };
   if (mine && mine.referrerId !== owner.userId) return fail("Your account was already referred by someone else.");

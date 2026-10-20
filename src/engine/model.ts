@@ -90,11 +90,15 @@ export function validateModelUrl(raw: string, allowLocal = false): URL {
 }
 // OpenAI reasoning models reject max_tokens and require max_completion_tokens.
 const providerRoots = { anthropic: "https://api.anthropic.com/v1", openrouter: "https://openrouter.ai/api/v1", openai: "https://api.openai.com/v1" };
-// One cheap authenticated call, so a wrong or revoked workspace key fails when it is saved, not on a review.
-export async function checkModelKey(provider: keyof typeof providerRoots, key: string) {
-  const anthropic = provider === "anthropic";
-  const response = await fetch(providerRoots[provider] + (provider === "openrouter" ? "/key" : "/models"), { headers: anthropic ? { "x-api-key": key, "anthropic-version": "2023-06-01" } : { authorization: `Bearer ${key}` }, redirect: "error", signal: AbortSignal.timeout(15000) });
+// One cheap authenticated call, so a wrong or revoked workspace key, or (Anthropic and OpenAI) a model the key
+// can't use, fails when it is saved, not on a review. Fetching the one model also resolves Anthropic's aliases.
+export async function checkModelKey(provider: keyof typeof providerRoots, key: string, model?: string) {
+  const anthropic = provider === "anthropic", modelPath = provider !== "openrouter" && model ? `/models/${encodeURIComponent(model)}` : undefined;
+  const response = await fetch(providerRoots[provider] + (provider === "openrouter" ? "/key" : modelPath ?? "/models"), { headers: anthropic ? { "x-api-key": key, "anthropic-version": "2023-06-01" } : { authorization: `Bearer ${key}` }, redirect: "error", signal: AbortSignal.timeout(15000) });
+  // shortcut: a restricted OpenAI key without the Models permission gets 403 here yet can still run models, so it is saved unchecked; send a 1-token completion instead if bad restricted keys get saved.
+  if (response.status === 403 && provider === "openai") return;
   if (response.status === 401 || response.status === 403) throw new Error("The provider rejected this API key");
+  if (response.status === 404 && modelPath) throw new Error(`This key can't use a model named ${model} (check the name for this provider)`);
   if (!response.ok) throw new Error(`Could not check the API key (the provider answered ${response.status})`);
 }
 export const reasoningModel = (model: string) => /(^|\/)(o\d|gpt-5)/i.test(model);
@@ -121,7 +125,8 @@ export class HttpModel implements ModelProvider {
     private persisted?: ModelCache,
     private billing?: InferenceBilling,
   ) {}
-  private modelFor(task: string) {
+  /** The model a task runs on (the review job records it for routed agent-authored pull requests). */
+  modelFor(task: string) {
     return (!this.config.workspaceKey && process.env[`LLM_MODEL_${taskKey(task)}`]) || this.config.taskModels?.[task.split(":")[0]] || this.config.model;
   }
   private outputLimit(task: string, model: string) {
