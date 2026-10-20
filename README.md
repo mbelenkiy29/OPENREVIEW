@@ -196,7 +196,7 @@ Notifications (Settings → Notifications, see [docs/notifications.md](docs/noti
 
 Requirements context from Notion: connect a Notion workspace in Memory → Integrations. When a pull request links Notion pages that were shared with OpenReview, their text is read as read-only requirements, alongside Linear issues, Jira issues and Confluence pages. See [docs/notion.md](docs/notion.md). The Confluence space and Jira project pickers group resources by site, can be filtered, and support select all/none per site. They also flag selections that are no longer authorized.
 
-Billing (cloud mode only, see [docs/billing.md](docs/billing.md)): when `BILLING_ENABLED=true`, a workspace gets a 14-day trial, then a Stripe per-seat subscription with a monthly review quota, grace for past-due payments, and Settings → Billing with Checkout and the Customer Portal. Self-hosted deployments leave it off and have no quotas.
+Billing (cloud mode only, see [docs/billing.md](docs/billing.md)): when `BILLING_ENABLED=true`, workspaces choose Free (a monthly usage allowance, no card), Starter or Pro (Stripe per-seat subscriptions with included usage and a trial; Pro adds deep reviews, generated tests and fix pull requests), with grace for past-due payments and Settings → Billing with Checkout and the Customer Portal. Self-hosted deployments leave it off and have no quotas.
 
 Error tracking and analytics (hosted deployments only, see [docs/observability.md](docs/observability.md)): Sentry for errors and PostHog for page views and signed-in usage, each off unless its public key is set at build time. No session replays, cookies, request bodies or secret URL parameters are sent, and signed-in pages send page views only.
 

@@ -10,7 +10,9 @@ export const planCatalog: Record<Plan, { name: string; entitlements: readonly En
   starter: { name: "Starter", entitlements: [] },
   pro: { name: "Pro", entitlements },
 };
-export const entitled = (plan: Plan | "disabled", key: Entitlement) => plan === "disabled" || planCatalog[plan].entitlements.includes(key);
+// legacy: a Starter subscription from before Pro existed keeps every feature it had (grandfathered).
+export const planEntitlements = (plan: Plan | "disabled", legacy = false): readonly Entitlement[] => plan === "disabled" || (legacy && plan === "starter") ? entitlements : planCatalog[plan].entitlements;
+export const entitled = (plan: Plan | "disabled", key: Entitlement, legacy = false) => planEntitlements(plan, legacy).includes(key);
 export const upgradeNote: Record<Entitlement, string> = {
   "review.deep": "Deep reviews are on the Pro plan, so this review ran at the standard tier.",
   "review.reproTests": "Generated reproduction tests are on the Pro plan.",
