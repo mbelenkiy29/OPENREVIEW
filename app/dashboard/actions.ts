@@ -19,6 +19,7 @@ import {approvalPolicySchema} from "../../src/approval";
 import {runtimePolicySchema} from "../../src/runtime-policy";
 import {approvalDefaults,runtimeDefaults} from "../../src/review-settings";
 import { REFERRAL_PAYOUT_REVIEW_CENTS, formatMoney, parseMoneyInput, stripeHostedUrl } from "../../src/referrals";
+import { safeNext } from "../../src/identity";
 
 const text = (f: FormData, key: string) => z.string().parse(f.get(key) ?? "");
 export async function saveApprovalPolicy(_state:{error?:string;saved?:boolean},form:FormData):Promise<{error?:string;saved?:boolean}>{
@@ -207,7 +208,7 @@ async function endSession(to: string): Promise<never> {
   const jar = await cookies(), token = jar.get("openreview_session")?.value;
   if (token) await backend().mutation(api.identity.signOut, { token }).catch(() => undefined);
   jar.delete("openreview_session");
-  redirect(to);
+  redirect(safeNext(to));
 }
 export async function logout() { await endSession("/"); }
 export async function signOutEverywhere() {
