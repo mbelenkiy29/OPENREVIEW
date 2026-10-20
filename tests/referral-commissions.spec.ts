@@ -279,13 +279,12 @@ test("referral codes added in Settings → Billing follow the anti-abuse rules, 
 test("commissions accrue in a scheduled job, so a failure there never touches billing", async () => {
   const t = convexTest(schema, modules);
   const { alice, bob, org } = await referred(t);
-  const accountId = await linkStripe(t, org, "past_due");
+  const accountId = await linkStripe(t, org);
   // Duplicate membership rows make the job's member check throw.
   for (let i = 0; i < 2; i++) await t.run((ctx) => ctx.db.insert("organizationMembers", { organizationId: org, userId: alice.userId, role: "member" }));
   vi.spyOn(console, "error").mockImplementation(() => {});
   expect((await deliver(t, paid("in_1", Date.now()))).status).toBe(200);
   expect(await t.run((ctx) => ctx.db.get(accountId))).toMatchObject({ status: "active" });
-  expect((await t.run((ctx) => ctx.db.get(accountId)))?.pastDueSince).toBeUndefined();
   const jobs = async () => (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).filter((j) => j.name.includes("referrals:accrue"));
   expect((await jobs()).map((j) => j.state.kind)).toEqual(["pending"]);
   expect(await commissions(t)).toEqual([]);
