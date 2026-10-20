@@ -4,6 +4,7 @@ import { api } from "../../../../convex/_generated/api";
 import { backend } from "../../../../src/server";
 import { emailOnWeb } from "../../../../src/email";
 import { billingConfig, checkoutTrialEnd, usdText } from "../../../../src/billing";
+import { entitlements } from "../../../../src/plans";
 import { referralConfig, referralDisclosure, referralFact } from "../../../../src/referrals";
 import { installHref, linkHref } from "../../../../src/github-install";
 import { providerDisplay, providerShort } from "../../../../src/provider-display";
@@ -85,7 +86,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
   if (step === "summary" || step === "comments" || step === "triggers" || step === "tools") {
     const props = { action: saveSetupStep, organizationId, defaults: status.defaults, admin, progress: <ConfigureProgress step={step} />, heading: <><Heading step={step}>{ledes[step]}</Heading><ReadOnlyNote admin={admin} /></> };
     return <WizardFrame step={step} {...frame} nextLabel={step === "tools" ? "Save and continue" : "Next"}>
-      {step === "summary" ? <SummaryStep {...props} /> : step === "comments" ? <CommentsStep {...props} /> : step === "triggers" ? <TriggersStep {...props} /> : <ToolsStep {...props} agent={organization.defaultAgent} handoff={organization.defaultHandoff} cloudAgent={organization.defaultCloudAgent} />}
+      {step === "summary" ? <SummaryStep {...props} /> : step === "comments" ? <CommentsStep {...props} /> : step === "triggers" ? <TriggersStep {...props} /> : <ToolsStep {...props} locked={billing?.enabled ? entitlements.filter((key) => !billing.entitlements.includes(key)) : []} agent={organization.defaultAgent} handoff={organization.defaultHandoff} cloudAgent={organization.defaultCloudAgent} />}
     </WizardFrame>;
   }
 
