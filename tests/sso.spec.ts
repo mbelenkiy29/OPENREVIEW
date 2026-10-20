@@ -86,3 +86,43 @@ test("SSO: domain proof, verified-email linking without takeover, JIT membership
   const audits = (await t.run((ctx) => ctx.db.query("auditEvents").collect())).map((a) => a.action);
   for (const action of ["sso.connection_saved", "sso.domain_added", "sso.domain_verified", "sso.jit_member", "sso.enforced"]) expect(audits).toContain(action);
 });
+
+test("SSO: changing the identity provider drops domain trust and pauses sign-in until DNS is proven again", async () => {
+  const t = convexTest(schema, modules);
+  const browser = async (providerUserId: string, login: string, email?: string) => {
+    const sid = randomBytes(32).toString("base64url");
+    const userId = await t.mutation(api.identity.signIn, { secret, provider: "github", providerUserId, login, avatar: "", ...(email ? { email } : {}), emailVerified: Boolean(email), sessionHash: sessionHash(sid) });
+    return { id: userId, token: await jwt(userId, sid) };
+  };
+  const owner = await browser("301", "owner", "owner@acme.com"), admin = await browser("302", "admin");
+  const org = await t.mutation(api.users.createOrganization, { token: owner.token, name: "Acme" });
+  await t.run((ctx) => ctx.db.insert("organizationMembers", { organizationId: org, userId: admin.id, role: "admin" }));
+  admin.token = await jwt(admin.id); // no browser session, so enforcement does not get in the way
+  const saml = (token: string, samlEntryPoint: string, samlIdpCert: string) => t.mutation(api.sso.saveConnection, { token, organizationId: org, protocol: "saml", name: "Okta", active: true, jitRole: "none", samlEntryPoint, samlIdpCert });
+  await saml(owner.token, "https://idp.acme.com/sso", cert);
+  const connection = (await t.query(api.sso.settings, { token: owner.token, organizationId: org })).connection!;
+  const domainId = await t.mutation(api.sso.addDomain, { token: owner.token, organizationId: org, domain: "acme.com" });
+  const before = (await t.query(api.sso.settings, { token: owner.token, organizationId: org })).domains[0];
+  dns.records.set(before.txtName, [[before.txtValue]]);
+  expect(await t.action(api.ssoJobs.verifyDomain, { token: owner.token, domainId })).toBe(true);
+  await t.mutation(api.sso.setEnforcement, { token: owner.token, organizationId: org, enforce: true });
+  const login = (subject: string, email: string) => t.mutation(api.sso.signIn, { secret, connectionId: connection._id as Id<"ssoConnections">, subject, email, name: subject, sessionHash: sessionHash(randomBytes(32).toString("base64url")) });
+  expect((await login("okta-owner", "owner@acme.com")).userId).toBe(owner.id);
+  // Saving the same IdP keeps everything.
+  await saml(admin.token, "https://idp.acme.com/sso", cert);
+  expect((await t.query(api.sso.settings, { token: owner.token, organizationId: org })).domains[0].verified).toBe(true);
+
+  // An admin re-points the connection at an IdP they control.
+  await saml(admin.token, "https://idp.attacker.example/sso", cert.replace("test", "evil"));
+  const after = await t.query(api.sso.settings, { token: owner.token, organizationId: org });
+  expect([after.connection!.enforce, after.domains[0].verified, after.domains[0].txtValue === before.txtValue]).toEqual([false, false, false]);
+  // Neither the owner's verified email nor the owner's existing SSO subject signs in as the owner.
+  await expect(login("evil-1", "owner@acme.com")).rejects.toThrow(/identity provider changed/);
+  await expect(login("okta-owner", "owner@acme.com")).rejects.toThrow(/identity provider changed/);
+  // The old TXT record is still published but no longer proves the domain.
+  expect(await t.action(api.ssoJobs.verifyDomain, { token: admin.token, domainId })).toBe(false);
+  // Whoever controls DNS publishes the new token; sign-in resumes.
+  dns.records.set(after.domains[0].txtName, [[after.domains[0].txtValue]]);
+  expect(await t.action(api.ssoJobs.verifyDomain, { token: owner.token, domainId })).toBe(true);
+  expect((await login("okta-erin", "erin@acme.com")).member).toBe(false);
+});

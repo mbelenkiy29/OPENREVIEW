@@ -159,3 +159,21 @@ test('magic links and email invitations are single use, expire, and never store 
  await expect(t.mutation(api.identity.acceptEmailInvitation,{token:fresh.token,tokenHash:third})).rejects.toThrow(/invalid or expired/);
  expect(JSON.stringify(await t.run(ctx=>ctx.db.query('emailInvitations').collect()))).not.toContain(invite);
 });
+
+test('GitHub-login invitations reach only GitHub-created accounts, not a magic-link user who picked the same name',async()=>{
+ const t=convexTest(schema,modules);
+ const owner=await signIn(t,{provider:'github',providerUserId:'901',login:'owner',emailVerified:false});
+ const organizationId=await t.mutation(api.users.createOrganization,{token:owner.token,name:'Invites'});
+ const invitationId=await t.mutation(api.users.invite,{token:owner.token,organizationId,githubLogin:'bob',role:'admin'});
+ // Magic link for bob@attacker.example: the account's login becomes "bob".
+ const raw=randomBytes(32).toString('base64url'),hash=createHash('sha256').update(raw).digest('hex'),s=session();
+ await t.mutation(internal.identity.storeLoginToken,{email:'bob@attacker.example',tokenHash:hash});
+ const emailUser=(await t.mutation(api.identity.consumeLoginToken,{secret:svc,tokenHash:hash,sessionHash:s.hash}))!,emailToken=await jwt(emailUser,s.sid);
+ expect((await t.run(ctx=>ctx.db.get(emailUser)))?.login).toBe('bob');
+ expect((await t.query(api.users.me,{token:emailToken})).invitations).toEqual([]);
+ await expect(t.mutation(api.users.acceptInvitation,{token:emailToken,invitationId})).rejects.toThrow(/invalid or expired/);
+ // GitHub user "bob" sees and accepts it.
+ const bob=await signIn(t,{provider:'github',providerUserId:'902',login:'bob',emailVerified:false});
+ expect((await t.query(api.users.me,{token:bob.token})).invitations.map(i=>i._id)).toEqual([invitationId]);
+ expect(await t.mutation(api.users.acceptInvitation,{token:bob.token,invitationId})).toBe(organizationId);
+});

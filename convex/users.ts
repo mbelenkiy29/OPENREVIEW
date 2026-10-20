@@ -34,7 +34,8 @@ export const me = query({
         role: m.role,
       })),
     );
-    const invitations = await ctx.db
+    // Invitations name a GitHub login; only GitHub-created accounts carry one (other sign-ins choose `login`).
+    const invitations = user.githubId === undefined ? [] : await ctx.db
       .query("invitations")
       .withIndex("by_login", (q) =>
         q.eq("githubLogin", user.login.toLowerCase()),
@@ -130,6 +131,7 @@ export const acceptInvitation = mutation({
       invitation = await ctx.db.get(args.invitationId);
     if (
       !invitation ||
+      user.githubId === undefined ||
       invitation.githubLogin !== user.login.toLowerCase() ||
       invitation.expiresAt <= Date.now() ||
       !(await ctx.db.get(invitation.organizationId))

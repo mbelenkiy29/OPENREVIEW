@@ -250,6 +250,8 @@ export default defineSchema({
     oidcIssuer: v.optional(v.string()),
     oidcClientId: v.optional(v.string()),
     oidcClientSecret: v.optional(v.string()),
+    // Set when the identity provider changed: sign-in waits until a domain is verified again (convex/sso.ts).
+    reverifyDomains: v.optional(v.boolean()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_org", ["organizationId"]),
