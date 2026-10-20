@@ -34,6 +34,8 @@ OpenReview reads review configuration from the repository. Server reviews always
 }
 ```
 
+`commentStyle` is `concise`, `detailed` or `compact`. `compact` keeps inline comments to the badge, title, prose, suggestion and a folded "Prompt To Fix With AI". On GitHub it also lays out the summary as: summary, confidence score, important files, sequence diagram, then every other section collapsed, the fix-all prompt, and a one-line footer.
+
 ## Directory cascade
 
 `.openreview/` folders can sit at any depth. Each one applies to the files under its parent directory, read from the base revision like everything else:

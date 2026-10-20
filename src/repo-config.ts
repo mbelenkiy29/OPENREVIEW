@@ -26,7 +26,7 @@ export const repoSettingsSchema = z.object({
   categories: z.array(z.enum(categories)).max(categories.length),
   ignoredPaths: z.array(z.string().max(300)).max(200),
   instructions: z.string().max(20000),
-  commentStyle: z.enum(["concise", "detailed"]),
+  commentStyle: z.enum(["concise", "detailed", "compact"]),
   summarySections: z.array(z.enum(summarySections)).max(summarySections.length),
   strictness: z.number().int().min(0).max(3),
   reviewEngine: z.enum(["pipeline", "agentic", "hypotheses"]),

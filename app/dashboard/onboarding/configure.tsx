@@ -65,7 +65,7 @@ export function SummaryStep(props: Props) {
       <ul className="wizard-toggles">{summarySections.map((s) => <Toggle key={s} name="summarySections" value={s} label={summaryLabels[s]} hint={sectionHints[s]}
         checked={sections.includes(s)} onChange={(on) => setSections(summarySections.filter((x) => x === s ? on : sections.includes(x)))} />)}</ul>
       <fieldset className="wizard-choice"><legend>Inline comment style</legend>
-        {["concise", "detailed"].map((v) => <label key={v} className="check"><input type="radio" name="commentStyle" value={v} checked={style === v} onChange={() => setStyle(v)} />{v === "concise" ? "Concise: the problem and the fix" : "Detailed: adds impact and evidence"}</label>)}
+        {["concise", "detailed", "compact"].map((v) => <label key={v} className="check"><input type="radio" name="commentStyle" value={v} checked={style === v} onChange={() => setStyle(v)} />{v === "concise" ? "Concise: the problem and the fix" : v === "detailed" ? "Detailed: adds impact and evidence" : "Compact: summary-first layout, plain prose and fix prompts"}</label>)}
       </fieldset>
       <details className="wizard-exact" open={exact} onToggle={(e) => setExact((e.target as HTMLDetailsElement).open)}><summary>Exact comment text for this example</summary>
         {exact && <div aria-live="polite"><ReviewMarkdown>{exampleSummary(sections)}</ReviewMarkdown><ReviewMarkdown>{findingComment(example, style)}</ReviewMarkdown></div>}</details>

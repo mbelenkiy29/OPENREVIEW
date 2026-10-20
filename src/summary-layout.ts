@@ -19,15 +19,21 @@ function escapeDisclosure(body: string) {
   }).join("\n");
 }
 
-export function disclosureLayout(summary: string) {
+// A stored summary is the verdict line, then "### Label" sections, then the review footer.
+function parts(summary: string) {
   const tail = summary.match(footer)?.[0] ?? "";
-  const [verdict, ...chunks] = summary.slice(0, summary.length - tail.length).split(/\n\n(?=### )/);
+  const [head, ...chunks] = summary.slice(0, summary.length - tail.length).split(/\n\n(?=### )/);
+  return { head, tail, sections: chunks.map((chunk) => {
+    const newline = chunk.indexOf("\n");
+    return { chunk, label: (newline < 0 ? chunk : chunk.slice(0, newline)).slice(4).trim(), body: newline < 0 ? "" : chunk.slice(newline + 1) };
+  }) };
+}
+
+export function disclosureLayout(summary: string) {
+  const { head: verdict, tail, sections } = parts(summary);
   let head = verdict;
   const blocks: string[] = [], shown: string[] = [], folded: string[] = [];
-  for (const chunk of chunks) {
-    const newline = chunk.indexOf("\n");
-    const label = (newline < 0 ? chunk : chunk.slice(0, newline)).slice(4).trim();
-    const body = newline < 0 ? "" : chunk.slice(newline + 1);
+  for (const { chunk, label, body } of sections) {
     if (label === summaryLabels.score) {
       // "**N/5** — reason": the score is already on the verdict line, so only the reason moves up.
       const reason = body.replace(/^\*\*\d\/5\*\* — /, "");
@@ -42,6 +48,30 @@ export function disclosureLayout(summary: string) {
     else blocks.push(chunk);
   }
   return [head, ...blocks, ...shown, ...folded].join("\n\n") + tail;
+}
+
+// The "compact" comment style: summary, confidence score, important files and diagram up front; every
+// other section collapsed; the fix-all prompt last; a one-line footer with the reviewed commit.
+const outsideLabel = "Outside the changed code";
+const details = (label: string, body: string, isOpen = false) => `<details${isOpen ? " open" : ""}><summary><strong>${label}</strong></summary>\n\n${escapeDisclosure(body)}\n\n</details>`;
+export function compactLayout(summary: string, commit: string, links = "") {
+  const { head, tail, sections } = parts(summary);
+  const body = (label: string) => sections.find((s) => s.label === label)?.body;
+  const front = new Set([summaryLabels.overview, summaryLabels.score, summaryLabels.affectedAreas, summaryLabels.diagram, summaryLabels.agentPrompt, outsideLabel]);
+  const overview = body(summaryLabels.overview), files = body(summaryLabels.affectedAreas), diagram = body(summaryLabels.diagram), outside = body(outsideLabel), prompt = body(summaryLabels.agentPrompt);
+  const score = body(summaryLabels.score)?.match(/^\*\*(\d)\/5\*\* — ([\s\S]*)$/);
+  const blocks = [
+    overview !== undefined ? "### OpenReview Summary\n\n" + overview : "",
+    score ? `### Confidence Score: ${score[1]}/5\n\n${head.match(/^\*\*[^*]+\*\*/)?.[0] ?? head}\n\n${score[2]}` : head,
+    files !== undefined ? "### Important Files Changed\n\n" + files.replace(/^\| File \| Change \|/, "| Filename | Overview |") : "",
+    diagram !== undefined ? "### Sequence Diagram\n\n" + diagram : "",
+    outside !== undefined ? details("Comments Outside Diff", outside, true) : "",
+    ...sections.filter((s) => !front.has(s.label)).map((s) => details(s.label, s.body)),
+    prompt !== undefined ? `<details><summary>Prompt To Fix All With AI</summary>\n\n${escapeDisclosure(prompt)}\n\n</details>` : "",
+  ].filter(Boolean);
+  // "Review N on this pull request · Comment `…` to re-run it." becomes one small line; a tip after it stays.
+  const [, number, rerun = "", rest = ""] = tail.match(/^\n\n(?:Review (\d+) on this pull request · )?(.*?\.)(\n[\s\S]*)?$/) ?? [];
+  return blocks.join("\n\n") + links + `\n\n<sub>${number ? `Reviews (${number}): ` : ""}Last reviewed commit: ${commit}${rerun ? " · " + rerun : ""}</sub>` + rest;
 }
 
 // Each issue row links to its inline thread when the thread is known; otherwise the token is dropped.

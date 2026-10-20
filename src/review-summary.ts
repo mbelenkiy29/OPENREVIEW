@@ -110,6 +110,9 @@ export function reviewSummary(data:Summary,selected:readonly string[]=summarySec
 }
 
 export function findingComment(f: Finding, style: string = "detailed", suggestion?: { syntax: SuggestionSyntax; start: number; end: number }, options: { agentPrompt?: boolean } = {}): string {
+  const question = f.question ? `\n\n**Question for the author:** ${f.question.replace(/[\r\n]+/g, " ").replace(/@(?=[\w-])/g, "@​")}` : "";
+  // Compact: badge and title, plain prose, the suggestion, and the agent prompt folded away; no labels or evidence.
+  if (style === "compact") return `**${priorityBadge(f.severity)} · ${f.title}**${tagBadges(f).map((t) => " · " + t).join("")}\n\n${f.description} ${f.impact}\n\n${f.suggestedFix}${f.suggestion && suggestion ? suggestionBlock(f.suggestion, suggestion.syntax, suggestion) : ""}${f.generatedTest ? generatedTestSection(f.generatedTest) : ""}${question}${options.agentPrompt ? "\n\n<details><summary>Prompt To Fix With AI</summary>\n\n" + agentPrompt([f]) + "\n\n</details>" : ""}\n\n<!-- openreview-finding:${f.fingerprint} -->`;
   const evidence = f.evidence
     .map((e) =>
       style === "concise"
@@ -118,7 +121,7 @@ export function findingComment(f: Finding, style: string = "detailed", suggestio
     )
     .join("\n\n") + f.evidence.filter(e => e.sourceUrl).map(e => "\n\n[Source: "+e.repository+" @ "+e.revision+"]("+e.sourceUrl+")").join("");
   const fix = f.suggestion && suggestion ? suggestionBlock(f.suggestion, suggestion.syntax, suggestion) : "";
-  return `**${priorityBadge(f.severity)} · ${f.title}**${tagBadges(f).map((t) => " · " + t).join("")} (${f.severity}, ${Math.round(f.confidence * 100)}% confidence)\n\n${f.description}\n\n**Impact:** ${f.impact}\n\n**Fix:** ${f.suggestedFix}${fix}${f.generatedTest ? generatedTestSection(f.generatedTest) : ""}${f.question ? `\n\n**Question for the author:** ${f.question.replace(/[\r\n]+/g, " ").replace(/@(?=[\w-])/g, "@\u200b")}` : ""}\n\n${evidence}${options.agentPrompt ? "\n\n<details><summary>Prompt for your coding agent</summary>\n\n" + agentPrompt([f]) + "\n\n</details>" : ""}\n\n<!-- openreview-finding:${f.fingerprint} -->`;
+  return `**${priorityBadge(f.severity)} · ${f.title}**${tagBadges(f).map((t) => " · " + t).join("")} (${f.severity}, ${Math.round(f.confidence * 100)}% confidence)\n\n${f.description}\n\n**Impact:** ${f.impact}\n\n**Fix:** ${f.suggestedFix}${fix}${f.generatedTest ? generatedTestSection(f.generatedTest) : ""}${question}\n\n${evidence}${options.agentPrompt ? "\n\n<details><summary>Prompt for your coding agent</summary>\n\n" + agentPrompt([f]) + "\n\n</details>" : ""}\n\n<!-- openreview-finding:${f.fingerprint} -->`;
 }
 
 // Footer line: which review this is on the pull request, and the comment that re-runs it where the
