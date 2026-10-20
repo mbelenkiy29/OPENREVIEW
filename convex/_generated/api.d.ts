@@ -28,6 +28,8 @@ import type * as budgetModel from "../budgetModel.js";
 import type * as cache from "../cache.js";
 import type * as chat from "../chat.js";
 import type * as chatJobs from "../chatJobs.js";
+import type * as cliReviewJobs from "../cliReviewJobs.js";
+import type * as cliReviews from "../cliReviews.js";
 import type * as cloudHandoff from "../cloudHandoff.js";
 import type * as commitSignals from "../commitSignals.js";
 import type * as context from "../context.js";
@@ -152,6 +154,8 @@ declare const fullApi: ApiFromModules<{
   cache: typeof cache;
   chat: typeof chat;
   chatJobs: typeof chatJobs;
+  cliReviewJobs: typeof cliReviewJobs;
+  cliReviews: typeof cliReviews;
   cloudHandoff: typeof cloudHandoff;
   commitSignals: typeof commitSignals;
   context: typeof context;
