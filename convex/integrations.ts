@@ -35,10 +35,11 @@ export const receipt=internalMutation({args:{token:v.string(),organizationId:v.i
 }});
 export const save=internalMutation({args:{token:v.string(),organizationId:v.id("organizations"),kind:v.optional(v.union(v.literal("linear"),v.literal("atlassian"),v.literal("notion"))),sites:v.optional(v.array(v.object({id:v.string(),name:v.string(),url:v.string(),scopes:v.array(v.string())}))),externalId:v.string(),name:v.string(),credentials:v.string(),expiresAt:v.number()},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true);
- if(!await hasEntitlement(ctx,a.organizationId,"context.requirements"))throw new Error(upgradeNote["context.requirements"]);
  if(!a.externalId||!a.name||a.name.length>200||a.credentials.length>20000||a.expiresAt<=Date.now())throw new Error("Invalid requirements connection");
  const kind=a.kind??"linear";
  const old=await ctx.db.query("integrationConnections").withIndex("by_account",q=>q.eq("organizationId",a.organizationId).eq("kind",kind).eq("externalId",a.externalId)).unique();
+ // Connecting a new workspace needs Pro; reconnecting an existing connection works on any plan (like approved conventions).
+ if(!old&&!await hasEntitlement(ctx,a.organizationId,"context.requirements"))throw new Error(upgradeNote["context.requirements"]);
  if(old?.active)throw new Error("Disconnect the existing requirements connection before reconnecting");
  if(old&&(await ctx.db.query("integrationRevocations").withIndex("by_connection",q=>q.eq("connectionId",old._id)).collect()).some(r=>r.status==="queued"))throw new Error("Linear revocation is pending; retry after it finishes");
  const data={sites:a.sites,jiraProjectIds:[],confluenceSpaceIds:[],externalId:a.externalId,name:a.name,credentials:a.credentials,expiresAt:a.expiresAt,active:true,generation:(old?.generation??0)+1,teamIds:[],projectIds:[],repositoryIds:[],error:undefined,refreshLease:undefined,refreshExpiresAt:undefined};

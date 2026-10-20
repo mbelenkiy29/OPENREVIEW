@@ -1003,6 +1003,8 @@ export default defineSchema({
     revoked: v.boolean(),
     // read | write | admin; absent on keys created before scopes (they keep full access).
     scopes: v.optional(v.array(v.string())),
+    // Passes only the Perforce routes (app/api/p4/*), which work on every plan; creatable without api.access.
+    perforce: v.optional(v.boolean()),
   })
     .index("by_hash", ["hash"])
     .index("by_org", ["organizationId"]),

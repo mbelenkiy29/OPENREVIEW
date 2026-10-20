@@ -66,8 +66,8 @@ export const entitlement = internalQuery({ args: { organizationId: v.id("organiz
 // The Pro features this workspace's plan lacks, for the dashboard's <Locked> settings (none with billing off).
 export const locked = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
   await authorize(ctx, a.token, a.organizationId);
-  const plan = await currentPlan(ctx, a.organizationId);
-  return entitlements.filter((key) => !entitled(plan, key));
+  const held = await Promise.all(entitlements.map((key) => hasEntitlement(ctx, a.organizationId, key)));
+  return entitlements.filter((_, i) => !held[i]);
 } });
 // Called by reviews.enqueue: counts an allowed review, or records a blocked one with its reason. Model calls
 // are what use the allowance (reserveUsage); this only stops a review that could not make any.

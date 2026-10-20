@@ -22,6 +22,8 @@ export const upgradeNote: Record<Entitlement, string> = {
   "auth.sso": "Single sign-on is on the Pro plan; a workspace admin can upgrade in Settings → Billing.",
   "audit.log": "The audit log is on the Pro plan; a workspace admin can upgrade in Settings → Billing. Changes are still recorded.",
 };
+// When the Pro gates shipped: SSO connections created before then stay fully editable on any plan.
+export const proGatesAt = Date.UTC(2026, 9, 21);
 // Without analytics.history, analytics reach back to the start of the UTC day 30 days ago.
 export const historyFloor = (now: number) => { const d = new Date(now); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - 30); };
 // The paid plan a Stripe seat price belongs to (monthly or annual); unknown prices map to nothing.

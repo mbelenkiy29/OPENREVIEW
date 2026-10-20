@@ -15,7 +15,8 @@ export class ApiAuthError extends Error {
 export const mcpRequests = new WeakSet<Request>();
 // Resolves a Bearer API key (or, at the MCP endpoint, an OAuth access token) to its workspace and
 // owner, and requires a scope (default read). API keys need a plan with API access (402 otherwise), except
-// for `plan: false` callers: the Perforce watcher and trigger, which are a code provider, not the public API.
+// for `plan: false` callers: the Perforce routes (a code provider, not the public API) and the key check in
+// /api/workspace. Perforce keys pass only those.
 export async function apiIdentity(request: Request, scope: ApiScope = "read", { plan = true } = {}) {
   const authorization = request.headers.get("authorization");
   if (authorization?.startsWith("Bearer ora_") && authorization.length <= 200) {
@@ -45,6 +46,7 @@ export async function apiIdentity(request: Request, scope: ApiScope = "read", { 
   }
   if (!hasScope(identity.scopes, scope)) throw new ApiAuthError(403, `This API key does not have the ${scope} scope`);
   if (plan && !identity.apiAccess) throw new ApiAuthError(402, upgradeNote["api.access"]);
+  if (plan && identity.perforce) throw new ApiAuthError(403, "This API key only works for Perforce indexing and reviews");
   return { ...identity, token: await signSession(identity.userId) };
 }
 // Authentication/scope failures keep their status; callers fall back to their own error for the rest.

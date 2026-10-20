@@ -105,8 +105,12 @@ async function main() {
     const apiKey = values.token ?? (values["api-key"] ? await readSecret("API key: ") : undefined);
     if (apiKey !== undefined) {
       const config = apiKeyLogin.parse({ url: serverUrl(values.url ?? process.env.OPENREVIEW_URL ?? defaultServer), apiKey });
-      const response = await fetch(new URL("/api/repositories", config.url), { headers: { authorization: `Bearer ${config.apiKey}` } });
-      if (!response.ok) throw new Error(`Login failed: HTTP ${response.status}. Generate an API key in dashboard Settings.`);
+      // /api/workspace accepts every valid key on every plan (Perforce keys too); other routes answer 402 without API access.
+      const response = await fetch(new URL("/api/workspace", config.url), { headers: { authorization: `Bearer ${config.apiKey}` } });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(`Login failed: HTTP ${response.status}. ${response.status === 401 ? "Generate an API key in dashboard Settings." : body.error ?? ""}`.trim());
+      }
       await replaceLogin(config);
       console.log("Authenticated. Configuration saved with owner-only permissions.");
       return;

@@ -18,11 +18,12 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
             {section[1] === "keys" && (isAdmin ? (
               <section>
                 <h2>Developer API keys</h2>
-                <Locked feature="api.access" locked={locked}><ApiKeyForm organizationId={organization._id} /></Locked>
+                <Locked feature="api.access" locked={locked} />
+                <ApiKeyForm organizationId={organization._id} perforceOnly={locked.includes("api.access")} />
                 {apiKeys.map((k) => (
                   <form action={revokeApiKey} key={k._id}>
                     <p>
-                      {k.name} · {k.prefix}… · {k.legacy ? "all scopes (created before scopes)" : k.scopes.join(", ")} ·{" "}
+                      {k.name} · {k.prefix}… · {k.perforce ? "Perforce only" : k.legacy ? "all scopes (created before scopes)" : k.scopes.join(", ")} ·{" "}
                       {k.revoked ? "Revoked" : "Active"}
                     </p>
                     <input type="hidden" name="keyId" value={k._id} />
