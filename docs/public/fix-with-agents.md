@@ -28,7 +28,7 @@ Cloud agents are available for repositories on the OpenReview GitHub App.
 
 ## Local agents (your machine)
 
-**Fix** buttons start Claude Code, Codex or Cursor Agent in your own checkout through the OpenReview bridge (`openreview bridge install`, then pair and register the repository under **Settings → Agents**). The agent leaves an uncommitted diff for you to review.
+**Fix** buttons start Claude Code, Codex or Cursor Agent in your own checkout through the OpenReview bridge (`openreview bridge install`, then pair and register the repository under **Settings → Agents**). The agent leaves an uncommitted diff for you to review. The bridge comes with the `openreview` command, which installs from an OpenReview source checkout, so it suits self-hosted deployments.
 
 Without the bridge, use **Open in Claude Code / Cursor / Codex / Conductor**, which opens the app with the prompt filled in, or copy the prompt.
 
