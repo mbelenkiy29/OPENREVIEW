@@ -68,6 +68,15 @@ test('rollups are idempotent, pick up later fixes, and never count repositories 
  expect((await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).filter(j=>j.name.includes('analyticsRollup:rollupDay')).map(j=>(j.args[0] as {day:string}).day)).toEqual(['2026-10-14','2026-10-13']);
 });
 
+test('the daily 35-day sweep pages through workspaces, staying under 1,000 scheduled functions per transaction',async()=>{
+ const t=convexTest({schema,modules,transactionLimits:true});
+ await t.run(async ctx=>{for(let i=0;i<30;i++)await ctx.db.insert('organizations',{name:'Org'+i,createdAt:0});});
+ await t.mutation(internal.analyticsRollup.sweep,{days:35});
+ await t.finishAllScheduledFunctions(vi.runAllTimers);
+ const rollups=(await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).filter(j=>j.name.includes('analyticsRollup:rollupDay'));
+ expect([rollups.length,new Set(rollups.map(j=>(j.args[0] as {organizationId:string}).organizationId)).size,rollups.every(j=>j.state.kind==='success')]).toEqual([30*35,30,true]);
+});
+
 test('the minutes-per-finding estimate is admin-only, validated and audited',async()=>{
  const {t,admin,member,org}=await setup();
  await roll(t,org);

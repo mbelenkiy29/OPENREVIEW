@@ -23,11 +23,11 @@ test("every table is either purged with a workspace or explicitly shared, throug
   for (const step of purgePlan) {
     if (step.via === "org") expect(indexFirst(step.table, step.index), step.table).toBe("organizationId");
     if (step.via === "repo") expect(indexFirst(step.table, step.index), step.table).toBe("repositoryId");
-    if (step.via === "child" || step.via === "repoChild") { expect(indexFirst(step.table, step.index), step.table).toBe(step.field); expect(indexFirst(step.parent.table, step.parent.index), step.parent.table).toBe(step.via === "child" ? "organizationId" : "repositoryId"); }
+    if (step.via === "child") { expect(indexFirst(step.table, step.index), step.table).toBe(step.field); expect(indexFirst(step.parent.table, step.parent.index), step.parent.table).toBe("organizationId"); }
   }
   // Children are purged before their parents are.
   const position = (t: string) => purgePlan.findIndex((s) => s.table === t);
-  for (const step of purgePlan) if (step.via === "child" || step.via === "repoChild") expect(position(step.table)).toBeLessThan(position(step.parent.table));
+  for (const step of purgePlan) if (step.via === "child") expect(position(step.table)).toBeLessThan(position(step.parent.table));
   expect(position("indexJobs")).toBeLessThan(position("repositories"));
 });
 
@@ -169,6 +169,36 @@ test("the purge resumes after an interruption: each chunk is a separate transact
   expect((await t.run((ctx) => ctx.db.get(deletion._id)))?.status).toBe("done");
   expect(await owned(t, acme.organizationId, acme.repo._id)).toEqual({});
   expect(await owned(t, rival.organizationId, rival.repo._id)).toEqual(rivalBefore);
+});
+
+test("a workspace with many index runs across many repositories purges to completion, under the 4,096 queries per transaction", async () => {
+  process.env.WORKSPACE_DELETION_GRACE_DAYS = "0";
+  const t = convexTest({ schema, modules, transactionLimits: true });
+  const acme = await workspace(t, 541, "Acme");
+  // 50 repositories × 100 index runs: walking every repository's runs for skipped files took 5,000+ queries.
+  await t.run(async (ctx) => {
+    const now = Date.now();
+    for (let r = 0; r < 50; r++) {
+      const repositoryId = r ? await ctx.db.insert("repositories", { organizationId: acme.organizationId, fullName: `acme/r${r}`, defaultBranch: "main", enabled: true, indexStatus: "indexed", createdAt: now }) : acme.repo._id;
+      for (let j = 0; j < 100; j++) { const jobId = await ctx.db.insert("indexJobs", { organizationId: acme.organizationId, repositoryId, sha: "a".repeat(40), status: "done", attempts: 1, processed: 1, total: 1, changed: 1, createdAt: now, updatedAt: now }); if (j % 25 === 0) await ctx.db.insert("indexSkippedFiles", { jobId, path: "big.bin" }); }
+    }
+  });
+  await t.mutation(api.dataControls.requestDeletion, { token: acme.token, organizationId: acme.organizationId, confirmName: "Acme" });
+  const [deletion] = await t.run((ctx) => ctx.db.query("workspaceDeletions").collect());
+  await t.mutation(internal.dataControls.startPurge, { deletionId: deletion._id });
+  for (let i = 0; i < 1000 && (await t.run((ctx) => ctx.db.get(deletion._id)))?.status !== "done"; i++) await t.mutation(internal.dataControls.purge, { deletionId: deletion._id });
+  expect((await t.run((ctx) => ctx.db.get(deletion._id)))).toMatchObject({ status: "done", counts: { indexJobs: 5001, indexSkippedFiles: 201, repositories: 50 } });
+  expect(await owned(t, acme.organizationId, acme.repo._id)).toEqual({});
+  expect(await t.run((ctx) => ctx.db.query("indexSkippedFiles").collect())).toEqual([]);
+}, 60_000);
+
+test("the retention sweep pages through workspaces, staying under 1,000 scheduled functions per transaction", async () => {
+  const t = convexTest({ schema, modules, transactionLimits: true });
+  await t.run(async (ctx) => { for (let i = 0; i < 1001; i++) await ctx.db.insert("organizations", { name: "Org" + i, createdAt: 0, reviewRetentionDays: 30 }); });
+  await t.mutation(internal.dataControls.retentionSweep, {});
+  await t.finishAllScheduledFunctions(vi.runAllTimers, 1000);
+  const runs = (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).filter((j) => j.name.includes("dataControls:retention") && !j.name.includes("Sweep"));
+  expect([runs.length, runs.every((j) => j.state.kind === "success")]).toEqual([1001, true]);
 });
 
 test("retention, data sharing and webhook pruning", async () => {

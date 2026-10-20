@@ -43,7 +43,9 @@ export async function enableIndexing(ctx:MutationCtx,repo:Doc<"repositories">){
 export async function cancelRepositoryIndex(ctx:MutationCtx,repo:Doc<"repositories">){
  const scheduled=repo.indexScheduledId?await ctx.db.system.get(repo.indexScheduledId):null;
  if(scheduled?.state.kind==="pending")await ctx.scheduler.cancel(scheduled._id);
- for(const job of await ctx.db.query("indexJobs").withIndex("by_repo",q=>q.eq("repositoryId",repo._id)).collect())if(job.status==="running")await ctx.db.patch(job._id,{status:"cancelled",updatedAt:Date.now()});
+ // Only the newest job can be running: indexing() supersedes a running job before starting another.
+ const job=await ctx.db.query("indexJobs").withIndex("by_repo",q=>q.eq("repositoryId",repo._id)).order("desc").first();
+ if(job?.status==="running")await ctx.db.patch(job._id,{status:"cancelled",updatedAt:Date.now()});
  if(["queued","indexing"].includes(repo.indexStatus))await ctx.db.patch(repo._id,{indexStatus:"cancelled",pendingIndexSha:undefined,error:undefined});
 }
 export async function disableRepository(ctx:MutationCtx,repo:Doc<"repositories">){await ctx.db.patch(repo._id,{enabled:false});await cancelRepositoryIndex(ctx,repo);}

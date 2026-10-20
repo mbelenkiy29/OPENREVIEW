@@ -15,7 +15,6 @@ import { openSubscription } from "../src/billing";
 type Step =
   | { table: TableNames; via: "org"; index: string }
   | { table: TableNames; via: "repo"; index: string; field?: "repositoryId" }
-  | { table: TableNames; via: "repoChild"; parent: { table: TableNames; index: string }; index: string; field: string }
   | { table: TableNames; via: "child"; parent: { table: TableNames; index: string }; index: string; field: string }
   | { table: TableNames; via: "scan"; match: "organizationId" | "repositoryOrConnection" }
   | { table: "organizations"; via: "self" };
@@ -32,7 +31,7 @@ export const purgePlan: Step[] = [
   { table: "providerEvents", via: "child", parent: { table: "providerConnections", index: "by_org" }, index: "by_connection_created", field: "connectionId" },
   { table: "providerIdentities", via: "child", parent: { table: "providerConnections", index: "by_org" }, index: "by_connection_user", field: "connectionId" },
   { table: "teamMembers", via: "child", parent: { table: "teams", index: "by_org" }, index: "by_team", field: "teamId" },
-  { table: "indexSkippedFiles", via: "repoChild", parent: { table: "indexJobs", index: "by_repo" }, index: "by_job_path", field: "jobId" },
+  { table: "indexSkippedFiles", via: "child", parent: { table: "indexJobs", index: "by_org" }, index: "by_job_path", field: "jobId" },
   // Per repository.
   ...([["repositorySettings", "by_repo"], ["repositoryFiles", "by_repo"], ["graphModuleReferences", "by_path"], ["symbols", "by_repo"], ["relationships", "by_repo"], ["indexJobs", "by_repo"], ["knowledgeEntries", "by_repo"], ["pullCatalogJobs", "by_repo"], ["codeChunks", "by_file"], ["embeddings", "by_path"], ["chunkEmbeddings", "by_path"], ["conversations", "by_pr"], ["p4Identities", "by_repo_user"]] as const).map(([table, index]) => ({ table, via: "repo" as const, index })),
   // Small tables without a workspace index.
@@ -86,11 +85,9 @@ async function runStep(ctx: MutationCtx, organizationId: Id<"organizations">, st
     for (const r of rows) await remove(ctx, step.table, r);
     return { deleted: rows.length, done: rows.length < BATCH };
   }
-  if (step.via === "repo" || step.via === "repoChild") {
+  if (step.via === "repo") {
     for (const repo of await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).take(2000)) {
-      let rows: ({ _id: string } & Record<string, unknown>)[] = [];
-      if (step.via === "repo") rows = await byField(ctx, step.table, step.index, "repositoryId", repo._id).take(BATCH);
-      else for (const parent of await byField(ctx, step.parent.table, step.parent.index, "repositoryId", repo._id).take(500)) { rows = await byField(ctx, step.table, step.index, step.field, parent._id).take(BATCH); if (rows.length) break; }
+      const rows = await byField(ctx, step.table, step.index, "repositoryId", repo._id).take(BATCH);
       if (rows.length) { for (const r of rows) await remove(ctx, step.table, r); return { deleted: rows.length, done: false }; }
     }
     return { deleted: 0, done: true };
@@ -196,9 +193,12 @@ async function removeReview(ctx: MutationCtx, review: Doc<"reviews">) {
   }
   await remove(ctx, "reviews", review as never);
 }
-export const retentionSweep = internalMutation({ args: {}, handler: async (ctx) => {
+// 25 workspaces per transaction (under 1,000 scheduled functions); the next page starts after this page's staggered runs.
+export const retentionSweep = internalMutation({ args: { cursor: v.optional(v.string()) }, handler: async (ctx, a) => {
+  const page = await ctx.db.query("organizations").paginate({ numItems: 25, cursor: a.cursor ?? null });
   let n = 0;
-  for (const org of await ctx.db.query("organizations").take(5000)) if (org.reviewRetentionDays || org.transcriptRetentionDays) { await ctx.scheduler.runAfter(n++ * 1000, internal.dataControls.retention, { organizationId: org._id }); }
+  for (const org of page.page) if (org.reviewRetentionDays || org.transcriptRetentionDays) { await ctx.scheduler.runAfter(n++ * 1000, internal.dataControls.retention, { organizationId: org._id }); }
+  if (!page.isDone) await ctx.scheduler.runAfter(n * 1000, internal.dataControls.retentionSweep, { cursor: page.continueCursor });
   return n;
 } });
 export const retention = internalMutation({ args: { organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<{ reviews: number; transcripts: number; more: boolean }> => {

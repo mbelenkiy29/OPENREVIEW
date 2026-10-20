@@ -31,10 +31,12 @@ export const rollupDay = internalMutation({ args: { organizationId: v.id("organi
   for (const r of rows.values()) await ctx.db.insert("analyticsDaily", { organizationId: a.organizationId, day: a.day, ...r, updatedAt: Date.now() });
   return rows.size;
 } });
-// Cron entry: recompute the last `days` days for every organization (one mutation per org-day).
-export const sweep = internalMutation({ args: { days: v.optional(v.number()) }, handler: async (ctx, a) => {
+// Cron entry: recompute the last `days` days for every organization (one mutation per org-day),
+// 10 organizations per transaction so even 90 days stays under 1,000 scheduled functions.
+export const sweep = internalMutation({ args: { days: v.optional(v.number()), cursor: v.optional(v.string()) }, handler: async (ctx, a) => {
   const days = Math.min(Math.max(a.days ?? 2, 1), 90), today = Date.now();
-  const orgs = (await ctx.db.query("organizations").take(5000)).map((o) => o._id);
-  for (const organizationId of orgs) for (let i = 0; i < days; i++) await ctx.scheduler.runAfter(0, internal.analyticsRollup.rollupDay, { organizationId, day: new Date(today - i * 86400000).toISOString().slice(0, 10) });
-  return orgs.length * days;
+  const page = await ctx.db.query("organizations").paginate({ numItems: 10, cursor: a.cursor ?? null });
+  for (const { _id: organizationId } of page.page) for (let i = 0; i < days; i++) await ctx.scheduler.runAfter(0, internal.analyticsRollup.rollupDay, { organizationId, day: new Date(today - i * 86400000).toISOString().slice(0, 10) });
+  if (!page.isDone) await ctx.scheduler.runAfter(0, internal.analyticsRollup.sweep, { days, cursor: page.continueCursor });
+  return page.page.length * days;
 } });

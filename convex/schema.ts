@@ -439,6 +439,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_repo", ["repositoryId"])
+    .index("by_org", ["organizationId"])
     .index("by_status", ["status"]),
   indexSkippedFiles: defineTable({
     jobId: v.id("indexJobs"),
