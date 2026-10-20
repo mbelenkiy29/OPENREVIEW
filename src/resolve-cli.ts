@@ -43,10 +43,16 @@ export function localGit(root: string, run: Exec = exec): LoopGit & { clean(): P
   };
 }
 
-// MCP client for the remote endpoint with the saved API key; tool results are JSON text.
-export async function mcpCaller(url: string, apiKey: string): Promise<{ call: McpCall; close(): Promise<void> }> {
-  const client = new Client({ name: "openreview-cli", version: "0.3.0" });
-  await client.connect(new StreamableHTTPClientTransport(new URL("/api/mcp", url), { requestInit: { headers: { authorization: `Bearer ${apiKey}` } } }));
+// MCP client for the remote endpoint; tool results are JSON text. The bearer is read on every request,
+// so a browser sign-in refreshes its access token during long runs.
+export async function mcpCaller(url: string, bearer: () => Promise<string>): Promise<{ call: McpCall; close(): Promise<void> }> {
+  const client = new Client({ name: "openreview-cli", version: "0.4.0" });
+  const authorized: typeof fetch = async (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set("authorization", `Bearer ${await bearer()}`);
+    return fetch(input, { ...init, headers });
+  };
+  await client.connect(new StreamableHTTPClientTransport(new URL("/api/mcp", url), { fetch: authorized }));
   return {
     async call(name, args) {
       const result = await client.callTool({ name, arguments: args }) as { content?: { text?: string }[]; isError?: boolean };

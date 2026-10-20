@@ -72,7 +72,8 @@ export async function bridgeMain(args:string[]) {
   await call(c,"pair",{code,name:values.name??hostname()});await save(c);
   console.log(`Open ${c.url}/dashboard/settings/agents and approve pairing code ${code}. Then run openreview bridge status. Credentials expire after 90 days and can be revoked there.`);return;
  }
- if(command==="install"){await installProtocol(directory,fileURLToPath(new URL("../bin/openreview.mjs",import.meta.url)),process.execPath);console.log("OpenReview protocol installed. Pair the bridge and register your repository before clicking Fix.");return;}
+ if(command==="install"){// The npm package (built with OPENREVIEW_CLI_VERSION defined) is a single file that launches itself.
+ await installProtocol(directory,fileURLToPath(new URL(process.env.OPENREVIEW_CLI_VERSION?import.meta.url:"../bin/openreview.mjs",import.meta.url)),process.execPath);console.log("OpenReview protocol installed. Pair the bridge and register your repository before clicking Fix.");return;}
  if(command==="status") {
   // Local setup diagnostics must work even before pairing or during an outage.
   for(const agent of ["codex","claude","cursor"]){try {if(agent==="cursor")await resolveCursorAgent();else if(agent==="codex"){const resolved=await resolveCodexAgent();await execute(resolved.file,[...resolved.prefix,"--help"],{timeout:10000});}else await execute(agent,["--help"],{timeout:10000});console.log(`${agent}: available`);}catch{console.log(`${agent}: unavailable`);}}

@@ -1,0 +1,39 @@
+{
+  "name": "openreview-cli",
+  "version": "0.1.0",
+  "description": "OpenReview CLI: AI code review of your commits before you push, for you and your coding agents",
+  "type": "module",
+  "bin": {
+    "openreview": "dist/openreview.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "tree-sitter-wasms": "0.1.13",
+    "typescript": "5.9.3",
+    "web-tree-sitter": "0.22.6"
+  },
+  "scripts": {
+    "prepublishOnly": "cd ../.. && pnpm build:cli"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mbelenkiy29/OPENREVIEW.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://openreview.tech/docs/cli",
+  "keywords": [
+    "code-review",
+    "ai",
+    "cli",
+    "claude-code",
+    "codex"
+  ],
+  "license": "MIT"
+}

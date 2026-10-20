@@ -1,21 +1,51 @@
 # CLI
 
-Review committed changes locally against their merge base:
+The `openreview` command reviews your commits before you push, from your terminal or from a coding agent such as Claude Code or Codex.
+
+## Install and sign in
 
 ```sh
-pnpm cli review --base main
-pnpm cli review --json
-pnpm cli review --security --mode deep
-pnpm cli review --agent      # output for coding agents
-pnpm cli review --inline     # file:line blocks with surrounding code
-pnpm cli review --engine agentic
-pnpm cli review --resume     # continue an interrupted agentic review
+npm install -g openreview-cli
+openreview login
 ```
 
-The CLI is for self-hosted deployments and development: run `npm link` in an OpenReview source checkout to install the `openreview` command. On a hosted workspace, fix findings with cloud agents, the Open in links or the [agent plugins](agent-plugins.md) instead; see [Fix with agents](fix-with-agents.md).
+`openreview login` opens your browser to sign in and choose a workspace. The CLI keeps the sign-in owner-only in `~/.config/openreview/config.json` and renews it on its own.
 
-- **Model credentials:** local reviews use model credentials from your environment.
-- **Repository config:** they read `.openreview.json` from the base commit.
+- **Self-hosted server:** pass `--url https://review.example.com`, or set `OPENREVIEW_URL`.
+- **CI and scripts:** sign in with an API key instead: `openreview login --url <server> --token <api-key>`.
+- `openreview status` shows the server and your repositories. `openreview logout` signs out and revokes the sign-in.
+
+It needs Node.js 24 or newer. In a checkout of this repository, `pnpm cli` runs the same command, and `npm link` installs it.
+
+## Review your changes
+
+```sh
+openreview review                   # committed changes since the merge base with main
+openreview review --base develop
+openreview review --security --mode deep
+openreview review --agent           # one JSON object, for coding agents
+openreview review --json
+openreview review --inline          # file:line blocks with surrounding code
+```
+
+Signed in, OpenReview reviews the change on your workspace. The CLI sends the diff and the changed files. The server adds context from the repository's index and applies the workspace's rules, settings and model.
+
+- **Usage:** each review counts toward the workspace's plan like a pull request review, and its model usage shows in Analytics.
+- **Repository:** the checkout's `origin` must be connected and indexed in the workspace.
+- **Retention:** the uploaded code is deleted when the review ends, and the result after a day. Only you can read it.
+- `--mode` asks for a review tier, up to the workspace's cap; `--security` reviews security only. Commit your work first: uncommitted edits are not reviewed.
+
+### Review on this machine
+
+`--local`, or reviewing while signed out, runs the review on this machine with model credentials from your environment (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`):
+
+```sh
+openreview review --local
+openreview review --local --engine agentic
+openreview review --local --resume  # continue an interrupted agentic review
+```
+
+- **Repository config:** local reviews read `.openreview.json` from the base commit.
 - **Limits:** they never execute repository code, and index at most 5,000 files or 20 MB.
 
 `--inline` prints each finding as a `file:line` block. The block includes two lines of code on either side, with the flagged lines marked `>`, then the priority, any tags, the explanation and the suggested fix.
@@ -24,12 +54,12 @@ The CLI is for self-hosted deployments and development: run `npm link` in an Ope
 
 If a review is interrupted (for example with Ctrl-C), run the same command with `--resume`, which implies the agentic engine, to continue from the last completed step. The saved progress is used only when `HEAD` is unchanged. If you committed since, it is discarded and the review starts over. It is removed when a review finishes.
 
-## Connect to a server
+## With coding agents
 
-```sh
-openreview login --url https://review.example.com --token <api-key>
-openreview status
-```
+Claude Code, Codex and other agents can run `openreview review --agent` before they push, and fix what it finds. After you sign in once, it runs without prompts. The animated logo and the progress line appear only in an interactive terminal, never in agent output or pipes.
+
+- The [agent plugin](agent-plugins.md) has a **review-local-changes** skill that runs this loop.
+- `openreview resolve --pr <number>` fixes an open pull request's findings with Claude Code or Codex.
 
 ## Onboard a workspace
 

@@ -109,6 +109,9 @@ importers:
       convex-test:
         specifier: ^0.0.60
         version: 0.0.60(convex@1.46.0(react@19.3.0))
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       eslint:
         specifier: ^9.39.5
         version: 9.39.5

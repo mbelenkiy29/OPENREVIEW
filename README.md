@@ -245,18 +245,26 @@ Avoid printing secrets in logs, terminal transcripts, or CI output. Rotate sessi
 ## CLI
 
 ```sh
+npm install -g openreview-cli
+openreview login
+openreview review --agent
+```
+
+Signed in, `openreview review` runs on your workspace with its model, rules and plan, and the usage shows in the dashboard; `--local` (or signing out) reviews on your machine with your own model key. See [CLI](docs/public/cli.md). From this checkout:
+
+```sh
 pnpm cli --help
 pnpm cli review --base main
 pnpm cli review --json
 pnpm cli review --agent
 pnpm cli review --security --mode deep
 pnpm cli review --inline
-pnpm cli review --engine agentic --resume
+pnpm cli review --local --engine agentic --resume
 pnpm cli onboard --repositories all
 pnpm cli resolve --pr 42 --fix-agent claude
 ```
 
-To install the `openreview` command from this checkout, run `npm link` (Node.js 24). Then run `openreview review --agent` from your repository. Local review compares committed HEAD with the merge base; commit your working changes first. Configure model credentials through the environment or `.env.local` in that repository. Local indexing respects ignored paths and limits eligible source to 5,000 files / 20 MB; it does not execute repository code.
+To install the `openreview` command from this checkout, run `npm link` (Node.js 24); `pnpm build:cli` builds the `openreview-cli` npm package in `packages/cli`. Review compares committed HEAD with the merge base; commit your working changes first. Configure model credentials through the environment or `.env.local` in that repository. Local indexing respects ignored paths and limits eligible source to 5,000 files / 20 MB; it does not execute repository code.
 
 Optional `.openreview.json`:
 
@@ -264,7 +272,7 @@ Optional `.openreview.json`:
 {"rules":[{"id":"membership","instructions":"Every organization API must validate membership.","severity":"high","category":"security","globs":["src/api/**"],"enabled":true}]}
 ```
 
-Generate an API key in dashboard Settings, then `openreview login --url https://review.example.com --token <key>` and `openreview status`. CLI configuration is saved with owner-only filesystem permissions. Local review works independently of server login.
+`openreview login` signs in through the browser; for CI, generate an API key in dashboard Settings and run `openreview login --url https://review.example.com --token <key>`. `openreview status` shows the server and repositories. CLI configuration is saved with owner-only filesystem permissions. Local review works independently of server login.
 
 For local agent fixes, install the selected Codex, Claude Code, or Cursor Agent CLI and sign in to it. Pair and register the checkout:
 

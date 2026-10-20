@@ -13,3 +13,5 @@ output/
 .vercel
 forge/bitbucket/static/build/
 deploy/grammars/
+packages/cli/dist/
+packages/cli/LICENSE

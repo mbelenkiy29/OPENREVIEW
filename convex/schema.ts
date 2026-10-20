@@ -1008,4 +1008,23 @@ export default defineSchema({
     expiresAt: v.number(),
     createdAt: v.number(),
   }).index("by_user", ["userId"]),
+  // Reviews of a developer's local commits sent by the CLI (convex/cliReviews.ts). The uploaded diff and
+  // files live in storage until the review ends; the row and its result are removed after a day.
+  cliReviews: defineTable({
+    organizationId: org,
+    repositoryId: repo,
+    userId: v.id("users"),
+    status: v.union(v.literal("queued"), v.literal("running"), v.literal("completed"), v.literal("failed")),
+    stage: v.optional(v.string()),
+    baseSha: v.string(),
+    headSha: v.string(),
+    title: v.string(),
+    mode: v.optional(v.string()),
+    security: v.boolean(),
+    inputStorageId: v.optional(v.id("_storage")),
+    result: v.optional(v.string()),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_org", ["organizationId"]),
 });

@@ -11,6 +11,8 @@ import { GET as context } from "../context/route";
 import { GET as repositories } from "../repositories/route";
 import { POST as query } from "../query/route";
 import { POST as search } from "../search/route";
+import { POST as localReview } from "../reviews/local/route";
+import { GET as localReviewProgress } from "../reviews/local/[id]/route";
 
 // Remote MCP tool calls run the public API route handlers in-process with the caller's
 // Authorization header, so scopes, tenant checks and validation are exactly the REST ones.
@@ -28,6 +30,8 @@ const routes: [string, RegExp, Handler, string?][] = [
   ["GET", /^\/api\/repositories$/, repositories as Handler],
   ["POST", /^\/api\/query$/, query as Handler],
   ["POST", /^\/api\/search$/, search as Handler],
+  ["POST", /^\/api\/reviews\/local$/, localReview as Handler],
+  ["GET", /^\/api\/reviews\/local\/([^/]+)$/, localReviewProgress as Handler, "id"],
 ];
 export function inProcessApi(origin: string, authorization: string, signal?: AbortSignal): ApiCall {
   return async (path, init = {}) => {
