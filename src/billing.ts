@@ -47,6 +47,18 @@ export function billingDecision(account: BillingAccount, used: number, now: numb
   return { ...base, allowed: true };
 }
 
+/** The 80% / 100% usage alert email; `used` is settled usage and `now` falls in the alert's period. */
+export function usageAlertEmail(workspace: string, threshold: number, d: BillingDecision, overageMicros: number, now: number, billingUrl?: string) {
+  const reset = resetText(now), pause = threshold >= 100 ? `are paused until ${reset}` : "pause when it runs out";
+  const next = d.plan === "free" ? `Reviews ${pause}. A workspace admin can upgrade to Starter or Pro in Settings → Billing for more usage.`
+    : d.capMicros ? `Extra usage is on: ${usdText(Math.max(0, d.capMicros - overageMicros))} of the ${usdText(d.capMicros)} monthly cap is left. A workspace admin can change the cap in Settings → Billing.`
+    : `Extra usage is off, so reviews ${pause}. A workspace admin can turn on extra usage in Settings → Billing.`;
+  return {
+    subject: `${workspace} used ${threshold >= 100 ? "all" : `${threshold}%`} of this month's included OpenReview usage`,
+    text: `${workspace} has used ${usdText(d.used)} of its ${usdText(d.limit ?? 0)} of included model usage this month. Usage resets on ${reset}.\n\n${next}${billingUrl ? `\n\n${billingUrl}` : ""}`,
+  };
+}
+
 /** A linked Stripe subscription that has not ended yet, so Stripe can still charge for it. */
 export const openSubscription = (account: { subscriptionId?: string; status: string } | null | undefined) => Boolean(account?.subscriptionId) && !["canceled", "incomplete_expired"].includes(account!.status);
 /** When a trial that has not started yet would end if it started now. */

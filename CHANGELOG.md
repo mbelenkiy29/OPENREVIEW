@@ -11,6 +11,7 @@
   - **Pro:** per seat, with more usage and with deep reviews, generated reproduction tests and fix pull requests. Pro also includes requirements checks from Linear, Jira, Confluence and Notion, learned conventions, API keys, analytics older than 30 days, SSO and the audit log.
 - On other plans, Pro settings stay visible but disabled, with a link to Settings → Billing. SSO that is already set up keeps working, conventions you approved keep applying, and existing API keys are kept: they answer with an upgrade message until you upgrade.
 - Usage is pooled across the workspace, and extra usage is billed at model cost up to a cap you set.
+- Workspace owners and admins get an email when the workspace has used 80% and then 100% of its monthly usage, and Settings → Billing shows a banner. On Free the email says when reviews resume and how to upgrade; on Starter and Pro it says whether extra usage is on and how much of the cap is left. Add a verified email under Settings → Notifications to get them.
 - Security checks, every provider, and the CLI and MCP signed in through the browser are on every plan.
 
 ### Your own model key

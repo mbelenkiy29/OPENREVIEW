@@ -127,7 +127,10 @@ export async function settleUsage(ctx: MutationCtx, usageId: Id<"billingUsage">,
   const account = await accountOf(ctx, usage.organizationId), decision = account ? billingDecision(account, 0, Date.now(), billingConfig()) : null;
   const before = usage.usedMicros ?? 0, after = before + amount, limit = decision?.plan === "starter" || decision?.plan === "pro" ? decision.limit! : null;
   const overage = limit === null ? 0 : Math.max(0, after - limit) - Math.max(0, before - limit);
-  await ctx.db.patch(usage._id, { usedMicros: after, reservedMicros: Math.max(0, (usage.reservedMicros ?? 0) - reservedMicros), ...(overage ? { overageMicros: (usage.overageMicros ?? 0) + overage } : {}) });
+  // Usage alerts: each threshold once per period; a jump past both sends only the 100% email.
+  const sent = usage.alertsSent ?? [], crossed = decision?.limit ? [80, 100].filter((p) => !sent.includes(p) && after * 100 >= decision.limit! * p) : [];
+  await ctx.db.patch(usage._id, { usedMicros: after, reservedMicros: Math.max(0, (usage.reservedMicros ?? 0) - reservedMicros), ...(overage ? { overageMicros: (usage.overageMicros ?? 0) + overage } : {}), ...(crossed.length ? { alertsSent: [...sent, ...crossed] } : {}) });
+  if (crossed.length) await ctx.scheduler.runAfter(0, internal.notificationJobs.usageAlert, { usageId, threshold: crossed.at(-1)! });
   if (!overage) return;
   const id = await ctx.db.insert("billingMeterEvents", { organizationId: usage.organizationId, period: usage.period, micros: overage, status: "pending", attempts: 0, createdAt: Date.now() });
   await ctx.scheduler.runAfter(0, internal.billingJobs.reportUsage, { id });

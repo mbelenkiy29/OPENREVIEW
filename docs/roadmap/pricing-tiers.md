@@ -197,14 +197,14 @@ The second pass gated the rest of Pro (P1.4, P1.6, plus `analytics.history`, `au
 **Acceptance:**
 - [ ] Tests: ingestion is skipped, existing rules still apply, key creation is denied, and the API returns 402 with an upgrade message.
 
-### - [ ] P1.7 Fair-use alerts
+### - [x] P1.7 Fair-use alerts
 **Depends on:** P0.1
 **Files:** `convex/billing.ts` (`reviewAllowance`), `convex/notifications.ts`, the email templates.
 **Build:**
 - When a workspace crosses 80% and then 100% of its monthly fair-use limit, email the admins once per threshold per month and show a banner in Settings → Billing.
 
 **Acceptance:**
-- [ ] Tests: each alert is sent exactly once per threshold per month and never to viewers.
+- [x] Tests: each alert is sent exactly once per threshold per month and never to viewers.
 
 ## Phase 2: Business tier
 
