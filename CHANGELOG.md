@@ -81,6 +81,7 @@
 - A Security page (`/security`) describes how the hosted service handles code: what is stored and sent to the model, secret redaction, access control, encryption, GitHub App permissions, retention and how to report a vulnerability. The reporting contact is also published in `/.well-known/security.txt` and `SECURITY.md`.
 - Docs search: page titles and section headings, with `/` to focus it and Enter to open the top result.
 - The changelog is dated by month, each section has a link, and it has an RSS feed at `/changelog/feed.xml`.
+- The changelog can also come by email: subscribe on `/changelog` and confirm the link. At most once a week you get only the entries added since the last email, and every email has an unsubscribe link.
 - Accessibility:
   - tables, code and demo windows that scroll can be reached and scrolled with the keyboard;
   - links inside text are underlined;

@@ -142,6 +142,8 @@ export default defineSchema({
     window: v.number(),
     count: v.number(),
   }).index("by_key", ["key"]),
+  // One row: the changelog entries the last email digest covered (src/changelog.ts feedDigest keys, space-separated).
+  changelogDigests: defineTable({ keys: v.string(), sentAt: v.number() }),
   modelCache: defineTable({
     organizationId: org,
     key: v.string(),

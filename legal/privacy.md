@@ -59,6 +59,10 @@ Our hosting providers keep server logs that include IP addresses.
 - **Who can see it:** posts, votes and comments on the public boards, with your name and picture, are visible to anyone who visits them.
 - **In your browser:** the UserJot widget keeps its own session in your browser so it remembers you between visits.
 
+**Changelog emails.** If you subscribe on the [changelog](/changelog), we send your email address to our email provider, which keeps the subscriber list and sends the updates.
+- **Confirmation first:** nothing is kept until you click the link in the confirmation email.
+- **Leaving:** every update has an unsubscribe link.
+
 **Cookies.** Most of our cookies are needed for the service to work:
 - your sign-in session;
 - your active workspace and team;
@@ -81,6 +85,7 @@ We use the information above to:
 - authenticate you, keep accounts and workspaces secure, and prevent abuse;
 - process subscriptions and enforce plan limits;
 - respond to support requests and send service messages, such as sign-in links, invitations and billing notices;
+- send changelog emails, only if you subscribed to them;
 - keep the service reliable, diagnose problems and understand which features are used;
 - meet legal obligations.
 
@@ -108,7 +113,7 @@ We share information only as needed to run the service, with:
 | PostHog | Product analytics |
 | UserJot | Feedback boards, roadmap and the feedback widget |
 | Linear, Atlassian, Notion, Slack | Only when your workspace connects them |
-| An email delivery provider | Only when email sign-in or email notifications are turned on |
+| An email delivery provider | Only when email sign-in or email notifications are turned on, or you subscribe to changelog emails |
 
 Information is also shared:
 - **With your workspace:** other members of your workspace can see its repositories, reviews and settings, according to their roles. Comments OpenReview posts on pull requests are visible to anyone who can see those pull requests on your code host.

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { changelogFeed, parseChangelog, plainText } from "../src/changelog";
+import { changelogFeed, digestEmail, feedDigest, parseChangelog, plainText } from "../src/changelog";
 
 const sample = `# Changelog\n\nIntro ignored.\n\n## October 2026\n\nA month note.\n\n### Site\n- A **bold** entry with \`code\` & <tags>.\n\n### Billing\n- [Promo codes](/docs/billing).\n`;
 
@@ -25,6 +25,24 @@ test("the RSS feed has one item per section, escaped, and a new guid only when a
   assert.equal(guids(changed)[0], guids(feed)[0], "unchanged section keeps its guid");
   assert.notEqual(guids(changed)[1], guids(feed)[1], "changed section gets a new guid");
   assert.equal(plainText("- A **bold** [link](/x) with `code`"), "• A bold link with code");
+});
+
+test("the email digest has only entries added since the last one, read back from the feed", () => {
+  const feed = (md: string) => changelogFeed(parseChangelog(md), "https://openreview.tech", new Date("2026-10-17T00:00:00Z"));
+  const first = feedDigest(feed(sample), new Set());
+  assert.deepEqual(first.sections.map((s) => [s.title, s.entries]), [["Site · October 2026", ["• A bold entry with code & <tags>."]], ["Billing · October 2026", ["• Promo codes."]]]);
+  const later = sample.replace("### Billing\n", "### Billing\n- Annual plans.\n") + "\n## November 2026\n\n### Site\n- A bold entry with code & <tags>.\n";
+  const next = feedDigest(feed(later), new Set(first.keys));
+  assert.deepEqual(next.sections.map((s) => [s.link, s.entries]), [
+    ["https://openreview.tech/changelog#october-2026-billing", ["• Annual plans."]],
+    ["https://openreview.tech/changelog#november-2026-site", ["• A bold entry with code & <tags>."]],
+  ], "the same text in another month is new");
+  assert.equal(next.keys.length, 4);
+  assert.deepEqual(feedDigest(feed(later), new Set(next.keys)).sections, []);
+  const email = digestEmail(next.sections, "https://openreview.tech");
+  assert.equal(email.subject, "What's new in OpenReview: Billing, Site");
+  assert.match(email.text, /Billing · October 2026\n• Annual plans\.\nhttps:\/\/openreview\.tech\/changelog#october-2026-billing/);
+  assert.match(email.text, /\{\{\{RESEND_UNSUBSCRIBE_URL\}\}\}$/);
 });
 
 test("CHANGELOG.md is dated by month, with no Unreleased heading", () => {
