@@ -43,6 +43,8 @@ test("the email digest has only entries added since the last one, read back from
   assert.equal(email.subject, "What's new in OpenReview: Billing, Site");
   assert.match(email.text, /Billing · October 2026\n• Annual plans\.\nhttps:\/\/openreview\.tech\/changelog#october-2026-billing/);
   assert.match(email.text, /\{\{\{RESEND_UNSUBSCRIBE_URL\}\}\}$/);
+  assert.match(email.html, /<a href="\{\{\{RESEND_UNSUBSCRIBE_URL\}\}\}">Unsubscribe<\/a>/);
+  assert.ok(email.html.includes("• A bold entry with code &amp; &lt;tags&gt;.") && !email.html.includes("<tags>"), "entries are HTML-escaped");
 });
 
 test("CHANGELOG.md is dated by month, with no Unreleased heading", () => {

@@ -8,10 +8,10 @@ const svc='changelog-service',env=['RESEND_API_KEY','EMAIL_FROM','RESEND_CHANGEL
 beforeEach(()=>{vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date']});vi.setSystemTime(Date.UTC(2026,9,19,12));Object.assign(process.env,{SERVICE_SECRET:svc,APP_URL:'https://review.example.com'});});
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();for(const k of env)delete process.env[k];});
 
-// Resend and the live feed, faked: contacts that already exist answer 409 to a create, as an existing address would.
+// Resend and the live feed, faked: a create for a contact that already exists answers 409, or 200 without changing it.
 function fakeResend(){
  const mails:{to:string;text:string}[]=[],broadcasts:Record<string,unknown>[]=[],calls:string[]=[],contacts=new Map<string,{unsubscribed:boolean;segments:Set<string>}>();
- const state={feed:''};
+ const state={feed:'',existingCreate:409};
  vi.spyOn(globalThis,'fetch').mockImplementation(async(u:string|URL|Request,init?:RequestInit)=>{
   const url=new URL(String(u)),method=init?.method??'GET',body=init?.body?JSON.parse(String(init.body)):{};
   calls.push(`${method} ${url.pathname}`);
@@ -19,7 +19,7 @@ function fakeResend(){
   if(url.pathname==='/emails'){mails.push({to:body.to[0],text:body.text});return Response.json({id:'m'+mails.length});}
   if(url.pathname==='/broadcasts'){broadcasts.push(body);return Response.json({id:'b'+broadcasts.length});}
   if(url.pathname==='/contacts'){
-   if(contacts.has(body.email))return Response.json({name:'conflict'},{status:409});
+   if(contacts.has(body.email))return state.existingCreate===200?Response.json({id:'c'}):Response.json({name:'conflict'},{status:409});
    contacts.set(body.email,{unsubscribed:body.unsubscribed,segments:new Set(body.segments.map((s:{id:string})=>s.id))});return Response.json({id:'c'});
   }
   const [,,email,,segment]=url.pathname.split('/'),contact=contacts.get(decodeURIComponent(email));
@@ -51,6 +51,10 @@ test('changelog sign-up is double opt-in, stores no address, and lands in the Re
  expect(await t.action(api.changelogJobs.confirm,{secret:svc,token})).toBe(true);
  expect(r.contacts.get('reader@example.com')!.unsubscribed).toBe(false);
  expect(r.calls.slice(-3)).toEqual(['POST /contacts','PATCH /contacts/reader%40example.com','POST /contacts/reader%40example.com/segments/seg_1']);
+ // Resend may instead answer the create with 200 and change nothing: the contact is still subscribed again and back in the segment.
+ r.state.existingCreate=200;Object.assign(r.contacts.get('reader@example.com')!,{unsubscribed:true,segments:new Set()});
+ expect(await t.action(api.changelogJobs.confirm,{secret:svc,token})).toBe(true);
+ expect(r.contacts.get('reader@example.com')).toEqual({unsubscribed:false,segments:new Set(['seg_1'])});
  // Tampered or expired links do nothing, and each address gets 3 links an hour.
  expect(await t.action(api.changelogJobs.confirm,{secret:svc,token:token.slice(0,-2)+'xx'})).toBe(false);
  await t.action(api.changelogJobs.subscribe,{secret:svc,email:'reader@example.com'});
@@ -73,6 +77,7 @@ test('the weekly digest sends one broadcast with only the new entries, never the
  expect(r.broadcasts[0]).toMatchObject({segment_id:'seg_1',from:'OpenReview <noreply@example.com>',send:true,subject:"What's new in OpenReview: Site"});
  expect(r.broadcasts[0].text).toContain('• Changelog by email.');
  expect(r.broadcasts[0].text).not.toContain('RSS feed');
+ expect(r.broadcasts[0].html).toContain('<a href="{{{RESEND_UNSUBSCRIBE_URL}}}">Unsubscribe</a>');
  expect(await t.action(internal.changelogJobs.digest,{})).toBe('0 sections sent');
  // A broken feed is not recorded, so the next good run still sends only what is new.
  r.state.feed='<rss></rss>';
@@ -80,4 +85,12 @@ test('the weekly digest sends one broadcast with only the new entries, never the
  r.state.feed=feed(md.replace('- RSS feed.\n','- RSS feed.\n- Changelog by email.\n'));
  expect(await t.action(internal.changelogJobs.digest,{})).toBe('0 sections sent');
  expect(r.broadcasts).toHaveLength(1);
+});
+
+test('changelog sign-ups are capped at 100 an hour across all addresses',async()=>{
+ const t=convexTest(schema,modules);
+ for(let i=0;i<100;i++)await t.mutation(internal.changelog.limitSubscribe,{emailHash:'h'+i});
+ await expect(t.mutation(internal.changelog.limitSubscribe,{emailHash:'another'})).rejects.toThrow('Rate limit');
+ vi.advanceTimersByTime(3600_000);
+ await t.mutation(internal.changelog.limitSubscribe,{emailHash:'another'});
 });

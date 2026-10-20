@@ -40,8 +40,9 @@ export const confirm = action({ args: { secret: v.string(), token: v.string() },
   const email = await jwtDecrypt(a.token, linkKey(), { audience: "changelog", keyManagementAlgorithms: ["dir"], contentEncryptionAlgorithms: ["A256GCM"] })
     .then((r) => emailAddress.parse(r.payload.email)).catch(() => null);
   if (!email) return false;
-  if ((await resend("/contacts", "POST", { email, unsubscribed: false, segments: [{ id }] })).ok) return true;
-  // Resend already has the address (for example, someone who unsubscribed): subscribe it again and add it to the segment.
+  await resend("/contacts", "POST", { email, unsubscribed: false, segments: [{ id }] });
+  // Resend may already have the address (for example, someone who unsubscribed) and answer the create with
+  // a success or an error without changing it, so always subscribe it again and add it to the segment.
   const contact = `/contacts/${encodeURIComponent(email)}`;
   const updated = await resend(contact, "PATCH", { unsubscribed: false });
   const added = updated.ok ? await resend(`${contact}/segments/${id}`, "POST") : updated;

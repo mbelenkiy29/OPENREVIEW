@@ -86,12 +86,15 @@ export function feedDigest(feed: string, seen: ReadonlySet<string>) {
   return { sections, keys };
 }
 
-/** A plain-text digest for a Resend broadcast; Resend fills in the unsubscribe link. */
+/** A digest for a Resend broadcast, in plain text and HTML; Resend fills in the unsubscribe link. */
 export function digestEmail(sections: DigestSection[], origin: string) {
   const areas = [...new Set(sections.map((s) => s.title.split(" · ")[0]))].join(", ");
   const body = sections.map((s) => `${s.title}\n${s.entries.join("\n")}\n${s.link}`).join("\n\n");
+  const html = sections.map((s) => `<h3><a href="${escapeXml(s.link)}">${escapeXml(s.title)}</a></h3><p>${s.entries.map(escapeXml).join("<br>")}</p>`).join("");
   return {
     subject: `What's new in OpenReview: ${areas}`.slice(0, 200),
     text: `New in OpenReview since the last update:\n\n${body}\n\nThe full changelog: ${origin}/changelog\n\nUnsubscribe: {{{RESEND_UNSUBSCRIBE_URL}}}`,
+    // Resend documents the unsubscribe placeholder for HTML, so the link is sure to be filled in here.
+    html: `<p>New in OpenReview since the last update:</p>${html}<p><a href="${escapeXml(origin)}/changelog">The full changelog</a></p><p><a href="{{{RESEND_UNSUBSCRIBE_URL}}}">Unsubscribe</a></p>`,
   };
 }
