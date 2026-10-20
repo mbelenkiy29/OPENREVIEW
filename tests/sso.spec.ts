@@ -126,3 +126,37 @@ test("SSO: changing the identity provider drops domain trust and pauses sign-in 
   expect(await t.action(api.ssoJobs.verifyDomain, { token: owner.token, domainId })).toBe(true);
   expect((await login("okta-erin", "erin@acme.com")).member).toBe(false);
 });
+
+test("SSO: after an IdP change, proving a different domain does not let the new IdP replay old subjects", async () => {
+  const t = convexTest(schema, modules);
+  const browser = async (providerUserId: string, login: string, email?: string) => {
+    const sid = randomBytes(32).toString("base64url");
+    const userId = await t.mutation(api.identity.signIn, { secret, provider: "github", providerUserId, login, avatar: "", ...(email ? { email } : {}), emailVerified: Boolean(email), sessionHash: sessionHash(sid) });
+    return { id: userId, token: await jwt(userId, sid) };
+  };
+  const owner = await browser("401", "owner", "owner@acme.com"), admin = await browser("402", "admin");
+  const org = await t.mutation(api.users.createOrganization, { token: owner.token, name: "Acme" });
+  await t.run((ctx) => ctx.db.insert("organizationMembers", { organizationId: org, userId: admin.id, role: "admin" }));
+  admin.token = await jwt(admin.id);
+  const saml = (samlEntryPoint: string, samlIdpCert: string) => t.mutation(api.sso.saveConnection, { token: admin.token, organizationId: org, protocol: "saml", name: "Okta", active: true, jitRole: "none", samlEntryPoint, samlIdpCert });
+  const verify = async (domain: string) => {
+    const domainId = await t.mutation(api.sso.addDomain, { token: admin.token, organizationId: org, domain });
+    const d = (await t.query(api.sso.settings, { token: admin.token, organizationId: org })).domains.find((x) => x.domain === domain)!;
+    dns.records.set(d.txtName, [[d.txtValue]]);
+    expect(await t.action(api.ssoJobs.verifyDomain, { token: admin.token, domainId })).toBe(true);
+  };
+  await saml("https://idp.acme.com/sso", cert);
+  const connectionId = (await t.query(api.sso.settings, { token: admin.token, organizationId: org })).connection!._id as Id<"ssoConnections">;
+  await verify("acme.com");
+  const login = (subject: string, email: string) => t.mutation(api.sso.signIn, { secret, connectionId, subject, email, name: subject, sessionHash: sessionHash(randomBytes(32).toString("base64url")) });
+  expect((await login("okta-owner", "owner@acme.com")).userId).toBe(owner.id);
+
+  // The admin re-points the IdP and proves a domain they own; acme.com is never proven again.
+  await saml("https://idp.attacker.example/sso", cert.replace("test", "evil"));
+  await verify("attacker.example");
+  // The owner's old subject is forgotten: it signs in as a fresh, unlinked user, not as the owner.
+  const replay = await login("okta-owner", "owner@acme.com");
+  expect([replay.userId === owner.id, replay.member]).toEqual([false, false]);
+  // New subjects on the proven domain still sign in.
+  expect((await login("evil-1", "someone@attacker.example")).userId).not.toBe(owner.id);
+});

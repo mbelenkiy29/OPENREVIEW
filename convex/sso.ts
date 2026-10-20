@@ -1,5 +1,6 @@
 import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { audit, authorize, service } from "./auth";
 import { linkIdentity } from "./identity";
@@ -13,6 +14,13 @@ const verifiedDomains = async (ctx: QueryCtx, connectionId: Id<"ssoConnections">
 const httpsUrl = (value: string) => { try { const u = new URL(value); return u.protocol === "https:" && !u.username && !u.password && value.length <= 500; } catch { return false; } };
 const challenge = () => { const bytes = new Uint8Array(16); crypto.getRandomValues(bytes); return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join(""); };
 const idpFields = ["protocol", "samlEntryPoint", "samlIdpCert", "samlIdpIssuer", "oidcIssuer", "oidcClientId", "oidcClientSecret"] as const;
+// SSO identities are `<connectionId>:<subject>`; ";" sorts right after ":", so this range is exactly that prefix.
+async function forgetSubjects(ctx: MutationCtx, connectionId: Id<"ssoConnections">) {
+  const rows = await ctx.db.query("identities").withIndex("by_provider_user", (q) => q.eq("provider", "sso").gt("providerUserId", `${connectionId}:`).lt("providerUserId", `${connectionId};`)).take(200);
+  for (const r of rows) await ctx.db.delete(r._id);
+  if (rows.length === 200) await ctx.scheduler.runAfter(0, internal.sso.forgetIdentities, { connectionId });
+}
+export const forgetIdentities = internalMutation({ args: { connectionId: v.id("ssoConnections") }, handler: async (ctx, a): Promise<void> => { await forgetSubjects(ctx, a.connectionId); } });
 const pem = (value: string) => value.length <= 20_000 && /-----BEGIN (CERTIFICATE|PUBLIC KEY)-----[\s\S]+-----END (CERTIFICATE|PUBLIC KEY)-----/.test(value);
 
 export const settings = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
@@ -41,12 +49,16 @@ export const saveConnection = mutation({
       ...(!a.active ? { enforce: false } : {}),
       updatedAt: Date.now(),
     };
-    // A different IdP can assert any subject or email, so trust built on the old one (verified domains,
-    // enforcement, existing SSO identities) waits for fresh DNS proof under new tokens; sign-in pauses until then.
+    // A different IdP can assert any subject or email, so trust built on the old one is dropped: verified domains
+    // and enforcement wait for fresh DNS proof under new tokens (sign-in pauses until then), and the old IdP's
+    // subjects are forgotten, since proving any domain would otherwise let the new IdP replay them.
     const idpChanged = existing && idpFields.some((k) => existing[k] !== data[k]);
     if (existing) await ctx.db.patch(existing._id, { ...data, ...(idpChanged ? { enforce: false, reverifyDomains: true } : {}) });
     else await ctx.db.insert("ssoConnections", { organizationId: a.organizationId, enforce: false, ...data, createdAt: Date.now() });
-    if (idpChanged) for (const d of await ctx.db.query("ssoDomains").withIndex("by_connection", (q) => q.eq("connectionId", existing._id)).take(50)) await ctx.db.patch(d._id, { verifiedAt: undefined, token: challenge() });
+    if (idpChanged) {
+      for (const d of await ctx.db.query("ssoDomains").withIndex("by_connection", (q) => q.eq("connectionId", existing._id)).take(50)) await ctx.db.patch(d._id, { verifiedAt: undefined, token: challenge() });
+      await forgetSubjects(ctx, existing._id);
+    }
     await audit(ctx, a.organizationId, user._id, "sso.connection_saved", a.protocol);
   },
 });
