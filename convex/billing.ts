@@ -1,14 +1,14 @@
-import { internalMutation, internalQuery, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { authorize } from "./auth";
-import { billingConfig, billingDecision, periodKey, seatCount, trialEndsFrom } from "../src/billing";
+import { audit, authorize } from "./auth";
+import { billingConfig, billingDecision, nextPeriodStart, periodKey, seatCount, trialEndsFrom } from "../src/billing";
 import { referralConfig } from "../src/referrals";
 import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus } from "./referralLedger";
 
-// Billing state and the review quota gate. With BILLING_ENABLED unset every check allows.
+// Billing state, the review gate and the workspace usage ledger. With BILLING_ENABLED unset every check allows.
 // The account row (and with it the trial clock) starts with the first review or checkout, so
 // workspaces created before billing was turned on still get their full trial.
 async function members(ctx: QueryCtx, organizationId: Id<"organizations">) {
@@ -26,6 +26,8 @@ async function ensureAccount(ctx: MutationCtx, organizationId: Id<"organizations
 async function usageOf(ctx: QueryCtx, organizationId: Id<"organizations">, period: string) {
   return ctx.db.query("billingUsage").withIndex("by_org_period", (q) => q.eq("organizationId", organizationId).eq("period", period)).unique();
 }
+// Usage counted against the allowance: settled cost plus what in-flight calls have reserved.
+const spent = (usage: Doc<"billingUsage"> | null) => (usage?.usedMicros ?? 0) + (usage?.reservedMicros ?? 0);
 export const choosePlanMessage = "Choose a plan for this workspace first: a workspace admin starts the free trial under Setup → Choose your plan";
 /** A workspace that must choose a plan (new, on a billing deployment) and has no Stripe-confirmed choice yet. */
 export async function planMissing(ctx: QueryCtx, organizationId: Id<"organizations">) {
@@ -41,18 +43,72 @@ async function recordPlanSelected(ctx: MutationCtx, organizationId: Id<"organiza
   await ctx.db.patch(organizationId, { planSelectedAt: Date.now(), plan: "starter" });
   await ctx.db.insert("auditEvents", { organizationId, action: "billing.plan_selected", target: "starter", createdAt: Date.now() });
 }
-// Called by reviews.enqueue: counts an allowed review, or records a blocked one with its reason.
+// Called by reviews.enqueue: counts an allowed review, or records a blocked one with its reason. Model calls
+// are what use the allowance (reserveUsage); this only stops a review that could not make any.
 export async function reviewAllowance(ctx: MutationCtx, organizationId: Id<"organizations">): Promise<{ allowed: true } | { allowed: false; reason: string }> {
   const config = billingConfig();
   if (!config.enabled) return { allowed: true };
   if (await planMissing(ctx, organizationId)) return { allowed: false, reason: "Billing: " + choosePlanMessage };
   const account = await ensureAccount(ctx, organizationId), now = Date.now(), period = periodKey(now);
   const usage = await usageOf(ctx, organizationId, period);
-  const decision = billingDecision(account, usage?.reviews ?? 0, now, config);
+  const decision = billingDecision(account, spent(usage), now, config);
   if (usage) await ctx.db.patch(usage._id, decision.allowed ? { reviews: usage.reviews + 1 } : { blocked: usage.blocked + 1 });
   else await ctx.db.insert("billingUsage", { organizationId, period, reviews: decision.allowed ? 1 : 0, blocked: decision.allowed ? 0 : 1 });
   return decision.allowed ? { allowed: true } : { allowed: false, reason: "Billing: " + decision.reason };
 }
+// Workspace side of an inference reservation (inferenceBudget.reserve, same transaction): refuses past the
+// included usage and extra-usage cap with the billing reason, otherwise holds the amount until the call settles.
+export async function reserveUsage(ctx: MutationCtx, organizationId: Id<"organizations">, micros: number): Promise<Id<"billingUsage"> | null> {
+  const config = billingConfig();
+  if (!config.enabled) return null;
+  if (await planMissing(ctx, organizationId)) throw new ConvexError("Billing: " + choosePlanMessage);
+  const account = await ensureAccount(ctx, organizationId), now = Date.now(), period = periodKey(now);
+  const usage = await usageOf(ctx, organizationId, period);
+  const decision = billingDecision(account, spent(usage), now, config, micros);
+  if (!decision.allowed) throw new ConvexError("Billing: " + decision.reason);
+  if (!usage) return ctx.db.insert("billingUsage", { organizationId, period, reviews: 0, blocked: 0, reservedMicros: micros });
+  await ctx.db.patch(usage._id, { reservedMicros: (usage.reservedMicros ?? 0) + micros });
+  return usage._id;
+}
+// Settles a reservation into the month it was made in; the part past the included usage is queued for Stripe.
+export async function settleUsage(ctx: MutationCtx, usageId: Id<"billingUsage">, reservedMicros: number, amount: number) {
+  const usage = await ctx.db.get(usageId);
+  if (!usage) return;
+  const account = await accountOf(ctx, usage.organizationId), decision = account ? billingDecision(account, 0, Date.now(), billingConfig()) : null;
+  const before = usage.usedMicros ?? 0, after = before + amount, limit = decision?.plan === "starter" ? decision.limit! : null;
+  const overage = limit === null ? 0 : Math.max(0, after - limit) - Math.max(0, before - limit);
+  await ctx.db.patch(usage._id, { usedMicros: after, reservedMicros: Math.max(0, (usage.reservedMicros ?? 0) - reservedMicros), ...(overage ? { overageMicros: (usage.overageMicros ?? 0) + overage } : {}) });
+  if (!overage) return;
+  const id = await ctx.db.insert("billingMeterEvents", { organizationId: usage.organizationId, period: usage.period, micros: overage, status: "pending", attempts: 0, createdAt: Date.now() });
+  await ctx.scheduler.runAfter(0, internal.billingJobs.reportUsage, { id });
+}
+
+// Admin-set monthly extra-usage cap in dollars (0 turns extra usage off). Audited.
+export const setSpendingCap = mutation({ args: { token: v.string(), organizationId: v.id("organizations"), capUsd: v.number() }, handler: async (ctx, a) => {
+  const { user } = await authorize(ctx, a.token, a.organizationId, true);
+  if (!billingConfig().enabled) throw new Error("Billing is disabled on this deployment");
+  if (!Number.isFinite(a.capUsd) || a.capUsd < 0 || a.capUsd > 1_000_000) throw new Error("Enter a cap between $0 and $1,000,000");
+  const account = await ensureAccount(ctx, a.organizationId), capUsd = Math.round(a.capUsd * 100) / 100;
+  await ctx.db.patch(account._id, { spendCapUsd: capUsd, updatedAt: Date.now() });
+  await audit(ctx, a.organizationId, user._id, "billing.spending_cap", String(capUsd));
+} });
+export const meterEvent = internalQuery({ args: { id: v.id("billingMeterEvents") }, handler: async (ctx, a) => {
+  const event = await ctx.db.get(a.id);
+  if (!event || event.status !== "pending") return null;
+  return { ...event, customerId: (await accountOf(ctx, event.organizationId))?.customerId ?? null };
+} });
+export const meterResult = internalMutation({ args: { id: v.id("billingMeterEvents"), status: v.union(v.literal("reported"), v.literal("skipped"), v.literal("retry")), error: v.optional(v.string()) }, handler: async (ctx, a) => {
+  const event = await ctx.db.get(a.id);
+  if (!event || event.status !== "pending") return;
+  if (a.status === "retry") {
+    const attempts = event.attempts + 1;
+    if (attempts >= 5) { await ctx.db.patch(event._id, { status: "failed", attempts, error: a.error?.slice(0, 300) }); return; }
+    await ctx.db.patch(event._id, { attempts, error: a.error?.slice(0, 300) });
+    await ctx.scheduler.runAfter(60_000 * 2 ** attempts, internal.billingJobs.reportUsage, { id: event._id });
+    return;
+  }
+  await ctx.db.patch(event._id, { status: a.status, ...(a.status === "reported" ? { reportedAt: Date.now() } : {}), ...(a.error ? { error: a.error.slice(0, 300) } : {}) });
+} });
 
 export const status = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
   const { user, member } = await authorize(ctx, a.token, a.organizationId);
@@ -60,11 +116,11 @@ export const status = query({ args: { token: v.string(), organizationId: v.id("o
   if (!config.enabled) return { enabled: false as const };
   const stored = await accountOf(ctx, a.organizationId);
   const account = stored ?? { status: "trial", seats: 0, trialEndsAt: trialEndsFrom(Date.now(), config) } as Pick<Doc<"billingAccounts">, "status" | "seats" | "trialEndsAt"> & Partial<Doc<"billingAccounts">>;
-  const usage = await usageOf(ctx, a.organizationId, periodKey(Date.now()));
-  const decision = billingDecision({ status: account.status, seats: account.seats, trialEndsAt: account.trialEndsAt, pastDueSince: account.pastDueSince, subscriptionId: account.subscriptionId }, usage?.reviews ?? 0, Date.now(), config);
+  const now = Date.now(), usage = await usageOf(ctx, a.organizationId, periodKey(now));
+  const decision = billingDecision({ status: account.status, seats: account.seats, trialEndsAt: account.trialEndsAt, pastDueSince: account.pastDueSince, subscriptionId: account.subscriptionId, spendCapUsd: account.spendCapUsd }, spent(usage), now, config);
   const organization = await ctx.db.get(a.organizationId);
   const admin = ["owner", "admin"].includes(member.role), referrals = admin && referralConfig().enabled;
-  return { enabled: true as const, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: decision.used, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: account.trialEndsAt, trialStarted: Boolean(stored), trialDays: config.trialDays, trialReviews: config.trialReviews, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, reviewsPerSeat: config.reviewsPerSeat, hasCustomer: Boolean(account.customerId) };
+  return { enabled: true as const, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: usage?.usedMicros ?? 0, reserved: usage?.reservedMicros ?? 0, overage: usage?.overageMicros ?? 0, capUsd: account.spendCapUsd ?? 0, resetsAt: nextPeriodStart(now), reviews: usage?.reviews ?? 0, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: account.trialEndsAt, trialStarted: Boolean(stored), trialDays: config.trialDays, trialUsageMicros: config.trialUsageMicros, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, usagePerSeatMicros: config.usagePerSeatMicros, hasCustomer: Boolean(account.customerId) };
 } });
 
 export const checkoutContext = internalQuery({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
@@ -112,8 +168,7 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
   if (a.invoice) {
     const account = await byCustomer(a.invoice.customer);
     if (!account || (a.invoice.subscription && account.subscriptionId && a.invoice.subscription !== account.subscriptionId)) return record("unknown customer");
-    if (a.type === "invoice.payment_failed") await ctx.db.patch(account._id, { status: "past_due", pastDueSince: account.pastDueSince ?? a.created, updatedAt: Date.now() });
-    if (a.type === "invoice.paid" && account.status === "past_due") await ctx.db.patch(account._id, { status: "active", pastDueSince: undefined, updatedAt: Date.now() });
+    // Past due and recovery come from customer.subscription.updated, which carries the ordering guard above.
     // Referral commissions accrue in their own job, so a referral bug can never fail this webhook.
     if (a.type === "invoice.paid" && referralConfig().enabled && a.invoice.id && a.invoice.subscription) await ctx.scheduler.runAfter(0, internal.referrals.accrue, { ...a.invoice, paidAt: a.invoice.paidAt ?? a.created });
     return record(a.type);

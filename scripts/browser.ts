@@ -189,6 +189,7 @@ try {
   await page.goto(`${url}/dashboard/settings/agents`);
   await page.getByRole("heading", { name: "Personal fix agent" }).waitFor();
   await page.getByRole("heading", { name: "Cloud agents" }).waitFor();
+  await page.getByText("Local bridge (self-hosted deployments)", { exact: true }).waitFor();
   for (const mention of ["@claude", "@codex", "@copilot", "@cursor"]) await page.getByText(mention, { exact: true }).waitFor();
   const link = await page.request.get(`${url}/dashboard/github-link?organization=${organizationId}&returnTo=%2Fdashboard%2Frepositories`, { maxRedirects: 0 });
   assert.ok(link.status() === 200 || (link.status() === 307 && /purpose=github-install/.test(link.headers().location ?? "")), `Link page answered ${link.status()}`);

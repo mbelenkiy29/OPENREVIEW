@@ -1,7 +1,6 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { decodeJwt } from "jose";
 import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authenticated, authenticatedSession, authorize, service } from "./auth";
@@ -10,7 +9,6 @@ import { scheduleSeatSync } from "./billing";
 import { recentSignIn, recordReferralSignup } from "./referralLedger";
 import { emailAddress } from "../src/email";
 import { normalizeReferralCode, referralConfig } from "../src/referrals";
-import { sessionHash } from "../src/session-hash";
 
 // Identities, sessions, email invitations and magic links.
 // Linking rule: a new provider account joins an existing user only when BOTH sides carry the
@@ -78,12 +76,11 @@ export const signIn = mutation({ args: { secret: v.string(), provider, providerU
 } });
 
 export const sessionValid = query({ args: { token: v.string() }, handler: async (ctx, a) => { try { await authenticated(ctx, a.token); return true; } catch { return false; } } });
-const currentHash = (token: string) => { const sid = decodeJwt(token).sid; return typeof sid === "string" ? sessionHash(sid) : undefined; };
 export const sessions = query({ args: { token: v.string() }, handler: async (ctx, a) => {
-  const user = await authenticated(ctx, a.token), current = currentHash(a.token);
+  const { user, session } = await authenticatedSession(ctx, a.token);
   const rows = (await ctx.db.query("sessions").withIndex("by_user", (q) => q.eq("userId", user._id)).take(200)).filter((s) => !s.revokedAt && s.expiresAt > Date.now());
   const identities = await ctx.db.query("identities").withIndex("by_user", (q) => q.eq("userId", user._id)).take(20);
-  return { sessions: rows.map((s) => ({ _id: s._id, provider: s.provider, userAgent: s.userAgent ?? null, createdAt: s.createdAt, expiresAt: s.expiresAt, current: s.hash === current })).sort((x, y) => y.createdAt - x.createdAt), identities: identities.map((i) => ({ provider: i.provider, email: i.email ?? null, emailVerified: i.emailVerified, lastLoginAt: i.lastLoginAt })) };
+  return { sessions: rows.map((s) => ({ _id: s._id, provider: s.provider, userAgent: s.userAgent ?? null, createdAt: s.createdAt, expiresAt: s.expiresAt, current: s._id === session?._id })).sort((x, y) => y.createdAt - x.createdAt), identities: identities.map((i) => ({ provider: i.provider, email: i.email ?? null, emailVerified: i.emailVerified, lastLoginAt: i.lastLoginAt })) };
 } });
 export const revokeSession = mutation({ args: { token: v.string(), sessionId: v.id("sessions") }, handler: async (ctx, a) => {
   const user = await authenticated(ctx, a.token), session = await ctx.db.get(a.sessionId);
@@ -91,10 +88,8 @@ export const revokeSession = mutation({ args: { token: v.string(), sessionId: v.
   if (!session.revokedAt) await ctx.db.patch(session._id, { revokedAt: Date.now() });
 } });
 export const signOut = mutation({ args: { token: v.string() }, handler: async (ctx, a) => {
-  let hash: string | undefined;
-  try { await authenticated(ctx, a.token); hash = currentHash(a.token); } catch { return; }
-  const session = hash ? await ctx.db.query("sessions").withIndex("by_hash", (q) => q.eq("hash", hash)).unique() : null;
-  if (session && !session.revokedAt) await ctx.db.patch(session._id, { revokedAt: Date.now() });
+  const session = await authenticatedSession(ctx, a.token).then((r) => r.session, () => null);
+  if (session) await ctx.db.patch(session._id, { revokedAt: Date.now() });
 } });
 export async function revokeAllSessions(ctx: MutationCtx, userId: Id<"users">) {
   const now = Date.now();

@@ -1,6 +1,6 @@
 # Durable hosted inference cap
 
-October 4, 2026. Convex tidy-ocelot-457 now has an active deployment-wide $5 inference cap. The latest native OpenReview-local usage dashboard shows **$4.40** (rounded). The initialized historical baseline is deliberately **$4.50**, above both that display and the preceding $4.3846788 native CSV plus $0.014128 newly recorded follow-up usage. The baseline is a conservative accounting floor, not a claim that the provider billed $4.50. Initial reservable capacity is **$0.50**. No inference occurred during implementation, deployment or activation.
+October 4, 2026. Convex `<prod-deployment>` now has an active deployment-wide $5 inference cap. The latest native OpenReview-local usage dashboard shows **$4.40** (rounded). The initialized historical baseline is deliberately **$4.50**, above both that display and the preceding $4.3846788 native CSV plus $0.014128 newly recorded follow-up usage. The baseline is a conservative accounting floor, not a claim that the provider billed $4.50. Initial reservable capacity is **$0.50**. No inference occurred during implementation, deployment or activation.
 
 ## Enforcement
 
@@ -16,7 +16,7 @@ Prices are independently verified from official standard-price model references:
 
 Live activation found zero active reviews, generating/queued knowledge or answering conversations. Initialization replay returned the same budget ID; resetting its baseline was rejected. A $0.648 request ceiling was refused against $0.50 available capacity. No reservation was inserted for that refusal. ModelCalls stayed 403 and usageEvents stayed 423; before/after active queues and reservation counts are identical. No fake provider receipts or successful paid requests were created merely to test this gate. Positive settlement and concurrency are regression evidence, not native billed-call acceptance.
 
-Receipts: `output/setup/inference-budget-activate-live-evidence.json`, `inference-budget-native-spend.png`, and `inference-budget-*` validation/deployment logs. Frontend remains READY `dpl_EgwhTf9juy35nGvsCsa8Fm5X5o2e`; this is a backend/shared-engine change. No root commit/push.
+Receipts: `output/setup/inference-budget-activate-live-evidence.json`, `inference-budget-native-spend.png`, and `inference-budget-*` validation/deployment logs. Frontend remains READY `<deployment-id>`; this is a backend/shared-engine change. No root commit/push.
 
 ## Operator setup and limitations
 

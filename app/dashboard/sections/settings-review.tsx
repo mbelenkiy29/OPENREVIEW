@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { lockableKeys } from "../../../src/review-settings";
 import { saveSettings, revokeApiKey, revokeMcpConnection, decideConvention, saveModelKey, removeModelKey } from "../actions";
+import { ModelSelect } from "../model-select";
 import { ApiKeyForm } from "../api-key";
 import { SummarySettings } from "../summary-settings";
 
@@ -44,7 +45,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                   <input type="hidden" name="organizationId" value={organization._id} />
                   <label>Provider<select name="provider" defaultValue={modelKey?.provider ?? "anthropic"}><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option></select></label>
                   <label>API key<input name="key" type="password" autoComplete="off" required maxLength={500} /></label>
-                  <label>Model (required for OpenRouter)<input name="model" maxLength={200} placeholder="Provider default" defaultValue={modelKey?.model ?? ""} /></label>
+                  <label>Model (required for OpenRouter)<input name="model" maxLength={200} placeholder="Provider default" /></label>
                   <button className="primary">{modelKey ? "Replace key" : "Save key"}</button>
                 </form>
               </section>
@@ -160,7 +161,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                       name="mode"
                       defaultValue={repoSettings.settings.mode}
                     >
-                      {["fast", "standard", "deep"].map((s) => (
+                      {["fast", "standard", "deep", "auto"].map((s) => (
                         <option key={s}>{s}</option>
                       ))}
                     </select>
@@ -226,7 +227,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                   </fieldset>
                   <fieldset className="wide">
                     <legend>Agent-authored pull requests (experimental)</legend>
-                    <label>Review model for agent-authored pull requests<input name="aiAuthoredModel" maxLength={200} defaultValue={repoSettings.settings.aiAuthoredModel ?? ""} placeholder="Leave empty to use the usual model" /></label>
+                    <label>Review model for agent-authored pull requests<ModelSelect name="aiAuthoredModel" value={repoSettings.settings.aiAuthoredModel} models={repoSettings.models} empty="The usual model" /></label>
                     <p className="muted">Detection uses explicit signals only: a known agent bot author, a Co-Authored-By trailer naming a coding agent, an agent branch prefix (claude/, copilot/, cursor/, codex/, devin/, jules/) or a marker the agent adds to the description. The reason is shown on the review.</p>
                   </fieldset>
                   <fieldset className="wide">
@@ -276,10 +277,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                   </label>
                   <label>
                     Model override
-                    <input
-                      name="model"
-                      defaultValue={repoSettings.settings.model}
-                    />
+                    <ModelSelect name="model" value={repoSettings.settings.model} models={repoSettings.models} empty="Workspace default" />
                   </label>
                   <SummarySettings key={JSON.stringify([repoSettings.repo._id,repoSettings.settings.summarySections,repoSettings.settings.commentStyle])} initial={repoSettings.settings.summarySections} style={repoSettings.settings.commentStyle}/>
                   <fieldset className="wide">

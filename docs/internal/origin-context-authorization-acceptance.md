@@ -6,7 +6,7 @@ Origin now requires a current confirmed personal identity for each selected Orig
 
 Regression coverage proves source omission without a link; exact selected-repository native token scope; successful retrieval; legacy receipt rejection; native denial before any App read; native denial after reading preventing result return; publication rejection; local expiry/revocation; and denied Origin primary access at the retrieval guard. Full verification: **171 Node + 142 Convex = 313 tests**, lint, typecheck and production build passed.
 
-The backend dry-run and actual deployment succeeded on `tidy-ocelot-457`. No frontend code changed in this increment; production remains READY Vercel `dpl_9dfjSheqs8F8kX7uwwjpfgr2URx2`.
+The backend dry-run and actual deployment succeeded on `<prod-deployment>`. No frontend code changed in this increment; production remains READY Vercel `<deployment-id>`.
 
 Live acceptance used the existing GitHub and Origin acceptance repositories, one temporary explicitly selected cluster, the actual GitHub PR #1 author and actual Origin PR #1 author, and the current confirmed Origin identity generation 1. The two directions each retrieved two files with pinned revision and native source links. The Origin source receipt references the confirmed personal identity. The returned context passed the deployed publication guard; removing its personal identity from a copied receipt was denied. Missing/wrong GitHub author IDs were denied. The cluster was removed in `finally`, with absence read back afterward.
 

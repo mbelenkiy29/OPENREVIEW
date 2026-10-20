@@ -26,11 +26,11 @@ Primary API references: [OAuth](https://linear.app/developers/oauth-2-0-authenti
 
 ## Domain change — October 15, 2026
 
-Production moved to https://openreview.tech, and the OAuth callback is built from `APP_URL`. The Linear OAuth application must list `https://openreview.tech/api/integrations/linear/callback`, alongside or instead of the old `openreview-flame-two.vercel.app` callback. Until it does, the provider rejects the redirect when someone connects.
+Production moved to https://openreview.tech, and the OAuth callback is built from `APP_URL`. The Linear OAuth application must list `https://openreview.tech/api/integrations/linear/callback`, alongside or instead of the old `<vercel-url>` callback. Until it does, the provider rejects the redirect when someone connects.
 
 ## Hosted registration preparation — October 4, 2026
 
-Computer use found the signed-in **Michael Belenkiy** workspace (`michael-belenkiy`) and its **MIC** team. The prior statement that no real workspace was available is superseded. Its API settings had no OAuth applications. A private **OpenReview** application form is prepared with the sole callback `https://openreview-flame-two.vercel.app/api/integrations/linear/callback`; public installation, client-credentials grants and webhooks are unchecked. This paragraph records the earlier prepared form; the registration state below supersedes its pending-creation status.
+Computer use found the signed-in **Michael Belenkiy** workspace (`michael-belenkiy`) and its **MIC** team. The prior statement that no real workspace was available is superseded. Its API settings had no OAuth applications. A private **OpenReview** application form is prepared with the sole callback `<vercel-url>/api/integrations/linear/callback`; public installation, client-credentials grants and webhooks are unchecked. This paragraph records the earlier prepared form; the registration state below supersedes its pending-creation status.
 
 Vercel CLI marketplace discovery for `productivity` returned no products, so registration uses Linear's native developer settings. The deployed integration uses S256 PKCE and needs only the public client ID, set on both Next.js and Convex. After registration and deployment, read-only consent, selected-team/repository retrieval, refresh, revocation and a published citation still require live verification. This preparation makes no live integration acceptance claim and consumed no inference.
 
@@ -40,9 +40,9 @@ The current missing-client setup and saved Atlassian resource picker now also ha
 
 ## Hosted client configuration and native consent — October 4, 2026
 
-On resumption, the live Linear tab had moved to the existing OpenReview application details (`6c066c29-3904-4041-99a8-cdf9058d96df`); no Create action was performed by the agent in this turn. Narrow native reads verified the public client ID, sole hosted callback and **Private to this workspace** availability. No client secret was read, copied or rotated. The public client ID was configured as `LINEAR_CLIENT_ID` in Vercel production and Convex `tidy-ocelot-457`.
+On resumption, the live Linear tab had moved to the existing OpenReview application details (`6c066c29-3904-4041-99a8-cdf9058d96df`); no Create action was performed by the agent in this turn. Narrow native reads verified the public client ID, sole hosted callback and **Private to this workspace** availability. No client secret was read, copied or rotated. The public client ID was configured as `LINEAR_CLIENT_ID` in Vercel production and Convex `<prod-deployment>`.
 
-Release `dpl_6qFFj4C3nBiYZYgxaU1tyYRKivXD` completed its hosted production build and is READY at https://openreview-flame-two.vercel.app. The hosted Integrations page now exposes Connect Linear workspace. Clicking it reached native Linear consent for the **Michael Belenkiy** workspace, displaying only **Read access to your workspace**. The native consent was initially preserved for action-time confirmation. The user then approved the read-only connection; Authorize completed token exchange and returned to the real resource picker. The successful connection state below supersedes the earlier pending-consent state.
+Release `<deployment-id>` completed its hosted production build and is READY at `<vercel-url>`. The hosted Integrations page now exposes Connect Linear workspace. Clicking it reached native Linear consent for the **Michael Belenkiy** workspace, displaying only **Read access to your workspace**. The native consent was initially preserved for action-time confirmation. The user then approved the read-only connection; Authorize completed token exchange and returned to the real resource picker. The successful connection state below supersedes the earlier pending-consent state.
 
 This registration/deployment evidence is supplemented by the successful live connection and retrieval recorded below; it does not prove refresh/revocation or published citations. No inference was requested. Evidence: `output/setup/linear-client-hosted-deploy.log` and `linear-read-consent-prepared.png`. The old missing-client screen is historical, not current production state.
 

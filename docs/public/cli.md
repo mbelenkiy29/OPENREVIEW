@@ -12,7 +12,7 @@ pnpm cli review --engine agentic
 pnpm cli review --resume     # continue an interrupted agentic review
 ```
 
-Run `npm link` to install the `openreview` command from a checkout.
+The CLI is for self-hosted deployments and development: run `npm link` in an OpenReview source checkout to install the `openreview` command. On a hosted workspace, fix findings with cloud agents, the Open in links or the [agent plugins](agent-plugins.md) instead; see [Fix with agents](fix-with-agents.md).
 
 - **Model credentials:** local reviews use model credentials from your environment.
 - **Repository config:** they read `.openreview.json` from the base commit.

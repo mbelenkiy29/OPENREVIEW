@@ -1,6 +1,6 @@
 # Perforce mobile outage acceptance
 
-Verified October 4, 2026 on the hosted production release `dpl_F5ySK8EfUgxrHd3auPiPRc8UGPd2`, with Convex `tidy-ocelot-457`.
+Verified October 4, 2026 on the hosted production release `<deployment-id>`, with Convex `<prod-deployment>`.
 
 At an actual 390×844 Chrome viewport, the existing Perforce catalog was filtered to `openreview-native-acceptance`. One click on “Review current revision for #26” encountered the unavailable provider hostname. The page showed a bounded recovery alert, re-enabled the button and retained document/body widths of 390 pixels. No browser warnings or errors were captured. Refresh cleared the alert, retained the repository filter and restored the available button without submitting another request. The temporary viewport was reset.
 

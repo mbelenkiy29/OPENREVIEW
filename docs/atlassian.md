@@ -22,7 +22,7 @@ Disconnect removes encrypted credentials and resource selections immediately, ad
 
 ## Domain change — October 15, 2026
 
-Production moved to https://openreview.tech, and the OAuth callback is built from `APP_URL`. The Atlassian OAuth 3LO app must list `https://openreview.tech/api/integrations/atlassian/callback`, alongside or instead of the old `openreview-flame-two.vercel.app` callback. Until it does, the provider rejects the redirect when someone connects.
+Production moved to https://openreview.tech, and the OAuth callback is built from `APP_URL`. The Atlassian OAuth 3LO app must list `https://openreview.tech/api/integrations/atlassian/callback`, alongside or instead of the old `<vercel-url>` callback. Until it does, the provider rejects the redirect when someone connects.
 
 ## Live resource discovery — October 4, 2026
 

@@ -17,7 +17,7 @@ The Docker VM's overlay had less than the native server's 250 MB minimum for tem
 
 Ordinary additions and deletions also passed full native source ingestion against retained review **14**, revision `p4:14:1:15:74483c3231265db265caab2ea28a377fdcfec891cca2bd6e0a0b94aa69bd0dac`. Its added source is present and deleted test source is removed. Evidence: `output/setup/p4-native/actions-ingestion-evidence.json`.
 
-Final production release: **dpl_DfRWyjNeYjqUeD1KbHnUcyyD4GFd**, at the unchanged canonical https://openreview-flame-two.vercel.app. Vercel production and Convex deployment/build succeeded with no removed indexes.
+Final production release: **`<deployment-id>`**, at the unchanged canonical `<vercel-url>`. Vercel production and Convex deployment/build succeeded with no removed indexes.
 
 ## Evidence and limits
 

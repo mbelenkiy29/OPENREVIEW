@@ -81,7 +81,7 @@ Treat this as a starting map, not gospel. Verify file and line references before
 ## Environment and deployment (names only; never print values)
 - **Local:** `.env.local` and `.env.backend` hold GitHub App and OAuth credentials, session, service and webhook secrets, `LLM_*` (OpenAI `gpt-4.1`; the key expires 2026-11-01) and `CREDENTIAL_ENCRYPTION_KEY`. Embeddings, Origin, Bitbucket, Linear and Atlassian are not configured locally.
 - **Production:**
-  - Vercel project `openreview` (team scope `open-review-free`) has production deploys whose `/api/health` reports ok.
+  - Vercel project `openreview` (team scope `<hobby-team>`) has production deploys whose `/api/health` reports ok.
   - Production is behind **Vercel Deployment Protection**, so outside users and OAuth callbacks are blocked.
   - The production build runs `convex deploy` using `CONVEX_DEPLOY_KEY`.
   - Changing any of this is a human step.

@@ -19,6 +19,7 @@ import {approvalPolicySchema} from "../../src/approval";
 import {runtimePolicySchema} from "../../src/runtime-policy";
 import {approvalDefaults,runtimeDefaults} from "../../src/review-settings";
 import { REFERRAL_PAYOUT_REVIEW_CENTS, formatMoney, parseMoneyInput, stripeHostedUrl } from "../../src/referrals";
+import { safeNext } from "../../src/identity";
 
 const text = (f: FormData, key: string) => z.string().parse(f.get(key) ?? "");
 export async function saveApprovalPolicy(_state:{error?:string;saved?:boolean},form:FormData):Promise<{error?:string;saved?:boolean}>{
@@ -207,7 +208,7 @@ async function endSession(to: string): Promise<never> {
   const jar = await cookies(), token = jar.get("openreview_session")?.value;
   if (token) await backend().mutation(api.identity.signOut, { token }).catch(() => undefined);
   jar.delete("openreview_session");
-  redirect(to);
+  redirect(safeNext(to));
 }
 export async function logout() { await endSession("/"); }
 export async function signOutEverywhere() {
@@ -363,6 +364,18 @@ export async function openBillingPortal(form: FormData) {
   try { url = await backend().action(api.billingJobs.portal, { token, organizationId: text(form, "organizationId") as Id<"organizations"> }); }
   catch { redirect("/dashboard/settings/billing?billing=error"); }
   redirect(url);
+}
+export async function setSpendingCap(form: FormData) {
+  const { token } = await current();
+  try { await backend().mutation(api.billing.setSpendingCap, { token, organizationId: text(form, "organizationId") as Id<"organizations">, capUsd: Number(text(form, "capUsd")) }); await notify("Extra usage cap saved."); }
+  catch { await notify("Could not save the extra usage cap.", "error"); }
+  revalidatePath("/dashboard/settings/billing");
+}
+export async function setWorkspaceModel(form: FormData) {
+  const { token } = await current();
+  try { await backend().mutation(api.scopes.setWorkspaceModel, { token, organizationId: text(form, "organizationId") as Id<"organizations">, model: text(form, "model") }); await notify("Model saved."); }
+  catch { await notify("Could not save the model.", "error"); }
+  revalidatePath("/dashboard/settings/model");
 }
 export async function saveSlackChannel(form: FormData) {
   const { token } = await current();

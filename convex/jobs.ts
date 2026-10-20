@@ -38,7 +38,7 @@ import { osvClient, osvEnabled } from "../src/osv";
 import { applyGeneratedTests, reproduceSystem, testCandidates, testDraftSchema } from "../src/generated-tests";
 import { knowledgeTokenBudgets, selectKnowledge } from "../src/knowledge-context";
 import { detectAiAuthored, reviewModelFor } from "../src/ai-authored";
-import { resolveTier, tiers } from "../src/review-tier";
+import { modes, resolveTier, tiers } from "../src/review-tier";
 import { repositoryGuidance, selectPacks } from "../src/guidance-packs";
 import { AzureDevOps } from "../src/azure-devops";
 import { semanticChunks, sourceChunks } from "../src/engine/chunks";
@@ -217,7 +217,7 @@ export const indexBatch = internalAction({
         if (process.env.EMBEDDING_MODEL) {
           // Chunk-level embeddings at definition boundaries; unchanged blobs with the current
           // model are skipped, so re-index backfills are idempotent.
-          const embedder = new Embeddings(inferenceBilling(ctx)), started = Date.now();
+          const embedder = new Embeddings(inferenceBilling(ctx, data.repo.organizationId)), started = Date.now();
           const state = await ctx.runQuery(internal.embeddings.chunkState, { repositoryId: data.repo._id, path: file.path });
           if (state?.sha !== file.sha || state.model !== embedder.model) {
             // Variable declarations (including locals) are not chunk boundaries.
@@ -467,7 +467,7 @@ export const review = internalAction({
         return { ...(resolved.settings.categories ? { categories: resolved.settings.categories } : {}), minimumConfidence: thresholds.minimumConfidence, severityThreshold: z.enum(severities).parse(thresholds.severityThreshold), ignored: resolved.ignored, ...(resolved.ignoredBy ? { ignoredBy: resolved.ignoredBy } : {}) };
       };
       // K2: comment > label > configured tier (raised by touched folders); the admin cap applies last.
-      const tier = resolveTier({ configured: z.enum(tiers).parse(effective.mode), requested: state.review.requestedMode ? { mode: state.review.requestedMode, source: state.review.requestedModeSource ?? "comment" } : undefined, cap: z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep") });
+      const tier = resolveTier({ configured: z.enum(modes).parse(effective.mode), diff: pr.diff, requested: state.review.requestedMode ? { mode: state.review.requestedMode, source: state.review.requestedModeSource ?? "comment" } : undefined, cap: z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep") });
       const touchedDirectories = pr.diff.flatMap((f) => { const d = directorySettings(f.path); return d && !d.ignored ? [d] : []; });
       const configNotes = [...repoConfig.warnings, ...guidance.rejected, ...(configured.blocked.length ? [`Repository config values for ${configured.blocked.join(", ")} were not applied because an administrator locked them.`] : [])];
       // Incremental review when the last reviewed head is an ancestor of this head.
@@ -703,7 +703,8 @@ export const review = internalAction({
         verdict: result.metadata.verdict,
         requirementsNotMet: result.metadata.requirementsNotMet,
         modeDecision: tier,
-        aiAuthored: aiAuthored ? { ...aiAuthored, ...(routed.routed ? { model: routed.model } : {}) } : undefined,
+        // The model that ran: a workspace's own key keeps its own model whatever the routing asked for.
+        aiAuthored: aiAuthored ? { ...aiAuthored, ...(routed.routed ? { model: modelProvider.modelFor("review") } : {}) } : undefined,
         coverageLimits: result.metadata.coverageLimits,
         findings: [...result.findings,...(result.metadata.carriedForward??[])],
         resolved: result.metadata.resolvedFingerprints,

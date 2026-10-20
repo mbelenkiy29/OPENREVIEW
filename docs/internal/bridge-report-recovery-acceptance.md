@@ -1,6 +1,6 @@
 # Bridge launch reporting recovery
 
-October 4, 2026. Production release `dpl_HoXy8ZUiaLLFsMmZXk4Ws7c9VYbk` is verified READY at https://openreview-flame-two.vercel.app; its integrated build deployed Convex tidy-ocelot-457 and the frontend successfully.
+October 4, 2026. Production release `<deployment-id>` is verified READY at `<vercel-url>`; its integrated build deployed Convex `<prod-deployment>` and the frontend successfully.
 
 A failed launch-status HTTP report previously exited bridge dispatch after the agent had started, detached its completion tracking and attempted to record a false agent failure. A failed completion report likewise attempted to mark an agent that exited successfully as failed.
 
