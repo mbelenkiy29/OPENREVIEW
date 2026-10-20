@@ -483,9 +483,13 @@ export default defineSchema({
     updatedAt: v.number(),
     nativeObservedAt: v.optional(v.number()),
     revisionKey: v.optional(v.string()),
+    // For Analytics merge time: first time OpenReview saw the PR, and when the merge webhook arrived.
+    openedAt: v.optional(v.number()),
+    mergedAt: v.optional(v.number()),
   })
     .index("by_repo_number", ["repositoryId", "number"])
     .index("by_org", ["organizationId"])
+    .index("by_org_merged", ["organizationId", "mergedAt"])
     .searchIndex("by_title",{searchField:"title",filterFields:["organizationId"]}),
   pullRequestCommits: defineTable({
     organizationId: org,

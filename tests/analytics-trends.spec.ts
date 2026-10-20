@@ -37,8 +37,8 @@ test('the daily rollup feeds trends: series, addressed rate, time saved, reposit
  const {t,admin,org,web,hidden}=await setup();
  await roll(t,org);
  const trends=await t.query(api.analytics.trends,{token:admin.token,organizationId:org,...period});
- expect(trends.days).toEqual([{day:'2026-10-10',reviews:3,findings:3,high:2,addressed:1,commitAddressed:0,ignored:0},{day:'2026-10-11',reviews:1,findings:1,high:1,addressed:1,commitAddressed:0,ignored:0}]);
- expect(trends.totals).toEqual({reviews:4,findings:4,high:3,addressed:2,commitAddressed:0,ignored:0});
+ expect(trends.days).toEqual([{day:'2026-10-10',reviews:3,findings:3,high:2,addressed:1,useful:1,notUseful:0,commitAddressed:0,ignored:0},{day:'2026-10-11',reviews:1,findings:1,high:1,addressed:1,useful:0,notUseful:1,commitAddressed:0,ignored:0}]);
+ expect(trends.totals).toEqual({reviews:4,findings:4,high:3,addressed:2,useful:1,notUseful:1,commitAddressed:0,ignored:0});
  expect(trends.fixRate).toBeNull();
  expect(trends.addressedRate).toBe(0.5);
  expect([trends.minutesPerFinding,trends.hoursSaved]).toEqual([15,0.5]);
@@ -48,7 +48,7 @@ test('the daily rollup feeds trends: series, addressed rate, time saved, reposit
  expect(rows.find(r=>r.repositoryId===web._id&&r.day==='2026-10-10'&&r.author==='ana')).toMatchObject({reviews:2,completed:1,findings:2,useful:1});
  expect(rows.some(r=>r.repositoryId===hidden._id)).toBe(true);
  // Filters narrow the aggregates.
- expect((await t.query(api.analytics.trends,{token:admin.token,organizationId:org,...period,author:'@bo'})).totals).toEqual({reviews:1,findings:1,high:1,addressed:1,commitAddressed:0,ignored:0});
+ expect((await t.query(api.analytics.trends,{token:admin.token,organizationId:org,...period,author:'@bo'})).totals).toEqual({reviews:1,findings:1,high:1,addressed:1,useful:0,notUseful:1,commitAddressed:0,ignored:0});
  expect((await t.query(api.analytics.trends,{token:admin.token,organizationId:org,...period,repositoryId:web._id})).totals.findings).toBe(3);
 });
 
@@ -61,7 +61,7 @@ test('rollups are idempotent, pick up later fixes, and never count repositories 
  await roll(t,org);
  expect((await t.query(api.analytics.trends,{token:admin.token,organizationId:org,...period})).totals.addressed).toBe(3);
  const visible=await t.query(api.analytics.trends,{token:member.token,organizationId:org,...period});
- expect(visible.totals).toEqual({reviews:3,findings:3,high:2,addressed:3,commitAddressed:0,ignored:0});
+ expect(visible.totals).toEqual({reviews:3,findings:3,high:2,addressed:3,useful:1,notUseful:1,commitAddressed:0,ignored:0});
  expect(visible.byRepository.map(r=>r.label)).toEqual(['acme/web']);
  // The sweep schedules one rollup per organization-day.
  expect(await t.mutation(internal.analyticsRollup.sweep,{days:2})).toBe(2);
@@ -86,4 +86,38 @@ test('the minutes-per-finding estimate is admin-only, validated and audited',asy
  expect((await t.query(api.analytics.trends,{token:admin.token,organizationId:org,...period})).hoursSaved).toBe(1.5);
  expect((await t.run(ctx=>ctx.db.query('auditEvents').collect())).some(e=>e.action==='analytics.minutes_per_finding_changed'&&e.target==='45')).toBe(true);
  await expect(t.query(api.analytics.trends,{token:admin.token,organizationId:org,since:0,until:400*day})).rejects.toThrow(/at most one year/);
+});
+
+test('report adds Greptile-style breakdowns: severity per day, contributors, merge time and most upvoted comments',async()=>{
+ const {t,admin,member,org,web,hidden,open}=await setup();
+ await t.run(async ctx=>{
+  const pr=(repositoryId:Id<'repositories'>,number:number,author:string,openedAt:number|undefined,mergedAt:number)=>ctx.db.insert('pullRequests',{organizationId:org,repositoryId,number,title:'PR',author,url:'u',headSha:'a'.repeat(40),baseSha:'b'.repeat(40),state:'merged',updatedAt:mergedAt,...(openedAt===undefined?{}:{openedAt}),mergedAt});
+  await pr(web._id,10,'ana',d1-2*3600000,d1);await pr(web._id,11,'bo',d2-4*3600000,d2);await pr(hidden._id,12,'ana',d1-10*3600000,d1);
+  await pr(web._id,13,'ana',undefined,d1); // merged before openedAt was recorded: excluded
+  await pr(web._id,14,'ana',d1-3600000,Date.UTC(2026,8,1)); // merged outside the period
+  const react=(user:string,reaction:string,findingId?:Id<'findings'>)=>ctx.db.insert('commentReactions',{organizationId:org,repositoryId:web._id,prNumber:1,provider:'github',commentId:'c'+user,user,reaction,createdAt:d1,...(findingId?{findingId}:{})});
+  await react('x','+1',open);await react('y','+1',open);await react('z','-1',open);
+ });
+ const r=await t.query(api.analytics.report,{token:admin.token,organizationId:org,...period});
+ expect(r.daily.map(d=>[d.date,d.critical,d.high,d.medium,d.low])).toEqual([['2026-10-10',0,2,0,1],['2026-10-11',1,0,0,0]]);
+ expect(r.bugRepositories).toBe(2);
+ expect(r.contributors).toEqual([{author:'ana',prs:2,repositories:['acme/web','acme/secret']},{author:'bo',prs:1,repositories:['acme/web']}]);
+ expect(r.mergeTime).toMatchObject({count:3,meanMs:16/3*3600000,medianMs:4*3600000});
+ expect(r.mergeTime.byRepository.map(x=>[x.repository,x.meanMs/3600000,x.count])).toEqual([['acme/secret',10,1],['acme/web',3,2]]);
+ expect(r.mergeTime.daily.map(x=>[x.date,x.meanMs/3600000])).toEqual([['2026-10-10',6],['2026-10-11',4]]);
+ expect(r.topComments).toEqual([expect.objectContaining({findingId:open,upvotes:2,repository:'acme/web'})]);
+ // Filters and visibility: a member outside the Secret team never sees its merge times.
+ expect((await t.query(api.analytics.report,{token:admin.token,organizationId:org,...period,author:'bo'})).mergeTime).toMatchObject({count:1,meanMs:4*3600000,medianMs:4*3600000});
+ expect((await t.query(api.analytics.report,{token:member.token,organizationId:org,...period})).mergeTime.count).toBe(2);
+});
+
+test('pull requests record when OpenReview first saw them and when the merge webhook arrived',async()=>{
+ const {t,web}=await setup();
+ await t.run(ctx=>ctx.db.patch(web._id,{enabled:true}));
+ const observe=(observedAt:number)=>t.mutation(internal.pulls.observe,{repositoryId:web._id,number:7,title:'Seven',author:'ana',url:'u',headSha:'c'.repeat(40),baseSha:'b'.repeat(40),state:'open',observedAt});
+ await observe(d1);await observe(d2);
+ const merge=(observedAt:number)=>t.mutation(internal.webhooks.lifecycle,{repositoryId:web._id,action:'closed',prNumber:7,state:'closed',merged:true,observedAt});
+ await merge(d2+3600000);await merge(d2+7200000);
+ const pr=await t.run(ctx=>ctx.db.query('pullRequests').withIndex('by_repo_number',q=>q.eq('repositoryId',web._id).eq('number',7)).unique());
+ expect([pr?.openedAt,pr?.mergedAt]).toEqual([d1,d2+3600000]);
 });
