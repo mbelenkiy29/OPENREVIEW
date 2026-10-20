@@ -10,6 +10,8 @@ import { example, exampleSummary } from "../summary-example";
 import { Stage } from "./art";
 import { cloudAgentIds, cloudAgents, defaultLocalAgent, isCloudAgent, localAgentLabels, localAgents, type CloudAgent } from "../../../src/fix-agents";
 import { StepForm } from "./wizard-client";
+import { Locked } from "../locked";
+import type { Entitlement } from "../../../src/plans";
 
 type Settings = { summarySections?: string[]; commentStyle: string; severityThreshold: string; minimumConfidence: number; maxComments: number; strictness?: number; categories: string[];
   automatic: boolean; drafts: boolean; rereview: boolean; triggerLabels?: string[]; threadReplies?: boolean; securityScan?: boolean; fixPullRequests?: boolean; mode: string };
@@ -140,9 +142,10 @@ export function TriggersStep(props: Props) {
 }
 
 const agents = localAgents.map((a) => [a, localAgentLabels[a]] as const);
-export function ToolsStep(props: Props & { agent?: string; handoff?: string; cloudAgent?: string }) {
-  const d = props.defaults;
-  const [security, setSecurity] = useState(d.securityScan ?? true), [fixPrs, setFixPrs] = useState(d.fixPullRequests ?? false), [agent, setAgent] = useState(props.agent ?? defaultLocalAgent), [mode, setMode] = useState(d.mode);
+// `locked` is billing.locked: Pro options stay visible but disabled on lower plans (none with billing off).
+export function ToolsStep(props: Props & { agent?: string; handoff?: string; cloudAgent?: string; locked: readonly Entitlement[] }) {
+  const d = props.defaults, fixLocked = props.locked.includes("fix.pullRequests"), deepLocked = props.locked.includes("review.deep");
+  const [security, setSecurity] = useState(d.securityScan ?? true), [fixPrs, setFixPrs] = useState(!fixLocked && (d.fixPullRequests ?? false)), [agent, setAgent] = useState(props.agent ?? defaultLocalAgent), [mode, setMode] = useState(deepLocked && d.mode === "deep" ? "standard" : d.mode);
   const [handoff, setHandoff] = useState(props.handoff === "cloud" ? "cloud" : "bridge"), [cloud, setCloud] = useState<CloudAgent>(isCloudAgent(props.cloudAgent) ? props.cloudAgent : "claude");
   const agentName = handoff === "cloud" ? cloudAgents[cloud].label : agents.find(([v]) => v === agent)?.[1] ?? "your agent";
   return <>
@@ -154,9 +157,12 @@ export function ToolsStep(props: Props & { agent?: string; handoff?: string; clo
       <label>Default local agent<select name="agent" value={agent} onChange={(e) => setAgent(e.target.value)}>{agents.map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select></label>
       <ul className="wizard-toggles">
         <Toggle name="securityScan" label="Security checks" hint="Pattern checks on added lines and advisory lookups for changed dependencies." checked={security} onChange={setSecurity} />
-        <Toggle name="fixPullRequests" label="Fix pull requests" hint="OpenReview opens a fix pull request on a new branch, from a finding’s Fix page or “@openreview fix this in a new PR”. Needs the App’s Contents: write permission." checked={fixPrs} onChange={setFixPrs} />
       </ul>
-      <label>Review depth<select name="mode" value={mode} onChange={(e) => setMode(e.target.value)}><option value="fast">Fast</option><option value="standard">Standard</option><option value="deep">Deep</option></select></label>
+      <Locked feature="fix.pullRequests" locked={props.locked}><ul className="wizard-toggles">
+        <Toggle name="fixPullRequests" label="Fix pull requests" hint="OpenReview opens a fix pull request on a new branch, from a finding’s Fix page or “@openreview fix this in a new PR”. Needs the App’s Contents: write permission." checked={fixPrs} onChange={setFixPrs} />
+      </ul></Locked>
+      <label>Review depth<select name="mode" value={mode} onChange={(e) => setMode(e.target.value)}><option value="fast">Fast</option><option value="standard">Standard</option><option value="deep" disabled={deepLocked}>Deep</option></select></label>
+      <Locked feature="review.deep" locked={props.locked} note="Deep reviews are on the Pro plan; fast and standard reviews are on every plan." />
     </Shell>
     <Stage caption={`fix with ${agentName}${security ? " · security checks on" : ""}${fixPrs ? " · fix pull requests on" : ""}`}>
       <Window title="src/total.ts · finding">

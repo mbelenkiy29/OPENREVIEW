@@ -243,3 +243,46 @@ test('a Starter subscription from before Pro (legacy) keeps its API keys and req
  expect((await requirements()).coverage).not.toContain(upgradeNote['context.requirements']);
  expect(await t.query(internal.billing.entitlement,{organizationId:org,key:'api.access'})).toBe(true);
 });
+
+test('onboarding tools step: Starter cannot save fix pull requests or deep reviews; Pro and billing off can',async()=>{
+ const {t,token,org,billing,pro}=await setup();
+ // The locked rendering is checked in tests/onboarding-wizard.test.ts; here the server refuses the values.
+ const save=async(settings:{fixPullRequests?:boolean;mode?:string})=>{const {defaults}=await t.query(api.onboarding.status,{token,organizationId:org});return t.mutation(api.onboarding.saveDefaults,{token,organizationId:org,step:'tools',settings:{...defaults,...settings}});};
+ billing(true);
+ await t.run(ctx=>ctx.db.insert('billingAccounts',{organizationId:org,customerId:'cus_1',subscriptionId:'sub_1',plan:'starter',status:'active',seats:1,trialEndsAt:Date.now(),updatedAt:Date.now()}));
+ await expect(save({fixPullRequests:true})).rejects.toThrow(upgradeNote['fix.pullRequests']);
+ await expect(save({mode:'deep'})).rejects.toThrow(/Deep reviews are on the Pro plan/);
+ await save({fixPullRequests:false,mode:'standard'});
+ billing(false);
+ await save({fixPullRequests:true,mode:'deep'});
+ billing(true);
+ await t.run(async ctx=>{for(const a of await ctx.db.query('billingAccounts').collect())await ctx.db.delete(a._id);});
+ await pro();
+ await save({fixPullRequests:true,mode:'deep'});
+ expect((await t.query(api.onboarding.status,{token,organizationId:org})).defaults).toMatchObject({fixPullRequests:true,mode:'deep'});
+});
+
+test('review.reproTests: a review on Starter with generated tests set up says why none ran; Pro does not',async()=>{
+ const {t,token,org,repo,billing}=await setup();
+ await t.run(ctx=>ctx.db.patch(repo._id,{indexStatus:'ready',indexedSha:'a'.repeat(40)}));
+ await t.mutation(api.runtime.save,{token,organizationId:org,policy:{enabled:false,image:'node@sha256:'+'a'.repeat(64),command:'',timeout:60,requiredForApproval:false,generatedTests:true,testCommand:'node --test {test}'}});
+ const account=await t.run(ctx=>ctx.db.insert('billingAccounts',{organizationId:org,customerId:'cus_1',subscriptionId:'sub_1',plan:'starter',status:'active',seats:1,trialEndsAt:Date.now(),updatedAt:Date.now()}));
+ billing(true);
+ const scm=new Github('fixture');vi.spyOn(Github,'installation').mockResolvedValue(scm);
+ vi.spyOn(scm,'tree').mockResolvedValue([]);
+ const publish=vi.spyOn(scm,'publish').mockResolvedValue({id:5,reused:false,comments:[]});
+ vi.spyOn(HttpModel.prototype,'generate').mockImplementation(async function<T>(request:ModelRequest,validator:z.ZodType<T>){
+  const value=request.task.startsWith('review:')?{findings:[]}:request.task==='diagram'?{diagram:null}:{summary:'Totals now divide by 100 before returning.',reviewScore:{value:4,reason:'No verified findings in the reviewed change.'}};
+  return {value:validator.parse(value),usage:{task:request.task,provider:'fixture',model:'fixture',inputTokens:1,outputTokens:1,latencyMs:0,estimatedCost:0,cached:false}};
+ });
+ const review=async(n:number)=>{
+  const head=String(n).repeat(40);
+  vi.spyOn(scm,'pullRequest').mockResolvedValue({number:n,title:'Totals',body:'',draft:false,state:'open',html_url:'https://github.com/acme/shop/pull/'+n,user:{login:'bob'},head:{sha:head,ref:'feature'},base:{sha:'a'.repeat(40),ref:'main'},diff:[{path:'src/total.ts',status:'modified',patch:'@@ -1 +1 @@\n-export const total = (c: number) => c;\n+export const total = (c: number) => c / 100;'}],comments:[],reviews:[],commits:[],checks:[]} as never);
+  const reviewId=(await t.mutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:n,headSha:head}))!;
+  await t.action(internal.jobs.review,{reviewId});
+  return String(publish.mock.calls.at(-1)?.[3]);
+ };
+ expect(await review(1)).toContain(upgradeNote['review.reproTests']);
+ await t.run(ctx=>ctx.db.patch(account,{plan:'pro'}));
+ expect(await review(2)).not.toContain(upgradeNote['review.reproTests']);
+});
