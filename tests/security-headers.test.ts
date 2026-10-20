@@ -22,6 +22,7 @@ test("every route sends nosniff, a referrer policy and refuses to be framed", as
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Frame-Options": "DENY",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
   });
 });
 
