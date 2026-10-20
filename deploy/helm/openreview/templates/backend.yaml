@@ -15,8 +15,8 @@ spec:
         app.kubernetes.io/component: backend
     spec:
       terminationGracePeriodSeconds: 30
-      # UID/GID 1000 is the image's `ubuntu` user; fsGroup makes the data volume group-writable for it.
-      securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 }
+      # UID/GID 1000 is the image's `ubuntu` user; fsGroup makes the data volume group-writable for it (re-chowned only when the root dir mismatches, so restarts stay fast).
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, fsGroupChangePolicy: OnRootMismatch }
       {{- if .Values.config.grammars.enabled }}
       initContainers:
         - name: grammars
