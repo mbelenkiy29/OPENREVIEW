@@ -213,6 +213,35 @@ test('seats follow membership: viewers are free and changes resync the subscript
  await expect(t.action(api.billingJobs.portal,{token:alice.token,organizationId:org})).rejects.toThrow(/test-mode key/);
 });
 
+test('an admin switches plans in the app: the seat price is swapped with prorations and the webhook records the plan',async()=>{
+ const {t,alice,bob,org}=await setup();
+ const calls:{url:string;body:string;key:string|null}[]=[];
+ vi.spyOn(globalThis,'fetch').mockImplementation(async(input:string|URL|Request,init?:RequestInit)=>{calls.push({url:String(input),body:String(init?.body),key:new Headers(init?.headers).get('idempotency-key')});return Response.json({id:'sub_1'});});
+ await expect(t.action(api.billingJobs.changePlan,{token:alice.token,organizationId:org,plan:'pro'})).rejects.toThrow(/Start a subscription/);
+ const created=Math.floor(Date.now()/1000),priced=(id:string,price:string,at:number)=>{const e=subscription(id,'customer.subscription.updated','active',2,at,org);e.data.object.items.data[0]={...e.data.object.items.data[0],price:{id:price}} as never;return e;};
+ await t.mutation(internal.billing.linkCustomer,{organizationId:org,customerId:'cus_1'});
+ await deliver(t,subscription('evt_sub','customer.subscription.created','active',2,created,org));
+ // A grandfathered Starter subscription (legacy) keeps that flag through a round trip to Pro.
+ await t.run(async ctx=>{const account=(await ctx.db.query('billingAccounts').collect())[0];await ctx.db.patch(account._id,{legacy:true});});
+ await expect(t.action(api.billingJobs.changePlan,{token:bob.token,organizationId:org,plan:'pro'})).rejects.toThrow(/Forbidden/);
+ await expect(t.action(api.billingJobs.changePlan,{token:alice.token,organizationId:org,plan:'starter'})).rejects.toThrow(/already on Starter/);
+ expect(calls).toHaveLength(0);
+ expect(await t.action(api.billingJobs.changePlan,{token:alice.token,organizationId:org,plan:'pro'})).toBe('requested');
+ expect(calls[0].url).toBe('https://api.stripe.com/v1/subscriptions/sub_1');
+ expect(Object.fromEntries(new URLSearchParams(calls[0].body))).toEqual({'items[0][id]':'si_1','items[0][price]':'price_pro',proration_behavior:'create_prorations'});
+ expect(calls[0].key).toBe(`plan:${org}:pro:${Math.floor(Date.now()/60000)}`);
+ expect((await t.run(ctx=>ctx.db.query('auditEvents').collect())).filter(e=>e.action==='billing.plan_change_requested').map(e=>[e.userId,e.target])).toEqual([[alice.id,'pro']]);
+ // The plan changes only when Stripe confirms it.
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).plan).toBe('starter');
+ await deliver(t,priced('evt_pro','price_pro',created+1));
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'pro',legacy:false});
+ await expect(t.action(api.billingJobs.changePlan,{token:alice.token,organizationId:org,plan:'pro'})).rejects.toThrow(/already on Pro/);
+ await t.action(api.billingJobs.changePlan,{token:alice.token,organizationId:org,plan:'starter'});
+ expect(new URLSearchParams(calls.at(-1)!.body).get('items[0][price]')).toBe('price_seat');
+ await deliver(t,priced('evt_starter','price_seat',created+2));
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'starter',legacy:true});
+});
+
 test('a new workspace must choose a plan: nothing indexes, reviews or finishes setup until Stripe confirms the trial',async()=>{
  const {t,alice,repo}=await setup();
  const fresh=await t.mutation(api.users.createOrganization,{token:alice.token,name:'New customer'});

@@ -320,6 +320,12 @@ export async function startCheckout(form: FormData) {
   catch { redirect("/dashboard/settings/billing?billing=error"); }
   redirect(url);
 }
+export async function changePlan(form: FormData) {
+  const { token } = await current();
+  try { await backend().action(api.billingJobs.changePlan, { token, organizationId: text(form, "organizationId") as Id<"organizations">, plan: z.enum(["starter", "pro"]).parse(text(form, "plan")) }); await notify("Plan change requested. It shows here once Stripe confirms it."); }
+  catch (e) { await notify(backendMessage(e, "Could not change the plan."), "error"); }
+  revalidatePath("/dashboard/settings/billing");
+}
 export async function applyReferralCode(form: FormData) {
   const { token } = await current();
   try { const result = await backend().mutation(api.referrals.applyCode, { token, organizationId: text(form, "organizationId") as Id<"organizations">, code: text(form, "code") }); await notify(result.ok ? "Referral code applied." : result.error, result.ok ? "success" : "error"); }

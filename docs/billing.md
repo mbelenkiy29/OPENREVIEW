@@ -21,7 +21,7 @@ The plan catalog is `src/plans.ts`. Security checks, every provider, and the CLI
   - Either way the choice is stored in `organizations.planSelectedAt` and `plan`, and audited as `billing.plan_selected`. Until then the dashboard sends everyone to the plan step (Billing, Account and Referrals settings stay open), and the server refuses indexing, reviews, advancing and finishing setup.
 - **Existing subscriptions (grandfathered):** subscriptions from before Pro existed keep every Pro feature while they stay on Starter (`billingAccounts.legacy`). Run once right after deploying plans: `npx convex run billing:grandfatherSubscriptions '{"confirm":"grandfather-pre-plan-subscriptions"}' --prod`.
 - **Free:** any workspace without a subscription, including workspaces from before plans were required and cancelled subscriptions. Free never expires; its allowance resets each month. `BILLING_TRIAL_USAGE_USD` is no longer read: a generous trial allowance must not become a monthly gift.
-- **Which paid plan:** the subscription's seat price decides it (`billingAccounts.plan`): `STRIPE_SEAT_PRICE_ID` / `STRIPE_SEAT_ANNUAL_PRICE_ID` is Starter, and `STRIPE_PRO_PRICE_ID` / `STRIPE_PRO_ANNUAL_PRICE_ID` is Pro. An unknown price keeps the recorded plan, and a subscription with none recorded is Starter. Checkout uses the monthly prices; customers switch plan or billing interval in the Customer Portal.
+- **Which paid plan:** the subscription's seat price decides it (`billingAccounts.plan`): `STRIPE_SEAT_PRICE_ID` / `STRIPE_SEAT_ANNUAL_PRICE_ID` is Starter, and `STRIPE_PRO_PRICE_ID` / `STRIPE_PRO_ANNUAL_PRICE_ID` is Pro. An unknown price keeps the recorded plan, and a subscription with none recorded is Starter. Checkout uses the monthly prices. Admins switch between Starter and Pro in Settings → Billing (`billingJobs.changePlan`): it swaps the seat price on the subscription item with prorations and audits `billing.plan_change_requested`, and the webhook then records the new plan. The Customer Portal can't do this, because it doesn't update subscriptions that carry a metered price. Switching to Starter leaves `legacy` as it is.
 - **Gated features:** each one is skipped, never failed.
   - A deep review runs at standard, with a coverage note.
   - Generated reproduction tests are not drafted.
@@ -41,7 +41,7 @@ The plan catalog is `src/plans.ts`. Security checks, every provider, and the CLI
 - Add a $120 yearly price to the Starter product.
 - Set `STRIPE_PRO_PRICE_ID`, `STRIPE_PRO_ANNUAL_PRICE_ID` and `STRIPE_SEAT_ANNUAL_PRICE_ID` on Convex.
 - Set `BILLING_PRO_PRICE_LABEL` on the web app.
-- In the Customer Portal configuration, turn on switching between these prices and turn off quantity changes.
+- In the Customer Portal configuration, turn off quantity changes. Plan switching happens in the app, not the portal.
 
 ## Usage
 
