@@ -240,7 +240,7 @@ test('extra usage runs past the included amount up to the admin cap and is meter
 });
 
 test('workspaces pick models from the operator price list',async()=>{
- const {t,alice,org,repo}=await setup();
+ const {t,alice,bob,org,repo}=await setup();
  process.env.LLM_PROVIDER='openrouter';process.env.INFERENCE_PRICES=JSON.stringify({'openrouter:openai/gpt-4.1':{input:2,output:8},'openrouter:anthropic/claude-sonnet-5-5':{input:3,output:15},'openai:gpt-4.1':{input:2,output:8}});
  try{
   expect((await t.query(api.scopes.list,{token:alice.token,organizationId:org})).models.map(m=>m.model)).toEqual(['openai/gpt-4.1','anthropic/claude-sonnet-5-5']);
@@ -251,5 +251,19 @@ test('workspaces pick models from the operator price list',async()=>{
   expect(await t.query(internal.scopes.workspaceModel,{organizationId:org})).toBeNull();
   await t.mutation(api.scopes.save,{token:alice.token,organizationId:org,settings:{...current.settings,model:'anthropic/claude-sonnet-5-5'},overrideKeys:['model']});
   expect(await t.query(internal.scopes.workspaceModel,{organizationId:org})).toBe('anthropic/claude-sonnet-5-5');
+  // Settings → AI Model: admins pick or reset; members only see it; other scope overrides are kept.
+  await expect(t.mutation(api.scopes.setWorkspaceModel,{token:bob.token,organizationId:org,model:'openai/gpt-4.1'})).rejects.toThrow();
+  await expect(t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:'meta/unpriced'})).rejects.toThrow(/model from this deployment's list/);
+  await t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:'openai/gpt-4.1'});
+  expect(await t.query(api.scopes.modelChoice,{token:bob.token,organizationId:org})).toMatchObject({model:'openai/gpt-4.1',ownKey:false,models:[{model:'openai/gpt-4.1'},{model:'anthropic/claude-sonnet-5-5'}]});
+  await t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:''});
+  expect(await t.query(internal.scopes.workspaceModel,{organizationId:org})).toBeNull();
  }finally{delete process.env.LLM_PROVIDER;delete process.env.INFERENCE_PRICES;}
+});
+
+test('a workspace without saved scope settings gets one holding only the model override',async()=>{
+ const {t,alice,org}=await setup();
+ await t.run(async ctx=>{for(const s of await ctx.db.query('scopeSettings').collect())await ctx.db.delete(s._id);});
+ await t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:'gpt-4.1-mini'});
+ expect(await t.run(ctx=>ctx.db.query('scopeSettings').collect())).toEqual([expect.objectContaining({organizationId:org,overrideKeys:['model'],settings:expect.objectContaining({model:'gpt-4.1-mini'})})]);
 });
