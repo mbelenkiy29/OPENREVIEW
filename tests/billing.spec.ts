@@ -128,20 +128,29 @@ test('signed Stripe webhooks link the workspace, apply once, and ignore replays 
  // A subscription for another workspace cannot hijack this customer.
  await deliver(t,subscription('evt_spoof','customer.subscription.updated','active',99,created+30,'k57abc0000000000000000organizations'));
  expect((await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0].seats).toBe(3);
- // Payment failure: reviews continue through the grace period, then pause; payment restores them.
+ // Payment failure (Stripe marks the subscription past due): reviews continue through the grace period, then pause; payment restores them.
  vi.setSystemTime(Date.UTC(2026,10,2));
- // Current API versions put the invoice's subscription under parent.subscription_details.
- await deliver(t,{id:'evt_failed',type:'invoice.payment_failed',created:Math.floor(Date.now()/1000),data:{object:{customer:'cus_1',parent:{subscription_details:{subscription:'sub_1'}}}}});
+ const failedAt=Math.floor(Date.now()/1000);
+ await deliver(t,subscription('evt_past_due','customer.subscription.updated','past_due',3,failedAt,org));
  expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).status).toBe('past_due');
  vi.setSystemTime(Date.UTC(2026,10,8));
  expect((await reviewOf(t,await enqueue(t,repo._id,8)))?.status).toBe('queued');
  vi.setSystemTime(Date.UTC(2026,10,9,1));
  expect((await reviewOf(t,await enqueue(t,repo._id,9)))?.error).toMatch(/past due and the grace period has ended/);
- await deliver(t,{id:'evt_paid',type:'invoice.paid',created:Math.floor(Date.now()/1000),data:{object:{customer:'cus_1',subscription:'sub_1'}}});
+ await deliver(t,subscription('evt_recovered','customer.subscription.updated','active',3,Math.floor(Date.now()/1000),org));
  expect((await reviewOf(t,await enqueue(t,repo._id,10)))?.status).toBe('queued');
- // Cancellation falls back to the (expired) trial.
+ // Invoice events never set the status, so a late or redelivered payment failure cannot block the paid workspace.
+ // Current API versions put the invoice's subscription under parent.subscription_details.
+ const lateFailure=(id:string)=>({id,type:'invoice.payment_failed',created:failedAt,data:{object:{customer:'cus_1',parent:{subscription_details:{subscription:'sub_1'}}}}});
+ await deliver(t,{id:'evt_paid',type:'invoice.paid',created:Math.floor(Date.now()/1000),data:{object:{customer:'cus_1',subscription:'sub_1'}}});
+ await deliver(t,lateFailure('evt_failed_late'));
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).status).toBe('active');
+ expect((await reviewOf(t,await enqueue(t,repo._id,11)))?.status).toBe('queued');
+ // Cancellation falls back to the (expired) trial; a late payment failure does not revive it as past due.
  await deliver(t,subscription('evt_cancel','customer.subscription.deleted','canceled',3,Math.floor(Date.now()/1000),org));
- expect((await reviewOf(t,await enqueue(t,repo._id,11)))?.error).toMatch(/free trial has ended/);
+ await deliver(t,lateFailure('evt_failed_after_cancel'));
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).status).toBe('canceled');
+ expect((await reviewOf(t,await enqueue(t,repo._id,12)))?.error).toMatch(/free trial has ended/);
 });
 
 test('seats follow membership: viewers are free and changes resync the subscription quantity',async()=>{
@@ -176,6 +185,8 @@ test('seats follow membership: viewers are free and changes resync the subscript
  const update=calls.at(-1)!;
  expect(update.url).toBe('https://api.stripe.com/v1/subscriptions/sub_1');
  expect(Object.fromEntries(new URLSearchParams(update.body))).toEqual({'items[0][id]':'si_1','items[0][quantity]':'3',proration_behavior:'create_prorations'});
+ // No idempotency key: within Stripe's 24h key window a later 2→3 change (after 3→2) would otherwise replay this one.
+ expect(update.key).toBeNull();
  expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).activeSeats).toBe(3);
  await expect(t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org})).rejects.toThrow(/already has a subscription/);
  // Live keys are refused unless explicitly allowed.
