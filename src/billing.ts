@@ -23,8 +23,10 @@ export type BillingAccount = { status: string; seats: number; trialEndsAt: numbe
 // limit, used and capMicros are micro-dollars; overage is true when this request runs past the included usage.
 export type BillingDecision = { allowed: boolean; plan: "disabled" | Plan; limit: number | null; used: number; capMicros: number; overage: boolean; reason?: string };
 const paying = new Set(["active", "trialing", "past_due"]);
-/** used includes in-flight reservations; request is the next call's reservation (0 for the pre-check at enqueue). */
-export function billingDecision(account: BillingAccount, used: number, now: number, config: BillingConfig, request = 0): BillingDecision {
+export const freeTakenReason = (workspace: string) => `Free is one workspace per owner, and an owner of this workspace already has "${workspace}" on Free. A workspace admin can choose Starter or Pro in Settings → Billing, or use "${workspace}" for free reviews.`;
+/** used includes in-flight reservations; request is the next call's reservation (0 for the pre-check at enqueue).
+ * freeElsewhere names the owner's other Free workspace when this one gets no Free allowance (convex/billing.ts). */
+export function billingDecision(account: BillingAccount, used: number, now: number, config: BillingConfig, request = 0, freeElsewhere?: string): BillingDecision {
   if (!config.enabled) return { allowed: true, plan: "disabled", limit: null, used, capMicros: 0, overage: false };
   const over = (room: number) => (request ? used + request > room : used >= room);
   if (account.subscriptionId && paying.has(account.status)) {
@@ -40,6 +42,7 @@ export function billingDecision(account: BillingAccount, used: number, now: numb
   }
   // Free: no subscription (or a lapsed one). The allowance resets each month and has no extra usage.
   const base = { plan: "free" as const, limit: config.freeUsageMicros, used, capMicros: 0, overage: false };
+  if (freeElsewhere) return { ...base, limit: 0, allowed: false, reason: freeTakenReason(freeElsewhere) };
   if (over(config.freeUsageMicros)) return { ...base, allowed: false, reason: `This workspace used the Free plan's ${usdText(config.freeUsageMicros)} of usage for this month. Usage resets on ${resetText(now)}; a workspace admin can upgrade in Settings → Billing.` };
   return { ...base, allowed: true };
 }
