@@ -1,5 +1,6 @@
 import { internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import { inferencePrice, inferenceMicros, reservationMicros } from "../src/inference-billing";
 import { billingConfig } from "../src/billing";
 import { reserveUsage, settleUsage } from "./billing";
@@ -26,6 +27,7 @@ export const reserve = internalMutation({ args: { provider: v.string(), model: v
 } });
 export const settle = internalMutation({ args: { id: v.id("inferenceReservations"), inputTokens: v.number(), outputTokens: v.number(), cacheReadTokens: v.optional(v.number()), cacheWriteTokens: v.optional(v.number()) }, handler: async (ctx, a) => {
   const reservation = await ctx.db.get(a.id); if (!reservation) throw new Error("Inference reservation missing");
+  if (reservation.status === "expired") throw new Error("Inference reservation expired; receipt not applied");
   const amount = inferenceMicros(a.inputTokens, a.outputTokens, { input: reservation.inputPrice, output: reservation.outputPrice, cacheRead: reservation.cacheReadPrice, cacheWrite: reservation.cacheWritePrice }, { read: a.cacheReadTokens, write: a.cacheWriteTokens });
   if (a.inputTokens > reservation.inputTokenCeiling || a.outputTokens > reservation.outputTokenCeiling || amount > reservation.reservedMicros) throw new Error("Inference receipt exceeds reserved ceiling; reservation retained");
   if (reservation.status === "settled") {
@@ -37,5 +39,20 @@ export const settle = internalMutation({ args: { id: v.id("inferenceReservations
   if (budget) await ctx.db.patch(budget._id, { reservedMicros: budget.reservedMicros - reservation.reservedMicros, committedMicros: budget.committedMicros + amount });
   if (reservation.usageId) await settleUsage(ctx, reservation.usageId, reservation.reservedMicros, amount);
   await ctx.db.patch(reservation._id, { status: "settled", inputTokens: a.inputTokens, outputTokens: a.outputTokens, ...(a.cacheReadTokens ? { cacheReadTokens: a.cacheReadTokens } : {}), ...(a.cacheWriteTokens ? { cacheWriteTokens: a.cacheWriteTokens } : {}), settledMicros: amount, settledAt: Date.now() });
+} });
+// Reservations never settled (timeout, abort, an OK reply without usage, a crashed worker) stop holding capacity
+// 15 minutes after they were made, well past the 120s model and 60s embedding timeouts. The deployment cap commits
+// the full amount, since the provider may have billed it; the workspace is charged nothing without a receipt.
+export const STALE_RESERVATION_MS = 15 * 60_000;
+export const expireStale = internalMutation({ args: {}, handler: async (ctx): Promise<number> => {
+  const stale = await ctx.db.query("inferenceReservations").withIndex("by_status_created", (q) => q.eq("status", "reserved").lt("createdAt", Date.now() - STALE_RESERVATION_MS)).take(100);
+  for (const r of stale) {
+    const budget = r.budgetId ? await ctx.db.get(r.budgetId) : null;
+    if (budget) await ctx.db.patch(budget._id, { reservedMicros: budget.reservedMicros - r.reservedMicros, committedMicros: budget.committedMicros + r.reservedMicros });
+    if (r.usageId) await settleUsage(ctx, r.usageId, r.reservedMicros, 0);
+    await ctx.db.patch(r._id, { status: "expired" });
+  }
+  if (stale.length === 100) await ctx.scheduler.runAfter(0, internal.inferenceBudget.expireStale, {});
+  return stale.length;
 } });
 export const status = internalQuery({ args: {}, handler: async ctx => ctx.db.query("inferenceBudgets").unique() });

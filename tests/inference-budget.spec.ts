@@ -5,6 +5,7 @@ import type {Id} from '../convex/_generated/dataModel';
 import {internal} from '../convex/_generated/api';
 import {HttpModel,ModelFailure} from '../src/engine/model';
 import {InferenceBudgetError} from '../src/inference-billing';
+import {STALE_RESERVATION_MS} from '../convex/inferenceBudget';
 import {Embeddings} from '../src/engine/embeddings';
 const modules=import.meta.glob('../convex/**/*.ts');
 const quote={provider:'openai',model:'gpt-4.1',baseUrl:'https://api.openai.com/v1',inputTokenCeiling:1000,outputTokenCeiling:1000};
@@ -76,4 +77,19 @@ test('cached Anthropic receipts reserve at the cache-write premium and settle ca
  await expect(t.mutation(internal.inferenceBudget.settle,{...receipt,cacheReadTokens:7000})).rejects.toThrow('differently');
  const next=await t.mutation(internal.inferenceBudget.reserve,sonnet);if(!next)throw Error();
  await expect(t.mutation(internal.inferenceBudget.settle,{id:next,inputTokens:10,outputTokens:1,cacheReadTokens:8,cacheWriteTokens:8})).rejects.toThrow('Invalid');
+});
+test('reservations never settled expire after 15 minutes: the cap commits them in full and late receipts are refused',async()=>{
+ const t=convexTest(schema,modules);await t.mutation(internal.inferenceBudget.initialize,{limitMicros:20000,baselineMicros:0,source:'expiry fixture'});
+ const old=await t.mutation(internal.inferenceBudget.reserve,quote),fresh=await t.mutation(internal.inferenceBudget.reserve,quote);if(!old||!fresh)throw Error();
+ await expect(t.mutation(internal.inferenceBudget.reserve,quote)).rejects.toThrow('exhausted');
+ // `old` timed out just past the cutoff; `fresh` may still be in flight.
+ await t.run(ctx=>ctx.db.patch(old,{createdAt:Date.now()-STALE_RESERVATION_MS-1}));
+ expect(await t.mutation(internal.inferenceBudget.expireStale,{})).toBe(1);
+ expect(await t.run(async ctx=>[(await ctx.db.get(old))!.status,(await ctx.db.get(fresh))!.status])).toEqual(['expired','reserved']);
+ expect(await t.query(internal.inferenceBudget.status,{})).toMatchObject({reservedMicros:10000,committedMicros:10000});
+ // A receipt arriving after expiry cannot release or count the call a second time.
+ await expect(t.mutation(internal.inferenceBudget.settle,{id:old,inputTokens:100,outputTokens:10})).rejects.toThrow('expired');
+ expect(await t.mutation(internal.inferenceBudget.expireStale,{})).toBe(0);
+ await t.mutation(internal.inferenceBudget.settle,{id:fresh,inputTokens:100,outputTokens:10});
+ expect(await t.query(internal.inferenceBudget.status,{})).toMatchObject({reservedMicros:0,committedMicros:10280});
 });
