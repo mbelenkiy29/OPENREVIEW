@@ -1021,6 +1021,7 @@ export default defineSchema({
     title: v.string(),
     mode: v.optional(v.string()),
     security: v.boolean(),
+    instructions: v.optional(v.string()),
     inputStorageId: v.optional(v.id("_storage")),
     result: v.optional(v.string()),
     error: v.optional(v.string()),

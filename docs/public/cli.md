@@ -12,8 +12,9 @@ openreview login
 `openreview login` opens your browser to sign in and choose a workspace. The CLI keeps the sign-in owner-only in `~/.config/openreview/config.json` and renews it on its own.
 
 - **Self-hosted server:** pass `--url https://review.example.com`, or set `OPENREVIEW_URL`.
-- **CI and scripts:** sign in with an API key instead: `openreview login --url <server> --token <api-key>`.
-- `openreview status` shows the server and your repositories. `openreview logout` signs out and revokes the sign-in.
+- **CI and scripts:** set `OPENREVIEW_API_KEY` (and `OPENREVIEW_URL` for a self-hosted server). It takes precedence over a saved sign-in and is never written to disk.
+- **API key on a machine:** `openreview login --api-key` prompts for the key without echoing it, or reads it from stdin (`printf %s "$KEY" | openreview login --api-key`). Avoid `--token <api-key>`, which leaves the key in your shell history and process list; it still works but warns.
+- `openreview status` (or `openreview whoami`) shows the server and your repositories. `openreview logout` signs out and revokes the sign-in.
 
 It needs Node.js 24 or newer. In a checkout of this repository, `pnpm cli` runs the same command, and `npm link` installs it.
 
@@ -26,6 +27,7 @@ openreview review --security --mode deep
 openreview review --agent           # one JSON object, for coding agents
 openreview review --json
 openreview review --inline          # file:line blocks with surrounding code
+openreview review --instructions "focus on error handling in the retry logic"
 ```
 
 Signed in, OpenReview reviews the change on your workspace. The CLI sends the diff and the changed files. The server adds context from the repository's index and applies the workspace's rules, settings and model.
@@ -33,7 +35,26 @@ Signed in, OpenReview reviews the change on your workspace. The CLI sends the di
 - **Usage:** each review counts toward the workspace's plan like a pull request review, and its model usage shows in Analytics.
 - **Repository:** the checkout's `origin` must be connected and indexed in the workspace.
 - **Retention:** the uploaded code is deleted when the review ends, and the result after a day. Only you can read it.
+- `--instructions` adds guidance for this run only, after the workspace's and repository's own instructions (up to 2,000 characters).
 - `--mode` asks for a review tier, up to the workspace's cap; `--security` reviews security only. Commit your work first: uncommitted edits are not reviewed.
+
+### Review status for hooks and CI
+
+```sh
+openreview review status --pr 42
+openreview review status --pr 42 --json
+```
+
+It reports the latest review of pull request 42 in this checkout's repository, and exits with a code you can gate on:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | A completed review covers the pull request's current head |
+| 1 | No review yet, the review is for an older head, you are signed out, or the origin is not connected |
+| 2 | Invalid usage, such as a missing `--pr` |
+| 3 | The review is queued or running |
+| 4 | The latest review failed |
+| 5 | The latest review was cancelled |
 
 ### Review on this machine
 
@@ -64,7 +85,7 @@ Claude Code, Codex and other agents can run `openreview review --agent` before t
 ## Onboard a workspace
 
 ```sh
-openreview onboard --url https://review.example.com --token <admin-api-key>
+openreview onboard --url https://review.example.com --api-key   # prompts for the admin key
 ```
 
 `openreview onboard` walks through setup with the workspace's API key. Create an admin-scope key under Settings → API keys.

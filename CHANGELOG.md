@@ -39,6 +39,10 @@
 
 
 ### OpenReview CLI
+- `openreview login --api-key` reads the key from a hidden prompt or stdin, and `OPENREVIEW_API_KEY` signs CI in without saving anything. `--token` still works but warns that it leaves the key in your shell history.
+- `openreview review --instructions "…"` adds guidance for one run, on the server or with `--local`.
+- `openreview review status --pr <number>` reports a pull request's latest review and exits 0 when a completed review covers its head, so hooks and CI can gate on it.
+- `openreview whoami` is another name for `openreview status`.
 - Install the CLI with `npm install -g openreview-cli` and sign in through your browser with `openreview login`. No API key to copy; the sign-in renews itself and `openreview logout` revokes it.
 - Signed in, `openreview review` reviews your commits before you push on your workspace, with its model, rules and repository index. Each review counts toward your plan, and its usage shows in Analytics. `--local` keeps reviewing on your machine with your own model key.
 - **Behavior change:** once a login is saved (including an API key from `openreview login --token` or `openreview onboard`), `openreview review` runs on the server: it uploads the diff and changed files and counts against the plan. Add `--local` to keep reviews on your machine.

@@ -14,6 +14,7 @@ export const localReviewFields = z.object({
   title: z.string().max(300).default(""),
   mode: z.enum(tiers).optional(),
   security: z.boolean().default(false),
+  instructions: z.string().max(2000).optional(),
   diff: z.string().min(1).max(localReviewLimits.diffChars),
   files: z.array(z.object({ path: z.string().min(1).max(500), sha: z.string().max(64), content: z.string().max(localReviewLimits.fileChars) })).max(localReviewLimits.files),
 });
@@ -22,6 +23,14 @@ export const localReviewRequest = localReviewFields.superRefine((value, ctx) => 
     ctx.addIssue({ code: "custom", path: ["files"], message: `Changed files exceed ${localReviewLimits.totalFileChars.toLocaleString("en-US")} characters; review with --local` });
 });
 export type LocalReviewRequest = z.infer<typeof localReviewRequest>;
+
+// `openreview review status` exit codes, for hooks and CI: 0 a completed review covers the head, 1 no such review,
+// 3 still running, 4 failed, 5 cancelled (2 is invalid usage, set by the caller).
+export function reviewStatusExit(review: { status: string; coversCurrentHead: boolean | null } | null) {
+  if (!review) return 1;
+  if (review.status === "completed") return review.coversCurrentHead === false ? 1 : 0;
+  return review.status === "failed" ? 4 : review.status === "cancelled" ? 5 : 3;
+}
 
 export type LocalReviewProgress = { id: string; status: "queued" | "running" | "completed" | "failed"; stage: string | null; error: string | null; result: { summary: string; findings: Finding[] } | null };
 

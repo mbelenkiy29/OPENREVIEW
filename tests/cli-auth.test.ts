@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { accessToken, browserSignIn, logout, readLogin, replaceLogin, saveLogin, serverUrl, type BrowserLogin } from "../src/cli-auth";
 import { remoteReview } from "../src/remote-review";
+import { reviewStatusExit } from "../src/cli-review";
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { ART } from "../src/cli-banner";
 import { markFrames, playBanner, stageReporter } from "../src/cli-animation";
 
@@ -119,7 +122,9 @@ test("remote review: matches the checkout's repository, uploads changed files, r
   assert.deepEqual(result, { repository: "Acme/Shop", summary: "Clean.", findings: [] });
   assert.deepEqual(stages, ["uploading", "reviewing"]);
   const upload = sent.find(([name]) => name === "review_local_changes")![1];
-  assert.deepEqual([upload.repositoryId, (upload.files as { path: string }[]).map((f) => f.path), "mode" in upload], ["repo1", ["x"], false]);
+  assert.deepEqual([upload.repositoryId, (upload.files as { path: string }[]).map((f) => f.path), "mode" in upload, "instructions" in upload], ["repo1", ["x"], false, false]);
+  await remoteReview(call, { ...input, instructions: "focus on retries" }, { stage: () => {}, wait: async () => {} });
+  assert.equal(sent.filter(([name]) => name === "review_local_changes").at(-1)![1].instructions, "focus on retries");
   await assert.rejects(remoteReview(call, { ...input, remote: "acme/other" }, { stage: () => {}, wait: async () => {} }), /not a repository in your OpenReview workspace/);
   await assert.rejects(remoteReview(async (name) => name === "list_repositories" ? [{ _id: "repo1", fullName: "acme/shop" }] : name === "review_local_changes" ? { reviewId: "r" } : { status: "failed", error: "Billing: limit reached" }, input, { stage: () => {}, wait: async () => {} }), /Billing: limit reached/);
   await assert.rejects(remoteReview(call, { ...input, diff: "x".repeat(1_000_001) }, { stage: () => {}, wait: async () => {} }), /too large/);
@@ -148,4 +153,37 @@ test("the mark draws in line by line and the marker lands last; nothing animates
   plain.stage("finding_issues");
   plain.done();
   assert.equal(written.at(-1), "finding issues\n");
+});
+
+test("review status exit codes: 0 reviewed head, 1 none or stale, 3 running, 4 failed, 5 cancelled", () => {
+  const review = (status: string, coversCurrentHead: boolean | null = true) => ({ status, coversCurrentHead });
+  assert.deepEqual([null, review("completed"), review("completed", null), review("completed", false), review("queued"), review("running"), review("failed"), review("cancelled")].map(reviewStatusExit), [1, 0, 0, 1, 3, 3, 4, 5]);
+});
+
+const cli = (args: string[], env: Record<string, string>, stdin = "") => new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+  const child = spawn(process.execPath, [path.resolve("bin/openreview.mjs"), ...args], { env: { ...process.env, OPENREVIEW_API_KEY: "", ...env } });
+  let stdout = "", stderr = "";
+  child.stdout.on("data", (d) => stdout += d);
+  child.stderr.on("data", (d) => stderr += d);
+  child.on("close", (code) => resolve({ code, stdout, stderr }));
+  child.stdin.end(stdin);
+});
+test("login --api-key reads the key from stdin, never argv, and saves it owner-only; review status without --pr is a usage error", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "openreview-home-"));
+  const seen: string[] = [];
+  const api = createServer((request, response) => { seen.push(request.headers.authorization ?? ""); response.setHeader("content-type", "application/json"); response.end("[]"); });
+  await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
+  try {
+    const url = `http://127.0.0.1:${(api.address() as { port: number }).port}`, key = "ork_test_key_0123456789abcdef";
+    const login = await cli(["login", "--api-key", "--url", url], { HOME: home }, key + "\n");
+    assert.equal(login.code, 0, login.stderr);
+    assert.deepEqual(seen, [`Bearer ${key}`]);
+    const file = path.join(home, ".config", "openreview", "config.json");
+    assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { url, apiKey: key });
+    assert.equal((await stat(file)).mode & 0o777, 0o600);
+    assert.doesNotMatch(login.stderr, /Warning/);
+    assert.match((await cli(["login", "--token", key, "--url", url], { HOME: home })).stderr, /--token puts the key in your shell history/);
+    const status = await cli(["review", "status"], { HOME: home });
+    assert.deepEqual([status.code, status.stderr.trim()], [2, "OpenReview: Pass --pr <number>"]);
+  } finally { api.close(); }
 });
