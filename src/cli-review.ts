@@ -4,8 +4,8 @@ import type { Finding } from "./engine/types";
 
 // A logged-in `openreview review` sends its committed changes for a server-side review: the unified diff
 // against the merge base and the changed files' contents at HEAD. The server takes the rest of the
-// context from the repository's index. Limits keep the request under the hosting platform's body limit.
-export const localReviewLimits = { diffChars: 1_000_000, files: 300, fileChars: 200_000, totalFileChars: 2_000_000 };
+// context from the repository's index. uploadBytes keeps the request under Vercel's 4.5 MB body limit.
+export const localReviewLimits = { diffChars: 1_000_000, files: 300, fileChars: 200_000, totalFileChars: 2_000_000, uploadBytes: 4_000_000 };
 const sha = z.string().regex(/^[a-f0-9]{40}$/, "Use a full commit SHA");
 export const localReviewFields = z.object({
   repositoryId: z.string().regex(/^[A-Za-z0-9]{20,64}$/, "Use an OpenReview repository ID"),

@@ -20,7 +20,7 @@ import { cacheDirectory, localAgentState, stateFile } from "./local-review-state
 import { inlineReport } from "./inline-output";
 import { remoteReview } from "./remote-review";
 import { repositoryFromRemote } from "./onboard";
-import { accessToken, browserSignIn, defaultServer, logout, readLogin, saveLogin, serverUrl, type SavedLogin } from "./cli-auth";
+import { accessToken, browserSignIn, defaultServer, logout, readLogin, replaceLogin, serverUrl, type SavedLogin } from "./cli-auth";
 import { playBanner, stageReporter } from "./cli-animation";
 
 try {
@@ -89,12 +89,12 @@ async function main() {
       const config = apiKeyLogin.parse({ url: serverUrl(values.url ?? process.env.OPENREVIEW_URL ?? defaultServer), apiKey: values.token });
       const response = await fetch(new URL("/api/repositories", config.url), { headers: { authorization: `Bearer ${config.apiKey}` } });
       if (!response.ok) throw new Error(`Login failed: HTTP ${response.status}. Generate an API key in dashboard Settings.`);
-      await saveLogin(config);
+      await replaceLogin(config);
       console.log("Authenticated. Configuration saved with owner-only permissions.");
       return;
     }
     const login = await browserSignIn(values.url ?? process.env.OPENREVIEW_URL ?? defaultServer, { print: (line) => console.error(line) });
-    await saveLogin(login);
+    await replaceLogin(login);
     if (process.stdout.isTTY) await playBanner({ details: [`Signed in to ${login.url}`, "Run openreview review before you push."] }, { size: "compact" });
     else console.log(`Signed in to ${login.url}.`);
     return;
@@ -110,7 +110,7 @@ async function main() {
     let config;
     if (values.url || values.token) {
       config = apiKeyLogin.parse({ url: values.url ? serverUrl(values.url) : values.url, apiKey: values.token });
-      await saveLogin(config);
+      await replaceLogin(config);
     } else {
       const saved = await readLogin();
       if (!saved || !("apiKey" in saved)) throw new Error("Onboarding needs an admin API key. Run openreview onboard --url <server> --token <admin-api-key> (create the key in dashboard Settings → API keys).");

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { accessToken, browserSignIn, logout, readLogin, saveLogin, serverUrl, type BrowserLogin } from "../src/cli-auth";
+import { accessToken, browserSignIn, logout, readLogin, replaceLogin, saveLogin, serverUrl, type BrowserLogin } from "../src/cli-auth";
 import { remoteReview } from "../src/remote-review";
 import { ART } from "../src/cli-banner";
 import { markFrames, playBanner, stageReporter } from "../src/cli-animation";
@@ -48,13 +48,25 @@ test("browser sign-in: registers a loopback client, uses PKCE and state, and exc
   assert.deepEqual({ ...login, expiresAt: 0 }, { url: issuer, clientId: "client-1", tokenEndpoint: metadata.token_endpoint, revocationEndpoint: metadata.revocation_endpoint, resource: `${issuer}/api/mcp`, accessToken: "ora_access_token_1", refreshToken: "orr_refresh_token_1", expiresAt: 0 });
 });
 
-test("browser sign-in refuses a response for another request or from another server", async () => {
-  for (const [query, message] of [["code=x&state=wrong", /did not match/], ["code=x&state={state}&iss=https%3A%2F%2Fevil.example", /different server/], ["error=access_denied&error_description=Denied&state={state}", /Denied/]] as const) {
+test("browser sign-in refuses a response from another server", async () => {
+  for (const [query, message] of [["code=x&state={state}&iss=https%3A%2F%2Fevil.example", /different server/], ["error=access_denied&error_description=Denied&state={state}", /Denied/]] as const) {
     await assert.rejects(browserSignIn(issuer, { fetch: server([]), print: () => {}, open: (url) => { const u = new URL(url); void fetch(`${u.searchParams.get("redirect_uri")}?${query.replace("{state}", u.searchParams.get("state")!)}`); } }), message);
   }
   await assert.rejects(browserSignIn(issuer, { fetch: server([]), print: () => {}, open: () => {}, timeoutMs: 50 }), /Timed out/);
   assert.throws(() => serverUrl("http://review.example.com"), /HTTPS/);
   assert.equal(serverUrl("http://localhost:3000/path"), "http://localhost:3000");
+});
+
+test("browser sign-in answers a callback with the wrong state with 400 and keeps waiting for the real one", async () => {
+  const calls: Call[] = [];
+  let stray: number | undefined;
+  const login = await browserSignIn(issuer, {
+    fetch: server(calls), print: () => {},
+    open: (url) => { const u = new URL(url), redirect = u.searchParams.get("redirect_uri"); void (async () => { stray = (await fetch(`${redirect}?code=forged&state=wrong`)).status; await fetch(`${redirect}?code=the-code&state=${u.searchParams.get("state")}`); })(); },
+  });
+  assert.equal(stray, 400);
+  assert.equal(new URLSearchParams(calls.find((c) => c.url === metadata.token_endpoint)!.body).get("code"), "the-code");
+  assert.equal(login.accessToken, "ora_access_token_1");
 });
 
 test("saved logins are owner-only; concurrent runs refresh a stale token once and share it; logout revokes and deletes", async () => {
@@ -78,6 +90,19 @@ test("saved logins are owner-only; concurrent runs refresh a stale token once an
   await assert.rejects(readFile(file));
 });
 
+test("replacing a browser sign-in with an API key revokes the browser sign-in first", async () => {
+  const file = await tempFile(), calls: Call[] = [];
+  await saveLogin({ url: issuer, clientId: "client-1", tokenEndpoint: metadata.token_endpoint, revocationEndpoint: metadata.revocation_endpoint, resource: `${issuer}/api/mcp`, accessToken: "ora_access_token_0", refreshToken: "orr_refresh_token_0", expiresAt: Date.now() + 600_000 }, file);
+  const admin = { url: issuer, apiKey: "or_admin_key_123456" };
+  await replaceLogin(admin, { file, fetch: server(calls) });
+  assert.deepEqual(calls.map((c) => [c.url, new URLSearchParams(c.body).get("token")]), [[metadata.revocation_endpoint, "orr_refresh_token_0"]]);
+  assert.deepEqual(await readLogin(file), admin);
+  assert.equal((await stat(file)).mode & 0o777, 0o600);
+  // Replacing an API key has nothing to revoke.
+  await replaceLogin({ ...admin, apiKey: "or_admin_key_654321" }, { file, fetch: server(calls) });
+  assert.equal(calls.length, 1);
+});
+
 test("remote review: matches the checkout's repository, uploads changed files, reports stages and returns findings", async () => {
   const sent: [string, Record<string, unknown>][] = [];
   const stages: string[] = [];
@@ -89,7 +114,7 @@ test("remote review: matches the checkout's repository, uploads changed files, r
     polls++;
     return polls === 1 ? { id: "rev1", status: "running", stage: "reviewing", error: null, result: null } : { id: "rev1", status: "completed", stage: "reviewing", error: null, result: { summary: "Clean.", findings: [] } };
   };
-  const input = { remote: "acme/shop", baseSha: "a".repeat(40), headSha: "b".repeat(40), title: "Add pay", security: false, diff: "diff --git a/x b/x", files: [{ path: "x", sha: "s", content: "x" }, { path: "big", sha: "s", content: "x".repeat(200_001) }] };
+  const input = { remote: "acme/shop", baseSha: "a".repeat(40), headSha: "b".repeat(40), title: "Add pay", security: false, diff: "diff --git a/x b/x", files: [{ path: "x", sha: "s", content: "x" }] };
   const result = await remoteReview(call, input, { stage: (s) => stages.push(s), wait: async () => {} });
   assert.deepEqual(result, { repository: "Acme/Shop", summary: "Clean.", findings: [] });
   assert.deepEqual(stages, ["uploading", "reviewing"]);
@@ -98,6 +123,11 @@ test("remote review: matches the checkout's repository, uploads changed files, r
   await assert.rejects(remoteReview(call, { ...input, remote: "acme/other" }, { stage: () => {}, wait: async () => {} }), /not a repository in your OpenReview workspace/);
   await assert.rejects(remoteReview(async (name) => name === "list_repositories" ? [{ _id: "repo1", fullName: "acme/shop" }] : name === "review_local_changes" ? { reviewId: "r" } : { status: "failed", error: "Billing: limit reached" }, input, { stage: () => {}, wait: async () => {} }), /Billing: limit reached/);
   await assert.rejects(remoteReview(call, { ...input, diff: "x".repeat(1_000_001) }, { stage: () => {}, wait: async () => {} }), /too large/);
+  // A changed file the server would not take is refused, not silently left out of the review.
+  await assert.rejects(remoteReview(call, { ...input, files: [...input.files, { path: "big", sha: "s", content: "x".repeat(200_001) }] }, { stage: () => {}, wait: async () => {} }), /too large/);
+  await assert.rejects(remoteReview(call, { ...input, files: Array.from({ length: 301 }, (_, i) => ({ path: `f${i}`, sha: "s", content: "x" })) }, { stage: () => {}, wait: async () => {} }), /too large/);
+  // Under every character limit, but over 4 MB once multi-byte characters are encoded.
+  await assert.rejects(remoteReview(call, { ...input, diff: "é".repeat(900_000), files: Array.from({ length: 10 }, (_, i) => ({ path: `f${i}`, sha: "s", content: "€".repeat(100_000) })) }, { stage: () => {}, wait: async () => {} }), /too large/);
 });
 
 test("the mark draws in line by line and the marker lands last; nothing animates outside an interactive terminal", async () => {
