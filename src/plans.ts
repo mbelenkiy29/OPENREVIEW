@@ -2,8 +2,8 @@
 // With billing disabled (self-hosted) the plan is "disabled" and everything is unlocked.
 export const plans = ["free", "starter", "pro"] as const;
 export type Plan = (typeof plans)[number];
-// Only features that cost us to run are gated; security checks never are.
-export const entitlements = ["review.deep", "review.reproTests", "fix.pullRequests"] as const;
+// Pro features: the ones that cost us to run, plus the team and admin features. Security checks never are.
+export const entitlements = ["review.deep", "review.reproTests", "fix.pullRequests", "context.requirements", "memory.conventions", "api.access", "analytics.history", "auth.sso", "audit.log"] as const;
 export type Entitlement = (typeof entitlements)[number];
 export const planCatalog: Record<Plan, { name: string; entitlements: readonly Entitlement[] }> = {
   free: { name: "Free", entitlements: [] },
@@ -17,7 +17,17 @@ export const upgradeNote: Record<Entitlement, string> = {
   "review.deep": "Deep reviews are on the Pro plan, so this review ran at the standard tier.",
   "review.reproTests": "Generated reproduction tests are on the Pro plan.",
   "fix.pullRequests": "Fix pull requests are on the Pro plan; a workspace admin can upgrade in Settings → Billing.",
+  "context.requirements": "Linked Linear, Jira, Confluence and Notion requirements are on the Pro plan, so they were not checked in this review.",
+  "memory.conventions": "Learning conventions from review comments is on the Pro plan; approved conventions keep applying.",
+  "api.access": "API keys are on the Pro plan; a workspace admin can upgrade in Settings → Billing. Your keys are kept and work again after upgrading.",
+  "analytics.history": "Analytics older than 30 days are on the Pro plan; a workspace admin can upgrade in Settings → Billing.",
+  "auth.sso": "Single sign-on is on the Pro plan; a workspace admin can upgrade in Settings → Billing.",
+  "audit.log": "The audit log is on the Pro plan; a workspace admin can upgrade in Settings → Billing. Changes are still recorded.",
 };
+// When the Pro gates shipped: SSO connections created before then stay fully editable on any plan.
+export const proGatesAt = Date.UTC(2026, 9, 21);
+// Without analytics.history, analytics reach back to the start of the UTC day 30 days ago.
+export const historyFloor = (now: number) => { const d = new Date(now); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - 30); };
 // The paid plan a Stripe seat price belongs to (monthly or annual); unknown prices map to nothing.
 export function planForPrice(price: string | undefined, env: Record<string, string | undefined> = process.env): "starter" | "pro" | undefined {
   if (!price) return undefined;

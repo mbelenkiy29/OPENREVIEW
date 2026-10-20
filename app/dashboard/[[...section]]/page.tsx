@@ -53,7 +53,7 @@ export default async function Dashboard(props: {
         <WorkspaceInvitations invitations={user.invitations}/>
         {savedTeam&&!selectedTeam&&filters.team===undefined&&<p role="status">Your previously selected team is no longer accessible. Showing all accessible repositories; use the workspace menu to select a team.</p>}
         {view === "overview" && needsSetup(organization) && <section className="setup-banner" aria-label="Workspace setup"><p><strong>Setup isn’t finished.</strong> {organization.onboarding?.reviewsPaused ? "Automatic reviews are paused until you choose when reviews run." : "Finish connecting repositories and choosing review behavior."}</p>{isAdmin ? <Link className="button primary small" href="/dashboard/onboarding">Resume setup</Link> : <p className="muted">A workspace admin is completing setup.</p>}</section>}
-        {view === "overview" && <AnalyticsView token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} />}
+        {view === "overview" && <AnalyticsView token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} locked={ctx.locked} />}
         {view === "repositories" && <RepositoriesSection ctx={ctx} />}
         {view === "reviews" && <ReviewsSection ctx={ctx} />}
         {view === "findings" && <FindingsSection ctx={ctx} />}
@@ -66,17 +66,17 @@ export default async function Dashboard(props: {
         {route === "settings" && section[1] === "account" && <AccountPanel token={user.token}/>}
         {route === "settings" && section[1] === "referrals" && <ReferralsPanel token={user.token} payouts={filters.payouts}/>}
         {route === "settings" && section[1] === "people" && isAdmin && <EmailInvitations token={user.token} organizationId={organization._id} status={filters.emailInvite}/>}
-        {route === "settings" && section[1] === "people" && isAdmin && <SsoSettings token={user.token} organizationId={organization._id}/>}
+        {route === "settings" && section[1] === "people" && isAdmin && <SsoSettings token={user.token} organizationId={organization._id} locked={ctx.locked}/>}
         {route === "settings" && section[1] === "data" && <DataControls token={user.token} organizationId={organization._id}/>}
         {route === "settings" && section[1] === "model" && <ModelPanel token={user.token} organizationId={organization._id} admin={isAdmin}/>}
         {route === "settings" && section[1] === "billing" && <BillingPanel token={user.token} organizationId={organization._id} filters={filters}/>}
         {route === "settings" && section[1] === "notifications" && <NotificationsPanel token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters}/>}
         {route === "chat" && <ChatPanel token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters}/>}
         {route === "memory" && section[1] === "preferences" && <PreferencesPanel token={user.token} organizationId={organization._id} repositories={data.repositories} admin={isAdmin} filters={filters}/>}
-        {route === "memory" && section[1] === "integrations" && <IntegrationsPanel token={user.token} organizationId={organization._id} admin={isAdmin} repositories={data.repositories} selected={filters.integration} error={filters.error} saved={filters.saved} />}
+        {route === "memory" && section[1] === "integrations" && <IntegrationsPanel token={user.token} organizationId={organization._id} admin={isAdmin} locked={ctx.locked} repositories={data.repositories} selected={filters.integration} error={filters.error} saved={filters.saved} />}
         {route === "memory" && section[1] === "clusters" && <ScopePanel token={user.token} organizationId={organization._id} admin={isAdmin} clusters />}
         {route === "settings" && section[1] === "teams" && <ScopePanel token={user.token} organizationId={organization._id} admin={isAdmin} />}
-        {route === "settings" && section[1] === "audit" && (isAdmin ? <AuditPanel token={user.token} organizationId={organization._id} cursor={filters.activityCursor} /> : <p>Workspace admin access required.</p>)}
+        {route === "settings" && section[1] === "audit" && (isAdmin ? <AuditPanel token={user.token} organizationId={organization._id} cursor={filters.activityCursor} locked={ctx.locked} /> : <p>Workspace admin access required.</p>)}
         {route === "settings" && section[1] === "providers" && (isAdmin ? <ProvidersPanel token={user.token} organizationId={organization._id} connectionId={filters.connection} projectId={filters.project} after={filters.after} inspect={filters.inspect} /> : <p>Workspace admin access required.</p>)}
         {route === "settings" && ["review","keys"].includes(section[1]) && <ReviewSettingsSection ctx={ctx} />}
       </main>

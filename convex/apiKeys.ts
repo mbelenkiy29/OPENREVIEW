@@ -2,6 +2,8 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { authorize, service, audit } from "./auth";
 import { apiScopes, legacyScopes } from "../src/api-scopes";
+import { hasEntitlement } from "./billing";
+import { upgradeNote } from "../src/plans";
 export const create = mutation({
   args: {
     token: v.string(),
@@ -10,6 +12,7 @@ export const create = mutation({
     hash: v.string(),
     prefix: v.string(),
     scopes: v.optional(v.array(v.string())),
+    perforce: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { user } = await authorize(
@@ -18,9 +21,11 @@ export const create = mutation({
       args.organizationId,
       true,
     );
+    // A Perforce key (admin scope, Perforce routes only) works on every plan, so the P4 watcher can run on Free.
+    if (!args.perforce && !await hasEntitlement(ctx, args.organizationId, "api.access")) throw new Error(upgradeNote["api.access"]);
     if (!args.name.trim() || !/^[a-f0-9]{64}$/.test(args.hash))
       throw new Error("Invalid API key");
-    const scopes = [...new Set(args.scopes ?? ["read"])];
+    const scopes = args.perforce ? ["admin"] : [...new Set(args.scopes ?? ["read"])];
     if (!scopes.length || scopes.some((s) => !(apiScopes as readonly string[]).includes(s))) throw new Error("Invalid API key scopes");
     const id=await ctx.db.insert("apiKeys", {
       organizationId: args.organizationId,
@@ -31,6 +36,7 @@ export const create = mutation({
       revoked: false,
       createdAt: Date.now(),
       scopes,
+      ...(args.perforce ? { perforce: true } : {}),
     });
     await audit(ctx,args.organizationId,user._id,"api_key.created",id);
     return id;
@@ -52,6 +58,7 @@ export const list = query({
       createdAt: k.createdAt,
       scopes: k.scopes ?? legacyScopes,
       legacy: !k.scopes,
+      perforce: Boolean(k.perforce),
     }));
   },
 });
@@ -84,6 +91,7 @@ export const resolve = query({
       .unique();
     if (!member)
       throw new Error("API key owner no longer has workspace access");
-    return { userId: key.userId, organizationId: key.organizationId, scopes: key.scopes ?? legacyScopes };
+    // Keys outlive a plan change: the caller answers 402 while the plan lacks API access.
+    return { userId: key.userId, organizationId: key.organizationId, scopes: key.scopes ?? legacyScopes, perforce: Boolean(key.perforce), apiAccess: await hasEntitlement(ctx, key.organizationId, "api.access") };
   },
 });

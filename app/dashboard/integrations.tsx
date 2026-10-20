@@ -6,8 +6,10 @@ import { backend, origin } from "../../src/server";
 import { configureLinear, configureAtlassian, configureNotion, disconnectLinear, refreshLinear } from "./actions";
 import { ResourcePicker } from "./resource-picker";
 import { offline } from "../../src/egress";
+import { Locked } from "./locked";
+import type { Entitlement } from "../../src/plans";
 
-export async function IntegrationsPanel({token,organizationId,admin,repositories,selected,error,saved}:{token:string;organizationId:Id<"organizations">;admin:boolean;repositories:{_id:Id<"repositories">;fullName:string}[];selected?:string;error?:string;saved?:string}) {
+export async function IntegrationsPanel({token,organizationId,admin,repositories,selected,error,saved,locked}:{locked:readonly Entitlement[];token:string;organizationId:Id<"organizations">;admin:boolean;repositories:{_id:Id<"repositories">;fullName:string}[];selected?:string;error?:string;saved?:string}) {
  const connections=await backend().query(api.integrations.list,{token,organizationId}),isOffline=offline();
  let atlassianResources:{projects:{id:string;name:string}[];spaces:{id:string;name:string}[]}|undefined;
  const connection=connections.find(c=>c._id===selected&&c.active);
@@ -26,9 +28,11 @@ export async function IntegrationsPanel({token,organizationId,admin,repositories
     {c.error&&<p role="alert">{c.error}</p>}{c.kind==="atlassian"&&!c.active&&<a href="https://id.atlassian.com/manage-profile/apps" target="_blank" rel="noreferrer">Revoke in Atlassian Connected Apps</a>}{c.kind==="notion"&&c.active&&c.error&&admin&&<a className="button" href={"/api/integrations/notion/connect?organization="+organizationId}>Reconnect Notion</a>}
     {admin&&c.active&&<div className="row"><Link className="button" href={"/dashboard/memory/integrations?integration="+c._id}>Select resources</Link>{c.kind==="linear"&&<form action={refreshLinear}><input type="hidden" name="integrationId" value={c._id}/><button>Refresh Linear connection</button></form>}<form action={disconnectLinear}><input type="hidden" name="integrationId" value={c._id}/><button>Disconnect {label(c.kind)}</button></form></div>}
    </article>)}
+   <Locked feature="context.requirements" locked={locked}>
    {admin&&!isOffline&&(process.env.LINEAR_CLIENT_ID?<a className="button primary" href={"/api/integrations/linear/connect?organization="+organizationId}>Connect Linear workspace</a>:<details open><summary>Linear OAuth setup required</summary><p>Create a Linear OAuth application with read scope and PKCE. Set <code>LINEAR_CLIENT_ID</code> on the web application and Convex backend. Register this callback:</p><code className="integration-callback">{origin()+"/api/integrations/linear/callback"}</code></details>)}
    {admin&&!isOffline&&(process.env.ATLASSIAN_CLIENT_ID&&process.env.ATLASSIAN_CLIENT_SECRET?<a className="button primary" href={"/api/integrations/atlassian/connect?organization="+organizationId}>Connect Atlassian sites</a>:<details open><summary>Atlassian OAuth setup required</summary><p>The OpenReview operator registers a distributable OAuth 3LO app with read-only Jira and Confluence scopes and offline access. Set <code>ATLASSIAN_CLIENT_ID</code> and server-only <code>ATLASSIAN_CLIENT_SECRET</code> on the web application and Convex backend. Register this callback:</p><code className="integration-callback">{origin()+"/api/integrations/atlassian/callback"}</code></details>)}
    {admin&&!isOffline&&(process.env.NOTION_CLIENT_ID&&process.env.NOTION_CLIENT_SECRET?<a className="button primary" href={"/api/integrations/notion/connect?organization="+organizationId}>Connect Notion workspace</a>:<details open><summary>Notion OAuth setup required</summary><p>The OpenReview operator creates a public Notion integration with read content capability only. Set <code>NOTION_CLIENT_ID</code> and server-only <code>NOTION_CLIENT_SECRET</code> on the web application and Convex backend. Register this redirect URI:</p><code className="integration-callback">{origin()+"/api/integrations/notion/callback"}</code></details>)}
+   </Locked>
   </section>
   {discoveryFailed&&<section><p role="alert">Integration resources could not be loaded. Access may have expired, or another request is refreshing the token.</p><Link className="button" href={"/dashboard/memory/integrations?integration="+selected}>Retry resource discovery</Link></section>}
   {connection&&resources&&<section><h2>Select resources · {connection.name}</h2><form action={configureLinear} className="form-grid policy-form">

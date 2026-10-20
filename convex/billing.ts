@@ -5,7 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authorize } from "./auth";
 import { billingConfig, billingDecision, nextPeriodStart, openSubscription, periodKey, seatCount, trialEndsFrom } from "../src/billing";
-import { entitled, planCatalog, planEntitlements, planForPrice, type Entitlement, type Plan } from "../src/plans";
+import { entitled, entitlements, planCatalog, planEntitlements, planForPrice, type Entitlement, type Plan } from "../src/plans";
 import { referralConfig } from "../src/referrals";
 import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus } from "./referralLedger";
 
@@ -56,20 +56,21 @@ export const chooseFreePlan = mutation({ args: { token: v.string(), organization
   await ctx.db.patch(a.organizationId, { planSelectedAt: Date.now(), plan: "free" });
   await audit(ctx, a.organizationId, user._id, "billing.plan_selected", "free");
 } });
-// The workspace's current plan ("disabled" when billing is off: every feature is unlocked).
-export async function currentPlan(ctx: QueryCtx, organizationId: Id<"organizations">): Promise<Plan | "disabled"> {
-  const config = billingConfig();
-  if (!config.enabled) return "disabled";
-  const account = await accountOf(ctx, organizationId);
-  return account ? billingDecision(account, 0, Date.now(), config).plan : "free";
-}
+// Whether the workspace's plan includes a feature; with billing off every feature is unlocked.
 export async function hasEntitlement(ctx: QueryCtx, organizationId: Id<"organizations">, key: Entitlement) {
   const config = billingConfig();
   if (!config.enabled) return true;
   const account = await accountOf(ctx, organizationId);
   return account ? entitled(billingDecision(account, 0, Date.now(), config).plan, key, account.legacy) : false;
 }
-export const entitlement = internalQuery({ args: { organizationId: v.id("organizations"), key: v.union(v.literal("review.deep"), v.literal("review.reproTests"), v.literal("fix.pullRequests")) }, handler: (ctx, a) => hasEntitlement(ctx, a.organizationId, a.key) });
+const entitlementKey = v.union(...entitlements.map((key) => v.literal(key)));
+export const entitlement = internalQuery({ args: { organizationId: v.id("organizations"), key: entitlementKey }, handler: (ctx, a) => hasEntitlement(ctx, a.organizationId, a.key) });
+// The Pro features this workspace's plan lacks, for the dashboard's <Locked> settings (none with billing off).
+export const locked = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
+  await authorize(ctx, a.token, a.organizationId);
+  const held = await Promise.all(entitlements.map((key) => hasEntitlement(ctx, a.organizationId, key)));
+  return entitlements.filter((_, i) => !held[i]);
+} });
 // Called by reviews.enqueue: counts an allowed review, or records a blocked one with its reason. Model calls
 // are what use the allowance (reserveUsage); this only stops a review that could not make any.
 export async function reviewAllowance(ctx: MutationCtx, organizationId: Id<"organizations">): Promise<{ allowed: true } | { allowed: false; reason: string }> {

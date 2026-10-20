@@ -1116,6 +1116,14 @@ tr:last-child td {
 }
 
 /* ---------- Dashboard features ---------- */
+/* A Pro setting on a lower plan (app/dashboard/locked.tsx): visible, dimmed and disabled. */
+.locked > fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  opacity: 0.6;
+}
 .filter-bar {
   display: flex;
   gap: 12px;

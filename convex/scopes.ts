@@ -5,6 +5,8 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { v, type Infer } from "convex/values";
 import { authorize, authorizeRepository, visibleRepositories, repositoryAccess, audit } from "./auth";
 import { settingsValidator } from "./schema";
+import { hasEntitlement } from "./billing";
+import { upgradeNote } from "../src/plans";
 import { defaults,deploymentDefaults,validSummarySections,validReviewEngine,validCheckFailureSeverity,validTriggerSettings,validPublicationSettings,validModelSettings,scopeDefaults } from "../src/review-settings";
 import { allowedModels } from "../src/inference-billing";
 import { categories } from "../src/engine/types";
@@ -118,11 +120,13 @@ export const related=internalQuery({args:{repositoryId:v.id("repositories"),acto
 }});
 export const activity=query({args:{token:v.string(),organizationId:v.id("organizations")},handler:async(ctx,a)=>{
  await authorize(ctx,a.token,a.organizationId,true);
+ if(!await hasEntitlement(ctx,a.organizationId,"audit.log"))throw new Error(upgradeNote["audit.log"]);
  const entries=await ctx.db.query("auditEvents").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).order("desc").take(100);
  return Promise.all(entries.map(async entry=>({...entry,actor:entry.userId?(await ctx.db.get(entry.userId))?.login??"Unavailable user":"OpenReview"})));
 }});
 export const activityPage=query({args:{token:v.string(),organizationId:v.id("organizations"),cursor:v.optional(v.string())},handler:async(ctx,a)=>{
  await authorize(ctx,a.token,a.organizationId,true);
+ if(!await hasEntitlement(ctx,a.organizationId,"audit.log"))throw new Error(upgradeNote["audit.log"]);
  const result=await ctx.db.query("auditEvents").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).order("desc").paginate({numItems:30,cursor:a.cursor??null});
  const page=await Promise.all(result.page.map(async entry=>({...entry,actor:entry.userId?(await ctx.db.get(entry.userId))?.login??"Unavailable user":"OpenReview"})));
  return {...result,page};

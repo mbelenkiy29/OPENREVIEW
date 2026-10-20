@@ -1,10 +1,11 @@
 import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { audit, authorize, service } from "./auth";
 import { linkIdentity } from "./identity";
-import { scheduleSeatSync } from "./billing";
+import { hasEntitlement, scheduleSeatSync } from "./billing";
+import { proGatesAt, upgradeNote } from "../src/plans";
 import { domainSchema, emailDomain, ssoEmailVerified, verificationName, verificationValue } from "../src/sso-domains";
 
 // Per-workspace SSO (M2). Admin settings are audited; the login side is called by the web server with
@@ -23,6 +24,9 @@ async function forgetSubjects(ctx: MutationCtx, connectionId: Id<"ssoConnections
   if (rows.length === 200) await ctx.scheduler.runAfter(0, internal.sso.forgetIdentities, { connectionId });
 }
 export const forgetIdentities = internalMutation({ args: { connectionId: v.id("ssoConnections") }, handler: async (ctx, a): Promise<void> => { await forgetSubjects(ctx, a.connectionId); } });
+// Changing SSO needs Pro, except on a connection from before the Pro gates. On a lapsed plan an admin can still
+// turn SSO off or stop requiring it, and sign-in is never gated.
+const ssoChangesAllowed = async (ctx: QueryCtx, organizationId: Id<"organizations">, c: Doc<"ssoConnections"> | null) => Boolean(c && c.createdAt < proGatesAt) || hasEntitlement(ctx, organizationId, "auth.sso");
 const pem = (value: string) => value.length <= 20_000 && /-----BEGIN (CERTIFICATE|PUBLIC KEY)-----[\s\S]+-----END (CERTIFICATE|PUBLIC KEY)-----/.test(value);
 
 export const settings = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
@@ -39,6 +43,8 @@ export const saveConnection = mutation({
   handler: async (ctx, a) => {
     const { user } = await authorize(ctx, a.token, a.organizationId, true);
     const existing = await connectionOf(ctx, a.organizationId);
+    // Without Pro (and not grandfathered) the only allowed save turns an existing connection off.
+    if ((!existing || a.active) && !await ssoChangesAllowed(ctx, a.organizationId, existing)) throw new Error(upgradeNote["auth.sso"]);
     if (!a.name.trim() || a.name.length > 100) throw new Error("Name the connection (up to 100 characters)");
     if (a.protocol === "saml" && (!a.samlEntryPoint || !httpsUrl(a.samlEntryPoint) || !a.samlIdpCert || !pem(a.samlIdpCert) || (a.samlIdpIssuer !== undefined && a.samlIdpIssuer.length > 500))) throw new Error("SAML needs the IdP's HTTPS sign-in URL and its signing certificate (PEM)");
     const secret = a.oidcClientSecret ?? (existing?.protocol === "oidc" ? existing.oidcClientSecret : undefined);
@@ -68,6 +74,7 @@ export const setEnforcement = mutation({ args: { token: v.string(), organization
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
   const c = await connectionOf(ctx, a.organizationId);
   if (!c) throw new Error("Set up SSO first");
+  if (a.enforce && !await ssoChangesAllowed(ctx, a.organizationId, c)) throw new Error(upgradeNote["auth.sso"]);
   if (a.enforce && (!c.active || !(await verifiedDomains(ctx, c._id)).length)) throw new Error("Enforcement needs an active connection and at least one verified domain");
   await ctx.db.patch(c._id, { enforce: a.enforce, updatedAt: Date.now() });
   await audit(ctx, a.organizationId, user._id, a.enforce ? "sso.enforced" : "sso.not_enforced", c._id);
@@ -77,6 +84,7 @@ export const addDomain = mutation({ args: { token: v.string(), organizationId: v
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
   const c = await connectionOf(ctx, a.organizationId);
   if (!c) throw new Error("Set up SSO first");
+  if (!await ssoChangesAllowed(ctx, a.organizationId, c)) throw new Error(upgradeNote["auth.sso"]);
   const domain = domainSchema.parse(a.domain);
   const taken = await ctx.db.query("ssoDomains").withIndex("by_domain", (q) => q.eq("domain", domain)).take(20);
   if (taken.some((d) => d.verifiedAt && d.organizationId !== a.organizationId)) throw new Error("Another workspace already verified this domain");
@@ -98,6 +106,7 @@ export const domainCheck = internalQuery({ args: { token: v.string(), domainId: 
   const d = await ctx.db.get(a.domainId);
   if (!d) throw new Error("Domain not found");
   await authorize(ctx, a.token, d.organizationId, true);
+  if (!await ssoChangesAllowed(ctx, d.organizationId, await ctx.db.get(d.connectionId))) throw new Error(upgradeNote["auth.sso"]);
   return { domain: d.domain, token: d.token, organizationId: d.organizationId };
 } });
 export const markVerified = internalMutation({ args: { domainId: v.id("ssoDomains"), token: v.string() }, handler: async (ctx, a) => {

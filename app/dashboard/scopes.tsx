@@ -8,6 +8,8 @@ import { backend } from "../../src/server";
 import { defaults, scopeDefaults } from "../../src/review-settings";
 import {SummarySettings} from "./summary-settings";
 import {ScrollTable} from "./scroll-table";
+import {Locked} from "./locked";
+import type {Entitlement} from "../../src/plans";
 import {ClusterForm} from "./cluster-form";
 import { createTeam, assignTeam, teamMember, inheritSettings, saveScope, saveCluster, setAutoEnable, requestClusterSuggestions, decideClusterSuggestion } from "./actions";
 
@@ -38,7 +40,8 @@ export async function ScopePanel({token,organizationId,admin,clusters=false}:{to
 <label className="check"><input type="checkbox" name="overrideKeys" value="summarySections" defaultChecked={overrides.includes("summarySections")}/>Override summary sections</label><label className="check"><input type="checkbox" name="overrideKeys" value="commentStyle" defaultChecked={overrides.includes("commentStyle")}/>Override comment style</label><SummarySettings key={JSON.stringify([teamId,s.summarySections,s.commentStyle])} initial={s.summarySections} style={s.commentStyle}/><button>Save defaults</button></form></section>;
  })}</>;
 }
-export async function AuditPanel({token,organizationId,cursor}:{token:string;organizationId:Id<"organizations">;cursor?:string}) {
+export async function AuditPanel({token,organizationId,cursor,locked}:{token:string;organizationId:Id<"organizations">;cursor?:string;locked:readonly Entitlement[]}) {
+ if(locked.includes("audit.log"))return <section><h2>Audit activity</h2><Locked feature="audit.log" locked={locked}/></section>;
  const result=await backend().query(api.scopes.activityPage,{token,organizationId,cursor}),entries=result.page;
  return <section><h2>Audit activity</h2><ScrollTable label="Audit activity table"><table><thead><tr><th>When (UTC)</th><th>Action</th><th>Actor</th><th>Target</th></tr></thead><tbody>{entries.map(e=><tr key={e._id}><td>{new Date(e.createdAt).toLocaleString("en-US",{timeZone:"UTC"})}</td><td>{e.action}</td><td>{e.actor}</td><td>{e.target}</td></tr>)}</tbody></table></ScrollTable>{!entries.length&&<p>{cursor?"No activity on this page.":"No recorded changes."}</p>}<nav className="toolbar" aria-label="Audit pagination">{cursor&&<Link href="/dashboard/settings/audit">Newest activity</Link>}{!result.isDone&&<Link href={`/dashboard/settings/audit?${new URLSearchParams({activityCursor:result.continueCursor})}`}>Older activity</Link>}</nav><p className="muted">{entries.length} actions on this page{result.isDone?" · End of recorded activity":""}.</p></section>;
 }
