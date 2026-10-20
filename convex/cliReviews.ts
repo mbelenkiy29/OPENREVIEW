@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { authorizeRepository } from "./auth";
 import { reviewAllowance } from "./billing";
+import { rateLimit } from "./rateLimit";
 import { localReviewRequest, type LocalReviewProgress } from "../src/cli-review";
 
 // Reviews of local commits from a logged-in CLI. A review counts against the plan like a pull request
@@ -37,6 +38,7 @@ export const create = internalMutation({
     if (!repositoryId) throw new Error("Repository not found");
     const { user, repo } = await authorizeRepository(ctx, a.token, repositoryId, true);
     if (repo.organizationId !== a.organizationId) throw new Error("Repository not found");
+    await rateLimit(ctx, `review:${repo.organizationId}`, 20);
     if (!repo.enabled) return { refused: `${repo.fullName} is not enabled in OpenReview. Enable it under Repositories, or review with --local.`, status: 409 };
     if (!repo.indexedSha) return { refused: `${repo.fullName} has not been indexed yet. Try again once Repositories shows it ready, or review with --local.`, status: 409 };
     const allowance = await reviewAllowance(ctx, repo.organizationId);

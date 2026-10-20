@@ -41,6 +41,7 @@
 ### OpenReview CLI
 - Install the CLI with `npm install -g openreview-cli` and sign in through your browser with `openreview login`. No API key to copy; the sign-in renews itself and `openreview logout` revokes it.
 - Signed in, `openreview review` reviews your commits before you push on your workspace, with its model, rules and repository index. Each review counts toward your plan, and its usage shows in Analytics. `--local` keeps reviewing on your machine with your own model key.
+- **Behavior change:** once a login is saved (including an API key from `openreview login --token` or `openreview onboard`), `openreview review` runs on the server: it uploads the diff and changed files and counts against the plan. Add `--local` to keep reviews on your machine.
 - Claude Code, Codex and other agents can run `openreview review --agent`, and the agent plugin's new **review-local-changes** skill runs the review-and-fix loop before a push.
 - The CLI shows the OpenReview logo, animated, and a progress line in interactive terminals, and stays plain in agent output, pipes and CI.
 

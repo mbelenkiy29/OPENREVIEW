@@ -71,6 +71,15 @@ test('a write-scoped key starts a review; read keys, missing keys and bad payloa
  expect(jobs.filter(j=>(j.args[0] as {id?:string}).id===started.reviewId).map(j=>j.name).sort()).toEqual(['cliReviewJobs:run','cliReviews:expire','cliReviews:remove']);
 });
 
+test('a workspace starts at most 20 reviews a minute; the 21st is refused without keeping the upload',async()=>{
+ const {t,shop,keys}=await setup();
+ for(let i=0;i<20;i++) expect((await startRoute(request('/api/reviews/local',keys.write,upload(shop._id)))).status).toBe(202);
+ const before=await uploads(t);
+ expect(await json(await startRoute(request('/api/reviews/local',keys.write,upload(shop._id))))).toEqual([429,{error:'Rate limit exceeded; retry after a minute'}]);
+ expect(await uploads(t)).toBe(before);
+ expect(await t.run(ctx=>ctx.db.query('cliReviews').collect())).toHaveLength(20);
+});
+
 test('repositories outside the workspace, disabled or unindexed ones, and an exhausted plan are refused without keeping the upload',async()=>{
  const {t,org,shop,fresh,rivalRepo,keys}=await setup();
  const before=await uploads(t);

@@ -116,7 +116,7 @@ export async function accessToken(login: SavedLogin, options: { file?: string; f
     const current = await readLogin(file);
     if (current && "accessToken" in current && current.url === login.url && fresh(current)) return current.accessToken;
     const from = current && "refreshToken" in current && current.url === login.url ? current : login;
-    const response = await (options.fetch ?? fetch)(from.tokenEndpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: from.refreshToken, client_id: from.clientId, resource: from.resource }) });
+    const response = await (options.fetch ?? fetch)(from.tokenEndpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: from.refreshToken, client_id: from.clientId, resource: from.resource }), signal: AbortSignal.timeout(20_000) });
     if (!response.ok) throw new Error("Your OpenReview sign-in expired or was revoked. Run openreview login again.");
     const tokens = tokenSchema.parse(await response.json());
     await saveLogin({ ...from, accessToken: tokens.access_token, refreshToken: tokens.refresh_token, expiresAt: Date.now() + tokens.expires_in * 1000 }, file);
