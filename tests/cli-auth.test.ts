@@ -110,6 +110,8 @@ test("remote review: matches the checkout's repository, uploads changed files, r
   await assert.rejects(remoteReview(call, { ...input, remote: "acme/other" }, { stage: () => {}, wait: async () => {} }), /not a repository in your OpenReview workspace/);
   await assert.rejects(remoteReview(async (name) => name === "list_repositories" ? [{ _id: "repo1", fullName: "acme/shop" }] : name === "review_local_changes" ? { reviewId: "r" } : { status: "failed", error: "Billing: limit reached" }, input, { stage: () => {}, wait: async () => {} }), /Billing: limit reached/);
   await assert.rejects(remoteReview(call, { ...input, diff: "x".repeat(1_000_001) }, { stage: () => {}, wait: async () => {} }), /too large/);
+  // Under every character limit, but over 4 MB once multi-byte characters are encoded.
+  await assert.rejects(remoteReview(call, { ...input, diff: "é".repeat(900_000), files: Array.from({ length: 10 }, (_, i) => ({ path: `f${i}`, sha: "s", content: "€".repeat(100_000) })) }, { stage: () => {}, wait: async () => {} }), /too large/);
 });
 
 test("the mark draws in line by line and the marker lands last; nothing animates outside an interactive terminal", async () => {
