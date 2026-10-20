@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "openreview",
   "version": "0.3.0",
-  "description": "OpenReview MCP server and skills to check a pull request's review and fix its findings until a re-review is clean.",
+  "description": "OpenReview MCP server and skills to review local commits before pushing, check a pull request's review and fix its findings until a re-review is clean.",
   "author": {
     "name": "OpenReview contributors"
   },

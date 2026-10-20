@@ -3,6 +3,7 @@
 The repository includes one plugin package, `plugins/openreview`, for Claude Code and for Codex. It provides:
 
 - The OpenReview MCP server (the remote endpoint at `/api/mcp`).
+- The **review-local-changes** skill: reviews the branch's committed changes with `openreview review --agent` before you push, fixes real findings and reviews again, at most three times. It needs the [CLI](cli.md), signed in with `openreview login`.
 - The **review-status** skill: shows a pull request's review status and open findings.
 - The **resolve-review-findings** skill: fixes open findings, commits locally, requests a re-review, and repeats until the pull request is clean or three rounds have run. It asks before every push unless you told it to push, and it never force-pushes or rewrites commits.
 

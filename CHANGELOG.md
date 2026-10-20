@@ -38,13 +38,19 @@
 - Fixed: after choosing repositories, setup could stay on "Starting indexing…" until the next click, even though indexing had started. The cause was a bug in the React version bundled with Next.js 15.5, which could also stall other page changes in the dashboard. OpenReview now includes React's fix.
 
 
+### OpenReview CLI
+- Install the CLI with `npm install -g openreview-cli` and sign in through your browser with `openreview login`. No API key to copy; the sign-in renews itself and `openreview logout` revokes it.
+- Signed in, `openreview review` reviews your commits before you push on your workspace, with its model, rules and repository index. Each review counts toward your plan, and its usage shows in Analytics. `--local` keeps reviewing on your machine with your own model key.
+- Claude Code, Codex and other agents can run `openreview review --agent`, and the agent plugin's new **review-local-changes** skill runs the review-and-fix loop before a push.
+- The CLI shows the OpenReview logo, animated, and a progress line in interactive terminals, and stays plain in agent output, pipes and CI.
+
 ### Fixing findings
 - Signing in from a **Fix with your agent** link in a pull request now returns you to that fix, instead of the dashboard.
 - One default coding agent everywhere: Claude Code, unless the workspace or you choose another. The settings page no longer shows a preview-only button.
 - Every finding on a review page links to the full Fix page (deep links, Devin and more), and deep links are hidden on findings that are already resolved or dismissed.
 - The Fix link under each inline finding is built the same way on every provider, and is left out when `APP_URL` is not a plain web origin.
 - Saving your coding agent confirms with a message, and shows the error if saving fails.
-- Settings → Agents starts with the fixes that need nothing installed from OpenReview: cloud agents, the Open in links and the agent plugin. The local bridge steps, which need an OpenReview source checkout, are collapsed under self-hosted deployments.
+- Settings → Agents starts with the fixes that need nothing installed from OpenReview: cloud agents, the Open in links and the agent plugin. The local bridge steps are collapsed below them.
 - **Open a fix PR** on a finding's Fix page: OpenReview commits its validated suggestion to a new `openreview/fix-*` branch and opens a pull request against your branch, checked against your own GitHub write access. It needs the repository's Fix pull requests setting and the App's Contents: Read and write permission; the page says which one is missing.
 - Settings → Code providers shows, for each GitHub installation, whether it granted Contents and Checks write access.
 - **Cloud agents.** Hand a finding to Claude, Codex, Copilot or Cursor from its Fix page. OpenReview posts a comment as you that mentions the agent, so it starts in its own cloud: Claude replies in the finding's thread, the others in the pull request conversation. Choose your agent, or the workspace default, under Settings → Agents, which also lists what each agent needs. When cloud agents are the workspace default, the link under each finding reads, for example, **Fix with Claude**. See [Fix with agents](docs/public/fix-with-agents.md).
