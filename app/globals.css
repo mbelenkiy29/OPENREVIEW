@@ -838,6 +838,7 @@ tr:last-child td {
 .badge.low,
 .badge.queued,
 .badge.cancelled,
+.badge.skipped,
 .badge.not_useful {
   color: var(--muted);
   background: var(--surface-2);

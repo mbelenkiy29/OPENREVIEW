@@ -261,5 +261,6 @@ export const stages = [
   "completed",
   "failed",
   "cancelled",
+  "skipped",
 ] as const;
 export type Stage = (typeof stages)[number];

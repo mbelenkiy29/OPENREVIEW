@@ -137,7 +137,7 @@ export const lifecycle = internalMutation({
           q.eq("repositoryId", repo._id).eq("prNumber", args.prNumber!),
         )
         .collect())
-        if (!["completed", "cancelled", "failed"].includes(review.status))
+        if (!["completed", "cancelled", "skipped", "failed"].includes(review.status))
           await cancelReview(ctx,review);
     }
   },

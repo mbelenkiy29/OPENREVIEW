@@ -102,7 +102,7 @@ export async function loadDashboard({
         ["queued", "generating"].includes(r.knowledgeStatus ?? ""),
     ) ||
     data.reviews.some(
-      (r) => !["completed", "failed", "cancelled"].includes(r.status),
+      (r) => !["completed", "failed", "cancelled", "skipped"].includes(r.status),
     );
   let detail = null;
   if (view === "reviews" && reviewDetailId)
@@ -111,7 +111,7 @@ export async function loadDashboard({
       reviewId: reviewDetailId as Id<"reviews">,
       historyCursor: filters.historyCursor,
     });
-  if(detail&&!['completed','failed','cancelled'].includes(detail.review.status))active=true;
+  if(detail&&!['completed','failed','cancelled','skipped'].includes(detail.review.status))active=true;
   const diagnostics=detail?.review.resultStorageId?await backend().action(api.jobs.diagnostics,{token:user.token,reviewId:detail.review._id}):null;
   const personalAgent=(await backend().query(api.bridge.personal,{token:user.token,organizationId:detail?.review.organizationId??organization._id})).agent;
   if(view === "knowledge" && requestedRepository && !data.repositories.some(r=>r._id===requestedRepository))notFound();

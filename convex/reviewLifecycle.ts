@@ -7,11 +7,12 @@ export function requireP4Worker(review:Doc<"reviews">,leaseId?:string){
   if(!leaseId||!lease||lease.id!==leaseId||lease.expiresAt<=Date.now())throw new Error("P4 review worker lease expired or replaced");
 }
 
-export async function cancelReview(ctx:MutationCtx,review:Doc<"reviews">) {
+// Ends a review before publication: "cancelled" when superseded or stopped, "skipped" when settings say not to review it.
+export async function cancelReview(ctx:MutationCtx,review:Doc<"reviews">,status:"cancelled"|"skipped"="cancelled") {
   if(review.retryScheduledId){
     const scheduled=await ctx.db.system.get(review.retryScheduledId);
     if(scheduled?.state.kind==="pending")await ctx.scheduler.cancel(scheduled._id);
   }
   const now=Date.now();
-  await ctx.db.patch(review._id,{status:"cancelled",updatedAt:now,finishedAt:now,retryScheduledId:undefined,retryAt:undefined});
+  await ctx.db.patch(review._id,{status,updatedAt:now,finishedAt:now,retryScheduledId:undefined,retryAt:undefined});
 }

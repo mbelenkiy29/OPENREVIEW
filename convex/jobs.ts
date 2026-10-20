@@ -327,7 +327,7 @@ export const review = internalAction({
   handler: async (ctx, args) => {
     const stepStarted = Date.now();
     const state = await ctx.runQuery(internal.reviews.data, args);
-    if (["completed", "cancelled"].includes(state.review.status)) return;
+    if (["completed", "cancelled", "skipped"].includes(state.review.status)) return;
     if(state.review.nativeP4){await ctx.runAction(internal.p4ReviewJobs.run,args);return;}
     const indexState = await ctx.runQuery(internal.repositories.data, {
       repositoryId: state.review.repositoryId,
@@ -429,14 +429,14 @@ export const review = internalAction({
       }
       const limit = state.review.trigger === "mention" || state.review.trigger === "manual" ? undefined : sizeLimitIssue(pr.diff, settings);
       if (limit) {
-        await ctx.runMutation(internal.reviews.stage, { ...args, status: "cancelled", detail: limit });
+        await ctx.runMutation(internal.reviews.stage, { ...args, status: "skipped", detail: limit });
         return;
       }
       if (pr.draft && !settings.drafts) {
         await ctx.runMutation(internal.reviews.stage, {
           ...args,
-          status: "cancelled",
-          detail: "Draft reviews disabled",
+          status: "skipped",
+          detail: "Skipped: draft reviews are off. Mark the pull request ready for review, or turn on draft reviews.",
         });
         return;
       }

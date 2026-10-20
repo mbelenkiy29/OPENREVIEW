@@ -53,12 +53,12 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                   {detail.review.headBranch} → {detail.review.baseBranch}
                 </p>
               )}
-              <ReviewDiff token={user.token} reviewId={detail.review._id} open={filters.diff === "1"} finished={["completed", "failed", "cancelled"].includes(detail.review.status)} findings={detail.findings.map((f) => ({ _id: String(f._id), title: f.title, severity: f.severity, filePath: f.filePath, startLine: f.startLine, endLine: f.endLine, description: f.description }))} />
+              <ReviewDiff token={user.token} reviewId={detail.review._id} open={filters.diff === "1"} finished={["completed", "failed", "cancelled", "skipped"].includes(detail.review.status)} findings={detail.findings.map((f) => ({ _id: String(f._id), title: f.title, severity: f.severity, filePath: f.filePath, startLine: f.startLine, endLine: f.endLine, description: f.description }))} />
               <p className="muted">
-                Started {when(detail.review.createdAt)} · {detail.review.status === "cancelled" ? "Cancelled" : "Finished"}{" "}
+                Started {when(detail.review.createdAt)} · {detail.review.status === "cancelled" ? "Cancelled" : detail.review.status === "skipped" ? "Skipped" : "Finished"}{" "}
                 {detail.review.finishedAt
                   ? when(detail.review.finishedAt)
-                  : ["completed","failed","cancelled"].includes(detail.review.status) ? "Time not recorded" : "In progress"}{" "}
+                  : ["completed","failed","cancelled","skipped"].includes(detail.review.status) ? "Time not recorded" : "In progress"}{" "}
                 · Models: {detail.review.models || [...new Set(detail.modelCalls.map(call => call.model))].join(", ") || "Not called yet"}
               </p>
               {detail.review.error && (
@@ -108,7 +108,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                   ))}
                 </ol>
               </section>
-              {!["completed", "failed", "cancelled"].includes(
+              {!["completed", "failed", "cancelled", "skipped"].includes(
                 detail.review.status,
               ) && (
                 <form action={cancelReview}>
@@ -124,7 +124,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 <div className="row"><h2>Review summary</h2>{detail.review.nativeP4&&isAdmin&&detail.review.status==="failed"&&detail.review.resultStorageId&&<form action={reviewAgain}><input type="hidden" name="reviewId" value={detail.review._id}/><input type="hidden" name="fresh" value="true"/><button>Re-review current shelf</button></form>}{(!detail.review.nativeP4||isAdmin)&&<form action={reviewAgain}><input type="hidden" name="reviewId" value={detail.review._id}/><button>{detail.review.nativeP4?(detail.review.status==="failed"&&detail.review.resultStorageId?"Retry saved publication":"Re-review current shelf"):"Re-review current PR"}</button></form>}</div>
                 <ReviewMarkdown>
                   {detail.review.summary ??
-                    (detail.review.status === "failed" ? "No summary was generated. Review the error above before retrying." : detail.review.status === "cancelled" ? "This review was cancelled before a summary was generated." : "The summary will appear when analysis finishes.")}
+                    (detail.review.status === "failed" ? "No summary was generated. Review the error above before retrying." : detail.review.status === "cancelled" ? "This review was cancelled before a summary was generated." : detail.review.status === "skipped" ? "This pull request was skipped by your review settings; the reason is under Processing lifecycle." : "The summary will appear when analysis finishes.")}
                 </ReviewMarkdown>
               </section>
               {detail.review.nativeP4&&<section aria-label="Native follow-up answers"><h2>Native follow-up answers</h2><p>Questions mentioning @openreview are discovered while native polling is enabled. Authors must link their native identity in Personal agents. Answers use the permitted sources of each author; they do not resolve findings or establish test execution.</p>{!detail.nativeConversations.length&&<p>No native questions recorded for this review.</p>}{detail.nativeConversations.map(answer=><article key={answer.id}><p><strong>@{answer.author}</strong> · {answer.status} · {answer.attempts} {answer.attempts===1?"attempt":"attempts"} · {when(answer.updatedAt)}</p><p>{answer.question}</p>{answer.error&&<p role="alert">{answer.error}</p>}{answer.answer&&<details><summary>{answer.status==="completed"?"Published answer":"Saved answer; publication not complete"}</summary><ReviewMarkdown>{answer.answer}</ReviewMarkdown></details>}{answer.replyId&&<p>Native reply #{answer.replyId}</p>}{answer.command?.requestedReviewId&&<p><a href={"/dashboard/pulls/"+answer.command.requestedReviewId}>View requested re-review</a></p>}{answer.canRetry&&<form action={retryP4Answer}><input type="hidden" name="conversationId" value={answer.id}/><button>Retry native answer</button></form>}</article>)}{detail.nativeConversationsTruncated&&<p className="muted">Showing the latest 20 native questions.</p>}</section>}
