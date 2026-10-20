@@ -89,7 +89,12 @@ test("compact layout: summary, score, important files and diagram first; the res
  assert.match(layout,/### Important Files Changed\n\n\| Filename \| Overview \|/);
  assert.match(layout,/### Sequence Diagram\n\n```mermaid/);
  assert.match(layout,/<details open><summary><strong>Comments Outside Diff<\/strong><\/summary>/);
- for(const label of ["Issues","Risk assessment","Test execution","Coverage"])assert.match(layout,new RegExp("<details><summary><strong>"+label+"</strong></summary>"),label);
+ for(const label of ["Issues","Risk assessment","Coverage"])assert.match(layout,new RegExp("<details><summary><strong>"+label+"</strong></summary>"),label);
+ // Sections holding only reviewSummary's "nothing recorded" text are left out.
+ for(const label of ["Resolved findings","Skipped files","Test source","Test execution"])assert.doesNotMatch(layout,new RegExp("<strong>"+label+"</strong>"),label);
+ const empty=compactLayout(reviewSummary({...data([]),assessment:undefined}),"`abc1234`");
+ for(const label of ["Issues","Risk assessment","Resolved findings","Skipped files","Test source","Test execution"])assert.doesNotMatch(empty,new RegExp("<strong>"+label+"</strong>"),label);
+ assert.match(empty,/<strong>Coverage<\/strong>/);
  assert.match(layout,/<details><summary>Prompt To Fix All With AI<\/summary>\n\n```text/);
  assert.match(layout,/\n\n\[View review\]\(https:\/\/x\)\n\n<sub>Reviews \(3\): Last reviewed commit: \[`abc1234`\]\(https:\/\/github\.com\/o\/r\/commit\/abc1234\) · Comment `@openreview review` to re-run it\.<\/sub>$/);
  const order=["### OpenReview Summary","### Confidence Score","### Important Files Changed","### Sequence Diagram","Comments Outside Diff","<strong>Issues","Prompt To Fix All","<sub>"].map(h=>layout.indexOf(h));

@@ -53,6 +53,8 @@ export function disclosureLayout(summary: string) {
 // The "compact" comment style: summary, confidence score, important files and diagram up front; every
 // other section collapsed; the fix-all prompt last; a one-line footer with the reviewed commit.
 const outsideLabel = "Outside the changed code";
+// reviewSummary's placeholder bodies for a section with nothing recorded; compact leaves those sections out.
+const nothingToReport = /^(?:No verified findings|No previously reported findings were confirmed resolved|No changed files were skipped|No changed test source identified|Unknown: no structured risk assessment|Not executed by OpenReview\.)/;
 const details = (label: string, body: string, isOpen = false) => `<details${isOpen ? " open" : ""}><summary><strong>${label}</strong></summary>\n\n${escapeDisclosure(body)}\n\n</details>`;
 export function compactLayout(summary: string, commit: string, links = "") {
   const { head, tail, sections } = parts(summary);
@@ -66,7 +68,7 @@ export function compactLayout(summary: string, commit: string, links = "") {
     files !== undefined ? "### Important Files Changed\n\n" + files.replace(/^\| File \| Change \|/, "| Filename | Overview |") : "",
     diagram !== undefined ? "### Sequence Diagram\n\n" + diagram : "",
     outside !== undefined ? details("Comments Outside Diff", outside, true) : "",
-    ...sections.filter((s) => !front.has(s.label)).map((s) => details(s.label, s.body)),
+    ...sections.filter((s) => !front.has(s.label) && !nothingToReport.test(s.body)).map((s) => details(s.label, s.body)),
     prompt !== undefined ? `<details><summary>Prompt To Fix All With AI</summary>\n\n${escapeDisclosure(prompt)}\n\n</details>` : "",
   ].filter(Boolean);
   // "Review N on this pull request · Comment `…` to re-run it." becomes one small line; a tip after it stays.
