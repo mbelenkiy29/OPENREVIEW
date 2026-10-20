@@ -115,7 +115,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
     const cards = [
       { plan: "free", name: "Free", price: "$0", points: [`${usdText(billing.freeUsageMicros)} of model usage per workspace each month`, "Fast and standard reviews with security checks", "Every provider, the CLI and MCP", "No card needed"] },
       { plan: "starter", name: "Starter", price: process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly", points: [`${usdText(billing.usagePerSeatMicros)} of model usage per seat each month, pooled`, "Optional extra usage up to a cap you set", "Owners, admins and members are seats; viewers are free"] },
-      { plan: "pro", name: "Pro", price: process.env.BILLING_PRO_PRICE_LABEL ?? "Per seat, billed monthly", points: [`${usdText(billing.proUsagePerSeatMicros)} of model usage per seat each month, pooled`, "Deep reviews", "Generated reproduction tests", "Fix pull requests"] },
+      { plan: "pro", name: "Pro", price: process.env.BILLING_PRO_PRICE_LABEL ?? "Per seat, billed monthly", points: [`${usdText(billing.proUsagePerSeatMicros)} of model usage per seat each month, pooled`, "Deep reviews", "Generated reproduction tests", "Fix pull requests", "Requirements from Linear, Jira and Notion", "SSO, audit log and API keys"] },
     ] as const;
     return <WizardFrame step="plan" {...frame} nextLabel={paid ? "Continue" : confirming ? "Waiting for Stripe…" : carries ? `Start ${trialLeft}-day Pro trial` : "Choose Pro"}>
       <div className="wizard-panel">

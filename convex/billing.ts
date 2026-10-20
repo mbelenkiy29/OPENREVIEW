@@ -5,7 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authorize } from "./auth";
 import { billingConfig, billingDecision, nextPeriodStart, periodKey, seatCount, trialEndsFrom } from "../src/billing";
-import { entitled, planCatalog, planForPrice, type Entitlement, type Plan } from "../src/plans";
+import { entitled, entitlements, planCatalog, planForPrice, type Entitlement, type Plan } from "../src/plans";
 import { referralConfig } from "../src/referrals";
 import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus } from "./referralLedger";
 
@@ -61,7 +61,14 @@ export async function currentPlan(ctx: QueryCtx, organizationId: Id<"organizatio
   return account ? billingDecision(account, 0, Date.now(), config).plan : "free";
 }
 export const hasEntitlement = async (ctx: QueryCtx, organizationId: Id<"organizations">, key: Entitlement) => entitled(await currentPlan(ctx, organizationId), key);
-export const entitlement = internalQuery({ args: { organizationId: v.id("organizations"), key: v.union(v.literal("review.deep"), v.literal("review.reproTests"), v.literal("fix.pullRequests")) }, handler: (ctx, a) => hasEntitlement(ctx, a.organizationId, a.key) });
+const entitlementKey = v.union(...entitlements.map((key) => v.literal(key)));
+export const entitlement = internalQuery({ args: { organizationId: v.id("organizations"), key: entitlementKey }, handler: (ctx, a) => hasEntitlement(ctx, a.organizationId, a.key) });
+// The Pro features this workspace's plan lacks, for the dashboard's <Locked> settings (none with billing off).
+export const locked = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
+  await authorize(ctx, a.token, a.organizationId);
+  const plan = await currentPlan(ctx, a.organizationId);
+  return entitlements.filter((key) => !entitled(plan, key));
+} });
 // Called by reviews.enqueue: counts an allowed review, or records a blocked one with its reason. Model calls
 // are what use the allowance (reserveUsage); this only stops a review that could not make any.
 export async function reviewAllowance(ctx: MutationCtx, organizationId: Id<"organizations">): Promise<{ allowed: true } | { allowed: false; reason: string }> {

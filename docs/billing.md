@@ -10,8 +10,10 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 | Included model usage per month | `BILLING_FREE_USAGE_USD` per workspace (default $3) | `BILLING_USAGE_PER_SEAT_USD` per seat (default $6), pooled | `BILLING_PRO_USAGE_PER_SEAT_USD` per seat (default $12), pooled |
 | Extra usage | none | up to the admin cap | up to the admin cap |
 | Deep reviews, generated reproduction tests, fix pull requests | | | ✓ |
+| Requirements from Linear, Jira, Confluence and Notion; learning conventions | | | ✓ |
+| API keys, analytics older than 30 days, SSO, the audit log | | | ✓ |
 
-The plan catalog is `src/plans.ts`. Security checks, every provider, the CLI and MCP are on every plan. With billing off every feature is unlocked.
+The plan catalog is `src/plans.ts`. Security checks, every provider, and the CLI and MCP signed in through the browser are on every plan. With billing off every feature is unlocked.
 
 - **Choosing a plan (new workspaces):** a workspace created while billing is on (`organizations.planRequired`) must choose a plan before anything else. Setup goes workspace → **Choose your plan** → connect.
   - **Free** is recorded at once (`billing.chooseFreePlan`, admins only).
@@ -23,6 +25,13 @@ The plan catalog is `src/plans.ts`. Security checks, every provider, the CLI and
   - A deep review runs at standard, with a coverage note.
   - Generated reproduction tests are not drafted.
   - A fix pull request request replies that it is a Pro feature. The validated suggestion is still posted.
+  - Linked requirements are not fetched, with a coverage note. Connecting a new Linear, Atlassian or Notion workspace needs Pro; existing connections stay and work again after upgrading.
+  - Convention learning is skipped (the sweep marks the repository synced without moving its cursor, so an upgrade later learns from the comments it skipped). Approved conventions keep applying.
+  - Creating API keys needs Pro. Existing keys are kept but answer `402` with an upgrade message. The Perforce watcher and trigger are exempt: they are a code provider, not the public API.
+  - Analytics periods may start at most 30 days back (the start of the UTC day 30 days ago).
+  - Setting up SSO needs Pro. A connection configured before keeps working and stays editable on any plan.
+  - The audit log page needs Pro. Events are still recorded, so they appear after upgrading.
+  - In the dashboard, each locked setting stays visible but disabled (`<Locked>`, `app/dashboard/locked.tsx`) with a link to Settings → Billing. `billing.locked` lists what the workspace's plan lacks.
 - **Seats:** owners, admins and members are seats; viewers are free. Accepting an invitation or changing a member's role resyncs the subscription quantity, with prorations.
 - **Past due:** reviews continue for `BILLING_GRACE_DAYS` (default 7) after the first failed payment, then pause until an invoice is paid.
 

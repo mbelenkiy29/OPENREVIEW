@@ -2,6 +2,8 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { authorize, service, audit } from "./auth";
 import { apiScopes, legacyScopes } from "../src/api-scopes";
+import { hasEntitlement } from "./billing";
+import { upgradeNote } from "../src/plans";
 export const create = mutation({
   args: {
     token: v.string(),
@@ -18,6 +20,7 @@ export const create = mutation({
       args.organizationId,
       true,
     );
+    if (!await hasEntitlement(ctx, args.organizationId, "api.access")) throw new Error(upgradeNote["api.access"]);
     if (!args.name.trim() || !/^[a-f0-9]{64}$/.test(args.hash))
       throw new Error("Invalid API key");
     const scopes = [...new Set(args.scopes ?? ["read"])];
@@ -84,6 +87,7 @@ export const resolve = query({
       .unique();
     if (!member)
       throw new Error("API key owner no longer has workspace access");
-    return { userId: key.userId, organizationId: key.organizationId, scopes: key.scopes ?? legacyScopes };
+    // Keys outlive a plan change: the caller answers 402 while the plan lacks API access.
+    return { userId: key.userId, organizationId: key.organizationId, scopes: key.scopes ?? legacyScopes, apiAccess: await hasEntitlement(ctx, key.organizationId, "api.access") };
   },
 });

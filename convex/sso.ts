@@ -4,7 +4,8 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { audit, authorize, service } from "./auth";
 import { linkIdentity } from "./identity";
-import { scheduleSeatSync } from "./billing";
+import { hasEntitlement, scheduleSeatSync } from "./billing";
+import { upgradeNote } from "../src/plans";
 import { domainSchema, emailDomain, ssoEmailVerified, verificationName, verificationValue } from "../src/sso-domains";
 
 // Per-workspace SSO (M2). Admin settings are audited; the login side is called by the web server with
@@ -39,6 +40,8 @@ export const saveConnection = mutation({
   handler: async (ctx, a) => {
     const { user } = await authorize(ctx, a.token, a.organizationId, true);
     const existing = await connectionOf(ctx, a.organizationId);
+    // New connections need Pro; one configured before (or on a lapsed plan) keeps working and stays editable.
+    if (!existing && !await hasEntitlement(ctx, a.organizationId, "auth.sso")) throw new Error(upgradeNote["auth.sso"]);
     if (!a.name.trim() || a.name.length > 100) throw new Error("Name the connection (up to 100 characters)");
     if (a.protocol === "saml" && (!a.samlEntryPoint || !httpsUrl(a.samlEntryPoint) || !a.samlIdpCert || !pem(a.samlIdpCert) || (a.samlIdpIssuer !== undefined && a.samlIdpIssuer.length > 500))) throw new Error("SAML needs the IdP's HTTPS sign-in URL and its signing certificate (PEM)");
     const secret = a.oidcClientSecret ?? (existing?.protocol === "oidc" ? existing.oidcClientSecret : undefined);

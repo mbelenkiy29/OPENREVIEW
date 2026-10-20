@@ -8,9 +8,10 @@
 - Three plans:
   - **Free:** no card, with a monthly usage allowance per workspace that never expires.
   - **Starter:** per seat.
-  - **Pro:** per seat, with more usage and with deep reviews, generated reproduction tests and fix pull requests.
+  - **Pro:** per seat, with more usage and with deep reviews, generated reproduction tests and fix pull requests. Pro also includes requirements checks from Linear, Jira, Confluence and Notion, learned conventions, API keys, analytics older than 30 days, SSO and the audit log.
+- On other plans, Pro settings stay visible but disabled, with a link to Settings → Billing. SSO that is already set up keeps working, conventions you approved keep applying, and existing API keys are kept: they answer with an upgrade message until you upgrade.
 - Usage is pooled across the workspace, and extra usage is billed at model cost up to a cap you set.
-- Security checks, every provider, the CLI and MCP are on every plan.
+- Security checks, every provider, and the CLI and MCP signed in through the browser are on every plan.
 
 ### Your own model key
 - Workspace owners and admins can run reviews, chat and fixes on their own Anthropic, OpenAI or OpenRouter key under Settings → API Keys. The key is checked, stored encrypted and never shown again, and the provider bills its usage.

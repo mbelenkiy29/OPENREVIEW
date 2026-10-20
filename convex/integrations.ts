@@ -2,6 +2,8 @@ import {query,mutation,internalQuery,internalMutation} from "./_generated/server
 import {v} from "convex/values";
 import {internal} from "./_generated/api";
 import {authorize,authorizeRepository,audit} from "./auth";
+import {hasEntitlement} from "./billing";
+import {upgradeNote} from "../src/plans";
 import type {QueryCtx,MutationCtx} from "./_generated/server";
 import type {Id} from "./_generated/dataModel";
 // Notion's resource scope is the set of pages the user shared with the integration in Notion itself.
@@ -15,7 +17,7 @@ export const validate=internalQuery({args:{repositoryId:v.id("repositories"),sco
 export const forRepository=internalQuery({args:{repositoryId:v.id("repositories"),kind:v.optional(v.union(v.literal("linear"),v.literal("atlassian"),v.literal("notion")))},handler:async(ctx,a)=>{
  const repo=await ctx.db.get(a.repositoryId);if(!repo)throw new Error("Repository unavailable");
  const connections=(await ctx.db.query("integrationConnections").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()).filter(c=>c.active&&hasResources(c)&&c.repositoryIds.includes(repo._id)&&(!a.kind||c.kind===a.kind));
- if(connections.length>5)throw new Error("Requirements context supports at most five requirements connections per repository");return connections.map(c=>({_id:c._id,generation:c.generation}));
+ if(connections.length>5)throw new Error("Requirements context supports at most five requirements connections per repository");return connections.map(c=>({_id:c._id,generation:c.generation,organizationId:c.organizationId}));
 }});
 
 export const list=query({args:{token:v.string(),organizationId:v.id("organizations")},handler:async(ctx,a)=>{
@@ -33,6 +35,7 @@ export const receipt=internalMutation({args:{token:v.string(),organizationId:v.i
 }});
 export const save=internalMutation({args:{token:v.string(),organizationId:v.id("organizations"),kind:v.optional(v.union(v.literal("linear"),v.literal("atlassian"),v.literal("notion"))),sites:v.optional(v.array(v.object({id:v.string(),name:v.string(),url:v.string(),scopes:v.array(v.string())}))),externalId:v.string(),name:v.string(),credentials:v.string(),expiresAt:v.number()},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true);
+ if(!await hasEntitlement(ctx,a.organizationId,"context.requirements"))throw new Error(upgradeNote["context.requirements"]);
  if(!a.externalId||!a.name||a.name.length>200||a.credentials.length>20000||a.expiresAt<=Date.now())throw new Error("Invalid requirements connection");
  const kind=a.kind??"linear";
  const old=await ctx.db.query("integrationConnections").withIndex("by_account",q=>q.eq("organizationId",a.organizationId).eq("kind",kind).eq("externalId",a.externalId)).unique();

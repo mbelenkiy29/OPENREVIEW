@@ -6,6 +6,7 @@ import schema from '../convex/schema';
 import {api,internal} from '../convex/_generated/api';
 import type {Id} from '../convex/_generated/dataModel';
 import {STALE_RESERVATION_MS} from '../convex/inferenceBudget';
+import {entitlements} from '../src/plans';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='billing-session-secret-at-least-32-characters',whsec='whsec_billing_fixture';
 const env={SESSION_SECRET:secret,SERVICE_SECRET:'billing-service',BILLING_ENABLED:'true',BILLING_TRIAL_USAGE_USD:'0.02',BILLING_USAGE_PER_SEAT_USD:'0.01',BILLING_PRO_USAGE_PER_SEAT_USD:'0.02',BILLING_GRACE_DAYS:'7',STRIPE_WEBHOOK_SECRET:whsec,STRIPE_SECRET_KEY:'sk_test_fixture',STRIPE_SEAT_PRICE_ID:'price_seat',STRIPE_PRO_PRICE_ID:'price_pro',APP_URL:'https://review.example.com'};
@@ -132,7 +133,7 @@ test('signed Stripe webhooks link the workspace, apply once, and ignore replays 
  expect(await deep()).toBe(false);
  const proItem=(id:string,price:string,at:number)=>({id,type:'customer.subscription.updated',created:at,data:{object:{id:'sub_1',customer:'cus_1',status:'active',metadata:{organizationId:org},items:{data:[{id:'si_1',quantity:3,current_period_end:at+30*86400,price:{id:price}}]}}}});
  await deliver(t,proItem('evt_pro','price_pro',created+25));
- expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'pro',planName:'Pro',limit:3*20000,entitlements:['review.deep','review.reproTests','fix.pullRequests']});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'pro',planName:'Pro',limit:3*20000,entitlements:[...entitlements]});
  expect(await deep()).toBe(true);
  // An unknown price keeps the plan.
  await deliver(t,proItem('evt_unknown_price','price_other',created+26));

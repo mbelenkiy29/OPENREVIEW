@@ -5,12 +5,18 @@ import { v } from "convex/values";
 import {authenticated} from "./auth";
 import {contextReadable,requireFindingReader} from "./repositoryContext";
 import { visibleRepositories } from "./auth";
+import { hasEntitlement } from "./billing";
+import { historyFloor, upgradeNote } from "../src/plans";
+import type { QueryCtx } from "./_generated/server";
+// Without analytics.history a period may start no earlier than 30 days back.
+const requireHistory = async (ctx: QueryCtx, organizationId: Id<"organizations">, since: number) => { if (since < historyFloor(Date.now()) && !await hasEntitlement(ctx, organizationId, "analytics.history")) throw new Error(upgradeNote["analytics.history"]); };
 
 export const report = query({
   args: { token: v.string(), organizationId: v.id("organizations"), since: v.number(), until: v.number(), repositoryId: v.optional(v.id("repositories")), author: v.optional(v.string()), teamId: v.optional(v.id("teams")) },
   handler: async (ctx, a) => {
     if (!Number.isFinite(a.since) || !Number.isFinite(a.until) || a.until < a.since || a.until - a.since > 366 * 86400000) throw new Error("Choose a period of at most one year");
     const repos = await visibleRepositories(ctx,a.token,a.organizationId,a.teamId);
+    await requireHistory(ctx, a.organizationId, a.since);
     const allowed = new Set(repos.map(r=>String(r._id)));
     if (a.repositoryId && !repos.some(r => r._id === a.repositoryId)) throw new Error("Repository not accessible");
     // ponytail: indexed period reads, not recent-record samples; daily aggregates when periods exceed Convex read limits.
@@ -59,6 +65,7 @@ export const trends = query({
   handler: async (ctx, a) => {
     if (!Number.isFinite(a.since) || !Number.isFinite(a.until) || a.until < a.since || a.until - a.since > 366 * 86400000) throw new Error("Choose a period of at most one year");
     const repos = await visibleRepositories(ctx, a.token, a.organizationId, a.teamId);
+    await requireHistory(ctx, a.organizationId, a.since);
     if (a.repositoryId && !repos.some((r) => r._id === a.repositoryId)) throw new Error("Repository not accessible");
     const names = new Map(repos.map((r) => [String(r._id), r.fullName]));
     const from = new Date(a.since).toISOString().slice(0, 10), to = new Date(a.until).toISOString().slice(0, 10), author = a.author?.replace(/^@/, "");

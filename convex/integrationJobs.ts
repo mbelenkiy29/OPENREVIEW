@@ -10,6 +10,7 @@ import {encryptCredential,decryptCredential} from "../src/credentials";
 import type {SourceFile} from "../src/engine/types";
 import {boundRequirementsContext} from "../src/requirements-context";
 import {egressAllowed} from "../src/egress";
+import {upgradeNote} from "../src/plans";
 
 async function client(ctx:ActionCtx,id:Id<"integrationConnections">,force=false):Promise<{connection:Doc<"integrationConnections">;linear:Linear}>{
  const connection=await ctx.runQuery(internal.integrations.data,{id});
@@ -64,11 +65,14 @@ export const revoke=internalAction({args:{id:v.id("integrationRevocations")},han
  catch{await ctx.runMutation(internal.integrations.revocationResult,{id:a.id,lease,success:false});}
 }});
 export const requirements=internalAction({args:{repositoryId:v.id("repositories"),references:v.string(),actor:v.string(),authorExternalId:v.optional(v.string()),nativeActor:v.optional(v.object({id:v.id("p4Identities"),generation:v.number()})),nativeAuthor:v.optional(v.boolean())},handler:async(ctx,a):Promise<{files:SourceFile[];scopes:{id:Id<"integrationConnections">;generation:number}[];coverage:string[]}>=>{
+ const any=await ctx.runQuery(internal.integrations.forRepository,{repositoryId:a.repositoryId});
  // Offline mode: no ticket or document lookups; say so once when the repository has connections.
- if(!egressAllowed("integrations")){const any=await ctx.runQuery(internal.integrations.forRepository,{repositoryId:a.repositoryId});return {files:[],scopes:[],coverage:any.length?["Offline mode (OPENREVIEW_OFFLINE=true): linked tickets and documents were not fetched."]:[]};}
+ if(!egressAllowed("integrations"))return {files:[],scopes:[],coverage:any.length?["Offline mode (OPENREVIEW_OFFLINE=true): linked tickets and documents were not fetched."]:[]};
+ // A plan without requirements skips this stage with a note; the review itself goes on.
+ if(any.length&&!await ctx.runQuery(internal.billing.entitlement,{organizationId:any[0].organizationId,key:"context.requirements"}))return {files:[],scopes:[],coverage:[upgradeNote["context.requirements"]]};
  // Anyone can open a PR naming ENG-1; private tracker text is fetched only for a verified workspace author.
  const denied=await ctx.runQuery(internal.repositoryContext.requirementsAuthor,{repositoryId:a.repositoryId,actor:a.actor,authorExternalId:a.authorExternalId,nativeActor:a.nativeActor,nativeAuthor:a.nativeAuthor});
- if(denied){const any=await ctx.runQuery(internal.integrations.forRepository,{repositoryId:a.repositoryId});return {files:[],scopes:[],coverage:any.length?["Linked tickets and documents were not fetched: "+denied]:[]};}
+ if(denied)return {files:[],scopes:[],coverage:any.length?["Linked tickets and documents were not fetched: "+denied]:[]};
  const connections=await ctx.runQuery(internal.integrations.forRepository,{repositoryId:a.repositoryId,kind:"linear"});
  const identifiers=[...new Set(a.references.match(/\b[A-Z0-9][A-Z0-9_]{0,49}-[1-9]\d{0,9}\b/g)??[])];
  const files:SourceFile[]=[],coverage:string[]=[],scopes=connections.map(c=>({id:c._id,generation:c.generation}));

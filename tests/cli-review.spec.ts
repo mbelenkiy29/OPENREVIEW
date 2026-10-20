@@ -90,7 +90,8 @@ test('repositories outside the workspace, disabled or unindexed ones, and an exh
  await t.run(ctx=>ctx.db.patch(fresh._id,{enabled:true}));
  expect((await json(await startRoute(request('/api/reviews/local',keys.write,upload(fresh._id)))))[0]).toBe(409);
  process.env.BILLING_ENABLED='true';
- await t.run(ctx=>ctx.db.patch(org,{planRequired:true}));
+ // API keys need Pro (api.access); this Pro subscription is not yet confirmed as the workspace's chosen plan.
+ await t.run(async ctx=>{await ctx.db.patch(org,{planRequired:true});await ctx.db.insert('billingAccounts',{organizationId:org,subscriptionId:'sub_1',plan:'pro',status:'active',seats:1,trialEndsAt:Date.now(),updatedAt:Date.now()});});
  const [status,body]=await json(await startRoute(request('/api/reviews/local',keys.write,upload(shop._id))));
  expect(status).toBe(402);
  expect(body.error).toMatch(/^Billing: /);

@@ -55,11 +55,11 @@ Status: **gated** = enforced by `src/plans.ts` today; **planned** = on Pro by de
 | Deep reviews (agentic and hypothesis engines) |  |  | ✓ | gated | `review.deep` |
 | Generated reproduction tests |  |  | ✓ | gated | `review.reproTests` |
 | Fix pull requests |  |  | ✓ | gated | `fix.pullRequests` |
-| Requirements check from Linear, Jira, Confluence and Notion |  |  | ✓ | planned | `context.requirements` |
-| Learned conventions from human reviewers |  |  | ✓ | planned | `memory.conventions` |
-| Public API keys |  |  | ✓ | planned | `api.access` |
-| Analytics beyond 30 days |  |  | ✓ | planned | `analytics.history` |
-| SSO (SAML / OIDC) and the audit log |  |  | ✓ | planned (both exist) | `auth.sso`, `audit.log` |
+| Requirements check from Linear, Jira, Confluence and Notion |  |  | ✓ | gated | `context.requirements` |
+| Learned conventions from human reviewers |  |  | ✓ | gated | `memory.conventions` |
+| Public API keys |  |  | ✓ | gated | `api.access` |
+| Analytics beyond 30 days |  |  | ✓ | gated | `analytics.history` |
+| SSO (SAML / OIDC) and the audit log |  |  | ✓ | gated (SSO configured earlier keeps working) | `auth.sso`, `audit.log` |
 
 **Potential Pro features to build later:**
 - Scheduled full-repository security audits.
@@ -70,6 +70,8 @@ Status: **gated** = enforced by `src/plans.ts` today; **planned** = on Pro by de
 - A cheaper bring-your-own-key seat (`convex/modelKeys.ts` already skips metering).
 
 The phases below are the original build checklist. P0.1, P0.2, P1.1, P1.3 and P1.5 shipped with the Free/Starter/Pro plans (`src/plans.ts`, `billingAccounts.plan`, Checkout per plan, and the deep, repro-test and fix-PR gates). The Business tier is dropped: its SSO and audit items move to Pro.
+
+The second pass gated the rest of Pro (P1.4, P1.6, plus `analytics.history`, `auth.sso` and `audit.log`). Settings for a locked feature stay visible but disabled inside `<Locked>` (`app/dashboard/locked.tsx`), which links to Settings → Billing. Grandfathering is limited to SSO: a connection configured before keeps working and stays editable. The Perforce watcher and trigger keep working with their admin API key, because they are a code provider, not the public API.
 
 ---
 
@@ -165,7 +167,7 @@ The phases below are the original build checklist. P0.1, P0.2, P1.1, P1.3 and P1
 **Acceptance:**
 - [ ] Tests: the engine falls back on Starter, runs as chosen on Pro, and security checks run in both.
 
-### - [ ] P1.4 Gate requirements context (`context.requirements`)
+### - [x] P1.4 Gate requirements context (`context.requirements`)
 **Depends on:** P0.3
 **Files:** the requirements check entry points (search `requirements` in `convex/` and `src/`), the integrations settings UI.
 **Build:**
@@ -185,7 +187,7 @@ The phases below are the original build checklist. P0.1, P0.2, P1.1, P1.3 and P1
 **Acceptance:**
 - [ ] Tests: no branch is created on Starter, the reply text is correct, and Pro works as before.
 
-### - [ ] P1.6 Gate learned conventions and API/MCP access (`memory.conventions`, `api.access`)
+### - [x] P1.6 Gate learned conventions and API/MCP access (`memory.conventions`, `api.access`)
 **Depends on:** P0.3
 **Files:** `convex/conventionJobs.ts`, `convex/conventions.ts`, `convex/apiKeys.ts`, `app/api/mcp`, `app/api/query`, `app/api/search`.
 **Build:**
