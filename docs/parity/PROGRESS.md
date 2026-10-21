@@ -251,6 +251,17 @@ Updated: 2026-10-14 · Branch: parity · Baseline: c62023e · Round 2 starts at 
   evidence: `pnpm eval --validate` green with 18 fixtures and no model call (not run live); tests: tests/eval-fixtures.test.ts (3: the hypothesis fixture's defect is only in repository files, the security fixture trips the deterministic shell-injection check, the requirements fixture carries one provenance ticket whose criterion the diff breaks); every path cited in the matrix checked to exist; UI labels in the runbook checked against the dashboard source; commands: lint/typecheck/test green; commit: see git log feat(V1)
 - Finish (round 2): done 2026-10-14 — gate lint/typecheck/test (464 Node + 263 vitest)/build green; `docker build` attempted with round 1's scratch-config approach and failed on a full Colima disk (Needs human #33); README feature list and CLI section updated; "Round 2" section added to docs/parity/REPORT.md (per item, priority checklist incl. a read-only go-live audit, three-engine evaluation plan); commit: see git log docs(parity): round 2 report.
 
+## Round 3: Pull Requests tab (P1–P6)
+Greptile's dashboard Pull Requests tab, checked against its docs and the signed-in app (2026-10-21). Plan: actions run as the clicking user; GitHub/GHE first.
+- [x] P1 Look and flow — done
+  plan: list → 3 columns (PULL REQUEST / REVIEW STATUS / ACTIONS) with meta line `#n · repo · @author · <relative time> · impact`, score + per-priority count badges (new `reviews.findingCounts`, saved with `findingSeverity`), Fix / Merge ↗ / Review current revision actions, whole-row link (CSS stretched link), Open/Closed/Merged/All segmented links, `EmptyState`, First page link; detail → title + chips header, status card (score, verdict, impact, "Fix N issues", Re-review, View pull request ↗), server-rendered `?tab=` Overview / Review [counts] / Code / Activity (`?diff=1` still opens Code).
+  evidence: tests: tests/priority.test.ts (+2: count grouping and badge markup, relative times), tests/priority.spec.ts (`findingCounts` saved); seen in the browser at 1280 and 375 px against seeded local data; commands: typecheck/test (572 Node + 351 vitest)
+- [ ] P2 Token search, suggested filters, selection and bulk actions, keyboard, numbered pages
+- [ ] P3 Pull request metadata (draft, +/−, files, requested reviewers), sidebar, pull-keyed route
+- [ ] P4 Actions as the user (merge, approve, request changes, close/reopen, draft, update branch)
+- [ ] P5 CI checks, Discussion timeline, Chat with PR
+- [ ] P6 Code tab stepper and file tree, per-file Reviewed, Tour, chat-proposed actions
+
 ## Needs human (ordered, exact steps)
 1. (H2) Create a private Git remote and push: `git remote add origin <private-url> && git push -u origin main parity`.
 2. (H4) Before 2026-11-01: rotate the model key in Convex production (`LLM_API_KEY`) per docs/production-checklist.md §4; optionally switch to `LLM_PROVIDER=anthropic` with empty `LLM_MODEL`.

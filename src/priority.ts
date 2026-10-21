@@ -9,3 +9,9 @@ export const priorityBadge = (severity: string) => marks[priorityOf(severity)] +
 export const findingTags = (f: { category?: string }) => (f.category === "security" ? ["security"] : []) as "security"[];
 export const tagLabels = { security: "Security" } as const;
 export const tagBadges = (f: { category?: string }) => findingTags(f).map((t) => "🔒 " + tagLabels[t]);
+// Counts per priority (P0–P3) plus security, as shown in the pull request list ("P1 ×2").
+export const findingCounts = (findings: { severity: string; category?: string }[]) =>
+  findings.reduce<Record<string, number>>((counts, f) => {
+    for (const key of [priorityOf(f.severity), ...findingTags(f)]) counts[key] = (counts[key] ?? 0) + 1;
+    return counts;
+  }, {});

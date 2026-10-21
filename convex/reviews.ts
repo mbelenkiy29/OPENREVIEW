@@ -25,7 +25,7 @@ import { runtimeEvidenceSchema, approvalAssessmentSchema, reviewScoreSchema } fr
 import {p4AutomaticAuthority} from "./p4Polling";
 import {cancelReview,requireP4Worker} from "./reviewLifecycle";
 import {p4Baseline} from "./p4Index";
-import {findingTags,priorityOf} from "../src/priority";
+import {findingTags,priorityOf,findingCounts} from "../src/priority";
 
 const usageValidator = v.object({
   task: v.string(),
@@ -337,6 +337,7 @@ export const save = internalMutation({
       findingSeverity: ["critical", "high", "medium", "low"].find((severity) =>
         args.findings.some((finding) => finding.severity === severity),
       ),
+      findingCounts: findingCounts(args.findings),
       models: [...new Set(args.usage.map((usage) => usage.model))].join(", "),
       resultStorageId: args.storageId,
       findingsRecorded:true,

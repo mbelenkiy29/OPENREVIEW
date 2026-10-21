@@ -506,6 +506,8 @@ export default defineSchema({
     baseBranch: v.optional(v.string()),
     findingCount: v.optional(v.number()),
     findingSeverity: v.optional(v.string()),
+    // Per-priority counts (P0–P3) plus security, for the pull request list badges.
+    findingCounts: v.optional(v.record(v.string(), v.number())),
     models: v.optional(v.string()),
     runtimeEvidence: v.optional(runtimeEvidenceValidator),
     organizationId: org,
