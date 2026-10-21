@@ -1,5 +1,6 @@
 "use node";
 import { internalAction } from "./_generated/server";
+import { pullObservation } from "../src/change-metadata";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { z } from "zod";
@@ -155,7 +156,7 @@ export const process = internalAction({
             const github = await Github.installation(repo.installationId!);
             const pr = await github.changeMetadata(repo.fullName,payload.pull_request.number);
             payload.pull_request = {...payload.pull_request,state:pr.state,draft:pr.draft,head:pr.head,base:pr.base};
-            await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,observedAt});
+            await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
           }
           if (
             delivery.event === "repository" ||

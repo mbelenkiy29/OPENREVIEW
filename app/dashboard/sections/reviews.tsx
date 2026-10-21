@@ -10,7 +10,9 @@ import { fixPrompt } from "../../../src/fix-prompt";
 import { cancelReview, retryP4Answer, reviewAgain } from "../actions";
 import { Copy } from "../live";
 import { FixButton } from "../fix-button";
-import { PullList } from "../pulls";
+import { PullList, PullSidebar } from "../pulls";
+import { SidebarKeys } from "../pull-list-client";
+import { CatalogReview } from "../catalog-sync";
 import { RuntimeReview, ApprovalReview } from "../runtime";
 import { ReviewDiff } from "../review-diff";
 import { when, ago, status, priority, severityCounts } from "./shared";
@@ -18,15 +20,36 @@ import { findingCounts } from "../../../src/priority";
 import type { DashboardContext } from "../load";
 
 export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
-  const { data, detail, diagnostics, filters, isAdmin, organization, personalAgent, repoLabel, repoName, user } = ctx;
+  const { data, detail, diagnostics, filters, isAdmin, organization, personalAgent, pull, repoLabel, repoName, user } = ctx;
+  const diffStats = pull && <>{pull.changedFiles !== undefined && <> · {pull.changedFiles} {pull.changedFiles === 1 ? "file" : "files"}</>}{pull.additions !== undefined && <> · <span className="chip diffstat"><span className="add">+{pull.additions.toLocaleString("en-US")}</span> <span className="del">−{(pull.deletions ?? 0).toLocaleString("en-US")}</span></span></>}</>;
   const counts = detail ? findingCounts(detail.findings) : {};
   const fixable = detail ? detail.findings.filter((f) => f.canFix).length : 0;
   const tab = ["review", "code", "activity"].includes(filters.tab ?? "") ? filters.tab : filters.diff === "1" ? "code" : "overview";
   const tabs: [string, React.ReactNode][] = [["overview", "Overview"], ["review", <>Review {severityCounts(counts)}</>], ["code", "Code"], ["activity", "Activity"]];
   return (
-          (detail ? (
+          (detail || pull ? (
+            <div className="pull-detail">
+              <PullSidebar token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} currentId={pull?._id} />
+              <div className="pull-main">
+              <SidebarKeys />
+            {!detail && pull ? (
+              <>
+                <h2 className="pull-title">{pull.title} <span className="muted">#{pull.number}</span></h2>
+                <p className="meta">
+                  {repoName(pull.repositoryId)} · @{pull.author} · updated <time dateTime={new Date(pull.updatedAt).toISOString()} title={when(pull.updatedAt)}>{ago(pull.updatedAt)}</time>
+                  {" "}· <span className="chip" title={pull.headSha}>{pull.headSha.slice(0, 7)}</span>{diffStats}
+                </p>
+                <section className="status-card" aria-label="Review status">
+                  <span>{pull.state === "open" ? "Not reviewed yet" : `${pull.state[0].toUpperCase() + pull.state.slice(1)} without a review`}</span>
+                  {pull.isDraft && <span className="badge">Draft</span>}
+                  <div className="actions">
+                    {pull.canRequest && <CatalogReview repositoryId={pull.repositoryId} prNumber={pull.number} revision={pull.headSha} baseRevision={pull.baseSha} />}
+                    <a className="button" href={pull.url} target="_blank" rel="noreferrer">View pull request ↗</a>
+                  </div>
+                </section>
+              </>
+            ) : detail && (
             <>
-              <p><Link href="/dashboard/pulls">← Pull Requests</Link></p>
               <h2 className="pull-title">
                 {detail.review.title ?? "Awaiting PR ingestion"} <span className="muted">#{detail.review.prNumber}</span>
               </h2>
@@ -35,7 +58,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 <time dateTime={new Date(detail.review.createdAt).toISOString()} title={when(detail.review.createdAt)}>{ago(detail.review.createdAt)}</time>
                 {detail.review.headBranch && <> · <span className="chip">{detail.review.headBranch}</span> → <span className="chip">{detail.review.baseBranch}</span></>}
                 {" "}· <span className="chip" title={detail.review.headSha}>{detail.review.headSha.slice(0, 7)}</span>
-                {detail.review.reviewNumber && <> · Review {detail.review.reviewNumber}</>} · {status(detail.review.status)}
+                {diffStats}{pull && <> · {pull.reviewCount} {pull.reviewCount === 1 ? "review" : "reviews"}</>} · {status(detail.review.status)}
               </p>
               <p className="muted repository-identity">{repoLabel(detail.review.repositoryId)}</p>
               {detail.latestReviewId && detail.latestReviewId !== detail.review._id && (
@@ -49,6 +72,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
               )}
               {detail.retryPending&&<p role="status">Retry {detail.review.retryAt ? "scheduled for "+when(detail.review.retryAt) : "pending"}. The review will update automatically.</p>}
               <section className="status-card" aria-label="Review status">
+                {pull?.isDraft && <span className="badge">Draft</span>}
                 {detail.review.reviewScore && <strong title={detail.review.reviewScore.reason}>{detail.review.reviewScore.value}/5</strong>}
                 {detail.review.verdict && <span>{verdictLabels[detail.review.verdict]}</span>}
                 {detail.review.approvalAssessment && detail.review.approvalAssessment.risk !== "unknown" && <span className={"impact " + detail.review.approvalAssessment.risk}>{detail.review.approvalAssessment.risk[0].toUpperCase() + detail.review.approvalAssessment.risk.slice(1)} impact</span>}
@@ -221,6 +245,9 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
               </ScrollTable>
               </>}
             </>
+            )}
+              </div>
+            </div>
           ) : (
             <>
               <PullList login={user.user.login} admin={isAdmin} token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} />

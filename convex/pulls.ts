@@ -58,8 +58,9 @@ export const browse=query({args:{token:v.string(),organizationId:v.id("organizat
 export const observationFields={
  repositoryId:v.id("repositories"),number:v.number(),title:v.string(),author:v.string(),url:v.string(),
  headSha:v.string(),baseSha:v.string(),state:v.string(),revisionKey:v.optional(v.string()),observedAt:v.number(),
+ isDraft:v.optional(v.boolean()),additions:v.optional(v.number()),deletions:v.optional(v.number()),changedFiles:v.optional(v.number()),requestedReviewers:v.optional(v.array(v.string())),
 };
-export type PullObservation={repositoryId:import("./_generated/dataModel").Id<"repositories">;number:number;title:string;author:string;url:string;headSha:string;baseSha:string;state:string;revisionKey?:string;observedAt:number};
+export type PullObservation={repositoryId:Id<"repositories">;number:number;title:string;author:string;url:string;headSha:string;baseSha:string;state:string;revisionKey?:string;observedAt:number;isDraft?:boolean;additions?:number;deletions?:number;changedFiles?:number;requestedReviewers?:string[]};
 // Called only after authenticated provider reads, independently of review policy.
 export async function observePull(ctx:MutationCtx,a:PullObservation,options?:{nativePollingAuthorized:boolean}){
  const repo=await ctx.db.get(a.repositoryId);
@@ -89,4 +90,14 @@ export const requestContext=internalQuery({args:{token:v.string(),repositoryId:v
  }
  if(!repo.enabled||connection&&(!connection.active||connection.suspended))throw new Error('Repository review access is disabled');
  return {nativeP4:false,organizationId:repo.organizationId,revisionKey:pr.revisionKey};
+}});
+// One pull request by id or by repository and number, with its latest readable review and review count.
+export const get=query({args:{token:v.string(),pullRequestId:v.optional(v.id("pullRequests")),repositoryId:v.optional(v.id("repositories")),number:v.optional(v.number())},handler:async(ctx,a)=>{
+ const viewer=await authenticated(ctx,a.token);
+ const pr=a.pullRequestId?await ctx.db.get(a.pullRequestId):a.repositoryId&&a.number!==undefined?await ctx.db.query("pullRequests").withIndex("by_repo_number",q=>q.eq("repositoryId",a.repositoryId!).eq("number",a.number!)).unique():null;
+ if(!pr)return null;
+ await authorizeRepository(ctx,a.token,pr.repositoryId);
+ const [row]=await enrich(ctx,viewer._id,[pr]);
+ const reviewCount=(await ctx.db.query("reviews").withIndex("by_pr",q=>q.eq("repositoryId",pr.repositoryId).eq("prNumber",pr.number)).take(100)).length;
+ return {...row,reviewCount};
 }});

@@ -1,5 +1,6 @@
 "use node";
 import { action,internalAction } from "./_generated/server";
+import { pullObservation } from "../src/change-metadata";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -184,7 +185,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
      if(payload.pullRequest){
       const number=Number(payload.pullRequest.number);if(!Number.isSafeInteger(number)||number<1)throw new Error("Unsupported Origin change number");
       const pr=await (await provider(ctx,repo)).changeMetadata(repo.fullName,number);
-      await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+      await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
       await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
       const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
       if(pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
@@ -218,7 +219,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
       }
      }else{
       const pr=await client.changeMetadata(repo.fullName,number);
-      await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+      await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
       await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
       const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
       await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:number});
@@ -247,7 +248,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
       }else await ctx.scheduler.runAfter(0,internal.conversationJobs.reply,{repositoryId:repo._id,prNumber:number,commentId:payload.comment.id,author,question:payload.comment.text,inline:payload.commentParentId!==undefined,parentCommentId:payload.commentParentId});
      }else if(!payload.eventKey.startsWith("pr:comment:")){
       const pr=await client.changeMetadata(repo.fullName,number);
-      await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+      await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
       await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
       await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:number});
       const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
@@ -265,7 +266,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
     const number=payload.resource.pullRequestId;
     if(number&&["git.pullrequest.created","git.pullrequest.updated","git.pullrequest.merged"].includes(payload.eventType)){
      const pr=await (await provider(ctx,repo)).changeMetadata(repo.fullName,number);
-     await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+     await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
      await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
      const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
      // Updates also fire for votes and descriptions; enqueue de-duplicates an already-reviewed head.
@@ -283,7 +284,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
     if(number&&["pull_request","pull_request_review"].includes(event.eventType??""))await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:number});
     if(number&&event.eventType==="pull_request"){
      const pr=await (await provider(ctx,repo)).changeMetadata(repo.fullName,number);
-     await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+     await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
      await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
      const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
      if(["opened","synchronize","reopened","ready_for_review"].includes(payload.action??"")&&pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(payload.action!=="synchronize"||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches)(pr.base.ref))&&!picomatch(settings.ignoredBranches)(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
@@ -309,7 +310,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
     if(number&&["pull_request","pull_request_sync","pull_request_review","pull_request_review_approved","pull_request_review_rejected","pull_request_review_comment"].includes(event.eventType??""))await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:number});
     if(["pull_request","pull_request_sync"].includes(event.eventType??"")&&number){
      const pr=await (await provider(ctx,repo)).changeMetadata(repo.fullName,number);
-     await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+     await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
      await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
      const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
      if(["opened","reopened","synchronized"].includes(payload.action??"")&&pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(payload.action!=="synchronized"||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches)(pr.base.ref))&&!picomatch(settings.ignoredBranches)(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
@@ -359,7 +360,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
     const attributes=z.object({action:z.string(),oldrev:z.string().nullish()}).parse(payload.object_attributes);
     await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:payload.object_attributes.iid});
     const pr=await (await provider(ctx,repo)).changeMetadata(repo.fullName,payload.object_attributes.iid);
-    await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+    await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
     await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:pr.number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
     const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
     if(["open","reopen","update"].includes(attributes.action)&&pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(!attributes.oldrev||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches)(pr.base.ref))&&!picomatch(settings.ignoredBranches)(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:pr.number,headSha:pr.head.sha,revisionKey:pr.revisionKey});

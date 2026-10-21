@@ -71,3 +71,29 @@ export function PullKeys() {
     </p>
   );
 }
+
+// On an open pull request: ⌘B collapses the sidebar (remembered in this browser), J/K open the next or
+// previous pull request in it, H/L switch tabs.
+export function SidebarKeys() {
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>(".pull-detail");
+    try { if (localStorage.getItem("openreview:pull-sidebar") === "closed") root?.setAttribute("data-collapsed", ""); } catch { /* storage blocked: start open */ }
+    const onKey = (e: KeyboardEvent) => {
+      if (typing(e.target) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && key === "b") { e.preventDefault(); toggle(root); return; }
+      if (e.metaKey || e.ctrlKey) return;
+      const step = key === "j" || key === "l" ? 1 : key === "k" || key === "h" ? -1 : 0;
+      if (!step) return;
+      const links = [...document.querySelectorAll<HTMLAnchorElement>(key === "j" || key === "k" ? ".pull-sidebar ol a" : ".tabs a")];
+      links[links.findIndex((a) => a.getAttribute("aria-current") === "page") + step]?.click();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+  return <button type="button" className="small sidebar-toggle" aria-label="Toggle pull request list (⌘B)" onClick={() => toggle(document.querySelector(".pull-detail"))}>☰</button>;
+}
+function toggle(root: HTMLElement | null) {
+  const closed = root?.toggleAttribute("data-collapsed");
+  try { localStorage.setItem("openreview:pull-sidebar", closed ? "closed" : "open"); } catch { /* not remembered */ }
+}

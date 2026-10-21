@@ -38,7 +38,7 @@ export async function PullList({token,organizationId,repositories,filters,admin,
    const meta=<small className="meta">#{pr.number} · {repo?.fullName} · @{pr.author} · <time dateTime={new Date(pr.updatedAt).toISOString()} title={when(pr.updatedAt)}>{ago(pr.updatedAt)}</time>{risk&&risk!=="unknown"&&<> · <span className={"impact "+risk}>{risk[0].toUpperCase()+risk.slice(1)}</span></>}</small>,title=repositoryDisplay(repo)+" #"+pr.number+": "+pr.title;
    return <tr key={pr._id}>
     <td className="row-select"><input type="checkbox" form="bulk-pulls" name="pr" value={`${pr.repositoryId}|${pr.number}|${latest?._id??""}`} aria-label={`Select #${pr.number}`}/></td>
-    <td>{pr.latest?<Link className="pull-link" title={title} href={"/dashboard/pulls/"+pr.latest._id}><span>{pr.state==="merged"&&<span className="merged" aria-label="Merged">⑂ </span>}{pr.title}</span>{meta}</Link>:<a className="pull-link" title={title} href={pr.url}><span>{pr.title}</span>{meta}</a>}</td>
+    <td>{pr.latest?<Link className="pull-link" title={title} href={"/dashboard/pulls/"+pr.latest._id}><span>{pr.state==="merged"&&<span className="merged" aria-label="Merged">⑂ </span>}{pr.title}</span>{meta}</Link>:<Link className="pull-link" title={title} href={"/dashboard/pulls/pr/"+pr._id}><span>{pr.title}</span>{meta}</Link>}</td>
     <td className="review-status">{!latest?<span className={"badge "+(pr.latest?"queued":"cancelled")}>{pr.latest?"Awaiting current review":"Not reviewed"}</span>:<>{latest.reviewScore&&<strong title={latest.reviewScore.reason}>{latest.reviewScore.value}/5</strong>}{latest.reviewScore&&" · "}{latest.status!=="completed"?status(latest.status):latest.findingCount?(latest.findingCounts?severityCounts(latest.findingCounts):<>{priority({severity:latest.findingSeverity??"low"})} ×{latest.findingCount}</>):<span className="badge completed">✓ Completed</span>}</>}</td>
     <td className="row-actions"><div>{latest&&latest.findingCount?<Link className="button small" href={"/fix/"+latest._id}>Fix</Link>:null}{pr.state==="open"&&<a className="button small" href={pr.url} target="_blank" rel="noreferrer">Merge ↗</a>}{!current&&pr.state==="open"&&pr.canRequest&&<CatalogReview repositoryId={pr.repositoryId} prNumber={pr.number} revision={pr.headSha} baseRevision={pr.baseSha}/>}</div></td>
    </tr>;})}</tbody></table></ScrollTable>
@@ -53,4 +53,17 @@ export async function PullList({token,organizationId,repositories,filters,admin,
   {result.capped&&<p className="muted">Showing the newest 1,000 matching pull requests. Narrow the search to see older ones.</p>}
   <PullKeys/>
  </>;
+}
+// Compact pull request list beside an open pull request (Greptile's detail sidebar).
+export async function PullSidebar({token,organizationId,repositories,filters,currentId}:{token:string;organizationId:Id<"organizations">;repositories:Doc<"repositories">[];filters:Record<string,string|undefined>;currentId?:string}){
+ const state=filters.list??"open",parsed=parsePullQuery(filters.find??"");
+ const result=await backend().query(api.pulls.browse,{token,organizationId,...(filters.team?{teamId:filters.team as Id<"teams">}:{}),page:1,pageSize:20,state:state==="all"?undefined:state,search:parsed.search,author:parsed.author});
+ return <aside className="pull-sidebar" aria-label="Pull requests">
+  <p><Link href="/dashboard/pulls">← Pull Requests</Link></p>
+  <form role="search">{filters.tab&&<input type="hidden" name="tab" value={filters.tab}/>}<input type="hidden" name="list" value={state}/><input name="find" defaultValue={filters.find} placeholder="Search" aria-label="Search pull requests"/></form>
+  <nav className="segmented" aria-label="Sidebar state">{(["open","closed","all"] as const).map(s=><Link key={s} href={"?"+new URLSearchParams({...(filters.find?{find:filters.find}:{}),list:s})} aria-current={state===s?"page":undefined}>{s[0].toUpperCase()+s.slice(1)}</Link>)}</nav>
+  <ol>{result.page.map(pr=><li key={pr._id}><Link href={pr.latest?"/dashboard/pulls/"+pr.latest._id:"/dashboard/pulls/pr/"+pr._id} aria-current={pr._id===currentId?"page":undefined}><span>{pr.state==="merged"&&<span className="merged" aria-label="Merged">⑂ </span>}<span className="muted">#{pr.number}</span> {pr.title}</span><small className="meta">{repositories.find(r=>r._id===pr.repositoryId)?.fullName} · @{pr.author}</small></Link></li>)}</ol>
+  {!result.page.length&&<p className="muted">No pull requests.</p>}
+  {result.total>20&&<p className="muted"><Link href="/dashboard/pulls">All {result.total}</Link></p>}
+ </aside>;
 }

@@ -477,6 +477,11 @@ export default defineSchema({
     updatedAt: v.number(),
     nativeObservedAt: v.optional(v.number()),
     revisionKey: v.optional(v.string()),
+    isDraft: v.optional(v.boolean()),
+    additions: v.optional(v.number()),
+    deletions: v.optional(v.number()),
+    changedFiles: v.optional(v.number()),
+    requestedReviewers: v.optional(v.array(v.string())),
   })
     .index("by_repo_number", ["repositoryId", "number"])
     .index("by_org", ["organizationId"])

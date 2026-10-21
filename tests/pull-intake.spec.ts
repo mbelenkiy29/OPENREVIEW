@@ -150,3 +150,13 @@ test("browse filters before paging, counts the total and filters on the current 
  expect((await s.t.query(api.pulls.browse,{...args,page:1,status:"unreviewed",state:"open"})).total).toBe(17);
  await expect(s.t.query(api.pulls.browse,{...args,page:0})).rejects.toThrow("Invalid page");
 });
+test("GitHub size, draft and requested reviewers are kept on the pull request row",async()=>{
+ const s=await setup();
+ const {changeMetadataSchema,pullObservation}=await import("../src/change-metadata");
+ const pr=changeMetadataSchema.parse({number:7,title:"Sized",html_url:s.observation.url,state:"open",draft:true,user:{login:"alice"},head:{sha:"c".repeat(40),ref:"feature"},base:{sha:"b".repeat(40),ref:"main"},additions:120,deletions:4,changed_files:3,requested_reviewers:[{login:"bob"}],mergeable:true});
+ await s.t.mutation(internal.pulls.observe,pullObservation(s.repo._id,pr,500));
+ const [row]=(await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,page:1,pageSize:10})).page;
+ expect(row).toMatchObject({number:7,isDraft:true,additions:120,deletions:4,changedFiles:3,requestedReviewers:["bob"]});
+ // Providers without these fields (or Gitea's nulls) still parse.
+ expect(pullObservation(s.repo._id,changeMetadataSchema.parse({...pr,additions:null,requested_reviewers:null}),1)).toMatchObject({additions:undefined,requestedReviewers:undefined});
+});

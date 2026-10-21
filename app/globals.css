@@ -1229,6 +1229,79 @@ kbd {
   border-radius: var(--radius);
   background: var(--surface);
 }
+.pull-detail {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.pull-detail[data-collapsed] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.pull-detail[data-collapsed] .pull-sidebar {
+  display: none;
+}
+.pull-sidebar {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  padding-right: 16px;
+  font-size: 13px;
+}
+.pull-sidebar form input {
+  width: 100%;
+}
+.pull-sidebar .segmented {
+  margin: 8px 0;
+}
+.pull-sidebar ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pull-sidebar li a {
+  display: block;
+  padding: 8px;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+}
+.pull-sidebar li a:hover,
+.pull-sidebar li a[aria-current="page"] {
+  background: var(--soft);
+}
+.pull-sidebar li .meta {
+  display: block;
+  margin-top: 2px;
+}
+.sidebar-toggle {
+  float: right;
+}
+/* Score and actions stay in view while reading a long review (Greptile's sticky header). */
+.pull-main .status-card {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.diffstat .add {
+  color: var(--success);
+}
+.diffstat .del {
+  color: var(--error);
+}
+@media (max-width: 1100px) {
+  .pull-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pull-sidebar {
+    display: none;
+  }
+  .sidebar-toggle {
+    display: none;
+  }
+}
 .pulls-table th {
   font-size: 11px;
   text-transform: uppercase;
