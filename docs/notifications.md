@@ -28,6 +28,14 @@ Set `RESEND_API_KEY` and `EMAIL_FROM` on Convex. Each member sets a notification
 
 Without email configuration, deliveries are recorded as skipped.
 
+### Changelog emails
+
+Visitors to `/changelog` can get its new entries by email. Create a segment in Resend and set its ID as `RESEND_CHANGELOG_SEGMENT_ID` on both Next.js and Convex, next to `RESEND_API_KEY` and `EMAIL_FROM`.
+- **Signing up is double opt-in.** The form mails a 24-hour confirmation link, and nothing is stored until it is clicked. Each address can ask for 3 links an hour, and the whole site sends at most 100 an hour.
+- **Resend keeps the list.** Confirming adds the address to the segment, or subscribes it again if it unsubscribed before.
+- **Unsubscribing is Resend's.** Every email carries Resend's unsubscribe link.
+- **One email a week at most.** Every Tuesday at 16:00 UTC, Convex reads the live `/changelog/feed.xml` and sends one Resend broadcast with the bullets that are new since the last one. An edited bullet counts as new. The first run only records what is already there, so subscribers never get the whole history.
+
 ## Delivery guarantees
 
 Each (event, review, target) is delivered at most once; a failed delivery is retried when the job runs again. A repository the member can no longer access is never emailed about.

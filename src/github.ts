@@ -10,7 +10,7 @@ import type { ChangedFile, Finding, SourceFile } from "./engine/types";
 import {changedLines} from "./engine/diff";
 import {commentRange} from "./engine/patch-lines";
 import {findingComment} from "./review-summary";
-import {disclosureLayout,threadLinks,withDescriptionSummary,withoutDescriptionSummary} from "./summary-layout";
+import {compactLayout,disclosureLayout,threadLinks,withDescriptionSummary,withoutDescriptionSummary} from "./summary-layout";
 
 export function verifyWebhook(
   body: string,
@@ -662,8 +662,10 @@ export class Github {
     await current();
     const commit = `${githubWebOrigin(this.base)}/${repository.split("/").map(encodeURIComponent).join("/")}/commit/${sha}`;
     const threads = summary.includes("<!-- openreview-thread:") ? await this.findingThreads(repository, number, publisher) : new Map<string, string>();
-    const layout = threadLinks(disclosureLayout(summary), (fingerprint) => threads.get(fingerprint));
-    const body = `## OpenReview\n\n${layout}${reviewLinks(marker,unresolvedCount)}\n\n**Last reviewed commit:** [\`${sha.slice(0, 7)}\`](${commit})\n\n${summaryMarker}\n<!-- openreview:${marker} -->`;
+    const link = (fingerprint: string) => threads.get(fingerprint);
+    const body = (style === "compact"
+      ? threadLinks(compactLayout(summary, `[\`${sha.slice(0, 7)}\`](${commit})`, reviewLinks(marker,unresolvedCount)), link)
+      : `## OpenReview\n\n${threadLinks(disclosureLayout(summary), link)}${reviewLinks(marker,unresolvedCount)}\n\n**Last reviewed commit:** [\`${sha.slice(0, 7)}\`](${commit})`) + `\n\n${summaryMarker}\n<!-- openreview:${marker} -->`;
     const note = (options.placement === "description" && await this.upsertDescriptionSummary(repository, number, body, publisher, description)) || await this.upsertSummary(repository, number, body, publisher, description);
     await current();
     return review ?? { id: note.id, reused: note.reused, comments: [] };

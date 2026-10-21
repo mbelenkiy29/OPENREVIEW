@@ -11,7 +11,7 @@ beforeEach(()=>{vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date']});
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();delete process.env.RESEND_API_KEY;delete process.env.EMAIL_FROM;});
 
 const session=()=>{const sid=randomBytes(32).toString('base64url');return {sid,hash:createHash('sha256').update(sid).digest('hex')};};
-const jwt=(userId:string,sid?:string,issuedAt=Math.floor(Date.now()/1000))=>new SignJWT(sid?{sid}:{}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(userId).setIssuedAt(issuedAt).setExpirationTime('7d').sign(new TextEncoder().encode(secret));
+const jwt=(userId:string,sid?:string,issuedAt=Math.floor(Date.now()/1000),key=secret)=>new SignJWT(sid?{sid}:{}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(userId).setIssuedAt(issuedAt).setExpirationTime('7d').sign(new TextEncoder().encode(key));
 type T=ReturnType<typeof convexTest>;
 async function signIn(t:T,profile:{provider:'github'|'gitlab'|'google';providerUserId:string;login:string;email?:string;emailVerified:boolean},linkToken?:string){
  const s=session();const userId=await t.mutation(api.identity.signIn,{secret:svc,avatar:'',...profile,sessionHash:s.hash,userAgent:'Vitest',...(linkToken?{linkToken}:{})});
@@ -70,6 +70,11 @@ test('server-side sessions: individual revocation, sign out everywhere, expiry, 
  await expect(t.query(api.users.me,{token:phone.token})).rejects.toThrow();
  // A forged session ID is rejected.
  expect(await valid(t,await jwt(laptop.userId,randomBytes(32).toString('base64url')))).toBe(false);
+ // A real session ID under a bad signature can neither list sessions nor sign that session out.
+ const badSignature=await jwt(laptop.userId,laptop.sid,undefined,'not-the-session-secret-but-32-chars-long');
+ await expect(t.query(api.identity.sessions,{token:badSignature})).rejects.toThrow();
+ await t.mutation(api.identity.signOut,{token:badSignature});
+ expect(await valid(t,laptop.token)).toBe(true);
  // Sign out: only this browser.
  const tablet=await signIn(t,{provider:'google',providerUserId:'g-1',login:'dev',email:'dev@example.com',emailVerified:true});
  await t.mutation(api.identity.signOut,{token:laptop.token});
@@ -153,4 +158,22 @@ test('magic links and email invitations are single use, expire, and never store 
  const fresh=await signIn(t,{provider:'github',providerUserId:'10',login:'late',emailVerified:false});
  await expect(t.mutation(api.identity.acceptEmailInvitation,{token:fresh.token,tokenHash:third})).rejects.toThrow(/invalid or expired/);
  expect(JSON.stringify(await t.run(ctx=>ctx.db.query('emailInvitations').collect()))).not.toContain(invite);
+});
+
+test('GitHub-login invitations reach only GitHub-created accounts, not a magic-link user who picked the same name',async()=>{
+ const t=convexTest(schema,modules);
+ const owner=await signIn(t,{provider:'github',providerUserId:'901',login:'owner',emailVerified:false});
+ const organizationId=await t.mutation(api.users.createOrganization,{token:owner.token,name:'Invites'});
+ const invitationId=await t.mutation(api.users.invite,{token:owner.token,organizationId,githubLogin:'bob',role:'admin'});
+ // Magic link for bob@attacker.example: the account's login becomes "bob".
+ const raw=randomBytes(32).toString('base64url'),hash=createHash('sha256').update(raw).digest('hex'),s=session();
+ await t.mutation(internal.identity.storeLoginToken,{email:'bob@attacker.example',tokenHash:hash});
+ const emailUser=(await t.mutation(api.identity.consumeLoginToken,{secret:svc,tokenHash:hash,sessionHash:s.hash}))!,emailToken=await jwt(emailUser,s.sid);
+ expect((await t.run(ctx=>ctx.db.get(emailUser)))?.login).toBe('bob');
+ expect((await t.query(api.users.me,{token:emailToken})).invitations).toEqual([]);
+ await expect(t.mutation(api.users.acceptInvitation,{token:emailToken,invitationId})).rejects.toThrow(/invalid or expired/);
+ // GitHub user "bob" sees and accepts it.
+ const bob=await signIn(t,{provider:'github',providerUserId:'902',login:'bob',emailVerified:false});
+ expect((await t.query(api.users.me,{token:bob.token})).invitations.map(i=>i._id)).toEqual([invitationId]);
+ expect(await t.mutation(api.users.acceptInvitation,{token:bob.token,invitationId})).toBe(organizationId);
 });

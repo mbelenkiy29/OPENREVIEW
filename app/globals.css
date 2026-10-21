@@ -1116,6 +1116,14 @@ tr:last-child td {
 }
 
 /* ---------- Dashboard features ---------- */
+/* A Pro setting on a lower plan (app/dashboard/locked.tsx): visible, dimmed and disabled. */
+.locked > fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  opacity: 0.6;
+}
 .filter-bar {
   display: flex;
   gap: 12px;
@@ -1930,6 +1938,18 @@ form.catalog-review {
 }
 .docs-content pre {
   overflow-x: auto;
+}
+.changelog-email {
+  flex-wrap: wrap;
+  margin: 0 0 24px;
+}
+.changelog-email label {
+  flex: 1 1 240px;
+  max-width: 360px;
+}
+.changelog-email [role="status"] {
+  flex-basis: 100%;
+  margin: 0;
 }
 .docs-content table {
   border-collapse: collapse;
@@ -3142,6 +3162,11 @@ input.switch:checked::before {
 }
 
 /* Plan step: one plan card */
+.wizard-plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
 .wizard-plan {
   display: flex;
   flex-direction: column;
@@ -3703,4 +3728,236 @@ input.switch:checked::before {
   .auth * {
     animation: none !important;
   }
+}
+
+/* ---------- Dashboard look (Greptile-style) ----------
+   Scoped to the signed-in dashboard (.shell.portal): neutral greys instead of parchment, 6px corners,
+   underlined icon tabs, card headers in small mono caps. The marketing site keeps its own palette.
+   The ember accent stays: it is OpenReview's brand. */
+:root:has(.shell.portal) {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --surface-3: #ececee;
+  --surface-4: #e4e4e7;
+  --text: #18181b;
+  --muted: #71717a;
+  --text-ter: #a1a1aa;
+  --line: #18181b14;
+  --line-strong: #18181b29;
+  --primary: #18181b;
+  --primary-hover: #3f3f46;
+  --on-primary: #fafafa;
+  --radius: 6px;
+}
+:root[data-theme="dark"]:has(.shell.portal) {
+  --bg: #161616;
+  --surface: #1c1c1c;
+  --surface-2: #232323;
+  --surface-3: #2a2a2a;
+  --surface-4: #313131;
+  --text: #ededed;
+  --muted: #a1a1a1;
+  --text-ter: #6b6b6b;
+  --line: #ffffff14;
+  --line-strong: #ffffff26;
+  --primary: #ededed;
+  --primary-hover: #d4d4d4;
+  --on-primary: #161616;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]):has(.shell.portal) {
+    --bg: #161616;
+    --surface: #1c1c1c;
+    --surface-2: #232323;
+    --surface-3: #2a2a2a;
+    --surface-4: #313131;
+    --text: #ededed;
+    --muted: #a1a1a1;
+    --text-ter: #6b6b6b;
+    --line: #ffffff14;
+    --line-strong: #ffffff26;
+    --primary: #ededed;
+    --primary-hover: #d4d4d4;
+    --on-primary: #161616;
+  }
+}
+/* Top bar: workspace, role badge, then tabs with icons and an underline for the current page. */
+.portal .portal-identity {
+  height: 56px;
+  font-size: 14px;
+}
+.portal .scope-selector > summary {
+  font-weight: 500;
+}
+.role-badge {
+  padding: 1px 7px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 12px;
+}
+.portal .primary-nav {
+  --header-tabs: 44px;
+  height: var(--header-tabs);
+  align-items: stretch;
+  gap: 4px;
+  padding: 0 14px;
+}
+.portal .primary-nav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  font-size: 14px;
+}
+.portal .primary-nav a:hover {
+  background: none;
+}
+.portal .primary-nav a[aria-current="page"] {
+  background: none;
+  border-bottom-color: var(--text);
+}
+.tab-icon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.portal {
+  --header-h: 101px; /* 56 + 44 + 1px border */
+}
+/* Page title: a compact bold heading, as on Greptile's settings pages. */
+.portal .content > header {
+  margin-bottom: 20px;
+}
+.portal .content > header h1 {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+/* Settings and Memory sidebar: plain group titles with dividers. */
+@media (min-width: 801px) {
+  .portal .settings-nav-group {
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .portal .settings-nav-group:last-child {
+    border-bottom: 0;
+  }
+}
+.portal .settings-nav-group h2 {
+  margin: 0 10px 6px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.portal .secondary-nav a {
+  font-size: 14px;
+  color: var(--text);
+}
+.portal .secondary-nav a[aria-current="page"] {
+  background: var(--surface-3);
+  font-weight: 500;
+}
+/* Tables: small mono caps headers on a tinted row. */
+.portal thead th {
+  background: var(--surface-2);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+/* Stat strip: one bordered box, plain labels, bold numbers, no column rules. */
+.portal .metrics > div {
+  border-right: 0;
+  padding: 22px 24px;
+}
+.portal .metrics span {
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+.portal .metrics strong {
+  font-size: 30px;
+  font-weight: 600;
+}
+/* Analytics filters: compact controls aligned right, labels kept for screen readers. */
+.analytics-filters {
+  justify-content: flex-end;
+  align-items: center;
+}
+.analytics-filters label {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.analytics-filters :is(select, input) {
+  width: auto;
+  max-width: 220px;
+}
+@media (max-width: 640px) {
+  .analytics-filters label {
+    flex: 1 1 140px;
+  }
+  .analytics-filters :is(select, input) {
+    width: 100%;
+    max-width: none;
+  }
+}
+/* Chart cards: a mono-caps header row, the chart, then the leaderboard under a divider. */
+.portal .analytics-grid > section {
+  padding: 0;
+  overflow: hidden;
+}
+.portal .analytics-grid > section > * {
+  margin: 0;
+  padding: 0 20px 20px;
+}
+.portal .analytics-grid > section > :first-child > figcaption,
+.portal .analytics-grid > section > h2:first-child {
+  margin: 0 -20px 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.portal .analytics-grid > section > h2:first-child {
+  margin: 0 0 16px;
+}
+.portal .analytics-grid > section > * + * {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.portal .analytics-grid > section > h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+.portal .analytics-grid > section > h3 + * {
+  border-top: 0;
+  padding-top: 8px;
+}
+.portal .analytics-grid > section > .chart + p {
+  border-top: 0;
+  padding-top: 0;
+  text-align: center;
+}
+.portal .chart + .chart figcaption {
+  font-size: 13px;
+}
+/* Empty leaderboards: a dashed box, like Greptile's "No data available". */
+.portal .chart > p.muted {
+  margin: 0;
+  padding: 28px 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  text-align: center;
 }

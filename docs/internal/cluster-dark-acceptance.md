@@ -1,6 +1,6 @@
 # Cluster dark-mode recovery acceptance
 
-October 4, 2026, current hosted release dpl_4Uwciate2DEgrRvT2miayUoofXrc. Computer use opened the existing GitHub + Origin acceptance context cluster. The actual viewport and document width both measured 390px. Native Chrome DevTools Rendering selected `prefers-color-scheme: dark`; media matching was true and body background was rgb(18,28,44). Automatic dark inversion was not enabled.
+October 4, 2026, current hosted release `<deployment-id>`. Computer use opened the existing GitHub + Origin acceptance context cluster. The actual viewport and document width both measured 390px. Native Chrome DevTools Rendering selected `prefers-color-scheme: dark`; media matching was true and body background was rgb(18,28,44). Automatic dark inversion was not enabled.
 
 The edit form rejected a one-repository selection with “Choose 2–20 distinct repositories.” Restoring its original GitHub and Origin repositories and saving recovered with “Cluster saved.” Reload retained the same name and two members; reopening edit confirmed both checked. Tab from the GitHub checkbox focused its indexing disclosure, and Space opened the full indexed revision `17456c1b49421d0840cda877fb20a72914ead487`. Final DOM evidence remained dark, 390px wide without document overflow. Warning/error logs were empty. The authoritative Convex readback retains the original cluster membership and inference ledger values unchanged.
 

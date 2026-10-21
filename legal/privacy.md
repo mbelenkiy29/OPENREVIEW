@@ -28,8 +28,8 @@ OpenReview is also open-source software. If you run it on your own infrastructur
 **Billing information.** Payments are handled by Stripe. We receive and store your Stripe customer and subscription identifiers, plan status, seat count and billing dates. We never receive or store full card numbers.
 
 **Referral information.** If you use the referral program, we keep your referral code, who signed up or added a workspace through it and when, the referred workspace's identifier, the commissions earned from its paid invoices (Stripe invoice and charge identifiers, amounts, refunds and disputes), and the credits you applied, with the workspace and Stripe customer balance transaction they went to. If you cash out, Stripe collects your identity, tax and bank details directly for your Stripe account; to start that account we send Stripe your verified email address and your OpenReview user ID, and we store only the account's identifier, country and payout status, and the transfers we sent to it.
-- **What a referrer sees:** the GitHub username of each person they referred, or "Email sign-up" for anyone without one, when they signed up, when their workspace subscribed, and what the referrer earned from each of its payments, including any share taken back after a refund or dispute. Referrers never see email addresses, workspace names or workspace content.
-- **What a referred person sees:** the referrer's GitHub username, if they have one, on the referral page.
+- **What a referrer sees:** the GitHub username of each person they referred, or "Email sign-up" for anyone without one, when they signed up, whether they have created a workspace, when it subscribed and when the referrer's commission from it ends, and what the referrer earned from each of its payments, including any share taken back after a refund or dispute. Referrers never see email addresses, workspace names or workspace content.
+- **What a referred workspace sees:** the referrer's GitHub username, if they have one. The referred person sees it on the referral page, and the owners and admins of the referred workspace see it as "Invited by" in **Settings → Billing**, with whether the referral discount applies.
 
 **Technical and usage information.** We record:
 - sign-in sessions, with the sign-in provider, the browser's user-agent string and timestamps;
@@ -59,6 +59,10 @@ Our hosting providers keep server logs that include IP addresses.
 - **Who can see it:** posts, votes and comments on the public boards, with your name and picture, are visible to anyone who visits them.
 - **In your browser:** the UserJot widget keeps its own session in your browser so it remembers you between visits.
 
+**Changelog emails.** If you subscribe on the [changelog](/changelog), we send your email address to our email provider, which keeps the subscriber list and sends the updates.
+- **Confirmation first:** nothing is kept until you click the link in the confirmation email.
+- **Leaving:** every update has an unsubscribe link.
+
 **Cookies.** Most of our cookies are needed for the service to work:
 - your sign-in session;
 - your active workspace and team;
@@ -83,6 +87,7 @@ We use the information above to:
 - authenticate you, keep accounts and workspaces secure, and prevent abuse;
 - process subscriptions and enforce plan limits;
 - respond to support requests and send service messages, such as sign-in links, invitations and billing notices;
+- send changelog emails, only if you subscribed to them;
 - keep the service reliable, diagnose problems and understand which features are used;
 - meet legal obligations.
 
@@ -110,7 +115,7 @@ We share information only as needed to run the service, with:
 | PostHog | Product analytics |
 | UserJot | Feedback boards, roadmap and the feedback widget |
 | Linear, Atlassian, Notion, Slack | Only when your workspace connects them |
-| An email delivery provider | Only when email sign-in or email notifications are turned on |
+| An email delivery provider | Only when email sign-in or email notifications are turned on, or you subscribe to changelog emails |
 
 Information is also shared:
 - **With your workspace:** other members of your workspace can see its repositories, reviews and settings, according to their roles. Comments OpenReview posts on pull requests are visible to anyone who can see those pull requests on your code host.

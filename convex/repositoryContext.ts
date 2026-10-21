@@ -5,17 +5,20 @@ import { connectionDigest } from "./indexAuthority";
 import {personalIdentityProviders} from "../src/personal-providers";
 import {providerIdentityAuthority} from "./providerIdentities";
 import { p4IdentityAuthority } from "./p4Identities";
-import type { Id } from "./_generated/dataModel";
+import { githubAccounts } from "./identity";
+import type { Doc, Id } from "./_generated/dataModel";
 
 import {repositoryContextValidator,type RepositoryContext} from "./repositoryContextTypes";
 export {repositoryContextValidator,type RepositoryContext} from "./repositoryContextTypes";
+// The GitHub ID is immutable; a stored login must also still match the PR author's.
+const holdsGithub=async(ctx:QueryCtx,user:Doc<"users">,id:string,login:string)=>(await githubAccounts(ctx,user)).some(g=>g.id===id&&(!g.login||g.login===login));
 const identityRef=v.object({id:v.id("p4Identities"),generation:v.number()});
 
 export async function validateRepositoryContext(ctx:QueryCtx|MutationCtx,receipt:RepositoryContext){
  const {repo,user}=await repositoryAccess(ctx,receipt.userId,receipt.repositoryId);
  if(receipt.nativeActor){const native=await p4IdentityAuthority(ctx,receipt.nativeActor.id,receipt.nativeActor.generation);if(native.repo._id!==repo._id||native.identity.userId!==user._id||native.identity.username!==receipt.actor)throw new Error("Native context author changed");}
  else if(receipt.providerActor){const linked=await providerIdentityAuthority(ctx,receipt.providerActor.id,repo._id,receipt.providerActor.generation);if(linked.identity.userId!==user._id||linked.identity.username!==receipt.actor||linked.identity.externalId!==receipt.providerActor.externalId)throw new Error("Provider context author changed");}
- else if(repo.connectionId||!receipt.githubActorId||String(user.githubId)!==receipt.githubActorId||user.login!==receipt.actor)throw new Error("Context author or provider identity changed");
+ else if(repo.connectionId||!receipt.githubActorId||!(await holdsGithub(ctx,user,receipt.githubActorId,receipt.actor)))throw new Error("Context author or provider identity changed");
  const allowed=new Set<string>();
  for(const reference of receipt.clusters){
   const cluster=await ctx.db.get(reference.id);
@@ -36,27 +39,42 @@ export async function validateRepositoryContext(ctx:QueryCtx|MutationCtx,receipt
 }
 export const validate=internalQuery({args:{receipt:repositoryContextValidator},handler:async(ctx,a)=>{await validateRepositoryContext(ctx,a.receipt);return true;}});
 
-export const select=internalQuery({args:{repositoryId:v.id("repositories"),actor:v.string(),authorExternalId:v.optional(v.string()),nativeActor:v.optional(identityRef),nativeAuthor:v.optional(v.boolean())},handler:async(ctx,a)=>{
- const repo=await ctx.db.get(a.repositoryId);if(!repo)throw new Error("Context repository missing");
- const clusters=(await ctx.db.query("repositoryClusters").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()).filter(c=>c.repositoryIds.includes(repo._id));
- if(!clusters.length)return {receipt:null,sources:[],coverage:[]};
+type ReviewAuthor={actor:string;authorExternalId?:string;nativeActor?:{id:Id<"p4Identities">;generation:number};nativeAuthor?:boolean};
+// The workspace user a review author verifiably is (throws without repository access), or why none is.
+async function reviewAuthor(ctx:QueryCtx,repo:Doc<"repositories">,a:ReviewAuthor):Promise<{userId:Id<"users">;githubActorId?:string;providerActor:RepositoryContext["providerActor"]}|string>{
  const primaryConnection=repo.connectionId?await ctx.db.get(repo.connectionId):null;
- if(primaryConnection&&primaryConnection.kind!=="perforce"&&!personalIdentityProviders.includes(primaryConnection.kind))return {receipt:null,sources:[],coverage:["Cross-repository context omitted: this provider requires a verified connection-specific review-author identity; native username equality is insufficient."]};
- if(primaryConnection?.kind==="perforce"&&!a.nativeActor)return {receipt:null,sources:[],coverage:["Cross-repository context omitted: native review author must link a personal P4 identity."]};
- if(a.nativeAuthor&&!a.nativeActor)return {receipt:null,sources:[],coverage:["Cross-repository context omitted: native review author must link a personal P4 identity."]};
+ if(primaryConnection&&primaryConnection.kind!=="perforce"&&!personalIdentityProviders.includes(primaryConnection.kind))return "this provider requires a verified connection-specific review-author identity; native username equality is insufficient.";
+ if(primaryConnection?.kind==="perforce"&&!a.nativeActor)return "native review author must link a personal P4 identity.";
+ if(a.nativeAuthor&&!a.nativeActor)return "native review author must link a personal P4 identity.";
  let githubActorId:string|undefined;
  let userId:Id<"users">|undefined,providerActor:RepositoryContext["providerActor"];
  if(primaryConnection&&personalIdentityProviders.includes(primaryConnection.kind)){
   const linked=a.authorExternalId?await ctx.db.query("providerIdentities").withIndex("by_connection_external",q=>q.eq("connectionId",primaryConnection._id).eq("externalId",a.authorExternalId!)).unique():null;
-  try{if(!linked||linked.username!==a.actor)throw new Error("Unlinked author");await providerIdentityAuthority(ctx,linked._id,repo._id);userId=linked.userId;providerActor={id:linked._id,generation:linked.generation,externalId:linked.externalId};}catch{return {receipt:null,sources:[],coverage:["Cross-repository context omitted: link the review author's personal provider identity for this connection."]};}
+  try{if(!linked||linked.username!==a.actor)throw new Error("Unlinked author");await providerIdentityAuthority(ctx,linked._id,repo._id);userId=linked.userId;providerActor={id:linked._id,generation:linked.generation,externalId:linked.externalId};}catch{return "link the review author's personal provider identity for this connection.";}
  }
  else if(a.nativeActor){const native=await p4IdentityAuthority(ctx,a.nativeActor.id,a.nativeActor.generation);if(native.repo._id!==repo._id||native.identity.username!==a.actor)throw new Error("Native context author mismatch");userId=native.identity.userId;}
  else{
-  if(!a.authorExternalId||!/^([1-9][0-9]*)$/.test(a.authorExternalId))return {receipt:null,sources:[],coverage:["Cross-repository context omitted: GitHub review author has no verified immutable account ID."]};
-  for(const m of await ctx.db.query("organizationMembers").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()){const u=await ctx.db.get(m.userId);if(u?.login===a.actor&&String(u.githubId)===a.authorExternalId){userId=m.userId;githubActorId=a.authorExternalId;break;}}
+  if(!a.authorExternalId||!/^([1-9][0-9]*)$/.test(a.authorExternalId))return "GitHub review author has no verified immutable account ID.";
+  for(const m of await ctx.db.query("organizationMembers").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()){const u=await ctx.db.get(m.userId);if(u&&await holdsGithub(ctx,u,a.authorExternalId,a.actor)){userId=m.userId;githubActorId=a.authorExternalId;break;}}
  }
- if(!userId)return {receipt:null,sources:[],coverage:["Cross-repository context omitted: review author is not linked to a workspace identity."]};
+ if(!userId)return "review author is not linked to a workspace identity.";
  await repositoryAccess(ctx,userId,repo._id);
+ return {userId,githubActorId,providerActor};
+}
+const authorArgs={actor:v.string(),authorExternalId:v.optional(v.string()),nativeActor:v.optional(identityRef),nativeAuthor:v.optional(v.boolean())};
+// Linked tickets and documents are quoted into the review, so only a verified workspace author with repository access pulls them in.
+export const requirementsAuthor=internalQuery({args:{repositoryId:v.id("repositories"),...authorArgs},handler:async(ctx,a):Promise<string|null>=>{
+ const repo=await ctx.db.get(a.repositoryId);if(!repo)throw new Error("Requirements repository missing");
+ try{const author=await reviewAuthor(ctx,repo,a);return typeof author==="string"?author:null;}catch{return "review author has no access to this repository.";}
+}});
+
+export const select=internalQuery({args:{repositoryId:v.id("repositories"),...authorArgs},handler:async(ctx,a)=>{
+ const repo=await ctx.db.get(a.repositoryId);if(!repo)throw new Error("Context repository missing");
+ const clusters=(await ctx.db.query("repositoryClusters").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()).filter(c=>c.repositoryIds.includes(repo._id));
+ if(!clusters.length)return {receipt:null,sources:[],coverage:[]};
+ const author=await reviewAuthor(ctx,repo,a);
+ if(typeof author==="string")return {receipt:null,sources:[],coverage:["Cross-repository context omitted: "+author]};
+ const {userId,githubActorId,providerActor}=author;
  const selected:RepositoryContext["clusters"]=[],approved=new Set<Id<"repositories">>(),coverage:string[]=[];
  for(const c of clusters){let accessible=true;for(const id of c.repositoryIds){try{if((await repositoryAccess(ctx,userId,id)).repo.organizationId!==repo.organizationId)accessible=false;}catch{accessible=false;}}
   if(!accessible){coverage.push("A repository cluster was omitted because the review author lacks access to every participating repository.");continue;}

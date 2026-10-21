@@ -19,6 +19,7 @@ import {approvalPolicySchema} from "../../src/approval";
 import {runtimePolicySchema} from "../../src/runtime-policy";
 import {approvalDefaults,runtimeDefaults} from "../../src/review-settings";
 import { REFERRAL_PAYOUT_REVIEW_CENTS, formatMoney, parseMoneyInput, stripeHostedUrl } from "../../src/referrals";
+import { safeNext } from "../../src/identity";
 
 const text = (f: FormData, key: string) => z.string().parse(f.get(key) ?? "");
 export async function saveApprovalPolicy(_state:{error?:string;saved?:boolean},form:FormData):Promise<{error?:string;saved?:boolean}>{
@@ -207,7 +208,7 @@ async function endSession(to: string): Promise<never> {
   const jar = await cookies(), token = jar.get("openreview_session")?.value;
   if (token) await backend().mutation(api.identity.signOut, { token }).catch(() => undefined);
   jar.delete("openreview_session");
-  redirect(to);
+  redirect(safeNext(to));
 }
 export async function logout() { await endSession("/"); }
 export async function signOutEverywhere() {
@@ -315,9 +316,15 @@ export async function setMinutesPerFinding(form: FormData) {
 export async function startCheckout(form: FormData) {
   const { token } = await current();
   let url: string;
-  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: text(form, "organizationId") as Id<"organizations"> }); }
+  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: text(form, "organizationId") as Id<"organizations">, plan: z.enum(["starter", "pro"]).catch("starter").parse(text(form, "plan")) }); }
   catch { redirect("/dashboard/settings/billing?billing=error"); }
   redirect(url);
+}
+export async function changePlan(form: FormData) {
+  const { token } = await current();
+  try { await backend().action(api.billingJobs.changePlan, { token, organizationId: text(form, "organizationId") as Id<"organizations">, plan: z.enum(["starter", "pro"]).parse(text(form, "plan")) }); await notify("Plan change requested. It shows here once Stripe confirms it."); }
+  catch (e) { await notify(backendMessage(e, "Could not change the plan."), "error"); }
+  revalidatePath("/dashboard/settings/billing");
 }
 export async function applyReferralCode(form: FormData) {
   const { token } = await current();
@@ -363,6 +370,18 @@ export async function openBillingPortal(form: FormData) {
   try { url = await backend().action(api.billingJobs.portal, { token, organizationId: text(form, "organizationId") as Id<"organizations"> }); }
   catch { redirect("/dashboard/settings/billing?billing=error"); }
   redirect(url);
+}
+export async function setSpendingCap(form: FormData) {
+  const { token } = await current();
+  try { await backend().mutation(api.billing.setSpendingCap, { token, organizationId: text(form, "organizationId") as Id<"organizations">, capUsd: Number(text(form, "capUsd")) }); await notify("Extra usage cap saved."); }
+  catch { await notify("Could not save the extra usage cap.", "error"); }
+  revalidatePath("/dashboard/settings/billing");
+}
+export async function setWorkspaceModel(form: FormData) {
+  const { token } = await current();
+  try { await backend().mutation(api.scopes.setWorkspaceModel, { token, organizationId: text(form, "organizationId") as Id<"organizations">, model: text(form, "model") }); await notify("Model saved."); }
+  catch { await notify("Could not save the model.", "error"); }
+  revalidatePath("/dashboard/settings/model");
 }
 export async function saveSlackChannel(form: FormData) {
   const { token } = await current();
@@ -473,7 +492,7 @@ export async function createApiKey(
     name: text(form, "name"),
     hash: createHash("sha256").update(key).digest("hex"),
     prefix: key.slice(0, 11),
-    scopes: [z.enum(["read", "write", "admin"]).parse(text(form, "scope") || "read")],
+    ...(text(form, "scope") === "perforce" ? { perforce: true } : { scopes: [z.enum(["read", "write", "admin"]).parse(text(form, "scope") || "read")] }),
   });
   revalidatePath("/dashboard/settings/keys");
   return key;

@@ -1,6 +1,6 @@
 # Current analytics recovery and export acceptance
 
-October 4, 2026, hosted release `dpl_GqVdoJFqYHjVQe88bdfN9FRj9CKB`, canonical production portal and Convex tidy-ocelot-457. This is fresh live acceptance evidence, with no implementation changes, indexing, reviews, inference or new credentials.
+October 4, 2026, hosted release `<deployment-id>`, canonical production portal and Convex `<prod-deployment>`. This is fresh live acceptance evidence, with no implementation changes, indexing, reviews, inference or new credentials.
 
 Native Chrome opened Analytics with the invalid date February 30. The page displayed its inline “Choose valid From and Through dates” recovery message, no report, and disabled Export CSV. Correcting From to October 4 and selecting Apply recovered the report for October 4 inclusive UTC, all accessible teams/repositories: 4 PRs, 5 reviews, 3 findings, $0.29 rounded cost, 111,730 recorded tokens and 45 seconds average duration.
 

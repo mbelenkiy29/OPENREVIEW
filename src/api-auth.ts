@@ -4,17 +4,20 @@ import { api } from "../convex/_generated/api";
 import { backend, signSession } from "./server";
 import { hasScope, type ApiScope } from "./api-scopes";
 import { mcpResource, oauthBase, tokenHash } from "./oauth-server";
+import { upgradeNote } from "./plans";
 
 export class ApiAuthError extends Error {
-  constructor(readonly status: 401 | 403, message: string) { super(message); }
+  constructor(readonly status: 401 | 402 | 403, message: string) { super(message); }
 }
 // Requests that reach a handler through the remote MCP endpoint (the endpoint's own request and its
 // in-process tool dispatch). Only these may carry an MCP OAuth access token: those tokens are issued
 // for the MCP resource (RFC 8707 audience) and are refused by every other API route.
 export const mcpRequests = new WeakSet<Request>();
 // Resolves a Bearer API key (or, at the MCP endpoint, an OAuth access token) to its workspace and
-// owner, and requires a scope (default read).
-export async function apiIdentity(request: Request, scope: ApiScope = "read") {
+// owner, and requires a scope (default read). API keys need a plan with API access (402 otherwise), except
+// for `plan: false` callers: the Perforce routes (a code provider, not the public API) and the key check in
+// /api/workspace. Perforce keys pass only those.
+export async function apiIdentity(request: Request, scope: ApiScope = "read", { plan = true } = {}) {
   const authorization = request.headers.get("authorization");
   if (authorization?.startsWith("Bearer ora_") && authorization.length <= 200) {
     if (!mcpRequests.has(request)) throw new ApiAuthError(401, "This access token is only valid at the MCP endpoint");
@@ -42,6 +45,8 @@ export async function apiIdentity(request: Request, scope: ApiScope = "read") {
     throw new ApiAuthError(401, "Invalid or revoked API key");
   }
   if (!hasScope(identity.scopes, scope)) throw new ApiAuthError(403, `This API key does not have the ${scope} scope`);
+  if (plan && !identity.apiAccess) throw new ApiAuthError(402, upgradeNote["api.access"]);
+  if (plan && identity.perforce) throw new ApiAuthError(403, "This API key only works for Perforce indexing and reviews");
   return { ...identity, token: await signSession(identity.userId) };
 }
 // Authentication/scope failures keep their status; callers fall back to their own error for the rest.

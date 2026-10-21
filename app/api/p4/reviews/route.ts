@@ -5,7 +5,7 @@ import { apiIdentity, apiDenied } from "../../../../src/api-auth";
 import {backend} from "../../../../src/server";
 export async function POST(request:Request){
  try{
-  const {token,organizationId}=await apiIdentity(request,"admin"),reader=request.body?.getReader();
+  const {token,organizationId}=await apiIdentity(request,"admin",{plan:false}),reader=request.body?.getReader();
   if(!reader)throw new Error("Missing body");
   const chunks:Uint8Array[]=[];let size=0;
   try{for(;;){const {value,done}=await reader.read();if(done)break;size+=value.length;if(size>4096)return Response.json({error:"P4 review request exceeds 4 KB"},{status:413});chunks.push(value);}}finally{await reader.cancel();}

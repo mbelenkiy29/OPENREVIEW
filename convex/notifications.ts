@@ -6,6 +6,7 @@ import { internal } from "./_generated/api";
 import { audit, authorize, repositoryAccess } from "./auth";
 import { rateLimit } from "./rateLimit";
 import { emailAddress, emailConfigured } from "../src/email";
+import { billingConfig, billingDecision, usageAlertEmail } from "../src/billing";
 import { notificationEvents } from "../src/notifications";
 import { mentionQuestion, slackChannelId } from "../src/slack";
 import { egressAllowed, offline } from "../src/egress";
@@ -129,6 +130,22 @@ export const reviewTargets = internalQuery({ args: { reviewId: v.id("reviews") }
     if (events.length) recipients.push({ userId: p.userId, email: p.email, events });
   }
   return { organizationId: repo.organizationId, installationId: slack?._id ?? null, notice: { repository: repo.fullName, prNumber: review.prNumber, prTitle: pr?.title, prUrl: pr?.url, headSha: review.headSha, findings }, channels, recipients };
+} });
+// Usage alert (settleUsage in convex/billing.ts): owners and admins with a verified email, never members or viewers.
+export const usageAlertTargets = internalQuery({ args: { usageId: v.id("billingUsage"), threshold: v.number(), origin: v.optional(v.string()) }, handler: async (ctx, a) => {
+  const usage = await ctx.db.get(a.usageId);
+  const account = usage && await ctx.db.query("billingAccounts").withIndex("by_org", (q) => q.eq("organizationId", usage.organizationId)).unique();
+  const organization = usage && await ctx.db.get(usage.organizationId);
+  if (!usage || !account || !organization) return null;
+  const decision = billingDecision(account, usage.usedMicros ?? 0, Date.now(), billingConfig());
+  if (!decision.limit) return null;
+  const recipients: { userId: Id<"users">; email: string }[] = [];
+  for (const m of await ctx.db.query("organizationMembers").withIndex("by_org", (q) => q.eq("organizationId", usage.organizationId)).take(1000)) {
+    if (m.role !== "owner" && m.role !== "admin") continue;
+    const p = await ownPreferences(ctx, m.userId, usage.organizationId);
+    if (p?.email && p.emailVerifiedAt) recipients.push({ userId: m.userId, email: p.email });
+  }
+  return { organizationId: usage.organizationId, recipients, ...usageAlertEmail(organization.name, a.threshold, decision, usage.overageMicros ?? 0, Date.parse(`${usage.period}-01`), a.origin && `${a.origin}/dashboard/settings/billing`) };
 } });
 // Claims a delivery once; a failed delivery may be retried, a sent or skipped one never repeats.
 export const claimDelivery = internalMutation({ args: { organizationId: v.id("organizations"), key: v.string(), channel: v.string() }, handler: async (ctx, a) => {

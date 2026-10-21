@@ -98,7 +98,7 @@ export const findingValidator = v.object({
 });
 export default defineSchema({
   inferenceBudgets: defineTable({limitMicros:v.number(),baselineMicros:v.number(),source:v.string(),committedMicros:v.number(),reservedMicros:v.number(),createdAt:v.number()}),
-  inferenceReservations: defineTable({budgetId:v.id("inferenceBudgets"),provider:v.string(),model:v.string(),baseUrl:v.string(),inputTokenCeiling:v.number(),outputTokenCeiling:v.number(),inputPrice:v.number(),outputPrice:v.number(),cacheReadPrice:v.optional(v.number()),cacheWritePrice:v.optional(v.number()),reservedMicros:v.number(),status:v.string(),createdAt:v.number(),inputTokens:v.optional(v.number()),outputTokens:v.optional(v.number()),cacheReadTokens:v.optional(v.number()),cacheWriteTokens:v.optional(v.number()),settledMicros:v.optional(v.number()),settledAt:v.optional(v.number())}).index("by_budget",["budgetId"]),
+  inferenceReservations: defineTable({budgetId:v.optional(v.id("inferenceBudgets")),usageId:v.optional(v.id("billingUsage")),provider:v.string(),model:v.string(),baseUrl:v.string(),inputTokenCeiling:v.number(),outputTokenCeiling:v.number(),inputPrice:v.number(),outputPrice:v.number(),cacheReadPrice:v.optional(v.number()),cacheWritePrice:v.optional(v.number()),reservedMicros:v.number(),status:v.string(),createdAt:v.number(),inputTokens:v.optional(v.number()),outputTokens:v.optional(v.number()),cacheReadTokens:v.optional(v.number()),cacheWriteTokens:v.optional(v.number()),settledMicros:v.optional(v.number()),settledAt:v.optional(v.number())}).index("by_budget",["budgetId"]).index("by_status_created",["status","createdAt"]),
   reviewFindings: defineTable({reviewId:review,findingId:v.id("findings"),snapshot:findingValidator}).index("by_review",["reviewId"]),
   integrationConnections:defineTable({organizationId:org,kind:v.union(v.literal("linear"),v.literal("atlassian"),v.literal("notion")),sites:v.optional(v.array(v.object({id:v.string(),name:v.string(),url:v.string(),scopes:v.array(v.string())}))),jiraProjectIds:v.optional(v.array(v.string())),confluenceSpaceIds:v.optional(v.array(v.string())),externalId:v.string(),name:v.string(),credentials:v.string(),expiresAt:v.number(),active:v.boolean(),generation:v.number(),teamIds:v.array(v.string()),projectIds:v.array(v.string()),repositoryIds:v.array(repo),refreshLease:v.optional(v.string()),refreshExpiresAt:v.optional(v.number()),error:v.optional(v.string()),createdAt:v.number()}).index("by_org",["organizationId"]).index("by_account",["organizationId","kind","externalId"]),
   integrationRevocations:defineTable({connectionId:v.id("integrationConnections"),organizationId:org,credentials:v.string(),attempts:v.number(),createdAt:v.number(),status:v.string(),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number())}).index("by_connection",["connectionId"]),
@@ -142,6 +142,8 @@ export default defineSchema({
     window: v.number(),
     count: v.number(),
   }).index("by_key", ["key"]),
+  // One row: the changelog entries the last email digest covered (src/changelog.ts feedDigest keys, space-separated).
+  changelogDigests: defineTable({ keys: v.string(), sentAt: v.number() }),
   modelCache: defineTable({
     organizationId: org,
     key: v.string(),
@@ -216,6 +218,7 @@ export default defineSchema({
     userId: v.id("users"),
     provider: v.string(), // github | gitlab | google | email | sso (providerUserId = <connectionId>:<subject>)
     providerUserId: v.string(),
+    login: v.optional(v.string()), // github only: the login GitHub reported at the last sign-in or link
     email: v.optional(v.string()),
     emailVerified: v.boolean(),
     createdAt: v.number(),
@@ -250,6 +253,8 @@ export default defineSchema({
     oidcIssuer: v.optional(v.string()),
     oidcClientId: v.optional(v.string()),
     oidcClientSecret: v.optional(v.string()),
+    // Set when the identity provider changed: sign-in waits until a domain is verified again (convex/sso.ts).
+    reverifyDomains: v.optional(v.boolean()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_org", ["organizationId"]),
@@ -439,6 +444,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_repo", ["repositoryId"])
+    .index("by_org", ["organizationId"])
     .index("by_status", ["status"]),
   indexSkippedFiles: defineTable({
     jobId: v.id("indexJobs"),
@@ -477,9 +483,13 @@ export default defineSchema({
     updatedAt: v.number(),
     nativeObservedAt: v.optional(v.number()),
     revisionKey: v.optional(v.string()),
+    // For Analytics merge time: first time OpenReview saw the PR, and when the merge webhook arrived.
+    openedAt: v.optional(v.number()),
+    mergedAt: v.optional(v.number()),
   })
     .index("by_repo_number", ["repositoryId", "number"])
     .index("by_org", ["organizationId"])
+    .index("by_org_merged", ["organizationId", "mergedAt"])
     .searchIndex("by_title",{searchField:"title",filterFields:["organizationId"]}),
   pullRequestCommits: defineTable({
     organizationId: org,
@@ -590,12 +600,18 @@ export default defineSchema({
     customerId: v.optional(v.string()),
     subscriptionId: v.optional(v.string()),
     subscriptionItemId: v.optional(v.string()),
+    // The subscription's paid plan (starter | pro) from its seat price; unset on a subscription means starter.
+    plan: v.optional(v.string()),
+    // A subscription from before plans existed: while it stays on Starter it keeps every entitlement.
+    legacy: v.optional(v.boolean()),
     status: v.string(), // trial | active | trialing | past_due | unpaid | canceled | incomplete | incomplete_expired | paused
     seats: v.number(),
     trialEndsAt: v.number(),
     currentPeriodEnd: v.optional(v.number()),
     pastDueSince: v.optional(v.number()),
     lastEventCreated: v.optional(v.number()),
+    // Monthly extra-usage cap in dollars, set by an admin; 0 or unset means no usage past the included amount.
+    spendCapUsd: v.optional(v.number()),
     updatedAt: v.number(),
   }).index("by_org", ["organizationId"]).index("by_customer", ["customerId"]),
   // Referral program (REFERRALS_ENABLED and BILLING_ENABLED only). One personal code per user. A
@@ -678,7 +694,12 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]).index("by_account", ["accountId"]),
-  billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number() }).index("by_org_period", ["organizationId", "period"]),
+  // Usage in micro-dollars of inference cost: settled, reserved by in-flight calls, and the part past the included usage.
+  billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number(), usedMicros: v.optional(v.number()), reservedMicros: v.optional(v.number()), overageMicros: v.optional(v.number()),
+    // Usage alert thresholds (percent of the included usage) already emailed this period.
+    alertsSent: v.optional(v.array(v.number())) }).index("by_org_period", ["organizationId", "period"]),
+  // Extra usage waiting to be reported to Stripe as meter events (identifier = this row id).
+  billingMeterEvents: defineTable({ organizationId: org, period: v.string(), micros: v.number(), status: v.string() /* pending | reported | skipped | failed */, attempts: v.number(), error: v.optional(v.string()), createdAt: v.number(), reportedAt: v.optional(v.number()) }).index("by_org_status", ["organizationId", "status"]),
   stripeEvents: defineTable({ eventId: v.string(), type: v.string(), outcome: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Slack app installs (one per Slack workspace); the bot token is encrypted with scope `<org>:slack`.
   slackInstallations: defineTable({
@@ -990,6 +1011,8 @@ export default defineSchema({
     revoked: v.boolean(),
     // read | write | admin; absent on keys created before scopes (they keep full access).
     scopes: v.optional(v.array(v.string())),
+    // Passes only the Perforce routes (app/api/p4/*), which work on every plan; creatable without api.access.
+    perforce: v.optional(v.boolean()),
   })
     .index("by_hash", ["hash"])
     .index("by_org", ["organizationId"]),
@@ -998,4 +1021,24 @@ export default defineSchema({
     expiresAt: v.number(),
     createdAt: v.number(),
   }).index("by_user", ["userId"]),
+  // Reviews of a developer's local commits sent by the CLI (convex/cliReviews.ts). The uploaded diff and
+  // files live in storage until the review ends; the row and its result are removed after a day.
+  cliReviews: defineTable({
+    organizationId: org,
+    repositoryId: repo,
+    userId: v.id("users"),
+    status: v.union(v.literal("queued"), v.literal("running"), v.literal("completed"), v.literal("failed")),
+    stage: v.optional(v.string()),
+    baseSha: v.string(),
+    headSha: v.string(),
+    title: v.string(),
+    mode: v.optional(v.string()),
+    security: v.boolean(),
+    instructions: v.optional(v.string()),
+    inputStorageId: v.optional(v.id("_storage")),
+    result: v.optional(v.string()),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_org", ["organizationId"]),
 });

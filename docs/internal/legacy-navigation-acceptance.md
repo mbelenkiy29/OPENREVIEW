@@ -1,6 +1,6 @@
 # Legacy navigation and setup resume acceptance
 
-October 4, 2026. Native Chrome on hosted release `dpl_CEQshwemhSJoSe9pWnMBSLkVr7TS` verified all eight legacy navigation aliases, dashboard root and the legacy repository-specific Settings link. Final URLs and rendered main headings are saved in `output/setup/navigation-legacy-redirects.json`.
+October 4, 2026. Native Chrome on hosted release `<deployment-id>` verified all eight legacy navigation aliases, dashboard root and the legacy repository-specific Settings link. Final URLs and rendered main headings are saved in `output/setup/navigation-legacy-redirects.json`.
 
 | Legacy path | Current destination |
 | --- | --- |

@@ -30,6 +30,7 @@ OpenReview exposes the same tools over two Model Context Protocol transports.
 | `list_unresolved_comments` | Open findings on your own open pull requests, with file, line, priority and fix |
 | `trigger_review` | Request a review of a pull request at its current head (needs write) |
 | `add_custom_context` | Suggest a custom rule; an admin approves it before reviews use it (needs write) |
+| `review_local_changes`, `get_local_review` | Review local commits from their diff and changed files, then read the result (the CLI's signed-in `openreview review`; needs write) |
 | `report` | `pr_status`, `weekly_summary` (last 1–90 days) or `team_metrics` from the analytics report |
 
 Every tool call goes through the public API, so the key's scope and workspace apply.

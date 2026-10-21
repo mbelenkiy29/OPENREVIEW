@@ -16,7 +16,7 @@ import {indexWriteAllowed,indexBatchMatches} from "./indexAuthority";
 import {adoptP4Baseline} from "./p4Polling";
 import {p4SubmittedRevision} from "../src/p4-revision";
 
-import { defaults,validSummarySections,validReviewEngine,validCheckFailureSeverity,validTriggerSettings,validPublicationSettings } from "../src/review-settings";
+import { defaults,validSummarySections,validReviewEngine,validCheckFailureSeverity,validTriggerSettings,validPublicationSettings,validModelSettings } from "../src/review-settings";
 import { applicableRules } from "../src/rule-scopes";
 import { categories } from "../src/engine/types";
 import { workspaceFixLabel } from "../src/fix-agents";
@@ -43,7 +43,9 @@ export async function enableIndexing(ctx:MutationCtx,repo:Doc<"repositories">){
 export async function cancelRepositoryIndex(ctx:MutationCtx,repo:Doc<"repositories">){
  const scheduled=repo.indexScheduledId?await ctx.db.system.get(repo.indexScheduledId):null;
  if(scheduled?.state.kind==="pending")await ctx.scheduler.cancel(scheduled._id);
- for(const job of await ctx.db.query("indexJobs").withIndex("by_repo",q=>q.eq("repositoryId",repo._id)).collect())if(job.status==="running")await ctx.db.patch(job._id,{status:"cancelled",updatedAt:Date.now()});
+ // Only the newest job can be running: indexing() supersedes a running job before starting another.
+ const job=await ctx.db.query("indexJobs").withIndex("by_repo",q=>q.eq("repositoryId",repo._id)).order("desc").first();
+ if(job?.status==="running")await ctx.db.patch(job._id,{status:"cancelled",updatedAt:Date.now()});
  if(["queued","indexing"].includes(repo.indexStatus))await ctx.db.patch(repo._id,{indexStatus:"cancelled",pendingIndexSha:undefined,error:undefined});
 }
 export async function disableRepository(ctx:MutationCtx,repo:Doc<"repositories">){await ctx.db.patch(repo._id,{enabled:false});await cancelRepositoryIndex(ctx,repo);}
@@ -88,8 +90,8 @@ export const configure = mutation({
         s.minimumConfidence < 0.5 ||
         s.minimumConfidence > 1 ||
         !["critical", "high", "medium", "low"].includes(s.severityThreshold) ||
-        !["fast", "standard", "deep"].includes(s.mode) ||
-        !["concise", "detailed"].includes(s.commentStyle) ||
+        !["fast", "standard", "deep", "auto"].includes(s.mode) ||
+        !["concise", "detailed", "compact"].includes(s.commentStyle) ||
         !validSummarySections(s.summarySections) ||
         !validReviewEngine(s.reviewEngine) ||
         !validCheckFailureSeverity(s.checkFailureSeverity) ||
@@ -98,6 +100,7 @@ export const configure = mutation({
         s.categories.some((c) => !(categories as readonly string[]).includes(c))
       )
         throw new Error("Invalid review settings");
+      if (!validModelSettings(s)) throw new Error("Choose a model from this deployment's list");
       const existing = await ctx.db
         .query("repositorySettings")
         .withIndex("by_repo", (q) => q.eq("repositoryId", repo._id))

@@ -8,17 +8,27 @@ declare global {
   interface Window { oaiq?: (...args: unknown[]) => void }
 }
 
-/** The Ads Manager setup code for this pixel, with console logging only in development. */
-const setupCode = (pixelId: string) => `!function(w,d,s,u){if(w.oaiq)return;var q=function(){q.q.push(arguments)};q.q=[];w.oaiq=q;var j=d.createElement(s);j.async=1;j.src=u;var f=d.getElementsByTagName(s)[0];f.parentNode.insertBefore(j,f)}(window,document,"script","https://bzrcdn.openai.com/sdk/oaiq.min.js");oaiq("init",{pixelId:${JSON.stringify(pixelId)},debug:${process.env.NODE_ENV !== "production"}});`;
+/** Ads Manager's setup code for this pixel, run from this bundle rather than as an inline script: the
+ *  page CSP allows only nonced inline scripts, while 'strict-dynamic' lets this code add the SDK's
+ *  (src/security-headers.ts). Console logging only in development. */
+function setupCode(pixelId: string) {
+  const queue = Object.assign(function () {
+    // The SDK replays the queued `arguments` objects, as the snippet stores them.
+    // eslint-disable-next-line prefer-rest-params
+    queue.q.push(arguments);
+  }, { q: [] as IArguments[] });
+  window.oaiq = queue;
+  const sdk = document.createElement("script");
+  sdk.async = true;
+  sdk.src = "https://bzrcdn.openai.com/sdk/oaiq.min.js";
+  document.head.append(sdk);
+  window.oaiq("init", { pixelId, debug: process.env.NODE_ENV !== "production" });
+}
 
 /** After consent: loads the pixel once and counts the current page. */
 export function startAdsPixel() {
   if (!adsPixelId) return;
-  if (!window.oaiq) {
-    const script = document.createElement("script");
-    script.textContent = setupCode(adsPixelId);
-    document.head.append(script);
-  }
+  if (!window.oaiq) setupCode(adsPixelId);
   // Undoes a denial the pixel stored when this visitor declined earlier.
   window.oaiq?.("consent", true);
   adsPageViewed(location.pathname);

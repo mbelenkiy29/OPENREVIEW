@@ -1,6 +1,6 @@
 // Light, dark or System (follows the operating system). The choice is kept in a first-party cookie
 // that only the browser reads: an inline <head> script applies it to <html data-theme> before first
-// paint, so the server never reads it and public pages can be prerendered.
+// paint, so the server never reads it.
 export const themeCookie = "openreview_theme";
 export type Theme = "system" | "light" | "dark";
 /** The saved choice in a `document.cookie` string. readTheme and themeScript share this rule. */

@@ -4,6 +4,7 @@ import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { v,ConvexError } from "convex/values";
 import { authorize,authorizeRepository,audit } from "./auth";
+import { hasEntitlement } from "./billing";
 import { runtimePolicyValidator,runtimeEvidenceValidator } from "./schema";
 import { runtimeDefaults,runtimePolicySchema,runtimePolicyKey,generatedTestsKey } from "../src/runtime-policy";
 import { testCommand } from "../src/generated-tests";
@@ -76,7 +77,13 @@ export const requestTests=internalMutation({args:{reviewId:v.id("reviews"),tests
 export const testsEnabled=internalQuery({args:{repositoryId:v.id("repositories")},handler:async(ctx,a)=>{
  const repo=await ctx.db.get(a.repositoryId);if(!repo?.enabled)return false;
  const policy=await runtimePolicy(ctx,repo);
- return !!policy.generatedTests&&!!policy.testCommand&&(await ctx.db.query("runtimeWorkers").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()).some(w=>!w.revoked&&w.expiresAt>Date.now()&&(w.lastSeen??0)>Date.now()-120000);
+ return !!policy.generatedTests&&!!policy.testCommand&&await hasEntitlement(ctx,repo.organizationId,"review.reproTests")&&(await ctx.db.query("runtimeWorkers").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()).some(w=>!w.revoked&&w.expiresAt>Date.now()&&(w.lastSeen??0)>Date.now()-120000);
+}});
+// Generated tests are set up for the repository but the plan lacks them: the review says so in its coverage notes.
+export const testsLocked=internalQuery({args:{repositoryId:v.id("repositories")},handler:async(ctx,a)=>{
+ const repo=await ctx.db.get(a.repositoryId);if(!repo?.enabled)return false;
+ const policy=await runtimePolicy(ctx,repo);
+ return !!policy.generatedTests&&!!policy.testCommand&&!await hasEntitlement(ctx,repo.organizationId,"review.reproTests");
 }});
 // The latest generated-test job for a review, with its recorded results (empty when none ran).
 export const generatedTests=internalQuery({args:{reviewId:v.id("reviews")},handler:async(ctx,a)=>{

@@ -34,11 +34,13 @@ OpenReview reads review configuration from the repository. Server reviews always
 }
 ```
 
+`commentStyle` is `concise`, `detailed` or `compact`. `compact` keeps inline comments to the badge, title, prose, suggestion and a folded "Prompt To Fix With AI". On GitHub it also lays out the summary as: summary, confidence score, important files, sequence diagram, then every other section collapsed, the fix-all prompt, and a one-line footer. Collapsed sections with nothing to report (no findings, nothing resolved or skipped, no test source, no risk assessment, tests not executed) are left out; Coverage is always shown. Compact summaries have no fixed section list, so a tool that reads them should look sections up by heading and treat a missing one as empty. The `concise` and `detailed` styles still show every selected section.
+
 ## Directory cascade
 
 `.openreview/` folders can sit at any depth. Each one applies to the files under its parent directory, read from the base revision like everything else:
 - **Per file:** `categories`, `strictness`, `severityThreshold` and `minimumConfidence` from a folder's `config.json` apply to that folder's files; a deeper folder overrides a shallower one field by field. `files.json` ignore globs (relative to the folder's directory) skip files, and a deeper `include` re-admits a file a shallower folder ignored. The review checks each finding against its own file's values; files ignored this way are listed as skipped with the folder that excluded them.
-- **Per pull request:** the review tier (`mode`) and `maxComments` use the highest value among the root and the folders a change touches. A folder can raise them, never lower them.
+- **Per pull request:** the review tier (`mode`) and `maxComments` use the highest value among the root and the folders a change touches. A folder can raise them, never lower them. `"mode": "auto"` counts as no tier, so any folder with an explicit tier replaces it ([how auto picks](public/reviews.md#review-tier-per-pull-request)).
 - **Rules and instructions:** a folder's `rules.md` and `config.json` rules are scoped to its directory, and its `instructions` are added as scoped text.
 - **Locks:** keys an admin locked in the dashboard never change at any level (a locked `ignoredPaths` also disables folder ignores).
 
