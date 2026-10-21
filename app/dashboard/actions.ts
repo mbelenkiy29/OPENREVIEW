@@ -2,6 +2,8 @@
 import {scopeSettingsFromForm} from "../../src/scope-settings-form";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { fixPrompt } from "../../src/fix-prompt";
+import { findingSchema } from "../../src/engine/types";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { randomBytes, createHash } from "node:crypto";
@@ -843,4 +845,22 @@ export async function requestCatalogReview(_state:{error?:string},form:FormData)
  let id:Id<"reviews">|null=null;
  try{const {token}=await current();id=await backend().action(api.pullReviewJobs.request,{token,repositoryId:text(form,"repositoryId") as Id<"repositories">,prNumber:Number(text(form,"prNumber")),expectedRevision:text(form,"expectedRevision"),expectedBaseRevision:text(form,"expectedBaseRevision")});revalidatePath("/dashboard/pulls");}catch{return {error:"Could not start this review. Refresh the list and check repository access, indexing, and whether the change is still open."};}
  if(id)redirect("/dashboard/pulls/"+id);return {error:"Review could not be queued. Check repository access and current revision."};
+}
+
+// Bulk actions from the pull request list. Each row value is "repositoryId|number|reviewId".
+const bulkRows = (form: FormData) => form.getAll("pr").map(String).map((row) => { const [repositoryId, number, reviewId] = row.split("|"); return { repositoryId: repositoryId as Id<"repositories">, prNumber: Number(number), reviewId: (reviewId || undefined) as Id<"reviews"> | undefined }; });
+export async function bulkReview(_state: { error?: string; saved?: string }, form: FormData): Promise<{ error?: string; saved?: string }> {
+ const { token } = await current(), rows = bulkRows(form);
+ // Reviews are rate limited to 20 per minute per workspace (convex/reviews.ts), so never ask for more at once.
+ if (!rows.length || rows.length > 20) return { error: "Select between 1 and 20 pull requests to re-review." };
+ const results = await Promise.allSettled(rows.map((r) => backend().action(api.providerJobs.rereview, { token, repositoryId: r.repositoryId, prNumber: r.prNumber })));
+ revalidatePath("/dashboard/pulls");
+ const started = results.filter((r) => r.status === "fulfilled" && r.value).length;
+ return started === rows.length ? { saved: `Started ${started} ${started === 1 ? "review" : "reviews"}.` } : { error: `Started ${started} of ${rows.length} reviews. The rest are closed, changed, rate limited or not accessible.` };
+}
+export async function bulkFixPrompt(reviewIds: string[]): Promise<string> {
+ const { token } = await current();
+ const details = await Promise.all(reviewIds.slice(0, 20).map((reviewId) => backend().query(api.reviews.detail, { token, reviewId: reviewId as Id<"reviews"> })));
+ const repos = await backend().query(api.repositories.list, { token, organizationId: details[0]?.review.organizationId ?? ("" as Id<"organizations">) }).catch(() => []);
+ return details.filter((d) => d.findings.some((f) => f.canFix)).map((d) => fixPrompt(repos.find((r) => r._id === d.review.repositoryId)?.fullName ?? "repository", `PR #${d.review.prNumber}`, d.findings.filter((f) => f.canFix).map((f) => ({ ...findingSchema.parse(f), agent: f.agent, fingerprint: f.fingerprint, commitSha: f.commitSha })), d.review.runtimeEvidence)).join("\n\n---\n\n");
 }

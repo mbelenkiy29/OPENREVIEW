@@ -223,7 +223,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
             </>
           ) : (
             <>
-              <PullList admin={isAdmin} token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} />
+              <PullList login={user.user.login} admin={isAdmin} token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} />
             </>
           ))
   );

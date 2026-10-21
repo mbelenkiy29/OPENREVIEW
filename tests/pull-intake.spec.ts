@@ -134,3 +134,19 @@ test('catalog Git requests reject stale native revisions, coalesce duplicate cli
  expect(await s.t.run(ctx=>ctx.db.query('modelCalls').collect())).toHaveLength(0);
  await s.t.mutation(api.reviews.cancel,{token:s.token,reviewId:next!});await s.t.finishAllScheduledFunctions(vi.runAllTimers);
 });
+test("browse filters before paging, counts the total and filters on the current review",async()=>{
+ const s=await setup();
+ for(let number=1;number<=25;number++)await s.t.mutation(internal.pulls.observe,{...s.observation,number,author:number%2?"alice":"Bob",state:number<=20?"open":"merged",observedAt:200+number});
+ const args={token:s.token,organizationId:s.organizationId,pageSize:10};
+ const first=await s.t.query(api.pulls.browse,{...args,page:1,state:"open"});
+ expect(first.total).toBe(20);expect(first.page).toHaveLength(10);expect(first.capped).toBe(false);
+ expect((await s.t.query(api.pulls.browse,{...args,page:2,state:"open"})).page).toHaveLength(10);
+ // Author matches case-insensitively and short pages never happen.
+ const bob=await s.t.query(api.pulls.browse,{...args,page:1,author:"bob"});expect(bob.total).toBe(12);expect(bob.page).toHaveLength(10);
+ const now=Date.now(),review=(number:number,value:number,risk:"low"|"high")=>s.t.run(ctx=>ctx.db.insert("reviews",{organizationId:s.organizationId,repositoryId:s.repo._id,prNumber:number,headSha:s.observation.headSha,status:"completed",mode:"standard",attempts:1,reviewScore:{value,reason:"r"},approvalAssessment:{risk,confidence:.9,reason:"r"},createdAt:now,updatedAt:now}));
+ await review(1,5,"low");await review(2,2,"high");await review(3,4,"high");
+ expect((await s.t.query(api.pulls.browse,{...args,page:1,scoreMin:4})).page.map(p=>p.number).sort()).toEqual([1,3]);
+ expect((await s.t.query(api.pulls.browse,{...args,page:1,impact:"high",scoreMax:3})).page.map(p=>p.number)).toEqual([2]);
+ expect((await s.t.query(api.pulls.browse,{...args,page:1,status:"unreviewed",state:"open"})).total).toBe(17);
+ await expect(s.t.query(api.pulls.browse,{...args,page:0})).rejects.toThrow("Invalid page");
+});

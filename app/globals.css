@@ -1150,6 +1150,85 @@ tr:last-child td {
   background: var(--soft);
   color: var(--text);
 }
+.pull-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.pull-toolbar .segmented {
+  margin: 0;
+}
+.pull-search {
+  flex: 1 1 320px;
+}
+.pull-search input {
+  width: 100%;
+}
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  margin: 0 0 12px;
+}
+.suggestions .chip {
+  color: var(--text);
+  text-decoration: none;
+}
+.bulk-bar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px;
+  font-size: 13px;
+  min-height: 32px;
+}
+.pulls-table .row-select {
+  width: 1%;
+  padding-right: 0;
+  position: relative;
+  z-index: 1;
+}
+.pulls-table tbody tr[data-focused] {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--text);
+}
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.pager a {
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: var(--text);
+}
+.pager a[aria-current="page"] {
+  background: var(--soft);
+}
+.pager > .muted:nth-of-type(2) {
+  margin: 0 8px 0 auto;
+}
+.key-hints {
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
 .pulls-table th {
   font-size: 11px;
   text-transform: uppercase;
