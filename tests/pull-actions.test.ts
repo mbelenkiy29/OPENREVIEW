@@ -29,9 +29,13 @@ test("each dashboard action calls the matching GitHub endpoint with the user's t
   assert.deepEqual(calls.at(-1), { path: "/repos/o/r/pulls/7", method: "PATCH", body: { state: "closed" } });
   await runPullAction(github, "o/r", 7, { action: "update_branch" });
   assert.deepEqual(calls.at(-1), { path: "/repos/o/r/pulls/7/update-branch", method: "PUT", body: {} });
+  await runPullAction(github, "o/r", 7, { action: "reply", commentId: 55, body: "Fixed in abc" });
+  assert.deepEqual(calls.at(-1), { path: "/repos/o/r/pulls/7/comments/55/replies", method: "POST", body: { body: "Fixed in abc" } });
+  await runPullAction(github, "o/r", 7, { action: "resolve", threadId: "PRRT_kw" });
+  assert.match(graph.at(-1)!.query, /resolveReviewThread/);
   await runPullAction(github, "o/r", 7, { action: "draft" });
-  assert.match(graph[0].query, /convertPullRequestToDraft/);
-  assert.equal(graph[0].id, "PR_node");
+  assert.match(graph.at(-1)!.query, /convertPullRequestToDraft/);
+  assert.equal(graph.at(-1)!.id, "PR_node");
 });
 
 test("a refused merge surfaces GitHub's reason; malformed actions never reach GitHub", async (t) => {
@@ -41,4 +45,5 @@ test("a refused merge surfaces GitHub's reason; malformed actions never reach Gi
   assert.equal(pullActionSchema.safeParse({ action: "merge", method: "merge", head: "main" }).success, false);
   assert.equal(pullActionSchema.safeParse({ action: "request_changes", body: "  " }).success, false);
   assert.equal(pullActionSchema.safeParse({ action: "delete_branch" }).success, false);
+  assert.equal(pullActionSchema.safeParse({ action: "resolve", threadId: "x}){evil" }).success, false);
 });

@@ -398,8 +398,8 @@ export async function setNotificationEmail(form: FormData) {
 }
 export async function askChat(form: FormData) {
   const { token } = await current();
-  const threadId = text(form, "threadId");
-  const result = await backend().mutation(api.chat.ask, { token, organizationId: text(form, "organizationId") as Id<"organizations">, ...(threadId ? { threadId: threadId as Id<"chatThreads"> } : {}), repositoryIds: form.getAll("repositoryIds").map(String).slice(0, 5) as Id<"repositories">[], question: text(form, "question") });
+  const threadId = text(form, "threadId"), pullRequestId = text(form, "pullRequestId");
+  const result = await backend().mutation(api.chat.ask, { token, organizationId: text(form, "organizationId") as Id<"organizations">, ...(threadId ? { threadId: threadId as Id<"chatThreads"> } : {}), ...(pullRequestId && !threadId ? { pullRequestId: pullRequestId as Id<"pullRequests"> } : {}), repositoryIds: form.getAll("repositoryIds").map(String).slice(0, 5) as Id<"repositories">[], question: text(form, "question") });
   redirect(`/dashboard/chat?thread=${result.threadId}`);
 }
 export async function deleteChatThread(form: FormData) {
@@ -870,7 +870,7 @@ export async function bulkFixPrompt(reviewIds: string[]): Promise<string> {
 // user token the action waits in a sealed cookie while GitHub re-authorizes (silent once authorized).
 export async function pullAction(_state: { error?: string; saved?: string }, form: FormData): Promise<{ error?: string; saved?: string }> {
  const { token, user } = await current(), pullRequestId = text(form, "pullRequestId");
- const parsed = pullActionSchema.safeParse({ action: text(form, "action"), method: form.get("method") ?? undefined, head: form.get("head") ?? undefined, body: form.get("body") ?? undefined });
+ const parsed = pullActionSchema.safeParse({ action: text(form, "action"), method: form.get("method") ?? undefined, head: form.get("head") ?? undefined, body: form.get("body") ?? undefined, commentId: form.get("commentId") ?? undefined, threadId: form.get("threadId") ?? undefined });
  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid action" };
  const credentials = await githubCredentials();
  if (!credentials) {

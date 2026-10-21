@@ -11,10 +11,12 @@ export const pullActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("approve"), body: body.optional() }),
   z.object({ action: z.literal("request_changes"), body: body.min(1, "Say what needs to change") }),
   z.object({ action: z.literal("comment"), body: body.min(1, "Write a comment") }),
+  z.object({ action: z.literal("reply"), commentId: z.coerce.number().int().positive(), body: body.min(1, "Write a reply") }),
+  z.object({ action: z.enum(["resolve", "unresolve"]), threadId: z.string().regex(/^[\w=-]{1,200}$/) }),
   z.object({ action: z.enum(["close", "reopen", "draft", "ready", "update_branch"]) }),
 ]);
 export type PullAction = z.infer<typeof pullActionSchema>;
-export const pullActionLabels: Record<PullAction["action"], string> = { merge: "Merged", approve: "Approved", request_changes: "Changes requested", comment: "Comment posted", close: "Closed", reopen: "Reopened", draft: "Converted to draft", ready: "Marked ready for review", update_branch: "Branch update started" };
+export const pullActionLabels: Record<PullAction["action"], string> = { merge: "Merged", approve: "Approved", request_changes: "Changes requested", comment: "Comment posted", close: "Closed", reopen: "Reopened", draft: "Converted to draft", ready: "Marked ready for review", update_branch: "Branch update started", reply: "Reply posted", resolve: "Conversation resolved", unresolve: "Conversation reopened" };
 
 export async function runPullAction(github: Github, repository: string, number: number, a: PullAction): Promise<string> {
   if (!Number.isSafeInteger(number) || number < 1) throw new Error("Invalid pull request number");
@@ -31,6 +33,13 @@ export async function runPullAction(github: Github, repository: string, number: 
       break;
     case "comment":
       await github.request(`/repos/${repository}/issues/${number}/comments`, z.object({ id: z.number() }), { method: "POST", body: JSON.stringify({ body: a.body }) });
+      break;
+    case "reply":
+      await github.request(`${path}/comments/${a.commentId}/replies`, z.object({ id: z.number() }), { method: "POST", body: JSON.stringify({ body: a.body }) });
+      break;
+    case "resolve":
+    case "unresolve":
+      await github.graphql(`mutation($id: ID!) { ${a.action}ReviewThread(input: { threadId: $id }) { thread { isResolved } } }`, { id: a.threadId }, z.unknown());
       break;
     case "close":
     case "reopen":

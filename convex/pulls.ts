@@ -117,3 +117,9 @@ export const recordAction=mutation({args:{token:v.string(),pullRequestId:v.id("p
  const {user}=await authorizeRepository(ctx,a.token,pr.repositoryId,true);
  await audit(ctx,pr.organizationId,user._id,"pull."+a.action.replace(/[^a-z_]/g,"").slice(0,30),pr._id);
 }});
+// Read access to one pull request and its repository, for provider reads (checks, discussion).
+export const readTarget=internalQuery({args:{token:v.string(),pullRequestId:v.id("pullRequests")},handler:async(ctx,a)=>{
+ const pr=await ctx.db.get(a.pullRequestId);if(!pr)throw new Error("Pull request not found");
+ const {repo}=await authorizeRepository(ctx,a.token,pr.repositoryId);
+ return {repo,pr};
+}});

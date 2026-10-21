@@ -131,3 +131,18 @@ export function PullActions({ pullRequestId, head, state, draft }: { pullRequest
     </form>
   );
 }
+
+// Reply to and resolve a review thread on GitHub as the developer.
+export function ThreadActions({ pullRequestId, threadId, replyTo, resolved }: { pullRequestId: string; threadId: string; replyTo?: number; resolved: boolean }) {
+  const [result, action, pending] = useActionState(pullAction, {});
+  return (
+    <form className="thread-actions" action={action}>
+      <input type="hidden" name="pullRequestId" value={pullRequestId} />
+      <input type="hidden" name="threadId" value={threadId} />
+      {replyTo !== undefined && <><input type="hidden" name="commentId" value={replyTo} /><textarea name="body" rows={2} aria-label="Reply" placeholder="Reply…" /><button name="action" value="reply" className="small" disabled={pending}>Reply</button></>}
+      <button name="action" value={resolved ? "unresolve" : "resolve"} className="small" disabled={pending}>{resolved ? "Unresolve conversation" : "Resolve conversation"}</button>
+      {result.error && <span role="alert">{result.error}</span>}
+      {result.saved && <span role="status">{result.saved}</span>}
+    </form>
+  );
+}

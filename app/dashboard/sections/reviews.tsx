@@ -12,6 +12,7 @@ import { Copy } from "../live";
 import { FixButton } from "../fix-button";
 import { PullList, PullSidebar } from "../pulls";
 import { SidebarKeys, PullActions } from "../pull-list-client";
+import { PullDiscussion } from "../pull-discussion";
 import { CatalogReview } from "../catalog-sync";
 import { RuntimeReview, ApprovalReview } from "../runtime";
 import { ReviewDiff } from "../review-diff";
@@ -20,14 +21,16 @@ import { findingCounts } from "../../../src/priority";
 import type { DashboardContext } from "../load";
 
 export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
-  const { data, detail, diagnostics, filters, isAdmin, organization, personalAgent, pull, repoLabel, repoName, user } = ctx;
+  const { checks, data, detail, diagnostics, filters, isAdmin, organization, personalAgent, pull, repoLabel, repoName, user } = ctx;
   const diffStats = pull && <>{pull.changedFiles !== undefined && <> · {pull.changedFiles} {pull.changedFiles === 1 ? "file" : "files"}</>}{pull.additions !== undefined && <> · <span className="chip diffstat"><span className="add">+{pull.additions.toLocaleString("en-US")}</span> <span className="del">−{(pull.deletions ?? 0).toLocaleString("en-US")}</span></span></>}</>;
   // Dashboard actions go to GitHub.com as the developer; other providers keep their own UI for them.
   const canAct = Boolean(pull && !data.repositories.find((r) => r._id === pull.repositoryId)?.connectionId);
   const counts = detail ? findingCounts(detail.findings) : {};
   const fixable = detail ? detail.findings.filter((f) => f.canFix).length : 0;
-  const tab = ["review", "code", "activity"].includes(filters.tab ?? "") ? filters.tab : filters.diff === "1" ? "code" : "overview";
-  const tabs: [string, React.ReactNode][] = [["overview", "Overview"], ["review", <>Review {severityCounts(counts)}</>], ["code", "Code"], ["activity", "Activity"]];
+  const tab = filters.tab === "activity" ? "discussion" : ["review", "code", "discussion"].includes(filters.tab ?? "") ? filters.tab : filters.diff === "1" ? "code" : "overview";
+  const tabs: [string, React.ReactNode][] = [["overview", "Overview"], ["review", <>Review {severityCounts(counts)}</>], ["discussion", "Discussion"], ["code", "Code"]];
+  const failing = checks?.filter((c) => c.conclusion && !["success", "neutral", "skipped"].includes(c.conclusion)).length ?? 0, running = checks?.some((c) => c.status !== "completed");
+  const ci = checks && checks.length > 0 && <span className={failing ? "impact high" : running ? "muted" : "impact low"}>{failing ? `⚠ CI failed (${failing})` : running ? "CI running" : "✓ CI passed"}</span>;
   return (
           (detail || pull ? (
             <div className="pull-detail">
@@ -46,9 +49,11 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 <section className="status-card" aria-label="Review status">
                   <span>{pull.state === "open" ? "Not reviewed yet" : `${pull.state[0].toUpperCase() + pull.state.slice(1)} without a review`}</span>
                   {pull.isDraft && <span className="badge">Draft</span>}
+                  {ci}
                   <div className="actions">
                     {pull.canRequest && <CatalogReview repositoryId={pull.repositoryId} prNumber={pull.number} revision={pull.headSha} baseRevision={pull.baseSha} />}
                     {canAct && <PullActions pullRequestId={pull._id} head={pull.headSha} state={pull.state} draft={pull.isDraft} />}
+                    <Link className="button" href={`/dashboard/chat?repository=${pull.repositoryId}&pull=${pull._id}`}>Chat with PR</Link>
                     <a className="button" href={pull.url} target="_blank" rel="noreferrer">View pull request ↗</a>
                   </div>
                 </section>
@@ -80,10 +85,12 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 {pull?.isDraft && <span className="badge">Draft</span>}
                 {detail.review.reviewScore && <strong title={detail.review.reviewScore.reason}>{detail.review.reviewScore.value}/5</strong>}
                 {detail.review.verdict && <span>{verdictLabels[detail.review.verdict]}</span>}
+                {ci}
                 {detail.review.approvalAssessment && detail.review.approvalAssessment.risk !== "unknown" && <span className={"impact " + detail.review.approvalAssessment.risk}>{detail.review.approvalAssessment.risk[0].toUpperCase() + detail.review.approvalAssessment.risk.slice(1)} impact</span>}
                 <div className="actions">
                   {detail.canFix && fixable > 0 && <FixButton reviewId={detail.review._id} agent={personalAgent} label={`Fix ${fixable} ${fixable === 1 ? "issue" : "issues"}`} />}
                   {detail.review.nativeP4&&isAdmin&&detail.review.status==="failed"&&detail.review.resultStorageId&&<form action={reviewAgain}><input type="hidden" name="reviewId" value={detail.review._id}/><input type="hidden" name="fresh" value="true"/><button>Re-review current shelf</button></form>}{(!detail.review.nativeP4||isAdmin)&&<form action={reviewAgain}><input type="hidden" name="reviewId" value={detail.review._id}/><button>{detail.review.nativeP4?(detail.review.status==="failed"&&detail.review.resultStorageId?"Retry saved publication":"Re-review current shelf"):"Re-review current PR"}</button></form>}
+                  {pull && <Link className="button" href={`/dashboard/chat?repository=${pull.repositoryId}&pull=${pull._id}`}>Chat with PR</Link>}
                   {detail.review.prUrl && <a className="button" href={detail.review.prUrl} target="_blank" rel="noreferrer">View pull request ↗</a>}
                 </div>
                 {canAct && pull && <PullActions pullRequestId={pull._id} head={pull.headSha} state={pull.state} draft={pull.isDraft} />}
@@ -104,6 +111,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 {tabs.map(([key, label]) => <Link key={key} href={`/dashboard/pulls/${detail.review._id}${key === "overview" ? "" : "?tab=" + key}`} aria-current={tab === key ? "page" : undefined}>{label}</Link>)}
               </nav>
               {tab === "overview" && <>
+              {checks && checks.length > 0 && <section aria-label="CI checks"><h2>CI Checks ({checks.length})</h2><ul className="checks">{checks.map((c) => <li key={c.name}><span className={"check " + (c.status !== "completed" ? "running" : c.conclusion && ["success", "neutral", "skipped"].includes(c.conclusion) ? "passed" : "failed")} aria-hidden>{c.status !== "completed" ? "…" : c.conclusion && ["success", "neutral", "skipped"].includes(c.conclusion) ? "✓" : "✕"}</span> {c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : c.name} <span className="muted">{c.status !== "completed" ? c.status.replaceAll("_", " ") : c.conclusion}</span></li>)}</ul></section>}
               {detail.review.verdict && <section aria-label="Verdict"><h2>Verdict</h2><p><strong>{verdictLabels[detail.review.verdict]}</strong> · computed from the score, unresolved findings and review coverage</p></section>}
               <section aria-label="Confidence score">
                 <h2>Confidence score</h2>
@@ -191,7 +199,9 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 {!detail.findings.length && <p className="muted">{["completed", "failed", "cancelled"].includes(detail.review.status) ? "No verified findings for this revision." : "Findings appear when the review finishes."}</p>}
               </>}
               {tab === "code" && <ReviewDiff token={user.token} reviewId={detail.review._id} open finished={["completed", "failed", "cancelled"].includes(detail.review.status)} findings={detail.findings.map((f) => ({ _id: String(f._id), title: f.title, severity: f.severity, filePath: f.filePath, startLine: f.startLine, endLine: f.endLine, description: f.description }))} />}
-              {tab === "activity" && <>
+              {tab === "discussion" && <>
+              {pull && <PullDiscussion token={user.token} pullRequestId={pull._id} filters={filters} canAct={canAct} />}
+              <details className="activity"><summary>OpenReview activity: review history, processing, diagnostics and model calls</summary>
               <section aria-label="Review history">
                 <h2>Review history</h2>
                 <ol className="timeline">
@@ -249,6 +259,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                   </tbody>
                 </table>
               </ScrollTable>
+              </details>
               </>}
             </>
             )}

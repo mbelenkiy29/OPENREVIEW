@@ -26,6 +26,7 @@ export const answer = internalAction({ args: { messageId: v.id("chatMessages") }
     const run = await runChatAgent({
       question: job.question,
       history: job.history,
+      context: job.context,
       repositories: job.repositories.map(({ repo }) => ({ name: repo.fullName, tools: chatToolbox(ctx, repo) })),
       model: await budgetModel(ctx, job.message.organizationId),
       usage,

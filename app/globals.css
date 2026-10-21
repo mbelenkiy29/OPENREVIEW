@@ -1430,6 +1430,40 @@ kbd {
   width: 100%;
   margin: 8px 0;
 }
+.checks {
+  list-style: none;
+  padding: 0;
+}
+.checks li {
+  padding: 4px 0;
+}
+.check.passed {
+  color: var(--success);
+}
+.check.failed {
+  color: var(--error);
+}
+.discussion .timeline summary {
+  cursor: pointer;
+}
+.thread-comment {
+  border-left: 2px solid var(--line);
+  padding-left: 12px;
+  margin: 8px 0;
+}
+.thread-actions {
+  flex-wrap: wrap;
+}
+.thread-actions textarea {
+  flex: 1 1 240px;
+}
+.chat-suggestions {
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+details.activity {
+  margin-top: 24px;
+}
 .tabs {
   display: flex;
   gap: 4px;

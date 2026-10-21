@@ -255,6 +255,37 @@ export class Github {
     if(review.commit_id!==head)throw new Error("Provider returned an approval for another revision");
     return {id:review.id,reused:false};
   }
+  // CI on one revision for the dashboard: latest check runs plus the newest status per context.
+  // shortcut: first 100 of each; page further if a repository runs more checks than that per commit.
+  async checks(repository:string,sha:string){
+    if(!/^[a-f0-9]{40}$/.test(sha))throw new Error("Checks need an exact Git commit");
+    const prefix=`/repos/${repository}/commits/${sha}`;
+    const [runs,statuses]=await Promise.all([
+      this.request(prefix+"/check-runs?filter=latest&per_page=100",z.object({check_runs:z.array(z.object({name:z.string(),status:z.string(),conclusion:z.string().nullable(),html_url:z.string().nullable()}))})),
+      this.request(prefix+"/statuses?per_page=100",z.array(z.object({context:z.string(),state:z.string(),target_url:z.string().nullable(),description:z.string().nullable()}))),
+    ]);
+    const seen=new Set<string>();
+    return [
+      ...runs.check_runs.map(c=>({name:c.name,status:c.status,conclusion:c.conclusion,url:c.html_url??undefined})),
+      ...statuses.filter(s=>!seen.has(s.context)&&Boolean(seen.add(s.context))).map(s=>({name:s.context,status:s.state==="pending"?"in_progress":"completed",conclusion:s.state==="pending"?null:s.state,url:s.target_url??undefined,description:s.description??undefined})),
+    ];
+  }
+  // The pull request conversation for the dashboard: comments, reviews, and review threads with resolved state.
+  async discussion(repository:string,number:number){
+    const [owner,name]=repository.split("/"),author=z.object({login:z.string(),__typename:z.string()}).nullable();
+    const comment=z.object({databaseId:z.number().nullable(),author,body:z.string(),createdAt:z.string(),url:z.string()});
+    const data=await this.graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+      comments(last:100){nodes{databaseId author{login __typename} body createdAt url}}
+      reviews(last:100){nodes{databaseId author{login __typename} state body createdAt url}}
+      reviewThreads(last:100){nodes{id isResolved path line comments(first:50){nodes{databaseId author{login __typename} body createdAt url}}}}}}}`,{owner,name,number},
+      z.object({repository:z.object({pullRequest:z.object({comments:z.object({nodes:z.array(comment)}),reviews:z.object({nodes:z.array(comment.extend({state:z.string()}))}),reviewThreads:z.object({nodes:z.array(z.object({id:z.string(),isResolved:z.boolean(),path:z.string(),line:z.number().nullable(),comments:z.object({nodes:z.array(comment)})}))})})})}));
+    const pr=data.repository.pullRequest,who=(a:z.infer<typeof author>)=>({author:a?.login??"ghost",bot:a?.__typename==="Bot"});
+    return [
+      ...pr.comments.nodes.map(c=>({kind:"comment" as const,...who(c.author),body:c.body,createdAt:c.createdAt,url:c.url})),
+      ...pr.reviews.nodes.filter(r=>r.body.trim()||r.state!=="COMMENTED").map(r=>({kind:"review" as const,...who(r.author),state:r.state,body:r.body,createdAt:r.createdAt,url:r.url})),
+      ...pr.reviewThreads.nodes.filter(t=>t.comments.nodes.length).map(t=>({kind:"thread" as const,...who(t.comments.nodes[0].author),threadId:t.id,resolved:t.isResolved,path:t.path,line:t.line??undefined,createdAt:t.comments.nodes[0].createdAt,url:t.comments.nodes[0].url,replyTo:t.comments.nodes[0].databaseId??undefined,comments:t.comments.nodes.map(c=>({...who(c.author),body:c.body,createdAt:c.createdAt}))})),
+    ].sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+  }
   async dismissApproval(repository:string,number:number,id:number){
     const review=await this.request(`/repos/${repository}/pulls/${number}/reviews/${id}`,z.object({state:z.string()}));
     if(review.state==="DISMISSED")return;

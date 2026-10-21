@@ -66,7 +66,7 @@ export function chatAnswerProblems(value: z.infer<typeof chatToolInputs.answer>,
 const shorten = (value: unknown) => String(value ?? "").replace(/[\r\n\t]+/g, " ").slice(0, 80);
 export type ChatRun = { answer?: { text: string; citations: ChatCitation[] }; usage: ModelUsage[]; limits: string[]; toolCalls: number; stopReason: string };
 
-export async function runChatAgent(args: { question: string; history: { role: "user" | "assistant"; content: string }[]; repositories: ChatRepository[]; model: ModelProvider; budget?: AgentBudget; signal?: AbortSignal; usage?: ModelUsage[]; onEvent?: (event: ChatEvent) => Promise<unknown> | void }): Promise<ChatRun> {
+export async function runChatAgent(args: { question: string; history: { role: "user" | "assistant"; content: string }[]; context?: string; repositories: ChatRepository[]; model: ModelProvider; budget?: AgentBudget; signal?: AbortSignal; usage?: ModelUsage[]; onEvent?: (event: ChatEvent) => Promise<unknown> | void }): Promise<ChatRun> {
   const { model } = args;
   if (!model.runTools) throw new Error("The configured model provider does not support tool calling");
   if (!args.repositories.length) throw new Error("Select at least one indexed repository");
@@ -76,7 +76,7 @@ export async function runChatAgent(args: { question: string; history: { role: "u
   const sources: ChatSource[] = [], usage: ModelUsage[] = args.usage ?? [], limits: string[] = [];
   const emit = async (event: ChatEvent) => { await args.onEvent?.({ kind: event.kind, text: event.text.slice(0, 200) }); };
   const history = args.history.slice(-8).map((m) => `${m.role === "user" ? "Developer" : "OpenReview"}: ${m.content.slice(0, 2000)}`).join("\n\n");
-  const messages: ToolMessage[] = [{ role: "user", content: `Selected repositories: ${names.join(", ")}.${history ? `\n\nEarlier in this thread (unverified context):\n${history}` : ""}\n\nQuestion: ${args.question}` }];
+  const messages: ToolMessage[] = [{ role: "user", content: `Selected repositories: ${names.join(", ")}.${args.context ? `\n\nPull request (unverified context):\n${args.context}` : ""}${history ? `\n\nEarlier in this thread (unverified context):\n${history}` : ""}\n\nQuestion: ${args.question}` }];
   let toolCalls = 0, tokens = 0, turns = 0, nudged = false, answer: ChatRun["answer"], stopReason = "completed";
   const started = Date.now();
   const unknownRepository = (name: string) => ({ isError: true, content: `Unknown repository ${shorten(name)}; use one of: ${names.join(", ")}` });

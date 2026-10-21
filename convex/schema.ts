@@ -741,6 +741,8 @@ export default defineSchema({
     title: v.string(),
     repositoryIds: v.array(repo),
     origin: v.optional(v.string()), // web (default) | api
+    // "Chat with PR": the pull request whose review the agent is given as context.
+    pullRequestId: v.optional(v.id("pullRequests")),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_org_user", ["organizationId", "userId", "updatedAt"]),

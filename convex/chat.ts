@@ -5,6 +5,8 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { authorize, repositoryAccess, visibleRepositories } from "./auth";
 import { rateLimit } from "./rateLimit";
+import { contextReadable } from "./repositoryContext";
+import { pullChatContext } from "../src/pull-chat";
 
 // Codebase chat over indexed repositories. A thread belongs to the member who started it; every
 // read re-checks organization membership and repository visibility, and answers that used a
@@ -37,7 +39,7 @@ export const thread = query({ args: { token: v.string(), threadId: v.id("chatThr
   const { thread, user } = await ownThread(ctx, a.token, a.threadId);
   const messages = await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", thread._id)).take(200);
   const visible = await readable(ctx, user._id, messages.flatMap((m) => m.repositoryIds));
-  return { _id: thread._id, title: thread.title, repositoryIds: thread.repositoryIds.filter((id) => visible.has(id)), messages: messages.map((m) => present(m, visible)) };
+  return { _id: thread._id, title: thread.title, repositoryIds: thread.repositoryIds.filter((id) => visible.has(id)), pullRequestId: thread.pullRequestId, messages: messages.map((m) => present(m, visible)) };
 } });
 
 // Polled by the SSE route: progress events while running, then the validated answer.
@@ -56,7 +58,7 @@ export const threadOf = query({ args: { token: v.string(), messageId: v.id("chat
   return thread._id;
 } });
 
-export const ask = mutation({ args: { token: v.string(), organizationId: v.id("organizations"), threadId: v.optional(v.id("chatThreads")), repositoryIds: v.array(v.id("repositories")), question: v.string(), origin: v.optional(v.literal("api")) }, handler: async (ctx, a): Promise<{ threadId: Id<"chatThreads">; messageId: Id<"chatMessages"> }> => {
+export const ask = mutation({ args: { token: v.string(), organizationId: v.id("organizations"), threadId: v.optional(v.id("chatThreads")), repositoryIds: v.array(v.id("repositories")), question: v.string(), origin: v.optional(v.literal("api")), pullRequestId: v.optional(v.id("pullRequests")) }, handler: async (ctx, a): Promise<{ threadId: Id<"chatThreads">; messageId: Id<"chatMessages"> }> => {
   const { user } = await authorize(ctx, a.token, a.organizationId);
   const question = a.question.trim();
   if (question.length < 2 || question.length > 4000) throw new Error("Ask a question of 2 to 4,000 characters");
@@ -68,6 +70,8 @@ export const ask = mutation({ args: { token: v.string(), organizationId: v.id("o
     if (!repo) throw new Error("Repository not accessible");
     if (!repo.indexedSha) throw new Error(`${repo.fullName} has not been indexed yet`);
   }
+  const pr = a.pullRequestId ? await ctx.db.get(a.pullRequestId) : null;
+  if (a.pullRequestId && (!pr || pr.organizationId !== a.organizationId || !ids.includes(pr.repositoryId))) throw new Error("Pull request not available in the selected repositories");
   await rateLimit(ctx, `chat:${a.organizationId}`, 30);
   await rateLimit(ctx, `chat-user:${user._id}`, 6);
   const now = Date.now();
@@ -78,7 +82,7 @@ export const ask = mutation({ args: { token: v.string(), organizationId: v.id("o
     const last = await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", thread._id)).order("desc").first();
     if (last && (last.status === "pending" || last.status === "running")) throw new Error("Wait for the current answer to finish");
     await ctx.db.patch(thread._id, { repositoryIds: ids, updatedAt: now });
-  } else threadId = await ctx.db.insert("chatThreads", { organizationId: a.organizationId, userId: user._id, title: question.replace(/\s+/g, " ").slice(0, 80), repositoryIds: ids, ...(a.origin ? { origin: a.origin } : {}), createdAt: now, updatedAt: now });
+  } else threadId = await ctx.db.insert("chatThreads", { organizationId: a.organizationId, userId: user._id, title: question.replace(/\s+/g, " ").slice(0, 80), repositoryIds: ids, ...(a.origin ? { origin: a.origin } : {}), ...(pr ? { pullRequestId: pr._id } : {}), createdAt: now, updatedAt: now });
   await ctx.db.insert("chatMessages", { organizationId: a.organizationId, threadId, userId: user._id, role: "user", content: question, status: "completed", repositoryIds: ids, createdAt: now, updatedAt: now });
   const messageId = await ctx.db.insert("chatMessages", { organizationId: a.organizationId, threadId, userId: user._id, role: "assistant", content: "", status: "pending", repositoryIds: ids, events: [], createdAt: now, updatedAt: now });
   await ctx.scheduler.runAfter(0, internal.chatJobs.answer, { messageId });
@@ -105,7 +109,16 @@ export const job = internalQuery({ args: { messageId: v.id("chatMessages") }, ha
   }
   const earlier = (await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", message.threadId)).take(200)).filter((m) => m._creationTime < message._creationTime && m.status === "completed");
   const question = earlier.filter((m) => m.role === "user").at(-1)?.content ?? "";
-  return { message, repositories, question, history: earlier.slice(0, -1).slice(-8).map((m) => ({ role: m.role === "user" ? "user" as const : "assistant" as const, content: m.content })) };
+  // Chat with PR: the pull request's latest readable review and findings, when the thread has one.
+  const thread = await ctx.db.get(message.threadId), pr = thread?.pullRequestId ? await ctx.db.get(thread.pullRequestId) : null;
+  let context: string | undefined;
+  if (pr && pr.organizationId === message.organizationId && message.repositoryIds.includes(pr.repositoryId)) {
+    const latest = await ctx.db.query("reviews").withIndex("by_pr", (q) => q.eq("repositoryId", pr.repositoryId).eq("prNumber", pr.number)).order("desc").first();
+    const review = latest && await contextReadable(ctx, message.userId, latest) ? latest : null;
+    const findings = review ? (await ctx.db.query("reviewFindings").withIndex("by_review", (q) => q.eq("reviewId", review._id)).take(30)).map((f) => f.snapshot) : [];
+    context = pullChatContext(pr, review, findings);
+  }
+  return { message, repositories, question, context, history: earlier.slice(0, -1).slice(-8).map((m) => ({ role: m.role === "user" ? "user" as const : "assistant" as const, content: m.content })) };
 } });
 export const start = internalMutation({ args: { messageId: v.id("chatMessages") }, handler: async (ctx, a) => {
   const m = await ctx.db.get(a.messageId);
