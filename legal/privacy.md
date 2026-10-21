@@ -91,7 +91,7 @@ We use the information above to:
 - keep the service reliable, diagnose problems and understand which features are used;
 - meet legal obligations.
 
-We do not sell personal information. If you accept cookies, we tell OpenAI when a visit or sign-up follows one of our ads, so we can measure them; we do not otherwise use your information for advertising.
+We do not sell personal information. If you accept cookies, we tell OpenAI when a visit or sign-up follows one of our ads, so we can measure them. To match a sign-up to an ad, the pixel may also send a one-way (SHA-256) hash of contact details shown on the page, such as an email address, never the details themselves. We do not otherwise use your information for advertising.
 
 Feedback you give on reviews, such as reactions, replies and approved rules, is used only to tune reviews within your own workspace. It is not shared with other workspaces.
 

@@ -39,6 +39,7 @@ The hosted site can report errors to [Sentry](https://sentry.io), product analyt
 - **Consent:** it starts and stops with PostHog, under the same banner choice. Declining removes its `__oppref` and `__obref` cookies; it keeps `__oaiq_consent=false` to remember the refusal.
 - **Page views:** each page is reported by its first path segment only (`/dashboard`, `/invite`), so ids and tokens in URLs are never sent.
 - **Sign-up:** `registration_completed` is sent with the `signed_up` milestone above, so once per account and never on a later sign-in. Accounts more than a day old don't count.
+- **Advanced matching:** if automatic advanced matching is on for the pixel in Ads Manager, the SDK itself hashes contact details it finds on the page (SHA-256) and sends the hashes. The privacy policy covers this; turn it off in Ads Manager to send none.
 - **Self-hosted:** off without `NEXT_PUBLIC_OPENAI_ADS_PIXEL_ID`.
 
 **URLs:** before any event leaves the browser or server, each URL keeps only a short allowlist of query parameters (`utm_*`, `ref`, `checkout`, `billing`, `signedout`) and loses its fragment. Invitation tokens, sign-in codes, error messages and repository filters are never sent. Referral links (`/r/<code>`) are reported as `/r/[code]`, in errors and performance traces alike, because a code identifies the person who shared it. Clicks aren't captured on those pages or on sign-up pages opened from them.
