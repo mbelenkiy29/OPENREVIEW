@@ -11,7 +11,7 @@ import { cancelReview, retryP4Answer, reviewAgain } from "../actions";
 import { Copy } from "../live";
 import { FixButton } from "../fix-button";
 import { PullList, PullSidebar } from "../pulls";
-import { SidebarKeys } from "../pull-list-client";
+import { SidebarKeys, PullActions } from "../pull-list-client";
 import { CatalogReview } from "../catalog-sync";
 import { RuntimeReview, ApprovalReview } from "../runtime";
 import { ReviewDiff } from "../review-diff";
@@ -22,6 +22,8 @@ import type { DashboardContext } from "../load";
 export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
   const { data, detail, diagnostics, filters, isAdmin, organization, personalAgent, pull, repoLabel, repoName, user } = ctx;
   const diffStats = pull && <>{pull.changedFiles !== undefined && <> · {pull.changedFiles} {pull.changedFiles === 1 ? "file" : "files"}</>}{pull.additions !== undefined && <> · <span className="chip diffstat"><span className="add">+{pull.additions.toLocaleString("en-US")}</span> <span className="del">−{(pull.deletions ?? 0).toLocaleString("en-US")}</span></span></>}</>;
+  // Dashboard actions go to GitHub.com as the developer; other providers keep their own UI for them.
+  const canAct = Boolean(pull && !data.repositories.find((r) => r._id === pull.repositoryId)?.connectionId);
   const counts = detail ? findingCounts(detail.findings) : {};
   const fixable = detail ? detail.findings.filter((f) => f.canFix).length : 0;
   const tab = ["review", "code", "activity"].includes(filters.tab ?? "") ? filters.tab : filters.diff === "1" ? "code" : "overview";
@@ -32,6 +34,8 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
               <PullSidebar token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} currentId={pull?._id} />
               <div className="pull-main">
               <SidebarKeys />
+              {filters.acted && <p role="status">{filters.acted}</p>}
+              {filters.actionError && <p role="alert">{filters.actionError}</p>}
             {!detail && pull ? (
               <>
                 <h2 className="pull-title">{pull.title} <span className="muted">#{pull.number}</span></h2>
@@ -44,6 +48,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                   {pull.isDraft && <span className="badge">Draft</span>}
                   <div className="actions">
                     {pull.canRequest && <CatalogReview repositoryId={pull.repositoryId} prNumber={pull.number} revision={pull.headSha} baseRevision={pull.baseSha} />}
+                    {canAct && <PullActions pullRequestId={pull._id} head={pull.headSha} state={pull.state} draft={pull.isDraft} />}
                     <a className="button" href={pull.url} target="_blank" rel="noreferrer">View pull request ↗</a>
                   </div>
                 </section>
@@ -81,6 +86,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                   {detail.review.nativeP4&&isAdmin&&detail.review.status==="failed"&&detail.review.resultStorageId&&<form action={reviewAgain}><input type="hidden" name="reviewId" value={detail.review._id}/><input type="hidden" name="fresh" value="true"/><button>Re-review current shelf</button></form>}{(!detail.review.nativeP4||isAdmin)&&<form action={reviewAgain}><input type="hidden" name="reviewId" value={detail.review._id}/><button>{detail.review.nativeP4?(detail.review.status==="failed"&&detail.review.resultStorageId?"Retry saved publication":"Re-review current shelf"):"Re-review current PR"}</button></form>}
                   {detail.review.prUrl && <a className="button" href={detail.review.prUrl} target="_blank" rel="noreferrer">View pull request ↗</a>}
                 </div>
+                {canAct && pull && <PullActions pullRequestId={pull._id} head={pull.headSha} state={pull.state} draft={pull.isDraft} />}
               </section>
               {!["completed", "failed", "cancelled"].includes(
                 detail.review.status,

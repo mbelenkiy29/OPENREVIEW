@@ -3,6 +3,8 @@ import {scopeSettingsFromForm} from "../../src/scope-settings-form";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { fixPrompt } from "../../src/fix-prompt";
+import { pullActionSchema } from "../../src/pull-actions";
+import { actionError, performPullAction, pullIntentCookie } from "../../src/pull-actions-server";
 import { findingSchema } from "../../src/engine/types";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -863,4 +865,18 @@ export async function bulkFixPrompt(reviewIds: string[]): Promise<string> {
  const details = await Promise.all(reviewIds.slice(0, 20).map((reviewId) => backend().query(api.reviews.detail, { token, reviewId: reviewId as Id<"reviews"> })));
  const repos = await backend().query(api.repositories.list, { token, organizationId: details[0]?.review.organizationId ?? ("" as Id<"organizations">) }).catch(() => []);
  return details.filter((d) => d.findings.some((f) => f.canFix)).map((d) => fixPrompt(repos.find((r) => r._id === d.review.repositoryId)?.fullName ?? "repository", `PR #${d.review.prNumber}`, d.findings.filter((f) => f.canFix).map((f) => ({ ...findingSchema.parse(f), agent: f.agent, fingerprint: f.fingerprint, commitSha: f.commitSha })), d.review.runtimeEvidence)).join("\n\n---\n\n");
+}
+// Merge, review, close and other pull request actions, sent as the developer. Without a fresh GitHub
+// user token the action waits in a sealed cookie while GitHub re-authorizes (silent once authorized).
+export async function pullAction(_state: { error?: string; saved?: string }, form: FormData): Promise<{ error?: string; saved?: string }> {
+ const { token, user } = await current(), pullRequestId = text(form, "pullRequestId");
+ const parsed = pullActionSchema.safeParse({ action: text(form, "action"), method: form.get("method") ?? undefined, head: form.get("head") ?? undefined, body: form.get("body") ?? undefined });
+ if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid action" };
+ const credentials = await githubCredentials();
+ if (!credentials) {
+  (await cookies()).set(pullIntentCookie, await seal({ userId: user._id, pullRequestId, request: parsed.data }), { ...cookieOptions, maxAge: 600 });
+  redirect(`/api/auth/login?purpose=github-act&next=${encodeURIComponent("/api/pulls/act")}`);
+ }
+ try { const saved = await performPullAction(token, pullRequestId, credentials, parsed.data); revalidatePath("/dashboard/pulls", "layout"); return { saved }; }
+ catch (error) { return { error: actionError(error) }; }
 }

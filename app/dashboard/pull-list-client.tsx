@@ -1,6 +1,6 @@
 "use client";
 import { useActionState, useEffect, useState } from "react";
-import { bulkFixPrompt, bulkReview } from "./actions";
+import { bulkFixPrompt, bulkReview, pullAction } from "./actions";
 
 const selected = () => [...document.querySelectorAll<HTMLInputElement>('input[form="bulk-pulls"]:checked')];
 const typing = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
@@ -73,7 +73,7 @@ export function PullKeys() {
 }
 
 // On an open pull request: ⌘B collapses the sidebar (remembered in this browser), J/K open the next or
-// previous pull request in it, H/L switch tabs.
+// previous pull request in it, H/L switch tabs, and action keys press the matching PullActions button.
 export function SidebarKeys() {
   useEffect(() => {
     const root = document.querySelector<HTMLElement>(".pull-detail");
@@ -84,7 +84,7 @@ export function SidebarKeys() {
       if ((e.metaKey || e.ctrlKey) && key === "b") { e.preventDefault(); toggle(root); return; }
       if (e.metaKey || e.ctrlKey) return;
       const step = key === "j" || key === "l" ? 1 : key === "k" || key === "h" ? -1 : 0;
-      if (!step) return;
+      if (!step) return document.querySelector<HTMLElement>(`.pull-actions [data-key="${key}"]:not(:disabled)`)?.click();
       const links = [...document.querySelectorAll<HTMLAnchorElement>(key === "j" || key === "k" ? ".pull-sidebar ol a" : ".tabs a")];
       links[links.findIndex((a) => a.getAttribute("aria-current") === "page") + step]?.click();
     };
@@ -96,4 +96,38 @@ export function SidebarKeys() {
 function toggle(root: HTMLElement | null) {
   const closed = root?.toggleAttribute("data-collapsed");
   try { localStorage.setItem("openreview:pull-sidebar", closed ? "closed" : "open"); } catch { /* not remembered */ }
+}
+
+// Merge, review, close, draft and branch actions on an open pull request, sent as the developer.
+// Keys: M merge, A approve, X request changes, C close, O reopen, D draft/ready, U update branch.
+export function PullActions({ pullRequestId, head, state, draft }: { pullRequestId: string; head: string; state: string; draft?: boolean }) {
+  const [result, action, pending] = useActionState(pullAction, {});
+  const ask = (message: string) => (e: React.MouseEvent) => { if (!confirm(message)) e.preventDefault(); };
+  return (
+    <form className="pull-actions" action={action}>
+      <input type="hidden" name="pullRequestId" value={pullRequestId} />
+      <input type="hidden" name="head" value={head} />
+      {state === "open" ? <>
+        <span className="merge-group">
+          <button name="action" value="merge" className="primary small" data-key="m" disabled={pending || draft} onClick={ask("Merge this pull request on GitHub as you?")}>Merge</button>
+          <select name="method" aria-label="Merge method" defaultValue="squash"><option value="squash">Squash</option><option value="merge">Merge commit</option><option value="rebase">Rebase</option></select>
+        </span>
+        <details>
+          <summary data-key="x">Review…</summary>
+          <textarea name="body" rows={3} aria-label="Review comment" placeholder="Leave a comment (required to request changes)" />
+          <span className="row">
+            <button name="action" value="approve" className="small" data-key="a" disabled={pending}>Approve</button>
+            <button name="action" value="request_changes" className="small" disabled={pending}>Request changes</button>
+            <button name="action" value="comment" className="small" disabled={pending}>Comment</button>
+          </span>
+        </details>
+        <button name="action" value={draft ? "ready" : "draft"} className="small" data-key="d" disabled={pending}>{draft ? "Ready for review" : "Convert to draft"}</button>
+        <button name="action" value="update_branch" className="small" data-key="u" disabled={pending}>Update branch</button>
+        <button name="action" value="close" className="small" data-key="c" disabled={pending} onClick={ask("Close this pull request on GitHub?")}>Close</button>
+      </> : state === "closed" && <button name="action" value="reopen" className="small" data-key="o" disabled={pending}>Reopen</button>}
+      {pending && <span role="status" className="muted">Working…</span>}
+      {result.error && <span role="alert">{result.error}</span>}
+      {result.saved && <span role="status">{result.saved}</span>}
+    </form>
+  );
 }

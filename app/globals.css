@@ -1398,6 +1398,38 @@ kbd {
 .status-card .actions form button {
   margin: 0;
 }
+.pull-actions {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center !important;
+  gap: 8px;
+  width: 100%;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.pull-actions .merge-group {
+  display: inline-flex;
+}
+.pull-actions .merge-group select {
+  width: auto;
+  font-size: 12px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.pull-actions .merge-group button {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.pull-actions details {
+  position: relative;
+}
+.pull-actions details[open] {
+  flex-basis: 100%;
+}
+.pull-actions details textarea {
+  width: 100%;
+  margin: 8px 0;
+}
 .tabs {
   display: flex;
   gap: 4px;

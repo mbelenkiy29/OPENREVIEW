@@ -1,11 +1,11 @@
-import { internalMutation, internalQuery, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import {authenticated} from "./auth";
 import {contextReadable} from "./repositoryContext";
 import {p4BaselineMetadata} from "./p4Index";
-import {authorizeRepository} from "./auth";
+import {authorizeRepository,audit} from "./auth";
 import { repositoryAccess, visibleRepositories } from "./auth";
 export const list=query({args:{token:v.string(),organizationId:v.id("organizations"),teamId:v.optional(v.id("teams")),repositoryId:v.optional(v.id("repositories")),author:v.optional(v.string()),state:v.optional(v.string()),search:v.optional(v.string()),paginationOpts:paginationOptsValidator},handler:async(ctx,a)=>{
  const viewer=await authenticated(ctx,a.token);
@@ -100,4 +100,20 @@ export const get=query({args:{token:v.string(),pullRequestId:v.optional(v.id("pu
  const [row]=await enrich(ctx,viewer._id,[pr]);
  const reviewCount=(await ctx.db.query("reviews").withIndex("by_pr",q=>q.eq("repositoryId",pr.repositoryId).eq("prNumber",pr.number)).take(100)).length;
  return {...row,reviewCount};
+}});
+// What the dashboard needs to act on a pull request as the signed-in developer: write access in
+// OpenReview, a github.com repository, and the GitHub accounts linked to this user.
+export const actionTarget=query({args:{token:v.string(),pullRequestId:v.id("pullRequests")},handler:async(ctx,a)=>{
+ const pr=await ctx.db.get(a.pullRequestId);if(!pr)throw new Error("Pull request not found");
+ const {repo,user}=await authorizeRepository(ctx,a.token,pr.repositoryId,true);
+ const connection=repo.connectionId?await ctx.db.get(repo.connectionId):null;
+ if(connection||!repo.installationId)throw new Error("Dashboard actions are available for GitHub.com repositories");
+ const identities=await ctx.db.query("identities").withIndex("by_user",q=>q.eq("userId",user._id)).collect();
+ const githubIds=[...new Set([...identities.filter(i=>i.provider==="github").map(i=>Number(i.providerUserId)),...(user.githubId&&user.githubId>0?[user.githubId]:[])])];
+ return {fullName:repo.fullName,number:pr.number,headSha:pr.headSha,state:pr.state,githubIds};
+}});
+export const recordAction=mutation({args:{token:v.string(),pullRequestId:v.id("pullRequests"),action:v.string()},handler:async(ctx,a)=>{
+ const pr=await ctx.db.get(a.pullRequestId);if(!pr)throw new Error("Pull request not found");
+ const {user}=await authorizeRepository(ctx,a.token,pr.repositoryId,true);
+ await audit(ctx,pr.organizationId,user._id,"pull."+a.action.replace(/[^a-z_]/g,"").slice(0,30),pr._id);
 }});

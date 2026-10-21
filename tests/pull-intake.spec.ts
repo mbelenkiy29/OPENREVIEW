@@ -160,3 +160,19 @@ test("GitHub size, draft and requested reviewers are kept on the pull request ro
  // Providers without these fields (or Gitea's nulls) still parse.
  expect(pullObservation(s.repo._id,changeMetadataSchema.parse({...pr,additions:null,requested_reviewers:null}),1)).toMatchObject({additions:undefined,requestedReviewers:undefined});
 });
+test("dashboard actions need write access on a GitHub.com repository and report the linked GitHub accounts",async()=>{
+ const s=await setup();
+ const pullRequestId=await s.t.mutation(internal.pulls.observe,s.observation);
+ const target=await s.t.query(api.pulls.actionTarget,{token:s.token,pullRequestId:pullRequestId!});
+ expect(target).toMatchObject({fullName:"intake/example",number:1,headSha:"a".repeat(40)});expect(target.githubIds).toContain(4001);
+ await s.t.mutation(api.pulls.recordAction,{token:s.token,pullRequestId:pullRequestId!,action:"merge"});
+ expect((await s.t.run(ctx=>ctx.db.query("auditEvents").collect())).some(e=>e.action==="pull.merge")).toBe(true);
+ // Another workspace's user cannot act on it.
+ const other=await s.t.mutation(api.users.login,{secret:process.env.SERVICE_SECRET!,githubId:4002,login:"outsider",avatar:""});
+ const otherToken=await new SignJWT({}).setSubject(other).setProtectedHeader({alg:"HS256"}).setIssuer("openreview").setAudience("openreview").setExpirationTime("1h").sign(new TextEncoder().encode(process.env.SESSION_SECRET));
+ await expect(s.t.query(api.pulls.actionTarget,{token:otherToken,pullRequestId:pullRequestId!})).rejects.toThrow();
+ // Repositories behind other provider connections keep their own UI for these actions.
+ const connectionId=await s.t.run(ctx=>ctx.db.insert("providerConnections",{organizationId:s.organizationId,kind:"gitlab",instance:"https://gitlab.example",name:"GitLab",credentials:"x",webhookSecret:"x",active:true,createdAt:1}));
+ await s.t.run(ctx=>ctx.db.patch(s.repo._id,{connectionId}));
+ await expect(s.t.query(api.pulls.actionTarget,{token:s.token,pullRequestId:pullRequestId!})).rejects.toThrow("GitHub.com");
+});
