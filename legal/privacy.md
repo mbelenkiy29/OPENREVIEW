@@ -72,7 +72,9 @@ If you allow it, PostHog also stores a random identifier in a cookie and in your
 - **Remembering your choice:** your choice is kept in a cookie for 180 days.
 - **Changing your mind:** use **Cookie settings** at the bottom of any page.
 
-We do not use advertising cookies, and we do not use cookies to track you across other websites.
+If you allow it, the OpenAI Ads pixel also stores two cookies, so we can tell whether a visit or sign-up came from one of our ads in ChatGPT: `__oppref`, the ad click it came from, for 30 days, and `__obref`, a random identifier for your browser, for a year. It follows the same choice as PostHog; declining removes both and leaves only `__oaiq_consent`, which remembers that you said no.
+
+Apart from that ad measurement, we do not use advertising cookies, and we do not use cookies to track you across other websites.
 
 ## How we use information
 
@@ -84,7 +86,7 @@ We use the information above to:
 - keep the service reliable, diagnose problems and understand which features are used;
 - meet legal obligations.
 
-We do not sell personal information, and we do not use it for advertising.
+We do not sell personal information. If you accept cookies, we tell OpenAI when a visit or sign-up follows one of our ads, so we can measure them; we do not otherwise use your information for advertising.
 
 Feedback you give on reviews, such as reactions, replies and approved rules, is used only to tune reviews within your own workspace. It is not shared with other workspaces.
 
@@ -100,7 +102,7 @@ We share information only as needed to run the service, with:
 |---|---|
 | Vercel | Website hosting |
 | Convex | Database and backend processing |
-| OpenAI | AI model processing for reviews and answers |
+| OpenAI | AI model processing for reviews and answers; with your consent, measuring our ads in ChatGPT |
 | Stripe | Payments, subscriptions and referral payouts |
 | GitHub (and other code hosts you connect) | Sign-in and repository access |
 | OSV.dev | Checking package names and versions from dependency changes for known vulnerabilities (no source code is sent) |
@@ -126,9 +128,9 @@ Uninstalling the GitHub App or removing a repository stops our access to it. To 
 
 - **Your requests:** you can ask us to access, correct, export or delete your personal information by emailing [mbelenkiy29@gmail.com](mailto:mbelenkiy29@gmail.com). We respond within 30 days.
 - **In the product:** you can sign out of other sessions in **Settings → Account**. Admins can disconnect integrations and remove repositories at any time.
-- **Analytics:** turn analytics off at any time with **Cookie settings** at the bottom of any page, or with your browser's Do Not Track or Global Privacy Control setting.
+- **Analytics and ad measurement:** turn both off at any time with **Cookie settings** at the bottom of any page, or with your browser's Do Not Track or Global Privacy Control setting.
 - **Regional rights:** depending on where you live, for example in the EU, UK or California, you may have additional rights, such as objecting to processing or complaining to a data protection authority. We honor these rights for everyone.
-- **No selling:** we do not sell or share personal information for cross-context behavioral advertising.
+- **No selling:** we do not sell personal information. The only sharing for advertising is the ad measurement above, which runs only if you accept cookies and stays off with Global Privacy Control.
 
 ## Where information is processed
 
