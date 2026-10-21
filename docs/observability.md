@@ -1,6 +1,6 @@
 # Error tracking and analytics (cloud)
 
-The hosted site can report errors to [Sentry](https://sentry.io) and product analytics to [PostHog](https://posthog.com). Both are off unless their public keys are set when the web app is built, so self-hosted installs send nothing to either service.
+The hosted site can report errors to [Sentry](https://sentry.io), product analytics to [PostHog](https://posthog.com) and ad conversions to OpenAI Ads. All are off unless their public keys are set when the web app is built, so self-hosted installs send nothing to any of them.
 
 ## What is collected
 
@@ -35,6 +35,13 @@ The hosted site can report errors to [Sentry](https://sentry.io) and product ana
 - **Self-hosted:** without `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` there is no banner.
 - **Sentry:** sets no cookies and is not gated.
 
+**OpenAI Ads pixel (ad measurement):** tells [Ads Manager](https://ads.openai.com) which visits and sign-ups came from our ads in ChatGPT ([docs](https://developers.openai.com/ads/measurement-pixel)). Code in `src/ads-pixel.ts`.
+- **Consent:** it starts and stops with PostHog, under the same banner choice. Declining removes its `__oppref` and `__obref` cookies; it keeps `__oaiq_consent=false` to remember the refusal.
+- **Page views:** each page is reported by its first path segment only (`/dashboard`, `/invite`), so ids and tokens in URLs are never sent.
+- **Sign-up:** `registration_completed` is sent with the `signed_up` milestone above, so once per account and never on a later sign-in. Accounts more than a day old don't count.
+- **Advanced matching:** if automatic advanced matching is on for the pixel in Ads Manager, the SDK itself hashes contact details it finds on the page (SHA-256) and sends the hashes. The privacy policy covers this; turn it off in Ads Manager to send none.
+- **Self-hosted:** off without `NEXT_PUBLIC_OPENAI_ADS_PIXEL_ID`.
+
 **URLs:** before any event leaves the browser or server, each URL keeps only a short allowlist of query parameters (`utm_*`, `ref`, `checkout`, `billing`, `signedout`) and loses its fragment. Invitation tokens, sign-in codes, error messages and repository filters are never sent. Referral links (`/r/<code>`) are reported as `/r/[code]`, in errors and performance traces alike, because a code identifies the person who shared it. Clicks aren't captured on those pages or on sign-up pages opened from them.
 
 **Same-origin delivery:** events go through this site's own origin, so ad blockers that block Sentry and PostHog domains don't drop them:
@@ -55,6 +62,7 @@ Set these on the **web app** (Vercel → Project → Settings → Environment Va
 | `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` | Optional, `0`–`1` (default `0.1`) | No |
 | `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` | The project API key, `phc_…` (PostHog → Project settings) | No (public by design) |
 | `NEXT_PUBLIC_POSTHOG_HOST` | `https://us.i.posthog.com` (default) or `https://eu.i.posthog.com` | No |
+| `NEXT_PUBLIC_OPENAI_ADS_PIXEL_ID` | The pixel ID (Ads Manager → Conversions → Data Source) | No (public by design) |
 
 **Release builds:** with `SENTRY_AUTH_TOKEN` set, a build uploads source maps and deletes them from the output, so they are never served publicly. Errors are tagged with the Vercel environment (`production` or `preview`) and the commit.
 

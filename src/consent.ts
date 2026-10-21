@@ -34,10 +34,11 @@ export function needsChoice(configured: boolean, cookies: string, signals: Brows
 export function analyticsAllowed(cookies: string, signals: BrowserSignals) {
   return readConsent(cookies) === "granted" && !browserRefuses(signals);
 }
-/** Names of PostHog's own cookies and storage keys (`ph_<token>_posthog`, `__ph_opt_in_out_…`). */
-export const isAnalyticsStorageKey = (name: string) => name.startsWith("ph_") || name.startsWith("__ph");
+/** Names of PostHog's own cookies and storage keys (`ph_<token>_posthog`, `__ph_opt_in_out_…`), and
+ *  the ad pixel's cookies (src/ads-pixel.ts). */
+export const isAnalyticsStorageKey = (name: string) => name.startsWith("ph_") || name.startsWith("__ph") || name === "__oppref" || name === "__obref";
 
-/** Browser only: remove PostHog's cookies and storage, including any left from before the visitor
+/** Browser only: remove PostHog's and the ad pixel's cookies and storage, including any left from before the visitor
  *  was asked. It lives here, not in src/analytics.ts, so clearing never downloads PostHog. */
 export function clearAnalyticsStorage() {
   for (const part of document.cookie.split(";")) {

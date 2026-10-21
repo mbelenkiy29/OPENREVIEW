@@ -4,6 +4,7 @@ import {siteDescription as description} from "../src/structured-data";
 import {themeScript} from "../src/theme";
 import {ThemeProvider} from "./theme";
 import {ConsentBanner} from "./consent";
+import {AdsPageViews} from "./ads-page-views";
 import {UserJot} from "./userjot";
 import {userJotConfig} from "../src/userjot";
 // Fonts are bundled from npm so builds never fetch them: Inter for UI, JetBrains Mono for code
@@ -34,7 +35,7 @@ export default async function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning data-userjot={userJot ? "" : undefined}>
       <head><script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{__html:themeScript}} /></head>
-      <body><ThemeProvider>{children}<ConsentBanner />{userJot&&<UserJot projectId={userJot.projectId} boardUrl={userJot.boardUrl} />}</ThemeProvider></body>
+      <body><ThemeProvider>{children}<ConsentBanner /><AdsPageViews />{userJot&&<UserJot projectId={userJot.projectId} boardUrl={userJot.boardUrl} />}</ThemeProvider></body>
     </html>
   );
 }
