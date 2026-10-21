@@ -1130,6 +1130,50 @@ tr:last-child td {
 }
 
 /* ---------- Pull Requests tab: Greptile's layout, measured from app.greptile.com ---------- */
+/* Greptile's fonts on the whole tab, and its white palette in light mode (dark mode keeps the app's
+   dark tokens). Scoped to the shell so the top navigation matches too. */
+.shell:has(.pulls-page, .pull-detail-page) {
+  --font-sans: "DM Sans Variable", "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-sans);
+  font-feature-settings: normal;
+  background: var(--bg);
+  color: var(--text);
+}
+:root[data-theme="light"] .shell:has(.pulls-page, .pull-detail-page) {
+  --bg: #ffffff;
+  --surface: #f8f8f8;
+  --surface-2: #f2f2f2;
+  --surface-3: #e6e6e6;
+  --surface-4: #dcdcdc;
+  --soft: #f2f2f2;
+  --text: #262626;
+  --muted: #5c5c5c;
+  --text-ter: #8a8a8a;
+  --line: #e6e6e6;
+  --line-strong: #d4d4d4;
+  --primary: #171717;
+  --primary-hover: #333333;
+  --on-primary: #ffffff;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .shell:has(.pulls-page, .pull-detail-page) {
+    --bg: #ffffff;
+    --surface: #f8f8f8;
+    --surface-2: #f2f2f2;
+    --surface-3: #e6e6e6;
+    --surface-4: #dcdcdc;
+    --soft: #f2f2f2;
+    --text: #262626;
+    --muted: #5c5c5c;
+    --text-ter: #8a8a8a;
+    --line: #e6e6e6;
+    --line-strong: #d4d4d4;
+    --primary: #171717;
+    --primary-hover: #333333;
+    --on-primary: #ffffff;
+  }
+}
 /* List: a centered 1200px column, no page title or side menu. Detail: a full-bleed sidebar + main pane. */
 .pulls-page {
   max-width: 1264px;
