@@ -45,7 +45,7 @@ export const worker=mutation({args:{token:v.string(),organizationId:v.id("organi
 }});
 export const revoke=mutation({args:{token:v.string(),workerId:v.id("runtimeWorkers")},handler:async(ctx,a)=>{const w=await ctx.db.get(a.workerId);if(!w)throw new Error("Worker missing");const {user}=await authorize(ctx,a.token,w.organizationId,true);await ctx.db.patch(w._id,{revoked:true});await audit(ctx,w.organizationId,user._id,"runtime.worker_revoked",w._id);}});
 export const request=internalMutation({args:{reviewId:v.id("reviews"),workerLease:v.optional(v.string())},handler:async(ctx,a)=>{
- const review=await ctx.db.get(a.reviewId);if(!review||["cancelled","completed","failed"].includes(review.status))return false;
+ const review=await ctx.db.get(a.reviewId);if(!review||["cancelled","skipped","completed","failed"].includes(review.status))return false;
  const repo=await ctx.db.get(review.repositoryId);if(!repo||!repo.enabled&&!review.nativeP4)return false;
  const policy=await runtimePolicy(ctx,repo);if(!policy.enabled)return false;
  requireP4Worker(review,a.workerLease);
@@ -63,7 +63,7 @@ const workerOnline=async(ctx:MutationCtx,organizationId:Doc<"repositories">["org
 // Generated reproduction tests for verified findings: one job per review, on the approved image and
 // test command template. The review waits like a runtime check and resumes when results arrive.
 export const requestTests=internalMutation({args:{reviewId:v.id("reviews"),tests:v.array(v.object({fingerprint:v.string(),path:v.string(),content:v.string()}))},handler:async(ctx,a)=>{
- const review=await ctx.db.get(a.reviewId);if(!review||["cancelled","completed","failed"].includes(review.status)||review.nativeP4||!a.tests.length)return false;
+ const review=await ctx.db.get(a.reviewId);if(!review||["cancelled","skipped","completed","failed"].includes(review.status)||review.nativeP4||!a.tests.length)return false;
  const repo=await ctx.db.get(review.repositoryId);if(!repo?.enabled)return false;
  const policy=await runtimePolicy(ctx,repo);if(!policy.generatedTests||!policy.testCommand)return false;
  if((await ctx.db.query("runtimeJobs").withIndex("by_review",q=>q.eq("reviewId",review._id)).collect()).some(j=>j.kind==="tests"))return false;

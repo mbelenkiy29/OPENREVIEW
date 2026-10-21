@@ -25,11 +25,11 @@ export const localReviewRequest = localReviewFields.superRefine((value, ctx) => 
 export type LocalReviewRequest = z.infer<typeof localReviewRequest>;
 
 // `openreview review status` exit codes, for hooks and CI: 0 a completed review covers the head, 1 no such review,
-// 3 still running, 4 failed, 5 cancelled (2 is invalid usage, set by the caller).
+// 3 still running, 4 failed, 5 cancelled or skipped (2 is invalid usage, set by the caller).
 export function reviewStatusExit(review: { status: string; coversCurrentHead: boolean | null } | null) {
   if (!review) return 1;
   if (review.status === "completed") return review.coversCurrentHead === false ? 1 : 0;
-  return review.status === "failed" ? 4 : review.status === "cancelled" ? 5 : 3;
+  return review.status === "failed" ? 4 : ["cancelled", "skipped"].includes(review.status) ? 5 : 3;
 }
 
 export type LocalReviewProgress = { id: string; status: "queued" | "running" | "completed" | "failed"; stage: string | null; error: string | null; result: { summary: string; findings: Finding[] } | null };

@@ -155,9 +155,9 @@ test("the mark draws in line by line and the marker lands last; nothing animates
   assert.equal(written.at(-1), "finding issues\n");
 });
 
-test("review status exit codes: 0 reviewed head, 1 none or stale, 3 running, 4 failed, 5 cancelled", () => {
+test("review status exit codes: 0 reviewed head, 1 none or stale, 3 running, 4 failed, 5 cancelled or skipped", () => {
   const review = (status: string, coversCurrentHead: boolean | null = true) => ({ status, coversCurrentHead });
-  assert.deepEqual([null, review("completed"), review("completed", null), review("completed", false), review("queued"), review("running"), review("failed"), review("cancelled")].map(reviewStatusExit), [1, 0, 0, 1, 3, 3, 4, 5]);
+  assert.deepEqual([null, review("completed"), review("completed", null), review("completed", false), review("queued"), review("running"), review("failed"), review("cancelled"), review("skipped")].map(reviewStatusExit), [1, 0, 0, 1, 3, 3, 4, 5, 5]);
 });
 
 const cli = (args: string[], env: Record<string, string>, stdin = "") => new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
