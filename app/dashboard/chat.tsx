@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { FunctionReturnType } from "convex/server";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { backend } from "../../src/server";
@@ -29,21 +30,7 @@ export async function ChatPanel({ token, organizationId, repositories, filters }
       {pull && <section className="status-card" aria-label="Pull request"><span>About <strong>#{pull.number} {pull.title}</strong></span><div className="actions"><Link className="button small" href={pull.latest ? `/dashboard/pulls/${pull.latest._id}` : `/dashboard/pulls/pr/${pull._id}`}>Back to the pull request</Link></div></section>}
       {pull && !thread && indexed.some((r) => r._id === pull.repositoryId) && <form action={askChat} className="chat-suggestions"><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="pullRequestId" value={pull._id} /><input type="hidden" name="repositoryIds" value={pull.repositoryId} />{["Walk me through what changed", "Explain the findings and which ones matter most", "What edge cases should I test for this change?"].map((q) => <button key={q} name="question" value={q} className="small">{q}</button>)}</form>}
       <p className="muted">Ask questions about up to five indexed repositories. Answers are investigated with read-only code tools, and every claim cites lines at the repository&apos;s indexed revision. Threads are visible only to you.</p>
-      {thread && <section aria-label="Conversation">
-        {thread.messages.map((m) => <article key={m._id} className={`chat-message ${m.role}`}>
-          <p className="muted">{m.role === "user" ? "You" : "OpenReview"} · {new Date(m.createdAt).toLocaleString()}{m.role === "assistant" && m.status !== "completed" && <> · <span className={`badge ${m.status}`}>{m.status}</span></>}</p>
-          {m.role === "user" ? <p className="chat-question">{m.content}</p> : m.status === "completed" ? <>
-            <ReviewMarkdown>{m.content}</ReviewMarkdown>
-            {m.citations.length > 0 && <ol className="chat-citations" aria-label="Citations">{m.citations.map((c, i) => <li key={i} id={`cite-${m._id}-${i + 1}`}>
-              {c.url ? <a href={c.url} target="_blank" rel="noopener noreferrer">{c.repository}:{c.filePath}:{c.startLine}{c.endLine > c.startLine ? `–${c.endLine}` : ""}</a> : <code>{c.repository}:{c.filePath}:{c.startLine}{c.endLine > c.startLine ? `–${c.endLine}` : ""}</code>}
-              <span className="muted"> @ {c.revision.slice(0, 12)}</span>
-              <pre>{c.quote}</pre>
-            </li>)}</ol>}
-            {m.proposal && pull && <ProposedAction pullRequestId={pull._id} head={pull.headSha} proposal={m.proposal} />}
-            {m.limits.map((l) => <p key={l} className="muted">{l}</p>)}
-          </> : m.status === "failed" ? <p role="alert">{m.error ?? "The answer failed."} {m.limits.join(" ")}</p> : <ChatStream messageId={m._id} initial={m.events.map((e) => ({ kind: e.kind, text: e.text }))} />}
-        </article>)}
-      </section>}
+      {thread && <ChatMessages messages={thread.messages} threadId={thread._id} pull={pull} />}
       {indexed.length === 0 ? <section><h2>No indexed repositories</h2><p>Enable and index a repository in Settings → Repositories to chat about its code.</p></section> :
         <form action={askChat} className="form-grid chat-form">
           <input type="hidden" name="organizationId" value={organizationId} />
@@ -57,4 +44,24 @@ export async function ChatPanel({ token, organizationId, repositories, filters }
       {thread && thread.repositoryIds.length > 0 && <p className="muted">Repositories in this thread: {thread.repositoryIds.map((id) => { const r = name(id); return r ? repositoryDisplay(r) : "unavailable"; }).join(", ")}</p>}
     </div>
   </div>;
+}
+
+type ChatThread = FunctionReturnType<typeof api.chat.thread>;
+// One conversation's messages: answers with citations, live progress, and any suggested PR action.
+export function ChatMessages({ messages, threadId, pull }: { messages: ChatThread["messages"]; threadId: string; pull: { _id: string; headSha: string } | null }) {
+  return <section aria-label="Conversation">
+        {messages.map((m) => <article key={m._id} className={`chat-message ${m.role}`}>
+          <p className="muted">{m.role === "user" ? "You" : "OpenReview"} · {new Date(m.createdAt).toLocaleString()}{m.role === "assistant" && m.status !== "completed" && <> · <span className={`badge ${m.status}`}>{m.status}</span></>}</p>
+          {m.role === "user" ? <p className="chat-question">{m.content}</p> : m.status === "completed" ? <>
+            <ReviewMarkdown>{m.content}</ReviewMarkdown>
+            {m.citations.length > 0 && <ol className="chat-citations" aria-label="Citations">{m.citations.map((c, i) => <li key={i} id={`cite-${m._id}-${i + 1}`}>
+              {c.url ? <a href={c.url} target="_blank" rel="noopener noreferrer">{c.repository}:{c.filePath}:{c.startLine}{c.endLine > c.startLine ? `–${c.endLine}` : ""}</a> : <code>{c.repository}:{c.filePath}:{c.startLine}{c.endLine > c.startLine ? `–${c.endLine}` : ""}</code>}
+              <span className="muted"> @ {c.revision.slice(0, 12)}</span>
+              <pre>{c.quote}</pre>
+            </li>)}</ol>}
+            {m.proposal && pull && <ProposedAction pullRequestId={pull._id} head={pull.headSha} proposal={m.proposal} threadId={threadId} messageId={m._id} />}
+            {m.limits.map((l) => <p key={l} className="muted">{l}</p>)}
+          </> : m.status === "failed" ? <p role="alert">{m.error ?? "The answer failed."} {m.limits.join(" ")}</p> : <ChatStream messageId={m._id} initial={m.events.map((e) => ({ kind: e.kind, text: e.text }))} />}
+        </article>)}
+  </section>;
 }

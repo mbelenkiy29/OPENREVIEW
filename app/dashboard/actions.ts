@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { fixPrompt } from "../../src/fix-prompt";
 import { pullActionSchema } from "../../src/pull-actions";
+import { pullChatReturn, withSelectedContext } from "../../src/pull-chat";
 import { actionError, performPullAction, pullIntentCookie } from "../../src/pull-actions-server";
 import { findingSchema } from "../../src/engine/types";
 import { redirect } from "next/navigation";
@@ -398,9 +399,11 @@ export async function setNotificationEmail(form: FormData) {
 }
 export async function askChat(form: FormData) {
   const { token } = await current();
-  const threadId = text(form, "threadId"), pullRequestId = text(form, "pullRequestId");
-  const result = await backend().mutation(api.chat.ask, { token, organizationId: text(form, "organizationId") as Id<"organizations">, ...(threadId ? { threadId: threadId as Id<"chatThreads"> } : {}), ...(pullRequestId && !threadId ? { pullRequestId: pullRequestId as Id<"pullRequests"> } : {}), repositoryIds: form.getAll("repositoryIds").map(String).slice(0, 5) as Id<"repositories">[], question: text(form, "question") });
-  redirect(`/dashboard/chat?thread=${result.threadId}`);
+  const threadId = text(form, "threadId"), pullRequestId = text(form, "pullRequestId"), back = pullChatReturn(text(form, "return"));
+  const result = await backend().mutation(api.chat.ask, { token, organizationId: text(form, "organizationId") as Id<"organizations">, ...(threadId ? { threadId: threadId as Id<"chatThreads"> } : {}), ...(pullRequestId && !threadId ? { pullRequestId: pullRequestId as Id<"pullRequests"> } : {}), repositoryIds: form.getAll("repositoryIds").map(String).slice(0, 5) as Id<"repositories">[], question: withSelectedContext(text(form, "question"), text(form, "context")) });
+  // Chat with PR answers in the panel beside the pull request it was asked from.
+  const tab = ["review", "discussion", "code"].includes(text(form, "tab")) ? `&tab=${text(form, "tab")}` : "";
+  redirect(back ? `${back}?chat=1&chatThread=${result.threadId}${tab}` : `/dashboard/chat?thread=${result.threadId}`);
 }
 export async function deleteChatThread(form: FormData) {
   const { token } = await current();

@@ -1,5 +1,6 @@
 "use client";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
+import { routineActions, runsWithoutAsking, type ChatPermission } from "../../src/pull-chat";
 import { useRouter } from "next/navigation";
 import { bulkFixPrompt, bulkReview, markFileReviewed, pullAction } from "./actions";
 
@@ -71,7 +72,7 @@ export function PullKeys({ hints }: { hints: [string, string][] }) {
   return <KeyFooter hints={hints} />;
 }
 
-const allShortcuts: [string, string][] = [["J K", "next / previous"], ["Enter", "open"], ["Space", "select"], ["⌘ A", "select all"], ["G", "re-review"], ["/", "search"], ["H L", "switch tabs"], ["⌘ B", "sidebar"], ["M", "merge"], ["A", "approve"], ["X", "request changes"], ["C", "close"], ["O", "reopen"], ["D", "draft / ready"], ["U", "update branch"], ["F", "fix"]];
+const allShortcuts: [string, string][] = [["J K", "next / previous"], ["Enter", "open"], ["Space", "select"], ["⌘ A", "select all"], ["G", "re-review"], ["/", "search"], ["H L", "switch tabs"], ["⌘ B", "sidebar"], ["M", "merge"], ["A", "approve"], ["X", "request changes"], ["C", "close"], ["O", "reopen"], ["D", "draft / ready"], ["U", "update branch"], ["F", "fix"], ["⇧ C", "chat with PR"], ["⇧ S", "select chat context"]];
 // Greptile's pinned "Keyboard Shortcuts" bar: the keys for this page, "View all", and a dismiss button.
 function KeyFooter({ hints }: { hints: [string, string][] }) {
   const [hidden, setHidden] = useState(false), [all, setAll] = useState(false);
@@ -122,6 +123,8 @@ export function SidebarKeys() {
       if (e.metaKey || e.ctrlKey) return;
       if (key === "/") { e.preventDefault(); document.querySelector<HTMLInputElement>(".pull-sidebar input[name=find]")?.focus(); return; }
       if (key === "f") return document.querySelector<HTMLElement>(".status-card .fix-control button:not(:disabled)")?.click();
+      if (e.shiftKey && key === "c") return document.querySelector<HTMLElement>("[data-chat-toggle]")?.click();
+      if (e.shiftKey && key === "s") return document.querySelector<HTMLElement>("[data-chat-context]")?.click();
       const step = key === "j" || key === "l" ? 1 : key === "k" || key === "h" ? -1 : 0;
       if (!step) return document.querySelector<HTMLElement>(`.pull-actions [data-key="${key}"]:not(:disabled)`)?.click();
       const links = [...document.querySelectorAll<HTMLAnchorElement>(key === "j" || key === "k" ? ".pull-sidebar ol a" : ".tabs a")];
@@ -132,7 +135,7 @@ export function SidebarKeys() {
   }, []);
   return <>
     <button type="button" className="sidebar-toggle" aria-label="Toggle pull request list (⌘B)" title="Toggle sidebar (⌘B)" onClick={() => toggle(document.querySelector(".pull-detail"))}>◧</button>
-    <KeyFooter hints={[["J K", "switch PR"], ["H L", "switch tabs"], ["M", "merge"], ["F", "fix"], ["/", "search"], ["⌘ B", "sidebar"]]} />
+    <KeyFooter hints={[["J K", "switch PR"], ["H L", "switch tabs"], ["⇧ C", "chat"], ["M", "merge"], ["F", "fix"], ["/", "search"], ["⌘ B", "sidebar"]]} />
   </>;
 }
 function toggle(root: HTMLElement | null) {
@@ -194,14 +197,25 @@ export function ReviewedToggle({ reviewId, path, reviewed }: { reviewId: string;
   return <input type="checkbox" checked={checked} aria-label={`Reviewed ${path}`} title="Reviewed" onChange={async (e) => { const next = e.currentTarget.checked; setChecked(next); try { await markFileReviewed(reviewId, path, next); } catch { setChecked(!next); } }} />;
 }
 
-const proposalLabels: Record<string, string> = { approve: "Approve the pull request", request_changes: "Request changes", comment: "Post a comment", merge: "Merge (squash)", close: "Close the pull request", ready: "Mark ready for review", update_branch: "Update the branch" };
-// A pull request action the chat agent suggested. Nothing happens until the developer approves it.
-export function ProposedAction({ pullRequestId, head, proposal }: { pullRequestId: string; head: string; proposal: { action: string; reason: string; body?: string } }) {
+const proposalLabels: Record<string, string> = { approve: "Approve the pull request", request_changes: "Request changes", comment: "Post a comment", merge: "Merge (squash)", close: "Close the pull request", reopen: "Reopen the pull request", ready: "Mark ready for review", update_branch: "Update the branch" };
+// Per-chat permission state (Greptile's shield chip), kept in this browser only.
+const store = (key: string) => ({ get: () => { try { return localStorage.getItem(key); } catch { return null; } }, set: (value: string) => { try { localStorage.setItem(key, value); } catch { /* not remembered */ } } });
+const permissionOf = (threadId: string) => ({ mode: (store(`openreview:chat-perm:${threadId}`).get() ?? "ask") as ChatPermission, allowed: JSON.parse(store(`openreview:chat-allow:${threadId}`).get() ?? "[]") as string[] });
+// A pull request action the chat agent suggested. It waits for Approve unless this chat's permission
+// already allows it; a permission raised later runs suggestions that are still waiting.
+export function ProposedAction({ pullRequestId, head, proposal, threadId, messageId }: { pullRequestId: string; head: string; proposal: { action: string; reason: string; body?: string }; threadId: string; messageId: string }) {
   const [result, action, pending] = useActionState(pullAction, {});
   const [dismissed, setDismissed] = useState(false);
+  const form = useRef<HTMLFormElement>(null), auto = useRef(false), ran = store(`openreview:chat-ran:${messageId}`);
+  useEffect(() => {
+    const check = () => { const p = permissionOf(threadId); if (!store(`openreview:chat-ran:${messageId}`).get() && runsWithoutAsking(p.mode, p.allowed, proposal.action)) { auto.current = true; form.current?.requestSubmit(); } };
+    check();
+    window.addEventListener("openreview:chat-permission", check);
+    return () => window.removeEventListener("openreview:chat-permission", check);
+  }, [threadId, proposal.action, messageId]);
   if (dismissed) return null;
   return (
-    <form className="proposal" action={action} onSubmit={(e) => { if (!confirm(`${proposalLabels[proposal.action] ?? proposal.action} on GitHub as you?`)) e.preventDefault(); }}>
+    <form ref={form} className="proposal" action={action} onSubmit={(e) => { if (ran.get() || (!auto.current && !confirm(`${proposalLabels[proposal.action] ?? proposal.action} on GitHub as you?`))) { e.preventDefault(); return; } ran.set("1"); }}>
       <input type="hidden" name="pullRequestId" value={pullRequestId} />
       <input type="hidden" name="action" value={proposal.action} />
       <input type="hidden" name="head" value={head} />
@@ -209,9 +223,58 @@ export function ProposedAction({ pullRequestId, head, proposal }: { pullRequestI
       {proposal.body && <input type="hidden" name="body" value={proposal.body} />}
       <p><strong>Suggested action:</strong> {proposalLabels[proposal.action] ?? proposal.action} · <span className="muted">{proposal.reason}</span></p>
       {proposal.body && <blockquote>{proposal.body}</blockquote>}
-      {!result.saved && <span className="row"><button className="small primary" disabled={pending}>Approve</button><button type="button" className="small" onClick={() => setDismissed(true)}>Cancel</button></span>}
+      {!result.saved && !ran.get() && <span className="row">
+        <button className="small primary" disabled={pending}>Approve</button>
+        {routineActions.includes(proposal.action) && <button type="button" className="small" disabled={pending} onClick={() => { const p = permissionOf(threadId); store(`openreview:chat-allow:${threadId}`).set(JSON.stringify([...new Set([...p.allowed, proposal.action])])); window.dispatchEvent(new Event("openreview:chat-permission")); }}>Allow for this chat</button>}
+        <button type="button" className="small" onClick={() => setDismissed(true)}>Cancel</button>
+      </span>}
+      {pending && <span role="status" className="muted">Running…</span>}
       {result.error && <span role="alert">{result.error}</span>}
       {result.saved && <span role="status">{result.saved}</span>}
     </form>
   );
+}
+
+const permissionLabels: Record<ChatPermission, string> = { ask: "Ask every time", routine: "Allow routine actions", full: "Full access mode" };
+// The shield chip beside Send: how this chat's suggested actions run. New chats start at "Ask every time".
+export function ChatPermissionChip({ threadId }: { threadId: string }) {
+  const [mode, setMode] = useState<ChatPermission>("ask");
+  useEffect(() => setMode(permissionOf(threadId).mode), [threadId]);
+  return <label className="permission-chip" title="Actions this chat may run without asking"><span aria-hidden>🛡</span><span className="sr-only">Chat permissions</span>
+    <select value={mode} onChange={(e) => { const next = e.currentTarget.value as ChatPermission; if (next === "full" && !confirm("Full access lets this chat run every suggested action, including merges and closing, without asking. Continue?")) return; setMode(next); store(`openreview:chat-perm:${threadId}`).set(next); window.dispatchEvent(new Event("openreview:chat-permission")); }}>
+      {(Object.keys(permissionLabels) as ChatPermission[]).map((k) => <option key={k} value={k}>{permissionLabels[k]}</option>)}
+    </select>
+  </label>;
+}
+
+const selectable = ".finding-card, .ov-section, .diff-file, .snippet, .pr-info-box, .checks li, .discussion .timeline li";
+// "Select context": click findings, sections, files or checks, or drag across text, on the pull request
+// page; a blue outline marks each pick and the text goes with the question. Esc or Done ends it.
+export function ChatContext() {
+  const [on, setOn] = useState(false), [picks, setPicks] = useState<string[]>([]);
+  useEffect(() => {
+    document.body.toggleAttribute("data-chat-select", on);
+    if (!on) return () => document.body.removeAttribute("data-chat-select");
+    const main = document.querySelector(".pull-main");
+    const click = (e: MouseEvent) => {
+      const el = (e.target as Element).closest<HTMLElement>(selectable);
+      if (!el || !main?.contains(el) || window.getSelection()?.toString()) return;
+      e.preventDefault(); e.stopPropagation();
+      const text = el.innerText.trim().slice(0, 600);
+      const picked = el.toggleAttribute("data-chat-selected");
+      setPicks((list) => picked ? [...list, text] : list.filter((t) => t !== text));
+    };
+    const drag = () => { const sel = window.getSelection(), text = sel?.toString().trim(); if (text && sel?.anchorNode && main?.contains(sel.anchorNode)) { setPicks((list) => [...list, text.slice(0, 600)]); sel.removeAllRanges(); } };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOn(false); };
+    document.addEventListener("click", click, true); document.addEventListener("mouseup", drag); document.addEventListener("keydown", key);
+    return () => { document.body.removeAttribute("data-chat-select"); document.removeEventListener("click", click, true); document.removeEventListener("mouseup", drag); document.removeEventListener("keydown", key); };
+  }, [on]);
+  // Picks only live until the question is sent (the page reloads with the answer).
+  useEffect(() => () => document.querySelectorAll("[data-chat-selected]").forEach((el) => el.removeAttribute("data-chat-selected")), []);
+  const clear = () => { setPicks([]); setOn(false); document.querySelectorAll("[data-chat-selected]").forEach((el) => el.removeAttribute("data-chat-selected")); };
+  return <>
+    <input type="hidden" name="context" value={picks.map((t) => "> " + t.replaceAll("\n", "\n> ")).join("\n\n").slice(0, 2500)} />
+    <button type="button" className={"icon-button" + (on ? " active" : "")} data-chat-context aria-pressed={on} title="Select context (Shift+S)" aria-label="Select context" onClick={() => setOn(!on)}>⌖</button>
+    {(on || picks.length > 0) && <span className="context-state">{picks.length} selected{on && <button type="button" className="link-button" onClick={() => setOn(false)}>Done</button>}{picks.length > 0 && <button type="button" className="link-button" onClick={clear}>Clear</button>}</span>}
+  </>;
 }

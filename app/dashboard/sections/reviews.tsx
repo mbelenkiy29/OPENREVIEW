@@ -13,6 +13,7 @@ import { FixButton } from "../fix-button";
 import { PullList, PullSidebar, SeverityTags } from "../pulls";
 import { SidebarKeys, PullActions } from "../pull-list-client";
 import { PullDiscussion } from "../pull-discussion";
+import { PullChat } from "../pull-chat";
 import { CatalogReview } from "../catalog-sync";
 import { RuntimeReview, ApprovalReview } from "../runtime";
 import { CodeTab } from "../code-tab";
@@ -33,12 +34,15 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
   const failing = checks?.filter((c) => c.conclusion && !["success", "neutral", "skipped"].includes(c.conclusion)).length ?? 0, running = checks?.some((c) => c.status !== "completed");
   const ci = checks && checks.length > 0 && <span className={failing ? "ci-failed" : running ? "muted" : "ci-passed"}>{failing ? "⚠ CI failed" : running ? "CI running" : "✓ CI passed"}</span>;
   const section = (title: string, icon: string, body: React.ReactNode, open = true) => <details className="ov-section" open={open}><summary><span className="ov-icon" aria-hidden>{icon}</span><span className="ov-title">{title}</span></summary><div className="ov-body">{body}</div></details>;
-  const chatLink = pull && <Link className="button" href={`/dashboard/chat?repository=${pull.repositoryId}&pull=${pull._id}`}><span aria-hidden>💬</span> Chat with PR</Link>;
+  const here = detail ? `/dashboard/pulls/${detail.review._id}` : pull ? `/dashboard/pulls/pr/${pull._id}` : "";
+  const chatOpen = Boolean(pull && filters.chat === "1");
+  const tabQuery = filters.tab ? `tab=${encodeURIComponent(filters.tab)}` : "";
+  const chatLink = pull && <Link className="button" data-chat-toggle aria-pressed={chatOpen} href={`${here}?${chatOpen ? tabQuery : `chat=1${tabQuery ? "&" + tabQuery : ""}`}`}><span aria-hidden>💬</span> Chat with PR</Link>;
   const github = (url?: string) => url && <>{sep}<a href={url} target="_blank" rel="noreferrer">GitHub ↗</a></>;
   const checkRows = checks && checks.length > 0 && <ul className="checks">{checks.map((c) => { const ok = c.status === "completed" && c.conclusion && ["success", "neutral", "skipped"].includes(c.conclusion); return <li key={c.name}><span className={"check " + (c.status !== "completed" ? "running" : ok ? "passed" : "failed")} aria-hidden>{c.status !== "completed" ? "…" : ok ? "✓" : "✕"}</span><span>{c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : c.name}{c.description && <small className="meta">{c.description}</small>}</span><span className="muted">{c.status !== "completed" ? c.status.replaceAll("_", " ") : c.conclusion}</span></li>; })}</ul>;
   return (
           (detail || pull ? (
-            <div className="pull-detail">
+            <div className={"pull-detail" + (chatOpen ? " with-chat" : "")}>
               <PullSidebar token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} currentId={pull?._id} />
               <div className="pull-main">
               <SidebarKeys />
@@ -241,6 +245,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
             </>
             )}
               </div>
+              {chatOpen && pull && <PullChat token={user.token} organizationId={organization._id} pull={pull} repository={data.repositories.find((r) => r._id === pull.repositoryId)} filters={filters} here={here} />}
             </div>
           ) : (
             <>

@@ -2087,6 +2087,228 @@ form.pull-actions {
 .check.failed {
   color: var(--error);
 }
+/* Chat with PR: a third column beside the pull request (424px, or 640px expanded). */
+.pull-detail.with-chat {
+  grid-template-columns: 324px minmax(0, 1fr) auto;
+}
+.pull-detail.with-chat[data-collapsed] {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.pull-chat {
+  position: sticky;
+  top: var(--header-h);
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  width: 424px;
+  height: calc(100vh - var(--header-h) - 44px);
+  border-left: 1px solid var(--line);
+  background: var(--bg);
+}
+.pull-chat.wide {
+  width: 640px;
+}
+.pull-chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+.pull-chat-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pull-chat-tools > a,
+.chat-history > summary {
+  color: var(--muted);
+  text-decoration: none;
+  list-style: none;
+  font-size: 14px;
+}
+.chat-history {
+  position: relative;
+  margin: 0;
+}
+.chat-history > summary::-webkit-details-marker {
+  display: none;
+}
+.chat-history .menu {
+  position: absolute;
+  right: 0;
+  top: 24px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  box-shadow: var(--shadow-popover);
+  font-size: 13px;
+}
+.chat-history .menu a {
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+}
+.chat-history .menu a:hover,
+.chat-history .menu a[aria-current="page"] {
+  background: var(--surface);
+}
+.pull-chat-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 18px;
+}
+.chat-empty {
+  padding-top: 48px;
+  text-align: center;
+}
+.chat-empty h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 500;
+}
+.chat-empty .chat-actions-label {
+  margin: 32px 0 8px;
+  text-align: left;
+}
+.chat-starters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.chat-starters form {
+  display: block !important;
+}
+.chat-starters button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 82px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  text-align: left;
+  font-size: 14px;
+  line-height: 20px;
+}
+.chat-starters button:hover {
+  background: var(--surface-3);
+}
+.pull-chat .chat-message {
+  margin: 16px 0;
+  font-size: 14px;
+}
+.pull-chat .chat-citations pre {
+  max-height: 160px;
+}
+form.pull-chat-form {
+  display: block !important;
+  margin: 12px 18px 16px;
+  padding: 4px 8px 8px;
+  border: 1px solid color-mix(in srgb, var(--text) 30%, transparent);
+  border-radius: 6px;
+}
+.pull-chat-form textarea {
+  border: 0;
+  padding: 8px;
+  resize: none;
+  font-size: 14px;
+}
+.pull-chat-form textarea:focus-visible {
+  outline: none;
+}
+.pull-chat-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.icon-button,
+.pull-chat-form .send {
+  min-height: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  font-size: 13px;
+}
+.icon-button {
+  background: transparent;
+}
+.icon-button.active {
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+.pull-chat-form .send {
+  margin-left: auto;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 85%, transparent);
+  color: var(--bg);
+}
+.context-state {
+  white-space: nowrap;
+  display: inline-flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.permission-chip {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.permission-chip select {
+  width: auto;
+  height: 22px;
+  padding: 0 22px 0 6px;
+  font-size: 12px;
+  background-position: right 6px center;
+}
+/* Select context mode: hovering shows what a click would pick; picks keep a blue outline. */
+[data-chat-select] .pull-main :is(.finding-card, .ov-section, .diff-file, .snippet, .pr-info-box, .checks li, .discussion .timeline li):hover {
+  outline: 1px dashed #3b82f6;
+  cursor: crosshair;
+}
+[data-chat-selected] {
+  outline: 2px solid #3b82f6 !important;
+  outline-offset: 2px;
+}
+@media (max-width: 1100px) {
+  .pull-detail.with-chat {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .pull-detail.with-chat .pull-sidebar,
+  .pull-detail.with-chat .sidebar-toggle {
+    display: none;
+  }
+}
+@media (max-width: 900px) {
+  .pull-detail.with-chat {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pull-chat,
+  .pull-chat.wide {
+    position: fixed;
+    inset: var(--header-h) 0 44px auto;
+    z-index: 35;
+    width: min(424px, 100vw);
+    height: auto;
+    box-shadow: var(--shadow-elevated);
+  }
+}
 /* Review tab: one collapsible card per finding, with the code it quotes. */
 .ov-body:has(> .finding-card) {
   padding: 0;
@@ -2259,6 +2481,13 @@ details.activity {
 }
 .stepper progress {
   width: 120px;
+}
+.proposal .row {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.proposal button {
+  white-space: nowrap;
 }
 .proposal {
   display: block !important;

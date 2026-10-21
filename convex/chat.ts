@@ -32,7 +32,7 @@ function present(m: Doc<"chatMessages">, visible: Set<Id<"repositories">>) {
 
 export const threads = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
   const { user } = await authorize(ctx, a.token, a.organizationId);
-  return (await ctx.db.query("chatThreads").withIndex("by_org_user", (q) => q.eq("organizationId", a.organizationId).eq("userId", user._id)).order("desc").take(50)).map((t) => ({ _id: t._id, title: t.title, updatedAt: t.updatedAt, repositoryIds: t.repositoryIds, origin: t.origin ?? "web" }));
+  return (await ctx.db.query("chatThreads").withIndex("by_org_user", (q) => q.eq("organizationId", a.organizationId).eq("userId", user._id)).order("desc").take(50)).map((t) => ({ _id: t._id, title: t.title, updatedAt: t.updatedAt, repositoryIds: t.repositoryIds, origin: t.origin ?? "web", pullRequestId: t.pullRequestId }));
 } });
 
 export const thread = query({ args: { token: v.string(), threadId: v.id("chatThreads") }, handler: async (ctx, a) => {

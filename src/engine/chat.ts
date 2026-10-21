@@ -17,7 +17,7 @@ export const chatBudget: AgentBudget = { toolCalls: 20, tokens: 250_000, wallMs:
 const repository = z.string().min(1).max(300);
 // Pull request actions the agent may suggest in a thread about a pull request; the developer approves
 // each one in the dashboard, and it runs with their own GitHub account. The agent never runs them.
-export const proposableActions = ["approve", "request_changes", "comment", "merge", "close", "ready", "update_branch"] as const;
+export const proposableActions = ["approve", "request_changes", "comment", "merge", "close", "reopen", "ready", "update_branch"] as const;
 export const chatToolInputs = {
   search_code: z.object({ query: z.string().min(2).max(200), repository: repository.optional() }),
   read_file: z.object({ repository, path: repoPath, startLine: z.number().int().positive().optional(), endLine: z.number().int().positive().optional() }),
@@ -34,7 +34,7 @@ const descriptions: Record<keyof typeof chatToolInputs, string> = {
   find_references: "Find lines that reference a symbol.",
   list_directory: "List entries directly under a directory ('' for the root).",
   get_related_files: "Files connected to a path by imports, calls or tests.",
-  answer: "Give the final answer in GitHub Markdown. Mark every claim with [n] referring to citations[n-1]; each citation copies complete lines exactly (without the 'N: ' prefix) from read_file output, starting at startLine. Call this once, when finished. Only when the developer asks you to act on the pull request under discussion (approve, request changes, comment, merge, close, mark ready, update branch), add proposal with the action, a one-line reason and any review or comment body; the developer approves it first, so never say it was done.",
+  answer: "Give the final answer in GitHub Markdown. Mark every claim with [n] referring to citations[n-1]; each citation copies complete lines exactly (without the 'N: ' prefix) from read_file output, starting at startLine. Call this once, when finished. Only when the developer asks you to act on the pull request under discussion (approve, request changes, comment, merge, close, reopen, mark ready, update branch), add proposal with the action, a one-line reason and any review or comment body; the developer approves it first, so never say it was done.",
 };
 const toJsonSchema = (schema: z.ZodTypeAny) => { const json = zodToJsonSchema(schema, { $refStrategy: "none", effectStrategy: "input" }) as Record<string, unknown>; delete json.$schema; return json; };
 export const chatTools: ToolDefinition[] = (Object.keys(chatToolInputs) as (keyof typeof chatToolInputs)[]).map((name) => ({ name, description: descriptions[name], inputSchema: toJsonSchema(chatToolInputs[name]) }));
