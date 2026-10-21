@@ -27,7 +27,7 @@ async function readable(ctx: QueryCtx | MutationCtx, userId: Id<"users">, ids: I
 const withheld = "Hidden: this answer used a repository you can no longer access.";
 function present(m: Doc<"chatMessages">, visible: Set<Id<"repositories">>) {
   const hidden = m.role === "assistant" && m.repositoryIds.some((id) => !visible.has(id));
-  return { _id: m._id, role: m.role, status: m.status, createdAt: m.createdAt, content: hidden ? withheld : m.content, citations: hidden ? [] : m.citations ?? [], events: hidden ? [] : m.events ?? [], limits: hidden ? [] : m.limits ?? [], error: m.error, repositoryIds: m.repositoryIds };
+  return { _id: m._id, role: m.role, status: m.status, createdAt: m.createdAt, content: hidden ? withheld : m.content, citations: hidden ? [] : m.citations ?? [], events: hidden ? [] : m.events ?? [], limits: hidden ? [] : m.limits ?? [], proposal: hidden ? undefined : m.proposal, error: m.error, repositoryIds: m.repositoryIds };
 }
 
 export const threads = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
@@ -131,11 +131,11 @@ export const event = internalMutation({ args: { messageId: v.id("chatMessages"),
   if (!m || m.status !== "running") return;
   await ctx.db.patch(m._id, { events: [...(m.events ?? []), { at: Date.now(), kind: a.kind.slice(0, 20), text: a.text.slice(0, 200) }].slice(-40), updatedAt: Date.now() });
 } });
-export const complete = internalMutation({ args: { messageId: v.id("chatMessages"), content: v.string(), citations: v.array(v.object({ repositoryId: v.id("repositories"), repository: v.string(), filePath: v.string(), startLine: v.number(), endLine: v.number(), quote: v.string(), revision: v.string(), url: v.optional(v.string()) })), limits: v.array(v.string()), inputTokens: v.number(), outputTokens: v.number(), estimatedCost: v.number() }, handler: async (ctx, a) => {
+export const complete = internalMutation({ args: { messageId: v.id("chatMessages"), content: v.string(), citations: v.array(v.object({ repositoryId: v.id("repositories"), repository: v.string(), filePath: v.string(), startLine: v.number(), endLine: v.number(), quote: v.string(), revision: v.string(), url: v.optional(v.string()) })), limits: v.array(v.string()), inputTokens: v.number(), outputTokens: v.number(), estimatedCost: v.number(), proposal: v.optional(v.object({ action: v.string(), reason: v.string(), body: v.optional(v.string()) })) }, handler: async (ctx, a) => {
   const m = await ctx.db.get(a.messageId);
   if (!m || m.status !== "running") return;
   if (a.citations.some((c) => !m.repositoryIds.includes(c.repositoryId))) throw new Error("Citation outside the selected repositories");
-  await ctx.db.patch(m._id, { status: "completed", content: a.content.slice(0, 12000), citations: a.citations.slice(0, 12), limits: a.limits.slice(0, 5), inputTokens: a.inputTokens, outputTokens: a.outputTokens, estimatedCost: a.estimatedCost, updatedAt: Date.now() });
+  await ctx.db.patch(m._id, { status: "completed", content: a.content.slice(0, 12000), citations: a.citations.slice(0, 12), limits: a.limits.slice(0, 5), inputTokens: a.inputTokens, outputTokens: a.outputTokens, estimatedCost: a.estimatedCost, ...(a.proposal ? { proposal: a.proposal } : {}), updatedAt: Date.now() });
   await ctx.db.patch(m.threadId, { updatedAt: Date.now() });
 } });
 export const fail = internalMutation({ args: { messageId: v.id("chatMessages"), error: v.string(), limits: v.optional(v.array(v.string())) }, handler: async (ctx, a) => {

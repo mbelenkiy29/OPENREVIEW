@@ -6,10 +6,10 @@ export type DiffFinding = { _id: string; title: string; severity: string; filePa
 export type DiffFile = { path: string; status: string; patch: string; truncated: boolean };
 // One collapsible block per changed file with findings shown inline after the line they anchor
 // to. Pure rendering, shared by the review page and the landing page's replica of it.
-export function DiffFiles({ files, findings }: { files: DiffFile[]; findings: DiffFinding[] }) {
+export function DiffFiles({ files, findings, open }: { files: DiffFile[]; findings: DiffFinding[]; open?: boolean }) {
   return <>{files.map((file) => {
     const hunks = parsePatch(file.patch), here = findings.filter((f) => f.filePath === file.path), placed = placeFindings(hunks, here);
-    return <details key={file.path} open={here.length > 0} className="diff-file">
+    return <details key={file.path} open={open || here.length > 0} className="diff-file">
       <summary><code>{file.path}</code> <span className="muted">{file.status}{here.length ? ` · ${here.length} finding${here.length === 1 ? "" : "s"}` : ""}</span></summary>
       {placed.outside.map((f) => <p key={f._id} className="diff-note"><span className={`badge ${f.severity}`}>{priorityBadge(f.severity)}</span> {f.title} <span className="muted">· line {f.startLine}, outside the changed hunks</span></p>)}
       {hunks.length === 0 ? <p className="muted">No text diff (binary, renamed or too large).</p> : <ScrollTable label={`Changes in ${file.path}`} className="table-scroll"><table className="diff-table"><tbody>

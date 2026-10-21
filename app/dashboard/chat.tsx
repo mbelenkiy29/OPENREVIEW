@@ -6,6 +6,7 @@ import { repositoryDisplay } from "../../src/provider-display";
 import { ReviewMarkdown } from "./markdown";
 import { ChatStream } from "./chat-stream";
 import { askChat, deleteChatThread } from "./actions";
+import { ProposedAction } from "./pull-list-client";
 
 // Codebase chat: private threads over indexed repositories; answers cite file:line at the indexed revision.
 export async function ChatPanel({ token, organizationId, repositories, filters }: { token: string; organizationId: Id<"organizations">; repositories: Doc<"repositories">[]; filters: Record<string, string | undefined> }) {
@@ -38,6 +39,7 @@ export async function ChatPanel({ token, organizationId, repositories, filters }
               <span className="muted"> @ {c.revision.slice(0, 12)}</span>
               <pre>{c.quote}</pre>
             </li>)}</ol>}
+            {m.proposal && pull && <ProposedAction pullRequestId={pull._id} head={pull.headSha} proposal={m.proposal} />}
             {m.limits.map((l) => <p key={l} className="muted">{l}</p>)}
           </> : m.status === "failed" ? <p role="alert">{m.error ?? "The answer failed."} {m.limits.join(" ")}</p> : <ChatStream messageId={m._id} initial={m.events.map((e) => ({ kind: e.kind, text: e.text }))} />}
         </article>)}

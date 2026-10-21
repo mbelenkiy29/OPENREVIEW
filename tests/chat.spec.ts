@@ -135,7 +135,16 @@ test('Chat with PR gives the agent the pull request review as context, only for 
  expect((await t.query(api.chat.thread,{token:alice.token,threadId})).pullRequestId).toBe(pr);
  const job=await t.query(internal.chat.job,{messageId});
  expect(job?.context).toContain('pull request #12');expect(job?.context).toContain('Moves totals to integer cents.');expect(job?.context).toContain('[P1] Rounding drops a cent (src/cart.ts:2)');
- const requests=script(()=>null);
+ // The agent may suggest an action on the pull request; it is stored for the developer to approve.
+ let turn=0;
+ const answer=(proposal?:unknown)=>call('answer',{answer:'Totals multiply integer cents by quantity [1].',citations:[{repository:'acme/shop',filePath:'src/cart.ts',startLine:2,quote:'  return cents * qty;'}],...(proposal?{proposal}:{})});
+ const requests=script(()=>++turn===1?[call('read_file',{repository:'acme/shop',path:'src/cart.ts'})]:turn===2?[answer({action:'approve',reason:'No blocking findings remain.'})]:null);
  await t.action(internal.chatJobs.answer,{messageId});
  expect(JSON.stringify(requests[0].messages[0])).toContain('Pull request (unverified context)');
+ expect((await t.query(api.chat.thread,{token:alice.token,threadId})).messages.at(-1)).toMatchObject({status:'completed',proposal:{action:'approve',reason:'No blocking findings remain.'}});
+ // Without a pull request the suggestion is dropped.
+ const plain=await t.mutation(api.chat.ask,{token:alice.token,organizationId:org,repositoryIds:[shop._id],question:'Approve it?'});
+ turn=0;
+ await t.action(internal.chatJobs.answer,{messageId:plain.messageId});
+ expect((await t.query(api.chat.thread,{token:alice.token,threadId:plain.threadId})).messages.at(-1)?.proposal).toBeUndefined();
 });

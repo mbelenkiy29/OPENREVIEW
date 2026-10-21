@@ -880,3 +880,13 @@ export async function pullAction(_state: { error?: string; saved?: string }, for
  try { const saved = await performPullAction(token, pullRequestId, credentials, parsed.data); revalidatePath("/dashboard/pulls", "layout"); return { saved }; }
  catch (error) { return { error: actionError(error) }; }
 }
+export async function markFileReviewed(reviewId: string, path: string, reviewed: boolean) {
+ const { token } = await current();
+ await backend().mutation(api.fileReviews.mark, { token, reviewId: reviewId as Id<"reviews">, path, reviewed });
+}
+export async function generateTour(form: FormData) {
+ const { token } = await current(), reviewId = text(form, "reviewId") as Id<"reviews">;
+ let error = "";
+ try { await backend().action(api.tourJobs.generate, { token, reviewId }); } catch (e) { error = e instanceof Error ? e.message.replace(/^.*Uncaught Error: /s, "").split("\n")[0].slice(0, 300) : "Tour failed"; }
+ redirect(`/dashboard/pulls/${reviewId}?tab=code&view=tour${error ? "&tourError=" + encodeURIComponent(error) : ""}`);
+}

@@ -15,7 +15,7 @@ import { SidebarKeys, PullActions } from "../pull-list-client";
 import { PullDiscussion } from "../pull-discussion";
 import { CatalogReview } from "../catalog-sync";
 import { RuntimeReview, ApprovalReview } from "../runtime";
-import { ReviewDiff } from "../review-diff";
+import { CodeTab } from "../code-tab";
 import { when, ago, status, priority, severityCounts } from "./shared";
 import { findingCounts } from "../../../src/priority";
 import type { DashboardContext } from "../load";
@@ -198,7 +198,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
               )}
                 {!detail.findings.length && <p className="muted">{["completed", "failed", "cancelled"].includes(detail.review.status) ? "No verified findings for this revision." : "Findings appear when the review finishes."}</p>}
               </>}
-              {tab === "code" && <ReviewDiff token={user.token} reviewId={detail.review._id} open finished={["completed", "failed", "cancelled"].includes(detail.review.status)} findings={detail.findings.map((f) => ({ _id: String(f._id), title: f.title, severity: f.severity, filePath: f.filePath, startLine: f.startLine, endLine: f.endLine, description: f.description }))} />}
+              {tab === "code" && <>{filters.tourError && <p role="alert">{filters.tourError}</p>}<CodeTab token={user.token} review={detail.review} filters={filters} findings={detail.findings.map((f) => ({ _id: String(f._id), title: f.title, severity: f.severity, filePath: f.filePath, startLine: f.startLine, endLine: f.endLine, description: f.description }))} /></>}
               {tab === "discussion" && <>
               {pull && <PullDiscussion token={user.token} pullRequestId={pull._id} filters={filters} canAct={canAct} />}
               <details className="activity"><summary>OpenReview activity: review history, processing, diagnostics and model calls</summary>

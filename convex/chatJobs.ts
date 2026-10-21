@@ -40,7 +40,7 @@ export const answer = internalAction({ args: { messageId: v.id("chatMessages") }
       try { url = source ? repositorySourceUrl(source.kind, source.instance, repo.fullName, c.revision, c.filePath, repo.externalId) + (source.kind === "github" || source.kind === "github-enterprise" ? `#L${c.startLine}${c.endLine > c.startLine ? "-L" + c.endLine : ""}` : source.kind === "gitlab" ? `#L${c.startLine}${c.endLine > c.startLine ? "-" + c.endLine : ""}` : "") : undefined; } catch { url = undefined; }
       return { ...c, repositoryId: repo._id, ...(url ? { url } : {}) };
     });
-    await ctx.runMutation(internal.chat.complete, { messageId: a.messageId, content: run.answer.text, citations, limits: run.limits, inputTokens: total.inputTokens, outputTokens: total.outputTokens, estimatedCost: total.estimatedCost });
+    await ctx.runMutation(internal.chat.complete, { messageId: a.messageId, content: run.answer.text, ...(run.answer.proposal ? { proposal: run.answer.proposal } : {}), citations, limits: run.limits, inputTokens: total.inputTokens, outputTokens: total.outputTokens, estimatedCost: total.estimatedCost });
   } catch (error) {
     if (error instanceof ModelFailure && !usage.includes(error.usage)) usage.push(error.usage);
     await record().catch(() => undefined);

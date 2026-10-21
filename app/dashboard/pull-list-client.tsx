@@ -1,6 +1,6 @@
 "use client";
 import { useActionState, useEffect, useState } from "react";
-import { bulkFixPrompt, bulkReview, pullAction } from "./actions";
+import { bulkFixPrompt, bulkReview, markFileReviewed, pullAction } from "./actions";
 
 const selected = () => [...document.querySelectorAll<HTMLInputElement>('input[form="bulk-pulls"]:checked')];
 const typing = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
@@ -141,6 +141,34 @@ export function ThreadActions({ pullRequestId, threadId, replyTo, resolved }: { 
       <input type="hidden" name="threadId" value={threadId} />
       {replyTo !== undefined && <><input type="hidden" name="commentId" value={replyTo} /><textarea name="body" rows={2} aria-label="Reply" placeholder="Reply…" /><button name="action" value="reply" className="small" disabled={pending}>Reply</button></>}
       <button name="action" value={resolved ? "unresolve" : "resolve"} className="small" disabled={pending}>{resolved ? "Unresolve conversation" : "Resolve conversation"}</button>
+      {result.error && <span role="alert">{result.error}</span>}
+      {result.saved && <span role="status">{result.saved}</span>}
+    </form>
+  );
+}
+
+// The developer's own "Reviewed" mark on a changed file (cleared by a new head).
+export function ReviewedToggle({ reviewId, path, reviewed }: { reviewId: string; path: string; reviewed: boolean }) {
+  const [checked, setChecked] = useState(reviewed);
+  return <input type="checkbox" checked={checked} aria-label={`Reviewed ${path}`} title="Reviewed" onChange={async (e) => { const next = e.currentTarget.checked; setChecked(next); try { await markFileReviewed(reviewId, path, next); } catch { setChecked(!next); } }} />;
+}
+
+const proposalLabels: Record<string, string> = { approve: "Approve the pull request", request_changes: "Request changes", comment: "Post a comment", merge: "Merge (squash)", close: "Close the pull request", ready: "Mark ready for review", update_branch: "Update the branch" };
+// A pull request action the chat agent suggested. Nothing happens until the developer approves it.
+export function ProposedAction({ pullRequestId, head, proposal }: { pullRequestId: string; head: string; proposal: { action: string; reason: string; body?: string } }) {
+  const [result, action, pending] = useActionState(pullAction, {});
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+  return (
+    <form className="proposal" action={action} onSubmit={(e) => { if (!confirm(`${proposalLabels[proposal.action] ?? proposal.action} on GitHub as you?`)) e.preventDefault(); }}>
+      <input type="hidden" name="pullRequestId" value={pullRequestId} />
+      <input type="hidden" name="action" value={proposal.action} />
+      <input type="hidden" name="head" value={head} />
+      <input type="hidden" name="method" value="squash" />
+      {proposal.body && <input type="hidden" name="body" value={proposal.body} />}
+      <p><strong>Suggested action:</strong> {proposalLabels[proposal.action] ?? proposal.action} · <span className="muted">{proposal.reason}</span></p>
+      {proposal.body && <blockquote>{proposal.body}</blockquote>}
+      {!result.saved && <span className="row"><button className="small primary" disabled={pending}>Approve</button><button type="button" className="small" onClick={() => setDismissed(true)}>Cancel</button></span>}
       {result.error && <span role="alert">{result.error}</span>}
       {result.saved && <span role="status">{result.saved}</span>}
     </form>

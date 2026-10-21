@@ -176,3 +176,14 @@ test("dashboard actions need write access on a GitHub.com repository and report 
  await s.t.run(ctx=>ctx.db.patch(s.repo._id,{connectionId}));
  await expect(s.t.query(api.pulls.actionTarget,{token:s.token,pullRequestId:pullRequestId!})).rejects.toThrow("GitHub.com");
 });
+test("Reviewed marks are per developer and stop counting once the head moves",async()=>{
+ const s=await setup(),now=Date.now();
+ const reviewId=await s.t.run(ctx=>ctx.db.insert("reviews",{organizationId:s.organizationId,repositoryId:s.repo._id,prNumber:1,headSha:"a".repeat(40),status:"completed",mode:"standard",attempts:1,createdAt:now,updatedAt:now}));
+ await s.t.mutation(api.fileReviews.mark,{token:s.token,reviewId,path:"src/a.ts",reviewed:true});
+ await s.t.mutation(api.fileReviews.mark,{token:s.token,reviewId,path:"src/b.ts",reviewed:true});
+ await s.t.mutation(api.fileReviews.mark,{token:s.token,reviewId,path:"src/b.ts",reviewed:false});
+ expect(await s.t.query(api.fileReviews.list,{token:s.token,reviewId})).toEqual(["src/a.ts"]);
+ const next=await s.t.run(ctx=>ctx.db.insert("reviews",{organizationId:s.organizationId,repositoryId:s.repo._id,prNumber:1,headSha:"c".repeat(40),status:"completed",mode:"standard",attempts:1,createdAt:now,updatedAt:now}));
+ expect(await s.t.query(api.fileReviews.list,{token:s.token,reviewId:next})).toEqual([]);
+ await expect(s.t.mutation(api.fileReviews.mark,{token:s.token,reviewId,path:"",reviewed:true})).rejects.toThrow("Invalid path");
+});

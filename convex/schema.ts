@@ -513,6 +513,8 @@ export default defineSchema({
     findingSeverity: v.optional(v.string()),
     // Per-priority counts (P0–P3) plus security, for the pull request list badges.
     findingCounts: v.optional(v.record(v.string(), v.number())),
+    // On-demand guided tour of the change (Code tab), grouped by the model; paths are checked against the diff.
+    tour: v.optional(v.object({ steps: v.array(v.object({ title: v.string(), explanation: v.string(), files: v.array(v.string()) })), createdAt: v.number() })),
     models: v.optional(v.string()),
     runtimeEvidence: v.optional(runtimeEvidenceValidator),
     organizationId: org,
@@ -735,6 +737,16 @@ export default defineSchema({
   }).index("by_key", ["key"]),
   slackEventReceipts: defineTable({ eventId: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Codebase chat (web): threads are private to the member who started them.
+  // Per-developer "Reviewed" marks on changed files; a mark counts only for the head it was made at.
+  fileReviews: defineTable({
+    organizationId: org,
+    userId: v.id("users"),
+    repositoryId: repo,
+    prNumber: v.number(),
+    path: v.string(),
+    headSha: v.string(),
+    updatedAt: v.number(),
+  }).index("by_user_pr", ["userId", "repositoryId", "prNumber"]).index("by_org", ["organizationId"]),
   chatThreads: defineTable({
     organizationId: org,
     userId: v.id("users"),
@@ -765,6 +777,8 @@ export default defineSchema({
     estimatedCost: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
+    // A pull request action the agent suggested; it runs only when the developer approves it.
+    proposal: v.optional(v.object({ action: v.string(), reason: v.string(), body: v.optional(v.string()) })),
   }).index("by_thread", ["threadId"]), // ordered by insertion (_creationTime)
   learnedRules: defineTable({
     organizationId: org,
