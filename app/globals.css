@@ -1216,10 +1216,15 @@ tr:last-child td {
   margin: 0 8px 0 auto;
 }
 .key-hints {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: 0;
   font-size: 12px;
   color: var(--muted);
+  background: var(--bg);
   border-top: 1px solid var(--line);
-  padding-top: 12px;
+  padding: 10px 0;
 }
 kbd {
   font-family: var(--font-mono);
