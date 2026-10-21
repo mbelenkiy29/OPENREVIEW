@@ -591,7 +591,8 @@ export default defineSchema({
     .index("by_repo_path", ["repositoryId", "filePath"])
     .index("by_pr", ["repositoryId", "prNumber"])
     .index("by_fingerprint", ["repositoryId", "prNumber", "fingerprint"])
-    .index("by_org_time", ["organizationId", "createdAt"]),
+    .index("by_org_time", ["organizationId", "createdAt"])
+    .index("by_org_rule", ["organizationId", "ruleId"]),
   // Team conventions learned from human review comments (review guidance only).
   // Cloud billing (BILLING_ENABLED=true only). One account per workspace; Stripe state is applied
   // from signed webhooks, newest event wins.

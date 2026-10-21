@@ -4,6 +4,14 @@
 
 ## October 2026
 
+### Memory
+- Custom rules is now a searchable table, laid out like Greptile's Memory tab:
+  - Search by text, or filter with `status:active|disabled` and `repository:owner/name`.
+  - Each rule shows its usage (findings that cite it) and addressed rate.
+  - Click a rule for an analytics panel: acceptance rate, uses this month, upvote and downvote ratios, and recent usage.
+  - Add, edit and delete happen in dialogs. "Draft with AI" (the rule assistant) lives in the Add dialog, and its suggestions appear as Suggested rows to approve or dismiss.
+- The Memory sidebar has icons and a Greptile-style order. Cross-repo context and Knowledge Base have new empty states, and Integrations is split into Connected and Available tables.
+
 ### Dashboard look
 - The dashboard now has a cleaner, Greptile-style look:
   - Neutral greys in light and dark mode.
