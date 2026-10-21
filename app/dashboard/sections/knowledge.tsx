@@ -19,8 +19,8 @@ export function KnowledgeSection({ ctx }: { ctx: DashboardContext }) {
             {knowledge.filter(k=>k.failed).map(k=><section key={k.repo._id}><h2>{k.repo.fullName}</h2><p className="muted repository-identity">{providerDisplay(k.repo.provider)}</p><p role="alert">Knowledge could not be loaded. Retry the request; if access changed, choose an accessible repository.</p><a className="button" href={knowledgeState.retryUrl}>Retry knowledge</a></section>)}
             {knowledgeState.empty && (
               <Empty
-                title={filters.q || requestedRepository ? "No matching knowledge" : "Repository knowledge"}
-                text={filters.q || requestedRepository ? "Adjust the search or repository filter. Knowledge is generated after repository indexing." : "Codebase knowledge is generated after indexing. Enable a repository to begin."}
+                title={filters.q || requestedRepository ? "No matching knowledge" : "No knowledge base yet"}
+                text={filters.q || requestedRepository ? "Adjust the search or repository filter. Knowledge is generated after repository indexing." : "OpenReview hasn't built a knowledge base for these repositories yet. It's generated after a repository is indexed, and what it learns from reviews shows up here."}
               />
             )}
             {knowledge.flatMap((k) =>

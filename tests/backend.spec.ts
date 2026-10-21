@@ -1448,10 +1448,10 @@ test("rules pagination retains inherited defaults beyond 200 without leaking pri
  const seen: string[]=[];let cursor:string|undefined;let pages=0;
  do{
   const result=await t.query(api.dashboard.rulesPage,{token:bob,organizationId,repositoryId:publicRepo._id,cursor});
-  expect(result.page.length).toBeLessThanOrEqual(30);seen.push(...result.page.map(r=>r.title));pages++;
+  expect(result.page.length).toBeLessThanOrEqual(10);seen.push(...result.page.map(r=>r.title));pages++;
   cursor=result.isDone?undefined:result.continueCursor;
  }while(cursor);
- expect(pages).toBe(7);expect(seen).toHaveLength(206);expect(new Set(seen).size).toBe(206);expect(seen).toContain("Workspace 0");expect(seen).toContain("Workspace 204");expect(seen).toContain("Public local");expect(seen).not.toContain("Private local");expect(seen).not.toContain("Foreign default");
+ expect(pages).toBe(21);expect(seen).toHaveLength(206);expect(new Set(seen).size).toBe(206);expect(seen).toContain("Workspace 0");expect(seen).toContain("Workspace 204");expect(seen).toContain("Public local");expect(seen).not.toContain("Private local");expect(seen).not.toContain("Foreign default");
  await expect(t.query(api.dashboard.rulesPage,{token:bob,organizationId,repositoryId:privateRepo._id})).rejects.toThrow("not accessible");
  await expect(t.query(api.dashboard.rulesPage,{token:alice,organizationId,teamId,repositoryId:publicRepo._id})).rejects.toThrow("not accessible");
  await expect(t.query(api.dashboard.rulesPage,{token:alice,organizationId:foreign})).rejects.toThrow("Forbidden");

@@ -153,8 +153,14 @@ export async function saveRule(form: FormData) {
     enabled: text(form, "enabled") !== "false",
     ...ruleScopeArgs(text(form, "scope"), text(form, "repositoryId"), text(form, "repositoryPattern")),
   });
-  await notify("Rule saved.");
+  await notify(text(form, "remove") === "true" ? "Rule deleted." : "Rule saved.");
   revalidatePath("/dashboard", "layout");
+  closeMemoryDialog(form);
+}
+// Forms in the Custom rules dialogs return to the rules list with the dialog closed (same-page paths only).
+function closeMemoryDialog(form: FormData) {
+  const back = text(form, "returnTo");
+  if (/^\/dashboard\/memory\/rules(\?[\w=&%.:+~-]*)?$/.test(back)) redirect(back);
 }
 export async function feedback(form: FormData) {
   const { token } = await current();
@@ -439,6 +445,7 @@ export async function requestRuleAssistant(form: FormData) {
     await notify("The rule assistant is working. Refresh in a moment to review its suggestions.");
   } catch (e) { await notify(backendMessage(e, "The rule assistant could not start."), "error"); }
   revalidatePath("/dashboard", "layout");
+  closeMemoryDialog(form);
 }
 export async function decideRuleSuggestion(form: FormData) {
   const { token } = await current();
