@@ -32,7 +32,7 @@ async function enrich(ctx:QueryCtx,viewerId:Id<"users">,rows:PullDoc[]){
 const running=new Set(["queued","ingesting","indexing","reviewing","verifying","summarizing","publishing"]);
 // Dashboard list: filters apply before paging, so pages are full and the total is exact.
 // shortcut: reads at most the newest 1,000 matching changes (500 with review filters); add a counter table or the aggregate component when workspaces outgrow that.
-export const browse=query({args:{token:v.string(),organizationId:v.id("organizations"),teamId:v.optional(v.id("teams")),repositoryId:v.optional(v.id("repositories")),author:v.optional(v.string()),state:v.optional(v.string()),search:v.optional(v.string()),status:v.optional(v.string()),impact:v.optional(v.string()),scoreMin:v.optional(v.number()),scoreMax:v.optional(v.number()),page:v.number(),pageSize:v.number()},handler:async(ctx,a)=>{
+export const browse=query({args:{token:v.string(),organizationId:v.id("organizations"),teamId:v.optional(v.id("teams")),repositoryId:v.optional(v.id("repositories")),author:v.optional(v.string()),state:v.optional(v.string()),search:v.optional(v.string()),status:v.optional(v.string()),impact:v.optional(v.string()),reviewer:v.optional(v.string()),scoreMin:v.optional(v.number()),scoreMax:v.optional(v.number()),page:v.number(),pageSize:v.number()},handler:async(ctx,a)=>{
  const viewer=await authenticated(ctx,a.token);
  const repos=await visibleRepositories(ctx,a.token,a.organizationId,a.teamId),allowed=new Set(repos.map(r=>r._id).filter(id=>!a.repositoryId||id===a.repositoryId));
  if(a.repositoryId&&!allowed.size)throw new Error("Repository not accessible in selected scope");
@@ -41,8 +41,9 @@ export const browse=query({args:{token:v.string(),organizationId:v.id("organizat
  const empty={page:[],total:0,capped:false};
  if(!allowed.size)return empty;
  const source=a.search?ctx.db.query("pullRequests").withSearchIndex("by_title",q=>q.search("title",a.search!).eq("organizationId",a.organizationId)):a.repositoryId?ctx.db.query("pullRequests").withIndex("by_repo_number",q=>q.eq("repositoryId",a.repositoryId!)).order("desc"):ctx.db.query("pullRequests").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).order("desc");
- const author=a.author?.toLowerCase();
- const rows=(await source.filter(q=>q.and(a.state?q.eq(q.field("state"),a.state):true)).take(limit+1)).filter(pr=>allowed.has(pr.repositoryId)&&(!author||pr.author.toLowerCase()===author));
+ const author=a.author?.toLowerCase(),reviewer=a.reviewer?.toLowerCase();
+ // "closed" means every change that is no longer open (Greptile's Closed list), merged included.
+ const rows=(await source.filter(q=>a.state==="closed"?q.or(q.eq(q.field("state"),"closed"),q.eq(q.field("state"),"merged")):a.state?q.eq(q.field("state"),a.state):true).take(limit+1)).filter(pr=>allowed.has(pr.repositoryId)&&(!author||pr.author.toLowerCase()===author)&&(!reviewer||Boolean(pr.requestedReviewers?.some(r=>r.toLowerCase()===reviewer))));
  let matched:PullDoc[]|Awaited<ReturnType<typeof enrich>>=rows.slice(0,limit);
  if(reviewFilters)matched=(await enrich(ctx,viewer._id,rows.slice(0,limit))).filter(pr=>{
   const r=pr.latest&&pr.latest.headSha===pr.headSha?pr.latest:null,score=r?.reviewScore?.value;

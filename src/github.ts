@@ -266,7 +266,7 @@ export class Github {
     ]);
     const seen=new Set<string>();
     return [
-      ...runs.check_runs.map(c=>({name:c.name,status:c.status,conclusion:c.conclusion,url:c.html_url??undefined})),
+      ...runs.check_runs.map(c=>({name:c.name,status:c.status,conclusion:c.conclusion,url:c.html_url??undefined,description:undefined as string|undefined})),
       ...statuses.filter(s=>!seen.has(s.context)&&Boolean(seen.add(s.context))).map(s=>({name:s.context,status:s.state==="pending"?"in_progress":"completed",conclusion:s.state==="pending"?null:s.state,url:s.target_url??undefined,description:s.description??undefined})),
     ];
   }

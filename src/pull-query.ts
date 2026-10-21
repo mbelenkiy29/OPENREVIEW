@@ -1,7 +1,7 @@
-// Greptile-style pull request search: free text plus author:, repo:, status:, state:, impact: and
+// Greptile-style pull request search: free text plus author:, reviewer:, repo:, status:, state:, impact: and
 // confidence: tokens ("confidence:>3", "author:@alice", 'repo:"acme/api"').
-export type PullQuery = { search?: string; author?: string; repo?: string; status?: string; state?: string; impact?: string; scoreMin?: number; scoreMax?: number };
-const keys = ["author", "repo", "status", "state", "impact", "confidence"] as const;
+export type PullQuery = { search?: string; author?: string; reviewer?: string; repo?: string; status?: string; state?: string; impact?: string; scoreMin?: number; scoreMax?: number };
+const keys = ["author", "reviewer", "repo", "status", "state", "impact", "confidence"] as const;
 export function parsePullQuery(input: string): PullQuery {
   const query: PullQuery = {}, words: string[] = [];
   for (const token of input.match(/[a-z]+:"[^"]*"|\S+/gi) ?? []) {
@@ -14,7 +14,7 @@ export function parsePullQuery(input: string): PullQuery {
       if (op.startsWith(">")) query.scoreMin = op === ">" ? n + 1 : n;
       else if (op.startsWith("<")) query.scoreMax = op === "<" ? n - 1 : n;
       else query.scoreMin = query.scoreMax = n;
-    } else query[key] = key === "author" ? value.replace(/^@/, "") : key === "repo" ? value : value.toLowerCase();
+    } else query[key] = key === "author" || key === "reviewer" ? value.replace(/^@/, "") : key === "repo" ? value : value.toLowerCase();
   }
   if (words.length) query.search = words.join(" ");
   return query;

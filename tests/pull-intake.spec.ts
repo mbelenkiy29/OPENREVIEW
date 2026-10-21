@@ -148,6 +148,7 @@ test("browse filters before paging, counts the total and filters on the current 
  expect((await s.t.query(api.pulls.browse,{...args,page:1,scoreMin:4})).page.map(p=>p.number).sort()).toEqual([1,3]);
  expect((await s.t.query(api.pulls.browse,{...args,page:1,impact:"high",scoreMax:3})).page.map(p=>p.number)).toEqual([2]);
  expect((await s.t.query(api.pulls.browse,{...args,page:1,status:"unreviewed",state:"open"})).total).toBe(17);
+ expect((await s.t.query(api.pulls.browse,{...args,page:1,state:"closed"})).total).toBe(5);
  await expect(s.t.query(api.pulls.browse,{...args,page:0})).rejects.toThrow("Invalid page");
 });
 test("GitHub size, draft and requested reviewers are kept on the pull request row",async()=>{
@@ -157,6 +158,7 @@ test("GitHub size, draft and requested reviewers are kept on the pull request ro
  await s.t.mutation(internal.pulls.observe,pullObservation(s.repo._id,pr,500));
  const [row]=(await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,page:1,pageSize:10})).page;
  expect(row).toMatchObject({number:7,isDraft:true,additions:120,deletions:4,changedFiles:3,requestedReviewers:["bob"]});
+ expect((await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,page:1,pageSize:10,reviewer:"BOB"})).page.map(p=>p.number)).toEqual([7]);
  // Providers without these fields (or Gitea's nulls) still parse.
  expect(pullObservation(s.repo._id,changeMetadataSchema.parse({...pr,additions:null,requested_reviewers:null}),1)).toMatchObject({additions:undefined,requestedReviewers:undefined});
 });

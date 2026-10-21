@@ -5,6 +5,7 @@ import { parsePullQuery, withToken, withoutToken } from "../src/pull-query";
 test("search tokens become filters and the rest stays free text", () => {
   assert.deepEqual(parsePullQuery("retry budget author:@Alice repo:acme/api status:Completed impact:HIGH state:open"), { author: "Alice", repo: "acme/api", status: "completed", impact: "high", state: "open", search: "retry budget" });
   assert.deepEqual(parsePullQuery('repo:"acme/my api" fix'), { repo: "acme/my api", search: "fix" });
+  assert.deepEqual(parsePullQuery("reviewer:@Bob"), { reviewer: "Bob" });
   assert.deepEqual(parsePullQuery(""), {});
 });
 

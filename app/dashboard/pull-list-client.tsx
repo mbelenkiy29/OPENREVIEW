@@ -1,5 +1,6 @@
 "use client";
 import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { bulkFixPrompt, bulkReview, markFileReviewed, pullAction } from "./actions";
 
 const selected = () => [...document.querySelectorAll<HTMLInputElement>('input[form="bulk-pulls"]:checked')];
@@ -18,12 +19,14 @@ export function BulkBar() {
   return (
     <form id="bulk-pulls" className="bulk-bar" action={action} onSubmit={(e) => { if (!confirm(`Re-review ${count} pull ${count === 1 ? "request" : "requests"}? Each review uses model credits.`)) e.preventDefault(); }}>
       <span aria-live="polite">{count} selected</span>
-      <button type="submit" className="small" disabled={!count || pending}>{pending ? "Starting reviews…" : "Re-review"}</button>
-      <button type="button" className="small" disabled={!count} onClick={async () => {
-        const ids = selected().map((box) => box.value.split("|")[2]).filter(Boolean);
-        try { const prompt = await bulkFixPrompt(ids); if (!prompt) return setCopied("No fixable findings in the selection"); await navigator.clipboard.writeText(prompt); setCopied("Fix prompts copied"); }
-        catch { setCopied("Copy failed"); }
-      }}>Copy fix prompts</button>
+      {count > 0 && <>
+        <button type="submit" className="small" disabled={pending}>{pending ? "Starting reviews…" : "Re-review"}</button>
+        <button type="button" className="small" onClick={async () => {
+          const ids = selected().map((box) => box.value.split("|")[2]).filter(Boolean);
+          try { const prompt = await bulkFixPrompt(ids); if (!prompt) return setCopied("No fixable findings in the selection"); await navigator.clipboard.writeText(prompt); setCopied("Fix prompts copied"); }
+          catch { setCopied("Copy failed"); }
+        }}>Copy fix prompts</button>
+      </>}
       {copied && <span role="status" className="muted">{copied}</span>}
       {state.error && <span role="alert">{state.error}</span>}
       {state.saved && <span role="status">{state.saved}</span>}
@@ -32,7 +35,7 @@ export function BulkBar() {
 }
 
 // J/K move, Enter opens, Space selects, ⌘A selects all, G re-reviews the selection, / searches.
-export function PullKeys() {
+export function PullKeys({ hints }: { hints: [string, string][] }) {
   useEffect(() => {
     let focused = -1;
     const onKey = (e: KeyboardEvent) => {
@@ -65,11 +68,45 @@ export function PullKeys() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+  return <KeyFooter hints={hints} />;
+}
+
+const allShortcuts: [string, string][] = [["J K", "next / previous"], ["Enter", "open"], ["Space", "select"], ["⌘ A", "select all"], ["G", "re-review"], ["/", "search"], ["H L", "switch tabs"], ["⌘ B", "sidebar"], ["M", "merge"], ["A", "approve"], ["X", "request changes"], ["C", "close"], ["O", "reopen"], ["D", "draft / ready"], ["U", "update branch"], ["F", "fix"]];
+// Greptile's pinned "Keyboard Shortcuts" bar: the keys for this page, "View all", and a dismiss button.
+function KeyFooter({ hints }: { hints: [string, string][] }) {
+  const [hidden, setHidden] = useState(false), [all, setAll] = useState(false);
+  useEffect(() => { try { setHidden(localStorage.getItem("openreview:key-footer") === "hidden"); } catch { /* storage blocked: show it */ } }, []);
+  if (hidden) return null;
+  const keys = (k: string) => k.split(" ").map((x) => <kbd key={x}>{x}</kbd>);
   return (
-    <p className="key-hints" aria-label="Keyboard shortcuts">
-      <kbd>J</kbd> <kbd>K</kbd> navigate · <kbd>Space</kbd> select · <kbd>Enter</kbd> open · <kbd>G</kbd> re-review · <kbd>/</kbd> search
-    </p>
+    <footer className="key-footer" aria-label="Keyboard shortcuts">
+      {all && <div className="key-panel" role="dialog" aria-label="All keyboard shortcuts">{allShortcuts.map(([k, label]) => <span key={label}>{keys(k)} {label}</span>)}</div>}
+      <span className="key-title">Keyboard Shortcuts</span>
+      {hints.map(([k, label]) => <span key={label} className="key-hint">{keys(k)} {label}</span>)}
+      <button type="button" className="link-button" onClick={() => setAll(!all)} aria-expanded={all}>View all</button>
+      <button type="button" className="key-close" aria-label="Hide keyboard shortcuts" onClick={() => { setHidden(true); try { localStorage.setItem("openreview:key-footer", "hidden"); } catch { /* not remembered */ } }}>×</button>
+    </footer>
   );
+}
+
+// Header checkbox that selects or clears every row on the page (⌘A does the same).
+export function SelectAll() {
+  return <input type="checkbox" aria-label="Select all pull requests on this page" onChange={(e) => { const on = e.currentTarget.checked; document.querySelectorAll<HTMLInputElement>('input[form="bulk-pulls"]').forEach((b) => { b.checked = on; }); document.dispatchEvent(new Event("change")); }} />;
+}
+
+// Copies the fix prompt for one review's findings (the list's "Copy Fix" action).
+export function CopyFix({ reviewId }: { reviewId: string }) {
+  const [label, setLabel] = useState("Copy Fix");
+  return <button type="button" className="text-action" onClick={async () => {
+    try { const prompt = await bulkFixPrompt([reviewId]); if (!prompt) return setLabel("Nothing to fix"); await navigator.clipboard.writeText(prompt); setLabel("Copied"); }
+    catch { setLabel("Copy failed"); }
+  }}><span aria-hidden>⧉</span> {label}</button>;
+}
+
+// Rows-per-page box at the left of the pager.
+export function PageSize({ value, options }: { value: number; options: number[] }) {
+  const router = useRouter();
+  return <select className="page-size" aria-label="Rows per page" value={value} onChange={(e) => { const url = new URL(location.href); url.searchParams.set("size", e.currentTarget.value); url.searchParams.delete("p"); router.push(url.pathname + url.search); }}>{options.map((n) => <option key={n} value={n}>{n}</option>)}</select>;
 }
 
 // On an open pull request: ⌘B collapses the sidebar (remembered in this browser), J/K open the next or
@@ -83,6 +120,8 @@ export function SidebarKeys() {
       const key = e.key.toLowerCase();
       if ((e.metaKey || e.ctrlKey) && key === "b") { e.preventDefault(); toggle(root); return; }
       if (e.metaKey || e.ctrlKey) return;
+      if (key === "/") { e.preventDefault(); document.querySelector<HTMLInputElement>(".pull-sidebar input[name=find]")?.focus(); return; }
+      if (key === "f") return document.querySelector<HTMLElement>(".status-card .fix-control button:not(:disabled)")?.click();
       const step = key === "j" || key === "l" ? 1 : key === "k" || key === "h" ? -1 : 0;
       if (!step) return document.querySelector<HTMLElement>(`.pull-actions [data-key="${key}"]:not(:disabled)`)?.click();
       const links = [...document.querySelectorAll<HTMLAnchorElement>(key === "j" || key === "k" ? ".pull-sidebar ol a" : ".tabs a")];
@@ -91,14 +130,18 @@ export function SidebarKeys() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
-  return <button type="button" className="small sidebar-toggle" aria-label="Toggle pull request list (⌘B)" onClick={() => toggle(document.querySelector(".pull-detail"))}>☰</button>;
+  return <>
+    <button type="button" className="sidebar-toggle" aria-label="Toggle pull request list (⌘B)" title="Toggle sidebar (⌘B)" onClick={() => toggle(document.querySelector(".pull-detail"))}>◧</button>
+    <KeyFooter hints={[["J K", "switch PR"], ["H L", "switch tabs"], ["M", "merge"], ["F", "fix"], ["/", "search"], ["⌘ B", "sidebar"]]} />
+  </>;
 }
 function toggle(root: HTMLElement | null) {
   const closed = root?.toggleAttribute("data-collapsed");
   try { localStorage.setItem("openreview:pull-sidebar", closed ? "closed" : "open"); } catch { /* not remembered */ }
 }
 
-// Merge, review, close, draft and branch actions on an open pull request, sent as the developer.
+// Merge, review, close, draft and branch actions on an open pull request, sent as the developer:
+// Greptile's Merge button with a ▾ menu for the rest.
 // Keys: M merge, A approve, X request changes, C close, O reopen, D draft/ready, U update branch.
 export function PullActions({ pullRequestId, head, state, draft }: { pullRequestId: string; head: string; state: string; draft?: boolean }) {
   const [result, action, pending] = useActionState(pullAction, {});
@@ -107,24 +150,22 @@ export function PullActions({ pullRequestId, head, state, draft }: { pullRequest
     <form className="pull-actions" action={action}>
       <input type="hidden" name="pullRequestId" value={pullRequestId} />
       <input type="hidden" name="head" value={head} />
-      {state === "open" ? <>
-        <span className="merge-group">
-          <button name="action" value="merge" className="primary small" data-key="m" disabled={pending || draft} onClick={ask("Merge this pull request on GitHub as you?")}>Merge</button>
-          <select name="method" aria-label="Merge method" defaultValue="squash"><option value="squash">Squash</option><option value="merge">Merge commit</option><option value="rebase">Rebase</option></select>
-        </span>
-        <details>
-          <summary data-key="x">Review…</summary>
-          <textarea name="body" rows={3} aria-label="Review comment" placeholder="Leave a comment (required to request changes)" />
-          <span className="row">
-            <button name="action" value="approve" className="small" data-key="a" disabled={pending}>Approve</button>
-            <button name="action" value="request_changes" className="small" disabled={pending}>Request changes</button>
-            <button name="action" value="comment" className="small" disabled={pending}>Comment</button>
-          </span>
+      {state === "open" ? <span className="merge-group">
+        <button name="action" value="merge" data-key="m" disabled={pending || draft} title={draft ? "Draft pull requests cannot be merged" : "Merge (M)"} onClick={ask("Merge this pull request on GitHub as you?")}><span aria-hidden>⑂</span> Merge <kbd>M</kbd></button>
+        <details className="action-menu">
+          <summary aria-label="More pull request actions" data-key="x">▾</summary>
+          <div className="menu">
+            <label>Merge method<select name="method" defaultValue="squash"><option value="squash">Squash and merge</option><option value="merge">Create a merge commit</option><option value="rebase">Rebase and merge</option></select></label>
+            <textarea name="body" rows={3} aria-label="Review comment" placeholder="Comment (required to request changes)" />
+            <button name="action" value="approve" data-key="a" disabled={pending}>Approve <kbd>A</kbd></button>
+            <button name="action" value="request_changes" disabled={pending}>Request changes <kbd>X</kbd></button>
+            <button name="action" value="comment" disabled={pending}>Comment</button>
+            <button name="action" value={draft ? "ready" : "draft"} data-key="d" disabled={pending}>{draft ? "Ready for review" : "Convert to draft"} <kbd>D</kbd></button>
+            <button name="action" value="update_branch" data-key="u" disabled={pending}>Update branch <kbd>U</kbd></button>
+            <button name="action" value="close" data-key="c" disabled={pending} onClick={ask("Close this pull request on GitHub?")}>Close pull request <kbd>C</kbd></button>
+          </div>
         </details>
-        <button name="action" value={draft ? "ready" : "draft"} className="small" data-key="d" disabled={pending}>{draft ? "Ready for review" : "Convert to draft"}</button>
-        <button name="action" value="update_branch" className="small" data-key="u" disabled={pending}>Update branch</button>
-        <button name="action" value="close" className="small" data-key="c" disabled={pending} onClick={ask("Close this pull request on GitHub?")}>Close</button>
-      </> : state === "closed" && <button name="action" value="reopen" className="small" data-key="o" disabled={pending}>Reopen</button>}
+      </span> : state === "closed" && <button name="action" value="reopen" data-key="o" disabled={pending}>Reopen <kbd>O</kbd></button>}
       {pending && <span role="status" className="muted">Working…</span>}
       {result.error && <span role="alert">{result.error}</span>}
       {result.saved && <span role="status">{result.saved}</span>}

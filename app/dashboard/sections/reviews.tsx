@@ -10,27 +10,32 @@ import { fixPrompt } from "../../../src/fix-prompt";
 import { cancelReview, retryP4Answer, reviewAgain } from "../actions";
 import { Copy } from "../live";
 import { FixButton } from "../fix-button";
-import { PullList, PullSidebar } from "../pulls";
+import { PullList, PullSidebar, SeverityTags } from "../pulls";
 import { SidebarKeys, PullActions } from "../pull-list-client";
 import { PullDiscussion } from "../pull-discussion";
 import { CatalogReview } from "../catalog-sync";
 import { RuntimeReview, ApprovalReview } from "../runtime";
 import { CodeTab } from "../code-tab";
-import { when, ago, status, priority, severityCounts } from "./shared";
+import { when, ago, status } from "./shared";
 import { findingCounts } from "../../../src/priority";
 import type { DashboardContext } from "../load";
 
 export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
   const { checks, data, detail, diagnostics, filters, isAdmin, organization, personalAgent, pull, repoLabel, repoName, user } = ctx;
-  const diffStats = pull && <>{pull.changedFiles !== undefined && <> · {pull.changedFiles} {pull.changedFiles === 1 ? "file" : "files"}</>}{pull.additions !== undefined && <> · <span className="chip diffstat"><span className="add">+{pull.additions.toLocaleString("en-US")}</span> <span className="del">−{(pull.deletions ?? 0).toLocaleString("en-US")}</span></span></>}</>;
+  const sep = <span className="sep" aria-hidden>·</span>;
+  const diffStats = pull && <>{pull.changedFiles !== undefined && <>{sep}{pull.changedFiles} {pull.changedFiles === 1 ? "file" : "files"}</>}{pull.additions !== undefined && <>{sep}<span className="chip diffstat"><span className="add">+{pull.additions.toLocaleString("en-US")}</span> <span className="del">−{(pull.deletions ?? 0).toLocaleString("en-US")}</span></span></>}</>;
   // Dashboard actions go to GitHub.com as the developer; other providers keep their own UI for them.
   const canAct = Boolean(pull && !data.repositories.find((r) => r._id === pull.repositoryId)?.connectionId);
   const counts = detail ? findingCounts(detail.findings) : {};
   const fixable = detail ? detail.findings.filter((f) => f.canFix).length : 0;
   const tab = filters.tab === "activity" ? "discussion" : ["review", "code", "discussion"].includes(filters.tab ?? "") ? filters.tab : filters.diff === "1" ? "code" : "overview";
-  const tabs: [string, React.ReactNode][] = [["overview", "Overview"], ["review", <>Review {severityCounts(counts)}</>], ["discussion", "Discussion"], ["code", "Code"]];
+  const tabs: [string, React.ReactNode][] = [["overview", "Overview"], ["review", <>Review <SeverityTags counts={counts} /></>], ["discussion", "Discussion"], ["code", "Code"]];
   const failing = checks?.filter((c) => c.conclusion && !["success", "neutral", "skipped"].includes(c.conclusion)).length ?? 0, running = checks?.some((c) => c.status !== "completed");
-  const ci = checks && checks.length > 0 && <span className={failing ? "impact high" : running ? "muted" : "impact low"}>{failing ? `⚠ CI failed (${failing})` : running ? "CI running" : "✓ CI passed"}</span>;
+  const ci = checks && checks.length > 0 && <span className={failing ? "ci-failed" : running ? "muted" : "ci-passed"}>{failing ? "⚠ CI failed" : running ? "CI running" : "✓ CI passed"}</span>;
+  const section = (title: string, icon: string, body: React.ReactNode, open = true) => <details className="ov-section" open={open}><summary><span className="ov-icon" aria-hidden>{icon}</span><span className="ov-title">{title}</span></summary><div className="ov-body">{body}</div></details>;
+  const chatLink = pull && <Link className="button" href={`/dashboard/chat?repository=${pull.repositoryId}&pull=${pull._id}`}><span aria-hidden>💬</span> Chat with PR</Link>;
+  const github = (url?: string) => url && <>{sep}<a href={url} target="_blank" rel="noreferrer">GitHub ↗</a></>;
+  const checkRows = checks && checks.length > 0 && <ul className="checks">{checks.map((c) => { const ok = c.status === "completed" && c.conclusion && ["success", "neutral", "skipped"].includes(c.conclusion); return <li key={c.name}><span className={"check " + (c.status !== "completed" ? "running" : ok ? "passed" : "failed")} aria-hidden>{c.status !== "completed" ? "…" : ok ? "✓" : "✕"}</span><span>{c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : c.name}{c.description && <small className="meta">{c.description}</small>}</span><span className="muted">{c.status !== "completed" ? c.status.replaceAll("_", " ") : c.conclusion}</span></li>; })}</ul>;
   return (
           (detail || pull ? (
             <div className="pull-detail">
@@ -41,36 +46,40 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
               {filters.actionError && <p role="alert">{filters.actionError}</p>}
             {!detail && pull ? (
               <>
-                <h2 className="pull-title">{pull.title} <span className="muted">#{pull.number}</span></h2>
+                <div className="title-row">
+                  <h2 className="pull-title"><span className="muted">#{pull.number}</span> {pull.title}</h2>
+                  <div className="title-actions">{chatLink}{pull.canRequest && <CatalogReview repositoryId={pull.repositoryId} prNumber={pull.number} revision={pull.headSha} baseRevision={pull.baseSha} />}</div>
+                </div>
                 <p className="meta">
-                  {repoName(pull.repositoryId)} · @{pull.author} · updated <time dateTime={new Date(pull.updatedAt).toISOString()} title={when(pull.updatedAt)}>{ago(pull.updatedAt)}</time>
-                  {" "}· <span className="chip" title={pull.headSha}>{pull.headSha.slice(0, 7)}</span>{diffStats}
+                  {repoName(pull.repositoryId)}{sep}{pull.author} updated <time dateTime={new Date(pull.updatedAt).toISOString()} title={when(pull.updatedAt)}>{ago(pull.updatedAt)}</time>
+                  {sep}<span className="chip" title={pull.headSha}>{pull.headSha.slice(0, 7)}</span>{diffStats}{github(pull.url)}
                 </p>
                 <section className="status-card" aria-label="Review status">
-                  <span>{pull.state === "open" ? "Not reviewed yet" : `${pull.state[0].toUpperCase() + pull.state.slice(1)} without a review`}</span>
-                  {pull.isDraft && <span className="badge">Draft</span>}
-                  {ci}
-                  <div className="actions">
-                    {pull.canRequest && <CatalogReview repositoryId={pull.repositoryId} prNumber={pull.number} revision={pull.headSha} baseRevision={pull.baseSha} />}
-                    {canAct && <PullActions pullRequestId={pull._id} head={pull.headSha} state={pull.state} draft={pull.isDraft} />}
-                    <Link className="button" href={`/dashboard/chat?repository=${pull.repositoryId}&pull=${pull._id}`}>Chat with PR</Link>
-                    <a className="button" href={pull.url} target="_blank" rel="noreferrer">View pull request ↗</a>
+                  <div className="facts">
+                    {pull.isDraft && <span>PR is in draft mode</span>}
+                    <span>{pull.state === "open" ? "Not reviewed yet" : `${pull.state[0].toUpperCase() + pull.state.slice(1)} without a review`}</span>
+                    {ci}
                   </div>
+                  <div className="actions">{canAct && <PullActions pullRequestId={pull._id} head={pull.headSha} state={pull.state} draft={pull.isDraft} />}</div>
                 </section>
               </>
             ) : detail && (
             <>
-              <h2 className="pull-title">
-                {detail.review.title ?? "Awaiting PR ingestion"} <span className="muted">#{detail.review.prNumber}</span>
-              </h2>
+              <div className="title-row">
+                <h2 className="pull-title"><span className="muted">#{detail.review.prNumber}</span> {detail.review.title ?? "Awaiting PR ingestion"}</h2>
+                <div className="title-actions">
+                  {chatLink}
+                  {!["completed", "failed", "cancelled"].includes(detail.review.status) && <form action={cancelReview}><input type="hidden" name="reviewId" value={detail.review._id} /><button>Cancel review</button></form>}
+                  {detail.review.nativeP4&&isAdmin&&detail.review.status==="failed"&&detail.review.resultStorageId&&<form action={reviewAgain}><input type="hidden" name="reviewId" value={detail.review._id}/><input type="hidden" name="fresh" value="true"/><button>Re-review current shelf</button></form>}{(!detail.review.nativeP4||isAdmin)&&<form action={reviewAgain}><input type="hidden" name="reviewId" value={detail.review._id}/><button aria-label={detail.review.nativeP4?undefined:"Re-review current PR"}>{detail.review.nativeP4?(detail.review.status==="failed"&&detail.review.resultStorageId?"Retry saved publication":"Re-review current shelf"):<><span aria-hidden>↻</span> Re-review</>}</button></form>}
+                </div>
+              </div>
               <p className="meta">
-                {repoName(detail.review.repositoryId)} · @{detail.review.author ?? "unknown"} · reviewed{" "}
+                {repoName(detail.review.repositoryId)}{sep}{detail.review.author ?? "unknown"} reviewed{" "}
                 <time dateTime={new Date(detail.review.createdAt).toISOString()} title={when(detail.review.createdAt)}>{ago(detail.review.createdAt)}</time>
-                {detail.review.headBranch && <> · <span className="chip">{detail.review.headBranch}</span> → <span className="chip">{detail.review.baseBranch}</span></>}
-                {" "}· <span className="chip" title={detail.review.headSha}>{detail.review.headSha.slice(0, 7)}</span>
-                {diffStats}{pull && <> · {pull.reviewCount} {pull.reviewCount === 1 ? "review" : "reviews"}</>} · {status(detail.review.status)}
+                {detail.review.headBranch && <>{sep}<span className="chip">{detail.review.headBranch}</span> → {detail.review.baseBranch}</>}
+                {sep}<span className="chip" title={detail.review.headSha}>{detail.review.headSha.slice(0, 7)}</span>
+                {diffStats}{pull && <>{sep}{pull.reviewCount} {pull.reviewCount === 1 ? "review" : "reviews"}</>}{detail.review.status !== "completed" && <>{sep}{status(detail.review.status)}</>}{github(detail.review.prUrl)}
               </p>
-              <p className="muted repository-identity">{repoLabel(detail.review.repositoryId)}</p>
               {detail.latestReviewId && detail.latestReviewId !== detail.review._id && (
                 <p role="status">
                   You’re viewing a historical review.{" "}
@@ -82,121 +91,89 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
               )}
               {detail.retryPending&&<p role="status">Retry {detail.review.retryAt ? "scheduled for "+when(detail.review.retryAt) : "pending"}. The review will update automatically.</p>}
               <section className="status-card" aria-label="Review status">
-                {pull?.isDraft && <span className="badge">Draft</span>}
-                {detail.review.reviewScore && <strong title={detail.review.reviewScore.reason}>{detail.review.reviewScore.value}/5</strong>}
-                {detail.review.verdict && <span>{verdictLabels[detail.review.verdict]}</span>}
-                {ci}
-                {detail.review.approvalAssessment && detail.review.approvalAssessment.risk !== "unknown" && <span className={"impact " + detail.review.approvalAssessment.risk}>{detail.review.approvalAssessment.risk[0].toUpperCase() + detail.review.approvalAssessment.risk.slice(1)} impact</span>}
-                <div className="actions">
-                  {detail.canFix && fixable > 0 && <FixButton reviewId={detail.review._id} agent={personalAgent} label={`Fix ${fixable} ${fixable === 1 ? "issue" : "issues"}`} />}
-                  {detail.review.nativeP4&&isAdmin&&detail.review.status==="failed"&&detail.review.resultStorageId&&<form action={reviewAgain}><input type="hidden" name="reviewId" value={detail.review._id}/><input type="hidden" name="fresh" value="true"/><button>Re-review current shelf</button></form>}{(!detail.review.nativeP4||isAdmin)&&<form action={reviewAgain}><input type="hidden" name="reviewId" value={detail.review._id}/><button>{detail.review.nativeP4?(detail.review.status==="failed"&&detail.review.resultStorageId?"Retry saved publication":"Re-review current shelf"):"Re-review current PR"}</button></form>}
-                  {pull && <Link className="button" href={`/dashboard/chat?repository=${pull.repositoryId}&pull=${pull._id}`}>Chat with PR</Link>}
-                  {detail.review.prUrl && <a className="button" href={detail.review.prUrl} target="_blank" rel="noreferrer">View pull request ↗</a>}
+                <div className="facts">
+                  {pull?.isDraft && <span>PR is in draft mode</span>}
+                  {detail.review.reviewScore && <span title={detail.review.reviewScore.reason}>{detail.review.reviewScore.value}/5</span>}
+                  {ci}
+                  {detail.review.approvalAssessment && detail.review.approvalAssessment.risk !== "unknown" && <span className={"impact " + detail.review.approvalAssessment.risk}>{detail.review.approvalAssessment.risk[0].toUpperCase() + detail.review.approvalAssessment.risk.slice(1)} impact</span>}
                 </div>
-                {canAct && pull && <PullActions pullRequestId={pull._id} head={pull.headSha} state={pull.state} draft={pull.isDraft} />}
+                <div className="actions">
+                  {canAct && pull && <PullActions pullRequestId={pull._id} head={pull.headSha} state={pull.state} draft={pull.isDraft} />}
+                  {detail.canFix && fixable > 0 && <FixButton compact reviewId={detail.review._id} agent={personalAgent} label={`Fix ${fixable} ${fixable === 1 ? "issue" : "issues"}`} />}
+                </div>
               </section>
-              {!["completed", "failed", "cancelled"].includes(
-                detail.review.status,
-              ) && (
-                <form action={cancelReview}>
-                  <input
-                    type="hidden"
-                    name="reviewId"
-                    value={detail.review._id}
-                  />
-                  <button>Cancel review</button>
-                </form>
-              )}
               <nav className="tabs" aria-label="Review sections">
                 {tabs.map(([key, label]) => <Link key={key} href={`/dashboard/pulls/${detail.review._id}${key === "overview" ? "" : "?tab=" + key}`} aria-current={tab === key ? "page" : undefined}>{label}</Link>)}
               </nav>
               {tab === "overview" && <>
-              {checks && checks.length > 0 && <section aria-label="CI checks"><h2>CI Checks ({checks.length})</h2><ul className="checks">{checks.map((c) => <li key={c.name}><span className={"check " + (c.status !== "completed" ? "running" : c.conclusion && ["success", "neutral", "skipped"].includes(c.conclusion) ? "passed" : "failed")} aria-hidden>{c.status !== "completed" ? "…" : c.conclusion && ["success", "neutral", "skipped"].includes(c.conclusion) ? "✓" : "✕"}</span> {c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : c.name} <span className="muted">{c.status !== "completed" ? c.status.replaceAll("_", " ") : c.conclusion}</span></li>)}</ul></section>}
-              {detail.review.verdict && <section aria-label="Verdict"><h2>Verdict</h2><p><strong>{verdictLabels[detail.review.verdict]}</strong> · computed from the score, unresolved findings and review coverage</p></section>}
-              <section aria-label="Confidence score">
-                <h2>Confidence score</h2>
-                {detail.review.reviewScore ? <><p><strong>{detail.review.reviewScore.value}/5</strong> · confidence that the change is safe to merge</p><p>{detail.review.reviewScore.reason}</p></> : <p className="muted">Not recorded for this review.</p>}
-              </section>
-              {detail.review.approvalAssessment && (
-                <section>
-                  <h2>Change impact</h2>
-                  <p>Risk: {detail.review.approvalAssessment.risk} · Confidence: {Math.round(detail.review.approvalAssessment.confidence*100)}%</p>
-                  <p>{detail.review.approvalAssessment.reason}</p>
-                  <p className="muted">Approval requires the configured policy and current provider checks.</p>
-                  {detail.review.coverageLimits?.map(limit=><p key={limit}>{limit}</p>)}
-                </section>
-              )}
-              {detail.review.modeDecision && <p className="muted">Review tier: <strong>{detail.review.modeDecision.mode}</strong> ({detail.review.modeDecision.source === "settings" ? "configured" : `requested by ${detail.review.modeDecision.source}`}{detail.review.modeDecision.capped ? `; ${detail.review.modeDecision.requested} was capped by the workspace limit` : ""})</p>}
-              {detail.review.aiAuthored && <p role="note">Written by a coding agent: <strong>{detail.review.aiAuthored.agent}</strong> ({detail.review.aiAuthored.detail}){detail.review.aiAuthored.model ? <> · reviewed with <code>{detail.review.aiAuthored.model}</code></> : null}</p>}
-              <section>
-                <div className="row"><h2>Review summary</h2></div>
-                <ReviewMarkdown>
-                  {detail.review.summary ??
-                    (detail.review.status === "failed" ? "No summary was generated. Review the error above before retrying." : detail.review.status === "cancelled" ? "This review was cancelled before a summary was generated." : "The summary will appear when analysis finishes.")}
-                </ReviewMarkdown>
-              </section>
-              {diagnostics&&diagnostics.diagrams.length>0&&<section aria-label="Sequence diagram"><h2>Sequence diagram</h2><MermaidDiagram code={diagnostics.diagrams[0]}/></section>}
-              <RuntimeReview token={user.token} reviewId={detail.review._id} evidence={detail.review.runtimeEvidence}/>{detail.review.nativeP4?<p>Automatic approval is not available for Perforce reviews.</p>:<ApprovalReview token={user.token} reviewId={detail.review._id}/>}
-              <p className="muted">
-                Started {when(detail.review.createdAt)} · {detail.review.status === "cancelled" ? "Cancelled" : "Finished"}{" "}
-                {detail.review.finishedAt
-                  ? when(detail.review.finishedAt)
-                  : ["completed","failed","cancelled"].includes(detail.review.status) ? "Time not recorded" : "In progress"}{" "}
-                · Models: {detail.review.models || [...new Set(detail.modelCalls.map(call => call.model))].join(", ") || "Not called yet"}
-              </p>
+              {detail.review.approvalAssessment && section("Change impact", "◎", <>
+                <p><strong className={"impact " + detail.review.approvalAssessment.risk}>{detail.review.approvalAssessment.risk[0].toUpperCase() + detail.review.approvalAssessment.risk.slice(1)}:</strong> {detail.review.approvalAssessment.reason}</p>
+                <p className="muted">Classified from what the change touches, independent of findings · {Math.round(detail.review.approvalAssessment.confidence*100)}% confidence. Approval also requires the configured policy and current provider checks.</p>
+                {detail.review.coverageLimits?.map(limit=><p key={limit} className="muted">{limit}</p>)}
+              </>)}
+              {section("Pull Request Info", "▤", <div className="pr-info">
+                <div className="pr-info-box">
+                  <h3>Review summary</h3>
+                  <div className="pr-info-scroll">
+                    {detail.review.reviewScore && <p><strong>Confidence Score: {detail.review.reviewScore.value}/5</strong> · {detail.review.reviewScore.reason}</p>}
+                    {detail.review.verdict && <p className="muted">{verdictLabels[detail.review.verdict]} · computed from the score, unresolved findings and review coverage</p>}
+                    <ReviewMarkdown>
+                      {detail.review.summary ??
+                        (detail.review.status === "failed" ? "No summary was generated. Review the error above before retrying." : detail.review.status === "cancelled" ? "This review was cancelled before a summary was generated." : "The summary will appear when analysis finishes.")}
+                    </ReviewMarkdown>
+                  </div>
+                </div>
+                <div className="pr-info-box">
+                  <h3>CI Checks{checks ? ` (${checks.length})` : ""}</h3>
+                  {checkRows || <p className="muted">{checks ? "No checks reported for this revision." : "Checks are shown for GitHub repositories."}</p>}
+                </div>
+              </div>)}
+              {section("Diagram", "◇", diagnostics && diagnostics.diagrams.length > 0 ? <MermaidDiagram code={diagnostics.diagrams[0]}/> : <p className="muted">No diagram was generated for this change.</p>)}
+              {section("Review details", "⋯", <>
+                {detail.review.modeDecision && <p className="muted">Review tier: <strong>{detail.review.modeDecision.mode}</strong> ({detail.review.modeDecision.source === "settings" ? "configured" : `requested by ${detail.review.modeDecision.source}`}{detail.review.modeDecision.capped ? `; ${detail.review.modeDecision.requested} was capped by the workspace limit` : ""})</p>}
+                {detail.review.aiAuthored && <p role="note">Written by a coding agent: <strong>{detail.review.aiAuthored.agent}</strong> ({detail.review.aiAuthored.detail}){detail.review.aiAuthored.model ? <> · reviewed with <code>{detail.review.aiAuthored.model}</code></> : null}</p>}
+                <RuntimeReview token={user.token} reviewId={detail.review._id} evidence={detail.review.runtimeEvidence}/>{detail.review.nativeP4?<p>Automatic approval is not available for Perforce reviews.</p>:<ApprovalReview token={user.token} reviewId={detail.review._id}/>}
+                <p className="muted repository-identity">{repoLabel(detail.review.repositoryId)}</p>
+                <p className="muted">
+                  Started {when(detail.review.createdAt)} · {detail.review.status === "cancelled" ? "Cancelled" : "Finished"}{" "}
+                  {detail.review.finishedAt
+                    ? when(detail.review.finishedAt)
+                    : ["completed","failed","cancelled"].includes(detail.review.status) ? "Time not recorded" : "In progress"}{" "}
+                  · Models: {detail.review.models || [...new Set(detail.modelCalls.map(call => call.model))].join(", ") || "Not called yet"}
+                </p>
+              </>, false)}
               </>}
               {tab === "review" && <>
               {!detail.historicalFindingsAvailable && detail.review.resultStorageId && <p role="status">Historical finding snapshots are unavailable for this review. An administrator can recover them from the saved review result.</p>}
-              {detail.findings.length > 0 && (
-                <section>
-                  <h2>Verified findings</h2>
-                  {detail.canFix && <FixButton reviewId={detail.review._id} agent={personalAgent} label="Fix All" />}
-                  {detail.canFix && <p><Link href={`/fix/${detail.review._id}`}>More ways to fix: cloud agents, deep links, Devin, fix pull request</Link></p>}
-                  {detail.canFix && <Copy
-                    value={fixPrompt(
-                      repoName(detail.review.repositoryId),
-                      `PR #${detail.review.prNumber}`,
-                      detail.findings
-                        .filter(
-                          (finding) =>
-                            finding.canFix,
-                        )
-                        .map((finding) => ({
-                          ...findingSchema.parse(finding),
-                          agent: finding.agent,
-                          fingerprint: finding.fingerprint,
-                          commitSha: finding.commitSha,
-                        })),
-                      detail.review.runtimeEvidence,
-                    )}
-                    label="Copy Fix All prompt"
-                  />}
-                  {detail.findings.map((finding) => (
-                    <article key={finding._id}>
-                      <h3>
-                        {priority(finding)} {finding.title}
-                      </h3>
-                      <p>
-                        {finding.filePath}:{finding.startLine} ·{" "}
-                        {finding.outsideDiff && <>Outside the changed code (summary only, not posted inline) ·{" "}</>}
-                        {Math.round(finding.confidence * 100)}% confidence ·{" "}
-                        Verified at this revision · Current status: {finding.currentStatus}
-                      </p>
-                      <p>{finding.description}</p>
+              {section("Findings", "⛉", detail.findings.length ? <>
+                {detail.canFix && <p className="findings-tools">
+                  <Copy value={fixPrompt(repoName(detail.review.repositoryId), `PR #${detail.review.prNumber}`, detail.findings.filter((finding) => finding.canFix).map((finding) => ({ ...findingSchema.parse(finding), agent: finding.agent, fingerprint: finding.fingerprint, commitSha: finding.commitSha })), detail.review.runtimeEvidence)} label="Copy Fix All prompt" />
+                  <Link href={`/fix/${detail.review._id}`}>More ways to fix: cloud agents, deep links, Devin, fix pull request</Link>
+                </p>}
+                {detail.findings.map((finding) => (
+                  <details key={finding._id} className="finding-card" open>
+                    <summary><SeverityTags counts={findingCounts([finding])} /><span className="finding-title">{finding.title}</span></summary>
+                    <div className="finding-body">
+                      <ReviewMarkdown>{finding.description}</ReviewMarkdown>
                       {finding.question && <p><strong>Question for the author:</strong> {finding.question}</p>}
-                      {finding.generatedTest && <details><summary>Generated test: {finding.generatedTest.status}{finding.generatedTest.exitCode !== undefined && finding.generatedTest.exitCode !== null ? ` (exit ${finding.generatedTest.exitCode})` : ""} · never committed</summary><p><code>{finding.generatedTest.command}</code></p><pre>{finding.generatedTest.path}{"\n"}{finding.generatedTest.code}</pre><pre>{finding.generatedTest.output || "(no output)"}</pre></details>}
-                      <p>Impact: {finding.impact}</p>
+                      <p><strong>How this was verified:</strong> {Math.round(finding.confidence * 100)}% confidence at this revision{finding.outsideDiff ? "; outside the changed code (summary only, not posted inline)" : ""}. Impact: {finding.impact}</p>
                       {finding.evidence.map((e, index) => (
-                        <div key={index}>{e.sourceUrl&&<a href={e.sourceUrl} target="_blank" rel="noreferrer">{e.repository} · {e.revision?.slice(0,8)} · source</a>}<pre>{e.filePath}:{e.startLine}{"\n"}{e.quote}</pre></div>
+                        <div key={index} className="snippet">
+                          <div className="snippet-head"><span>{e.filePath}:{e.startLine}</span>{e.sourceUrl && <a href={e.sourceUrl} target="_blank" rel="noreferrer">{e.repository ? e.repository + " · " : ""}{e.revision?.slice(0, 8)} ↗</a>}</div>
+                          <pre>{e.quote}</pre>
+                        </div>
                       ))}
-                      <p>Suggested fix: {finding.suggestedFix}</p>
-                      {finding.canFix && <FixButton reviewId={detail.review._id} agent={personalAgent} findingId={finding._id} />}
-                      {finding.canFix && <p><Link href={`/fix/${detail.review._id}?finding=${encodeURIComponent(finding.fingerprint)}`}>More ways to fix this</Link></p>}
-                    </article>
-                  ))}
-                </section>
-              )}
-                {!detail.findings.length && <p className="muted">{["completed", "failed", "cancelled"].includes(detail.review.status) ? "No verified findings for this revision." : "Findings appear when the review finishes."}</p>}
+                      {finding.generatedTest && <details><summary>Generated test: {finding.generatedTest.status}{finding.generatedTest.exitCode !== undefined && finding.generatedTest.exitCode !== null ? ` (exit ${finding.generatedTest.exitCode})` : ""} · never committed</summary><p><code>{finding.generatedTest.command}</code></p><pre>{finding.generatedTest.path}{"\n"}{finding.generatedTest.code}</pre><pre>{finding.generatedTest.output || "(no output)"}</pre></details>}
+                      <p><strong>Suggested fix:</strong> {finding.suggestedFix}</p>
+                      <div className="finding-foot">
+                        <span className="muted">Status: {finding.currentStatus}</span>
+                        {finding.canFix && <Link href={`/fix/${detail.review._id}?finding=${encodeURIComponent(finding.fingerprint)}`}>More ways to fix this</Link>}
+                        {finding.canFix && <FixButton compact reviewId={detail.review._id} agent={personalAgent} findingId={finding._id} />}
+                      </div>
+                    </div>
+                  </details>
+                ))}
+              </> : <p className="muted">{["completed", "failed", "cancelled"].includes(detail.review.status) ? "No verified findings for this revision." : "Findings appear when the review finishes."}</p>)}
               </>}
               {tab === "code" && <>{filters.tourError && <p role="alert">{filters.tourError}</p>}<CodeTab token={user.token} review={detail.review} filters={filters} findings={detail.findings.map((f) => ({ _id: String(f._id), title: f.title, severity: f.severity, filePath: f.filePath, startLine: f.startLine, endLine: f.endLine, description: f.description }))} /></>}
               {tab === "discussion" && <>
