@@ -16,7 +16,7 @@ beforeEach(()=>{vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date']});
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();delete process.env.RESEND_API_KEY;delete process.env.EMAIL_FROM;});
 
 const session=()=>{const sid=randomBytes(32).toString('base64url');return {sid,hash:createHash('sha256').update(sid).digest('hex')};};
-const jwt=(userId:string,sid?:string,issuedAt=Math.floor(Date.now()/1000))=>new SignJWT(sid?{sid}:{}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(userId).setIssuedAt(issuedAt).setExpirationTime('7d').sign(new TextEncoder().encode(secret));
+const jwt=(userId:string,sid?:string,issuedAt=Math.floor(Date.now()/1000),key=secret)=>new SignJWT(sid?{sid}:{}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(userId).setIssuedAt(issuedAt).setExpirationTime('7d').sign(new TextEncoder().encode(key));
 type T=ReturnType<typeof convexTest>;
 async function signIn(t:T,profile:{provider:'github'|'gitlab'|'google';providerUserId:string;login:string;email?:string;emailVerified:boolean},linkToken?:string){
  const s=session();const userId=await t.mutation(api.identity.signIn,{secret:svc,avatar:'',...profile,sessionHash:s.hash,userAgent:'Vitest',...(linkToken?{linkToken}:{})});
@@ -75,6 +75,11 @@ test('server-side sessions: individual revocation, sign out everywhere, expiry, 
  await expect(t.query(api.users.me,{token:phone.token})).rejects.toThrow();
  // A forged session ID is rejected.
  expect(await valid(t,await jwt(laptop.userId,randomBytes(32).toString('base64url')))).toBe(false);
+ // A real session ID under a bad signature can neither list sessions nor sign that session out.
+ const badSignature=await jwt(laptop.userId,laptop.sid,undefined,'not-the-session-secret-but-32-chars-long');
+ await expect(t.query(api.identity.sessions,{token:badSignature})).rejects.toThrow();
+ await t.mutation(api.identity.signOut,{token:badSignature});
+ expect(await valid(t,laptop.token)).toBe(true);
  // Sign out: only this browser.
  const tablet=await signIn(t,{provider:'google',providerUserId:'g-1',login:'dev',email:'dev@example.com',emailVerified:true});
  await t.mutation(api.identity.signOut,{token:laptop.token});
@@ -169,9 +174,8 @@ test('a GitHub-login invitation is only shown to and accepted by a user who sign
  const impostor=await signIn(t,{provider:'google',providerUserId:'g-1',login:'alice',email:'alice@attacker.example',emailVerified:true});
  expect((await t.query(api.users.me,{token:impostor.token})).invitations).toEqual([]);
  await expect(t.mutation(api.users.acceptInvitation,{token:impostor.token,invitationId})).rejects.toThrow('invalid');
- // Linking a GitHub account replaces the login with the GitHub one.
+ // Linking a different GitHub account does not make the invitation theirs.
  await signIn(t,{provider:'github',providerUserId:'502',login:'mallory',emailVerified:false},impostor.token);
- expect((await t.run(ctx=>ctx.db.get(impostor.userId as Id<'users'>)))?.login).toBe('mallory');
  await expect(t.mutation(api.users.acceptInvitation,{token:impostor.token,invitationId})).rejects.toThrow('invalid');
  const alice=await signIn(t,{provider:'github',providerUserId:'503',login:'alice',emailVerified:false});
  expect((await t.query(api.users.me,{token:alice.token})).invitations.map(i=>i._id)).toEqual([invitationId]);
@@ -196,4 +200,22 @@ test('opening a magic link only shows a confirm button; the same-origin POST con
  expect([ok.status,ok.headers.get('location'),holder.jar.get('openreview_session')]).toEqual([303,'https://review.example.com/settings','session-jwt']);
  expect((await t.run(ctx=>ctx.db.query('loginTokens').collect()))[0].usedAt).toBeDefined();
  expect((await confirm('https://review.example.com')).headers.get('location')).toBe('https://review.example.com/login?error=link');
+});
+
+test('GitHub-login invitations reach only GitHub-created accounts, not a magic-link user who picked the same name',async()=>{
+ const t=convexTest(schema,modules);
+ const owner=await signIn(t,{provider:'github',providerUserId:'901',login:'owner',emailVerified:false});
+ const organizationId=await t.mutation(api.users.createOrganization,{token:owner.token,name:'Invites'});
+ const invitationId=await t.mutation(api.users.invite,{token:owner.token,organizationId,githubLogin:'bob',role:'admin'});
+ // Magic link for bob@attacker.example: the account's login becomes "bob".
+ const raw=randomBytes(32).toString('base64url'),hash=createHash('sha256').update(raw).digest('hex'),s=session();
+ await t.mutation(internal.identity.storeLoginToken,{email:'bob@attacker.example',tokenHash:hash});
+ const emailUser=(await t.mutation(api.identity.consumeLoginToken,{secret:svc,tokenHash:hash,sessionHash:s.hash}))!,emailToken=await jwt(emailUser,s.sid);
+ expect((await t.run(ctx=>ctx.db.get(emailUser)))?.login).toBe('bob');
+ expect((await t.query(api.users.me,{token:emailToken})).invitations).toEqual([]);
+ await expect(t.mutation(api.users.acceptInvitation,{token:emailToken,invitationId})).rejects.toThrow(/invalid or expired/);
+ // GitHub user "bob" sees and accepts it.
+ const bob=await signIn(t,{provider:'github',providerUserId:'902',login:'bob',emailVerified:false});
+ expect((await t.query(api.users.me,{token:bob.token})).invitations.map(i=>i._id)).toEqual([invitationId]);
+ expect(await t.mutation(api.users.acceptInvitation,{token:bob.token,invitationId})).toBe(organizationId);
 });

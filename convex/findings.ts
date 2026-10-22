@@ -53,6 +53,7 @@ export const list = query({
     author: v.optional(v.string()),
     usefulness: v.optional(v.string()),
     since: v.optional(v.number()),
+    until: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const reader=await authorize(ctx, args.token, args.organizationId);
@@ -76,6 +77,7 @@ export const list = query({
             ? q.eq(q.field("lastFeedback"), args.usefulness)
             : true,
           args.since ? q.gte(q.field("createdAt"), args.since) : true,
+          args.until ? q.lte(q.field("createdAt"), args.until) : true,
         ),
       )
       .paginate({ numItems: 30, cursor: args.cursor ?? null, maximumRowsRead: 1000 });

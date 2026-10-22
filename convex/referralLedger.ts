@@ -105,9 +105,11 @@ export async function accrueCommission(ctx: MutationCtx, f: ObjectType<typeof in
   if (f.total <= 0) return "nothing paid";
   // Self-referral: the referrer is, or once was, a member of the workspace they referred.
   if (await everMember(ctx, account.organizationId, referral.referrerId)) { await voidReferralRows(ctx, referral, "referrer is or was a member of the workspace"); return "void"; }
-  // The window starts at the earliest paid invoice, so a late month-1 invoice moves it back.
+  // The window starts at the earliest paid invoice, so a late month-1 invoice moves it back. Stripe creates
+  // each renewal invoice a little after its period starts, so the anniversary invoice can be created a few
+  // seconds before the window's end: anything within a day of the end is past it.
   const now = Date.now(), paidAt = f.paidAt ?? now, first = referral.firstPaidAt === undefined;
-  const windowStart = Math.min(referral.windowStart ?? Infinity, f.invoiceCreated), commissionEndsAt = addMonthsUTC(windowStart, config.months), ended = f.invoiceCreated >= commissionEndsAt;
+  const windowStart = Math.min(referral.windowStart ?? Infinity, f.invoiceCreated), commissionEndsAt = addMonthsUTC(windowStart, config.months), ended = f.invoiceCreated >= commissionEndsAt - 86400000;
   await ctx.db.patch(referral._id, { windowStart, commissionEndsAt, ...(first ? { status: "active" as const, firstPaidAt: paidAt } : ended ? { status: "ended" as const } : {}), updatedAt: now });
   if (first) await ctx.scheduler.runAfter(0, internal.referralJobs.sendConversionNotice, { referralId: referral._id });
   if (ended) return "ended";
@@ -115,6 +117,8 @@ export async function accrueCommission(ctx: MutationCtx, f: ObjectType<typeof in
   const base = commissionBase({ amountPaid: f.amountPaid, amountOverpaid: f.amountOverpaid, total: f.total, totalExcludingTax: f.totalExcludingTax });
   if (base <= 0) return "nothing paid";
   await ctx.db.insert("referralCommissions", { referralId: referral._id, referrerId: referral.referrerId, referredOrganizationId: account.organizationId, invoiceId, subscriptionId: f.subscription, currency: f.currency, base, rateBps: config.rateBps, amount: commissionAmount(base, config.rateBps), reversed: 0, status: "accrued", invoiceCreated: f.invoiceCreated, paidAt, availableAt: paidAt + config.holdDays * 86400000, createdAt: now, updatedAt: now });
+  // A refund or dispute handled before this commission existed found nothing to take back: look once.
+  await ctx.scheduler.runAfter(0, internal.referralJobs.checkInvoiceCharges, { invoiceId });
   return "accrued";
 }
 

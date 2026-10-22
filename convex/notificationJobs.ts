@@ -60,6 +60,17 @@ export const reviewCompleted = internalAction({ args: { reviewId: v.id("reviews"
   return outcome;
 } });
 
+// Monthly usage alert (80% / 100%): convex/billing.ts records the threshold first, so this runs once per threshold per period.
+export const usageAlert = internalAction({ args: { usageId: v.id("billingUsage"), threshold: v.number() }, handler: async (ctx, a): Promise<Record<string, string>> => {
+  const alert = await ctx.runQuery(internal.notifications.usageAlertTargets, { ...a, origin: appOrigin() });
+  const outcome: Record<string, string> = {};
+  for (const recipient of alert?.recipients ?? []) {
+    const key = `usage.${a.threshold}:${a.usageId}:email:${recipient.userId}`;
+    outcome[key] = await deliver(ctx, alert!.organizationId, key, "email", () => sendEmail({ to: recipient.email, subject: alert!.subject, text: alert!.text }));
+  }
+  return outcome;
+} });
+
 // Email verification: a random token (only its hash is stored) mailed as a one-hour link.
 export const sendVerification = internalAction({ args: { preferenceId: v.id("notificationPreferences") }, handler: async (ctx, a): Promise<string> => {
   const target = await ctx.runQuery(internal.notifications.verificationTarget, { preferenceId: a.preferenceId });

@@ -58,3 +58,12 @@ test("unmentioned replies skip bare acknowledgements and quoted-only text", () =
   for (const text of ["Why is this a problem when the caller checks first?", "This is intentional: guests are active by design.", "fixed in the next commit, but why does the retry matter?"]) assert.equal(wantsAnswer(text), true, text);
   for (const text of ["Thanks!", "thank you 🙏", "LGTM", "fixed.", "done, thanks", "👍", "> quoted\nok", "", " k "]) assert.equal(wantsAnswer(text), false, text);
 });
+
+test("a model's null for an optional field means absent, not an invalid finding", () => {
+  // Claude Haiku 5.5 through OpenRouter answers "ruleId": null; the whole specialist used to fail on it.
+  const parsed = findingSchema.parse({ ...candidate, ruleId: null, question: null, suggestion: null, evidence: candidate.evidence.map((e) => ({ ...e, repository: null })) });
+  assert.equal("ruleId" in parsed, false);
+  assert.equal("question" in parsed, false);
+  assert.equal("repository" in parsed.evidence[0], false);
+  assert.equal(findingSchema.safeParse({ ...candidate, title: null }).success, false, "a required field is still required");
+});

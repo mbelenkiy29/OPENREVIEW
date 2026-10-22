@@ -915,9 +915,26 @@ test("Linear retrieval preserves native provenance, refresh leases and rejects a
  expect(await t.mutation(internal.integrations.refreshed,{id,lease:"wrong",credentials:"wrong",expiresAt:Date.now()+86400000})).toBe(false);await t.mutation(internal.integrations.refreshFailed,{id,lease:"first"});
  const issue=vi.spyOn(Linear.prototype,"issue").mockResolvedValue({id:"native-issue",identifier:"ENG-42",title:"Return cents",description:"Amounts must be integer cents.",updatedAt:"2026-10-02T12:00:00.000Z",url:"https://linear.app/engineering/issue/ENG-42/return-cents",team:{id:"team-native"},project:null});
  try{
-  const result=await t.action(internal.integrationJobs.requirements,{repositoryId,references:"Fix ENG-42 (ENG-42)",actor:"alice",authorExternalId:"1"});expect(issue).toHaveBeenCalledTimes(1);expect(issue).toHaveBeenCalledWith("ENG-42",{organizationId:"org-native",teamIds:["team-native"],projectIds:[]});expect(result.files[0].provenance).toMatchObject({revision:"2026-10-02T12:00:00.000Z",sourceUrl:"https://linear.app/engineering/issue/ENG-42/return-cents"});expect(result.scopes).toEqual([{id,generation:2}]);
+  const result=await t.action(internal.integrationJobs.requirements,{repositoryId,actor:"alice",authorExternalId:"1",references:"Fix ENG-42 (ENG-42)"});expect(issue).toHaveBeenCalledTimes(1);expect(issue).toHaveBeenCalledWith("ENG-42",{organizationId:"org-native",teamIds:["team-native"],projectIds:[]});expect(result.files[0].provenance).toMatchObject({revision:"2026-10-02T12:00:00.000Z",sourceUrl:"https://linear.app/engineering/issue/ENG-42/return-cents"});expect(result.scopes).toEqual([{id,generation:2}]);
   issue.mockImplementationOnce(async()=>{await t.mutation(internal.integrations.scope,{...scope,generation:2,teamIds:[]});throw new Error("changed");});
-  await expect(t.action(internal.integrationJobs.requirements,{repositoryId,references:"ENG-42",actor:"alice",authorExternalId:"1"})).rejects.toThrow("scope changed");
+  await expect(t.action(internal.integrationJobs.requirements,{repositoryId,actor:"alice",authorExternalId:"1",references:"ENG-42"})).rejects.toThrow("scope changed");
+ }finally{issue.mockRestore();}
+});
+test("a PR by someone outside the workspace referencing ENG-1 fetches no private Linear text",async()=>{
+ const {t,alice,organizationId}=await setup();process.env.CREDENTIAL_ENCRYPTION_KEY="b".repeat(64);
+ await t.mutation(api.repositories.connect,{token:alice,secret:"integration-service-secret",organizationId,installationId:78,account:"alice",accountId:1,repositories:[{id:782,fullName:"alice/public",defaultBranch:"main"}]});
+ const repositoryId=(await t.query(api.dashboard.overview,{token:alice,organizationId})).repositories[0]._id;
+ const id=await t.mutation(internal.integrations.save,{token:alice,organizationId,externalId:"org-native",name:"Engineering",credentials:encryptCredential(JSON.stringify({accessToken:"native-access-token",refreshToken:"native-refresh-token",expiresAt:Date.now()+86400000}),organizationId+":linear"),expiresAt:Date.now()+86400000});
+ await t.mutation(internal.integrations.scope,{token:alice,id,generation:1,teamIds:["team-native"],projectIds:[],repositoryIds:[repositoryId]});
+ const issue=vi.spyOn(Linear.prototype,"issue").mockResolvedValue({id:"native-issue",identifier:"ENG-1",title:"Secret roadmap",description:"Private.",updatedAt:"2026-10-02T12:00:00.000Z",url:"https://linear.app/engineering/issue/ENG-1/secret",team:{id:"team-native"},project:null});
+ try{
+  // An outsider, and an outsider reusing a member's login with their own GitHub account ID.
+  for(const author of [{actor:"mallory",authorExternalId:"666"},{actor:"alice",authorExternalId:"666"},{actor:"alice"}]){
+   const result=await t.action(internal.integrationJobs.requirements,{repositoryId,references:"Fixes ENG-1",...author});
+   expect(result).toEqual({files:[],scopes:[],coverage:[expect.stringContaining("Linked tickets and documents were not fetched")]});
+  }
+  expect(issue).not.toHaveBeenCalled();
+  expect((await t.action(internal.integrationJobs.requirements,{repositoryId,references:"Fixes ENG-1",actor:"alice",authorExternalId:"1"})).files).toHaveLength(1);
  }finally{issue.mockRestore();}
 });
 test("Linear revocation recovers an interrupted action and erases credentials after bounded failures",async()=>{
@@ -1434,10 +1451,10 @@ test("rules pagination retains inherited defaults beyond 200 without leaking pri
  const seen: string[]=[];let cursor:string|undefined;let pages=0;
  do{
   const result=await t.query(api.dashboard.rulesPage,{token:bob,organizationId,repositoryId:publicRepo._id,cursor});
-  expect(result.page.length).toBeLessThanOrEqual(30);seen.push(...result.page.map(r=>r.title));pages++;
+  expect(result.page.length).toBeLessThanOrEqual(10);seen.push(...result.page.map(r=>r.title));pages++;
   cursor=result.isDone?undefined:result.continueCursor;
  }while(cursor);
- expect(pages).toBe(7);expect(seen).toHaveLength(206);expect(new Set(seen).size).toBe(206);expect(seen).toContain("Workspace 0");expect(seen).toContain("Workspace 204");expect(seen).toContain("Public local");expect(seen).not.toContain("Private local");expect(seen).not.toContain("Foreign default");
+ expect(pages).toBe(21);expect(seen).toHaveLength(206);expect(new Set(seen).size).toBe(206);expect(seen).toContain("Workspace 0");expect(seen).toContain("Workspace 204");expect(seen).toContain("Public local");expect(seen).not.toContain("Private local");expect(seen).not.toContain("Foreign default");
  await expect(t.query(api.dashboard.rulesPage,{token:bob,organizationId,repositoryId:privateRepo._id})).rejects.toThrow("not accessible");
  await expect(t.query(api.dashboard.rulesPage,{token:alice,organizationId,teamId,repositoryId:publicRepo._id})).rejects.toThrow("not accessible");
  await expect(t.query(api.dashboard.rulesPage,{token:alice,organizationId:foreign})).rejects.toThrow("Forbidden");

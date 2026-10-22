@@ -3,8 +3,8 @@
 The operator runs these steps. They change hosted accounts or need secret values, so the automated parity work only prepares them. Run them in order and tick each one off. Commands that print secret values are marked; run those only in a private terminal, never in a shared log, ticket or chat.
 
 Current hosted setup (see [deployment.md](deployment.md)):
-- **Web:** Vercel project `openreview`, team `open-review-free`, served at https://openreview.tech (custom domain; the `.vercel.app` alias redirects to it).
-- **Backend:** Convex deployment `tidy-ocelot-457`.
+- **Web:** Vercel project `openreview`, team `<hobby-team>`, served at https://openreview.tech (custom domain; the `.vercel.app` alias redirects to it).
+- **Backend:** Convex deployment `<prod-deployment>`.
 - **Build:** the production build runs `convex deploy` (see `vercel.json`).
 
 ## 1. Make production reachable (Vercel Deployment Protection)
@@ -28,7 +28,7 @@ Reference: https://vercel.com/docs/deployment-protection
 3. In GitHub → **Settings → Developer settings → GitHub Apps → (your app) → General**, set:
    - **Callback URL:** `https://<web-origin>/api/auth/callback`
    - **Setup URL:** `https://<web-origin>/api/github/callback`
-   - **Webhook URL:** `https://tidy-ocelot-457.convex.site/github/webhook`. This must be the production Convex `.convex.site` origin, not a tunnel.
+   - **Webhook URL:** `https://<prod-deployment>.convex.site/github/webhook`. This must be the production Convex `.convex.site` origin, not a tunnel.
    - **Webhook secret:** unchanged, and equal to Convex `GITHUB_WEBHOOK_SECRET`.
 4. Redeploy production (`vercel --prod`) after changing variables.
 5. Then verify:
@@ -89,7 +89,7 @@ Reference: https://docs.convex.dev/database/backup-restore
 
 ## 7. Final verification
 
-1. Check that `https://<web-origin>/api/health` and `https://tidy-ocelot-457.convex.site/health` both report ok.
+1. Check that `https://<web-origin>/api/health` and `https://<prod-deployment>.convex.site/health` both report ok.
 2. Sign in as a non-team GitHub user to confirm public sign-in works.
 3. Install the App on a test repository, enable it, and wait for indexing to complete.
 4. Open a small PR. Confirm a review is posted and the dashboard shows the review and its model-call costs.

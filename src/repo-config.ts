@@ -2,6 +2,7 @@ import { z } from "zod";
 import picomatch from "picomatch";
 import { categories, severities, type Rule } from "./engine/types";
 import { summarySections } from "./review-settings";
+import { modes, type Mode } from "./review-tier";
 
 // Repository configuration as code, shared by the CLI and server reviews. Server reviews read it
 // from the pull request's BASE revision, so a change can never disable or weaken its own review.
@@ -19,14 +20,14 @@ const ruleSchema = z.object({
   enabled: z.boolean(),
 }).strict();
 export const repoSettingsSchema = z.object({
-  mode: z.enum(["fast", "standard", "deep"]),
+  mode: z.enum(modes),
   minimumConfidence: z.number().min(0.5).max(1),
   severityThreshold: z.enum(severities),
   maxComments: z.number().int().min(0).max(30),
   categories: z.array(z.enum(categories)).max(categories.length),
   ignoredPaths: z.array(z.string().max(300)).max(200),
   instructions: z.string().max(20000),
-  commentStyle: z.enum(["concise", "detailed"]),
+  commentStyle: z.enum(["concise", "detailed", "compact"]),
   summarySections: z.array(z.enum(summarySections)).max(summarySections.length),
   strictness: z.number().int().min(0).max(3),
   reviewEngine: z.enum(["pipeline", "agentic", "hypotheses"]),
@@ -156,7 +157,7 @@ export function applyRepoConfig<T extends Record<string, unknown>>(dashboard: T 
   }
   // Touched directories can raise the PR-wide tier and comment limit above the root value, never lower them.
   const pr = pullRequestSettings(loaded.levels ?? [], touched, [...locked]);
-  if (pr.settings.mode && tiers.indexOf(pr.settings.mode) > tiers.indexOf((result.mode as (typeof tiers)[number]) ?? "fast")) { result.mode = pr.settings.mode; if (!applied.includes("mode")) applied.push("mode"); }
+  if (pr.settings.mode && rank(pr.settings.mode) > rank((result.mode as Mode) ?? "fast")) { result.mode = pr.settings.mode; if (!applied.includes("mode")) applied.push("mode"); }
   if (pr.settings.maxComments !== undefined && pr.settings.maxComments > Number(result.maxComments ?? 0)) { result.maxComments = pr.settings.maxComments; if (!applied.includes("maxComments")) applied.push("maxComments"); }
   const scoped = loaded.directories.filter((d) => d.instructions).map((d) => `For files under ${d.directory}/: ${d.instructions}`);
   if (scoped.length && !locked.has("instructions")) result.instructions = [result.instructions, ...scoped].filter(Boolean).join("\n\n").slice(0, 20000);
@@ -181,12 +182,13 @@ export function fileSettings(levels: ConfigLevel[], path: string, locked: readon
 }
 // Pull-request-wide values from the directories a change touches: the highest review tier and the
 // largest comment limit win (a deeper or sibling folder can raise them, never lower the root's).
-const tiers = ["fast", "standard", "deep"] as const;
+// "auto" ranks below every explicit tier, so a folder's explicit tier always replaces it.
+const rank = (mode: Mode) => (mode === "auto" ? -1 : modes.indexOf(mode));
 export function pullRequestSettings(levels: ConfigLevel[], touched: string[], locked: readonly string[] = []) {
   const applicable = levels.filter((l) => l.directory && touched.some((p) => under(p, l.directory)));
-  const result: { mode?: (typeof tiers)[number]; maxComments?: number } = {}, sources: Record<string, string> = {};
+  const result: { mode?: Mode; maxComments?: number } = {}, sources: Record<string, string> = {};
   for (const l of applicable) {
-    if (l.settings.mode && !locked.includes("mode") && (!result.mode || tiers.indexOf(l.settings.mode) > tiers.indexOf(result.mode))) { result.mode = l.settings.mode; sources.mode = l.directory; }
+    if (l.settings.mode && !locked.includes("mode") && (!result.mode || rank(l.settings.mode) > rank(result.mode))) { result.mode = l.settings.mode; sources.mode = l.directory; }
     if (l.settings.maxComments !== undefined && !locked.includes("maxComments") && l.settings.maxComments > (result.maxComments ?? -1)) { result.maxComments = l.settings.maxComments; sources.maxComments = l.directory; }
   }
   return { settings: result, sources };

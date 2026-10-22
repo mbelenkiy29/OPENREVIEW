@@ -74,6 +74,14 @@ export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
                   defaultValue={filters.since ?? ""}
                 />
               </label>
+              <label>
+                Until
+                <input
+                  name="until"
+                  type="date"
+                  defaultValue={filters.until ?? ""}
+                />
+              </label>
               <button>Filter findings</button>
               <Link href="/dashboard/findings">Reset filters</Link>
             </form>

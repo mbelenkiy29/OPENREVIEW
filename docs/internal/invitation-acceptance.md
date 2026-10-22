@@ -9,12 +9,12 @@ Two new durable backend regressions verify named invitation visibility for users
 New-member browser identity/permission acceptance, responsive and full recovery states remain unverified. Existing backend tests establish those authorization rules; they do not replace live multi-user acceptance.
 
 
-Initial live release dpl_5ER1tig1aHXe1LyJQnxtpFYGZM9a completed on the canonical domain with the existing Convex backend. A self-invitation to the isolated recovery workspace exercised pending management and invitation visibility from the already-selected main workspace. Acceptance consumed the invitation, switched to recovery Analytics, and preserved the existing owner role. No recipient was granted new access.
+Initial live release `<deployment-id>` completed on the canonical domain with the existing Convex backend. A self-invitation to the isolated recovery workspace exercised pending management and invitation visibility from the already-selected main workspace. Acceptance consumed the invitation, switched to recovery Analytics, and preserved the existing owner role. No recipient was granted new access.
 
 This first walkthrough found the uncontrolled workspace select retained its previous selection after acceptance, despite the correct cookie and displayed workspace. Workspace/team selects now remount when their effective scope changes. Final deployment and repeated acceptance are recorded in implementation-status.md. The initial evidence is a completed existing-owner path, not a new-viewer access claim.
 
 
-Final READY release dpl_9KhbFHACat9JJ4MynLr8MBd55L5i repeated acceptance successfully with the corrected selected workspace immediately after redirect. A second real page retained the consumed invitation; replay returned the visible invalid/expired recovery message without changing access. The existing owner remained owner, pending list became empty and main workspace was restored. Both self-invitations were consumed. No new access or inference was used. Admin revocation UI and new-member multi-user browser acceptance remain pending.
+Final READY release `<deployment-id>` repeated acceptance successfully with the corrected selected workspace immediately after redirect. A second real page retained the consumed invitation; replay returned the visible invalid/expired recovery message without changing access. The existing owner remained owner, pending list became empty and main workspace was restored. Both self-invitations were consumed. No new access or inference was used. Admin revocation UI and new-member multi-user browser acceptance remain pending.
 
 Screenshots: output/setup/invitations-pending-live.png, invitations-cross-workspace-live.png, invitations-consumed-owner-live.png and invitations-replay-error-live.png. Logs: invitations-{backend-tests,regression,lint,typecheck,build,vercel-deploy,selector-vercel-deploy}.log.
 

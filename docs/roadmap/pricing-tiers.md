@@ -24,43 +24,54 @@ A build checklist for adding paid tiers above **Starter**. It is written so an A
 
 ## Pricing
 
-| Tier | Price (per seat / month) | Fair-use reviews (per seat / month) | Status |
+Positioning: well under Greptile, which charges $30 per seat per month for 50 review credits, $1 for each extra credit, and gates SSO and audit logs to Enterprise.
+
+| Plan | Price (per seat / month) | Included model usage | Status |
 |---|---|---|---|
-| Trial | Free for 14 days, starting at the first review | 200 per workspace | Live |
-| **Starter** | $12 | 500 | Live: `STRIPE_SEAT_PRICE_ID` |
-| **Pro** | $29 | 1,500 | Planned |
-| **Business** | $49 | 3,000 | Planned |
+| **Free** | $0, no card | $3 per workspace per month (about 40 standard reviews) | Live |
+| **Starter** | $12 ($10 billed annually) | $6 per seat, pooled | Live: `STRIPE_SEAT_PRICE_ID` |
+| **Pro** | $24 ($20 billed annually) | $12 per seat, pooled | Live: `STRIPE_PRO_PRICE_ID` |
+| Enterprise | Contact | Custom | Process only: SCIM, custom DPA, invoicing, self-host help |
 
 - **Seats:** owners, admins and members count as seats; viewers are free.
-- **Annual billing:** two months free (pay for 10 of 12). Planned in P3.2.
-- **Unit economics:** a review costs about $0.06–0.07 in inference. At ten reviews per developer per week, Starter costs about $3 per seat in inference, so the fair-use limits only stop abuse.
+- **Extra usage:** billed at model cost × 1.3 (set in the Stripe metered price), up to the admin cap.
+- **Unit economics:**
+  - A standard review costs about $0.06–0.07 in inference.
+  - The worst case, with all included usage used, leaves about 47% margin after Stripe fees on both Starter and Pro.
+  - At 10 reviews per developer per week, Starter's margin is about 72%.
+  - Free costs at most $3 per workspace per month, and the deployment-wide `inferenceBudgets` cap bounds the total.
 - **Spend ceiling:** the global inference budget (`convex/inferenceBudget.ts`) is the hard ceiling for the whole deployment.
 
 ## Feature matrix
 
-Status: **exists** = built and on main today (every tier gets it until P0 lands); **build** = not built yet.
+Status: **gated** = enforced by `src/plans.ts` today; **planned** = on Pro by design, but every plan still gets it until it is gated.
 
-| Feature | Starter | Pro | Business | Status | Entitlement key |
+| Feature | Free | Starter | Pro | Status | Entitlement key |
 |---|---|---|---|---|---|
-| Unlimited reviews (fair use), summary comment, inline findings, committable suggestions | ✓ | ✓ | ✓ | exists | (always on) |
-| Incremental re-reviews, thread resolution, triggers, `.openreview.json` | ✓ | ✓ | ✓ | exists | (always on) |
-| Security checks and OSV advisories | ✓ | ✓ | ✓ | exists | (always on, never gated) |
-| All providers (GitHub, GitLab, Azure DevOps, Bitbucket, Gitea, Perforce) | ✓ | ✓ | ✓ | exists | (always on) |
-| Codebase chat in the dashboard | ✓ | ✓ | ✓ | exists | (always on) |
-| 👍/👎 learning and the Memory page | ✓ | ✓ | ✓ | exists | (always on) |
-| Slack and email notifications | ✓ | ✓ | ✓ | exists | (always on) |
-| Agentic and hypothesis review engines (deeper reviews) |  | ✓ | ✓ | exists | `engine.deep` |
-| Requirements check from Linear, Jira, Confluence and Notion |  | ✓ | ✓ | exists | `context.requirements` |
-| Fix pull requests (`@openreview fix this … in a new PR`) |  | ✓ | ✓ | exists | `fix.pullRequests` |
-| Generated reproduction tests in the sandbox |  | ✓ | ✓ | exists | `review.reproTests` |
-| Learned conventions from human reviewers |  | ✓ | ✓ | exists | `memory.conventions` |
-| Public API keys and the remote MCP server |  | ✓ | ✓ | exists | `api.access` |
-| Analytics trends beyond 30 days |  | ✓ | ✓ | build (the limit is new) | `analytics.history` |
-| SSO (SAML / OIDC) and enforced SSO |  |  | ✓ | build | `auth.sso` |
-| SCIM user provisioning |  |  | ✓ | build | `auth.scim` |
-| Audit log export (CSV / JSON) and 1-year retention |  |  | ✓ | build | `audit.export` |
-| Spending caps and usage alerts | ✓ (alerts) | ✓ | ✓ (caps) | build | `billing.caps` |
-| Priority support | | | ✓ | process (not code) | none |
+| Reviews, summaries, inline findings, suggestions, re-reviews, `.openreview.json` | ✓ | ✓ | ✓ | always on | none |
+| Security checks and OSV advisories | ✓ | ✓ | ✓ | never gated | none |
+| All providers, CLI, MCP, Claude Code/Codex plugins, chat, custom rules, 👍/👎 learning, Slack and email | ✓ | ✓ | ✓ | always on | none |
+| Extra usage up to an admin cap |  | ✓ | ✓ | live | none |
+| Deep reviews (agentic and hypothesis engines) |  |  | ✓ | gated | `review.deep` |
+| Generated reproduction tests |  |  | ✓ | gated | `review.reproTests` |
+| Fix pull requests |  |  | ✓ | gated | `fix.pullRequests` |
+| Requirements check from Linear, Jira, Confluence and Notion |  |  | ✓ | gated | `context.requirements` |
+| Learned conventions from human reviewers |  |  | ✓ | gated | `memory.conventions` |
+| Public API keys |  |  | ✓ | gated | `api.access` |
+| Analytics beyond 30 days |  |  | ✓ | gated | `analytics.history` |
+| SSO (SAML / OIDC) and the audit log |  |  | ✓ | gated (SSO configured earlier keeps working) | `auth.sso`, `audit.log` |
+
+**Potential Pro features to build later:**
+- Scheduled full-repository security audits.
+- A merge gate that requires a minimum confidence score.
+- A priority review queue.
+- A model choice per repository.
+- A weekly team quality digest.
+- A cheaper bring-your-own-key seat (`convex/modelKeys.ts` already skips metering).
+
+The phases below are the original build checklist. P0.1, P0.2, P1.1, P1.3 and P1.5 shipped with the Free/Starter/Pro plans (`src/plans.ts`, `billingAccounts.plan`, Checkout per plan, and the deep, repro-test and fix-PR gates). The Business tier is dropped: its SSO and audit items move to Pro.
+
+The second pass gated the rest of Pro (P1.4, P1.6, plus `analytics.history`, `auth.sso` and `audit.log`). Settings for a locked feature stay visible but disabled inside `<Locked>` (`app/dashboard/locked.tsx`), which links to Settings → Billing. Grandfathering is limited to SSO: a connection configured before keeps working and stays editable. The Perforce watcher and trigger keep working with their admin API key, because they are a code provider, not the public API.
 
 ---
 
@@ -156,7 +167,7 @@ Status: **exists** = built and on main today (every tier gets it until P0 lands)
 **Acceptance:**
 - [ ] Tests: the engine falls back on Starter, runs as chosen on Pro, and security checks run in both.
 
-### - [ ] P1.4 Gate requirements context (`context.requirements`)
+### - [x] P1.4 Gate requirements context (`context.requirements`)
 **Depends on:** P0.3
 **Files:** the requirements check entry points (search `requirements` in `convex/` and `src/`), the integrations settings UI.
 **Build:**
@@ -176,7 +187,7 @@ Status: **exists** = built and on main today (every tier gets it until P0 lands)
 **Acceptance:**
 - [ ] Tests: no branch is created on Starter, the reply text is correct, and Pro works as before.
 
-### - [ ] P1.6 Gate learned conventions and API/MCP access (`memory.conventions`, `api.access`)
+### - [x] P1.6 Gate learned conventions and API/MCP access (`memory.conventions`, `api.access`)
 **Depends on:** P0.3
 **Files:** `convex/conventionJobs.ts`, `convex/conventions.ts`, `convex/apiKeys.ts`, `app/api/mcp`, `app/api/query`, `app/api/search`.
 **Build:**
@@ -186,14 +197,14 @@ Status: **exists** = built and on main today (every tier gets it until P0 lands)
 **Acceptance:**
 - [ ] Tests: ingestion is skipped, existing rules still apply, key creation is denied, and the API returns 402 with an upgrade message.
 
-### - [ ] P1.7 Fair-use alerts
+### - [x] P1.7 Fair-use alerts
 **Depends on:** P0.1
 **Files:** `convex/billing.ts` (`reviewAllowance`), `convex/notifications.ts`, the email templates.
 **Build:**
 - When a workspace crosses 80% and then 100% of its monthly fair-use limit, email the admins once per threshold per month and show a banner in Settings → Billing.
 
 **Acceptance:**
-- [ ] Tests: each alert is sent exactly once per threshold per month and never to viewers.
+- [x] Tests: each alert is sent exactly once per threshold per month and never to viewers.
 
 ## Phase 2: Business tier
 

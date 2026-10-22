@@ -113,6 +113,9 @@ export function reviewSummary(data:Summary,selected:readonly string[]=summarySec
 // what goes wrong (description, then impact), one on the fix, and on GitHub a folded "Prompt To Fix With AI".
 // Confidence and evidence quotes stay on the dashboard; the comment already sits on the cited lines.
 export function findingComment(f: Finding, style: string = "detailed", suggestion?: { syntax: SuggestionSyntax; start: number; end: number }, options: { agentPrompt?: boolean } = {}): string {
+  const question = f.question ? `\n\n**Question for the author:** ${f.question.replace(/[\r\n]+/g, " ").replace(/@(?=[\w-])/g, "@​")}` : "";
+  // Compact: badge and title, plain prose, the suggestion, and the agent prompt folded away; no labels or evidence.
+  if (style === "compact") return `**${priorityBadge(f.severity)} · ${f.title}**${tagBadges(f).map((t) => " · " + t).join("")}\n\n${f.description} ${f.impact}\n\n${f.suggestedFix}${f.suggestion && suggestion ? suggestionBlock(f.suggestion, suggestion.syntax, suggestion) : ""}${f.generatedTest ? generatedTestSection(f.generatedTest) : ""}${question}${options.agentPrompt ? "\n\n<details><summary>Prompt To Fix With AI</summary>\n\n" + agentPrompt([f]) + "\n\n</details>" : ""}\n\n<!-- openreview-finding:${f.fingerprint} -->`;
   const text = (value: string) => (style === "concise" ? firstSentence(value) : value.trim());
   const problem = style === "concise" ? text(f.description) : [f.description.trim(), f.impact.trim()].filter(Boolean).join(" ");
   const body = [problem, text(f.suggestedFix)].filter(Boolean).join("\n\n");

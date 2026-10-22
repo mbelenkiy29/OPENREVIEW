@@ -1,7 +1,7 @@
 import {changeMetadataSchema,catalogPageSize,numberedPage,validateChangePage,type ChangeMetadata,type ChangePage} from "./change-metadata";
 import { fixAgentButtons, safeFixBranch } from "./fix-command";
 import {githubWebOrigin} from "./github-enterprise";
-import { reviewLinkItems, inlineFindings } from "./review-summary";
+import { reviewLinkItems, reviewLinks, inlineFindings } from "./review-summary";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { repositorySourceUrl } from "./source-url";
 import { importPKCS8, SignJWT } from "jose";
@@ -10,7 +10,7 @@ import type { ChangedFile, Finding, SourceFile } from "./engine/types";
 import {changedLines} from "./engine/diff";
 import {commentRange} from "./engine/patch-lines";
 import {findingComment} from "./review-summary";
-import {disclosureLayout,threadLinks,withDescriptionSummary,withoutDescriptionSummary} from "./summary-layout";
+import {compactLayout,disclosureLayout,threadLinks,withDescriptionSummary,withoutDescriptionSummary} from "./summary-layout";
 
 export function verifyWebhook(
   body: string,
@@ -707,8 +707,10 @@ export class Github {
     await current();
     const commit = `${githubWebOrigin(this.base)}/${repository.split("/").map(encodeURIComponent).join("/")}/commit/${sha}`;
     const threads = summary.includes("<!-- openreview-thread:") ? await this.findingThreads(repository, number, publisher) : new Map<string, string>();
-    const layout = threadLinks(disclosureLayout(summary, [`Last reviewed commit: [\`${sha.slice(0, 7)}\`](${commit})`, ...reviewLinkItems(marker, unresolvedCount, "View in OpenReview")]), (fingerprint) => threads.get(fingerprint));
-    const body = `${layout}\n\n${summaryMarker}\n<!-- openreview:${marker} -->`;
+    const link = (fingerprint: string) => threads.get(fingerprint);
+    const body = (style === "compact"
+      ? threadLinks(compactLayout(summary, `[\`${sha.slice(0, 7)}\`](${commit})`, reviewLinks(marker,unresolvedCount)), link)
+      : threadLinks(disclosureLayout(summary, [`Last reviewed commit: [\`${sha.slice(0, 7)}\`](${commit})`, ...reviewLinkItems(marker, unresolvedCount, "View in OpenReview")]), link)) + `\n\n${summaryMarker}\n<!-- openreview:${marker} -->`;
     const note = (options.placement === "description" && await this.upsertDescriptionSummary(repository, number, body, publisher, description)) || await this.upsertSummary(repository, number, body, publisher, description);
     await current();
     return review ?? { id: note.id, reused: note.reused, comments: [] };

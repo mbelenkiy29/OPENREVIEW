@@ -4,25 +4,67 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 
 ## Plans
 
-- **Choosing a plan (new workspaces):** a workspace created while billing is on (`organizations.planRequired`) must choose a plan before anything else. Setup goes workspace → **Choose your plan** → connect. The plan step starts Stripe Checkout for the Starter plan with a `BILLING_TRIAL_DAYS` (default 14) day trial, and the card is always collected (`payment_method_collection: always`). The choice is recorded (`organizations.planSelectedAt`, `plan`, audit `billing.plan_selected`) only when Stripe confirms it: `checkout.session.completed` with a subscription, or a subscription that is trialing, active or past due. Until then the dashboard sends everyone to the plan step (Billing, Account and Referrals settings stay open), and the server refuses indexing, reviews, advancing and finishing setup.
-- **Trial (older workspaces):** workspaces from before plans were required have no `planRequired` flag and keep the app-level trial: `BILLING_TRIAL_DAYS` days, starting at the first review or first Checkout, with no card.
-- **Starter (per seat):**
-  - A Stripe subscription whose quantity is the number of active seats. Owners, admins and members are seats; viewers are free.
-  - Reviews are unlimited under a monthly fair-use limit of seats × `BILLING_REVIEWS_PER_SEAT` (default 500).
-  - The landing page, the setup plan step and Settings → Billing show `BILLING_SEAT_PRICE_LABEL` (for example `$12 per seat / month`). Set it on the web app and keep it in sync with the Stripe price.
-- **Seat changes:** accepting an invitation or changing a member's role resyncs the subscription quantity, with prorations.
-- **Past due:** reviews continue for `BILLING_GRACE_DAYS` (default 7) after the first failed payment, then pause until an invoice is paid.
-- **Cancelled:** the workspace falls back to any remaining trial.
+| | Free | Starter | Pro |
+|---|---|---|---|
+| Price | $0, no card | `BILLING_SEAT_PRICE_LABEL` per seat (we sell $12/month) | `BILLING_PRO_PRICE_LABEL` per seat (we sell $24/month) |
+| Included model usage per month | `BILLING_FREE_USAGE_USD` per workspace (default $3) | `BILLING_USAGE_PER_SEAT_USD` per seat (default $6), pooled | `BILLING_PRO_USAGE_PER_SEAT_USD` per seat (default $12), pooled |
+| Extra usage | none | up to the admin cap | up to the admin cap |
+| Deep reviews, generated reproduction tests, fix pull requests | | | ✓ |
+| Requirements from Linear, Jira, Confluence and Notion; learning conventions | | | ✓ |
+| API keys, analytics older than 30 days, SSO, the audit log | | | ✓ |
 
-Higher tiers (Pro, Business) are planned in [roadmap/pricing-tiers.md](roadmap/pricing-tiers.md).
+The plan catalog is `src/plans.ts`. Security checks, every provider, and the CLI and MCP signed in through the browser are on every plan. With billing off every feature is unlocked.
+
+- **Choosing a plan (new workspaces):** a workspace created while billing is on (`organizations.planRequired`) must choose a plan before anything else. Setup goes workspace → **Choose your plan** → connect.
+  - **Free** is recorded at once (`billing.chooseFreePlan`, admins only).
+  - **Starter and Pro** open Stripe Checkout with a `BILLING_TRIAL_DAYS` (default 14) day trial, and the card is always collected (`payment_method_collection: always`). The choice is recorded only when Stripe confirms it: `checkout.session.completed` with a subscription, or a subscription that is trialing, active or past due.
+  - Either way the choice is stored in `organizations.planSelectedAt` and `plan`, and audited as `billing.plan_selected`. Until then the dashboard sends everyone to the plan step (Billing, Account and Referrals settings stay open), and the server refuses indexing, reviews, advancing and finishing setup.
+- **Existing subscriptions (grandfathered):** subscriptions from before Pro existed keep every Pro feature while they stay on Starter (`billingAccounts.legacy`). Run once right after deploying plans: `npx convex run billing:grandfatherSubscriptions '{"confirm":"grandfather-pre-plan-subscriptions"}' --prod`.
+- **Free:** any workspace without a subscription, including workspaces from before plans were required and cancelled subscriptions. Free never expires; its allowance resets each month. `BILLING_TRIAL_USAGE_USD` is no longer read: a generous trial allowance must not become a monthly gift.
+- **One Free workspace per owner:** otherwise creating workspaces would be unlimited free usage. A new workspace (`planRequired`) gets no Free allowance (a $0 limit, with a `Billing:` reason naming the owner's Free workspace) while any of its owners owns another Free workspace created before it. Before a new workspace has chosen a plan, any other Free workspace counts, so `billing.chooseFreePlan` refuses it and the plan step offers only Starter and Pro. A Free workspace is one with no paying subscription that is not still choosing its plan. Paid workspaces, workspaces from before plans were required, and billing off are unaffected. When the owner's Free workspace subscribes, the next-oldest one gets Free. A workspace that is pending deletion still counts until it is purged.
+- **Which paid plan:** the subscription's seat price decides it (`billingAccounts.plan`): `STRIPE_SEAT_PRICE_ID` / `STRIPE_SEAT_ANNUAL_PRICE_ID` is Starter, and `STRIPE_PRO_PRICE_ID` / `STRIPE_PRO_ANNUAL_PRICE_ID` is Pro. An unknown price keeps the recorded plan, and a subscription with none recorded is Starter. Checkout uses the monthly prices. Admins switch between Starter and Pro in Settings → Billing (`billingJobs.changePlan`): it swaps the seat price on the subscription item with prorations and audits `billing.plan_change_requested`, and the webhook then records the new plan. The Customer Portal can't do this, because it doesn't update subscriptions that carry a metered price. Switching to Starter leaves `legacy` as it is.
+- **Gated features:** each one is skipped, never failed.
+  - A deep review runs at standard, with a coverage note.
+  - Generated reproduction tests are not drafted.
+  - A fix pull request request replies that it is a Pro feature. The validated suggestion is still posted.
+  - Linked requirements are not fetched, with a coverage note. Connecting a new Linear, Atlassian or Notion workspace needs Pro; existing connections stay and work again after upgrading.
+  - Convention learning is skipped (the sweep marks the repository synced without moving its cursor, so an upgrade later learns from the comments it skipped). Approved conventions keep applying.
+  - Creating API keys needs Pro. Existing keys are kept but answer `402` with an upgrade message. The Perforce watcher and trigger are exempt: they are a code provider, not the public API.
+  - Analytics periods may start at most 30 days back (the start of the UTC day 30 days ago).
+  - Setting up SSO needs Pro. A connection configured before keeps working and stays editable on any plan.
+  - The audit log page needs Pro. Events are still recorded, so they appear after upgrading.
+  - In the dashboard, each locked setting stays visible but disabled (`<Locked>`, `app/dashboard/locked.tsx`) with a link to Settings → Billing. `billing.locked` lists what the workspace's plan lacks.
+- **Seats:** owners, admins and members are seats; viewers are free. Accepting an invitation or changing a member's role resyncs the subscription quantity, with prorations.
+- **Past due:** reviews continue for `BILLING_GRACE_DAYS` (default 7) after the first failed payment, then pause until an invoice is paid.
+
+**Stripe setup:**
+- Create a Product "OpenReview Pro" with a $24 monthly price and a $240 yearly price.
+- Add a $120 yearly price to the Starter product.
+- Set `STRIPE_PRO_PRICE_ID`, `STRIPE_PRO_ANNUAL_PRICE_ID` and `STRIPE_SEAT_ANNUAL_PRICE_ID` on Convex.
+- Set `BILLING_PRO_PRICE_LABEL` on the web app.
+- In the Customer Portal configuration, turn off quantity changes. Plan switching happens in the app, not the portal.
+
+## Usage
+
+Usage is the inference cost of the workspace's model calls (reviews, chat, Slack answers, fixes, knowledge, indexing embeddings), priced by `INFERENCE_PRICES` or the built-in prices, so pricier models use it faster. Workspaces that bring their own model key are not metered.
+
+- **Enforcement:** every model call reserves its worst-case cost before it is sent (`inferenceBudget.reserve`, which also checks the deployment-wide cap) and settles the real cost after (`billingUsage.usedMicros`). A call that would pass the allowance is refused before anything is sent, with a `Billing:` reason that says when usage resets (the first of the next UTC month). New reviews are blocked once the allowance is used.
+- **Extra usage:** on Starter and Pro an admin sets a monthly cap in Settings → Billing (0 = off, audited as `billing.spending_cap`). Usage past the included amount, up to the cap, is recorded in `billingUsage.overageMicros` and reported to Stripe as meter events (`billingMeterEvents`, retried with backoff, the row id as the idempotent identifier).
+- **Meter:** Settings → Billing shows the percentage used and the reset date; admins also see dollars.
+- **Alerts:** when settled usage crosses 80% and then 100% of the included usage, the workspace owners and admins with a verified notification email (Settings → Notifications) get one email per threshold per month; members and viewers never do. `settleUsage` records the thresholds in `billingUsage.alertsSent`, so the next month starts over, and `notificationJobs.usageAlert` sends them (skipped without email configured). On Free the 100% email says reviews are paused until the reset date and points to upgrading; on Starter and Pro it says extra usage is off, or how much of the cap is left. Settings → Billing shows a banner from 80%.
+- **Stripe setup:** create a Meter (event name `STRIPE_METER_EVENT`, sum of `value`) and a metered price on it with the markup in `unit_amount_decimal` (the value is micro-dollars of cost: $1.25 per $1 of cost is 0.000125 cents per unit). Set `STRIPE_USAGE_PRICE_ID`; Checkout then adds it next to the seat price. Existing subscriptions need the price added (Customer Portal or Dashboard) before their extra usage is invoiced.
+
+## Model choice
+
+Workspace and team defaults and repository settings pick the review model from the operator's priced list: the `INFERENCE_PRICES` entries for `LLM_PROVIDER` (for example `openrouter:anthropic/claude-sonnet-5-5`). Chat, Slack answers, fixes and knowledge use the workspace default. A saved model that leaves the list falls back to the operator's `LLM_MODEL`. Only list models that support tool calls and `response_format` JSON.
 
 ## Choosing a plan during setup
 
-When billing is on, guided setup adds a **Choose your plan** step after inviting the team. It shows the Starter plan, the seat count and the trial, and offers two choices:
-- **Add payment method:** opens Stripe Checkout and returns to the step.
-- **Continue on the trial:** subscribe later in Settings → Billing.
+When billing is on, guided setup adds a **Choose your plan** step after inviting the team. It shows the Free, Starter and Pro cards and the seat count:
+- **Continue on Free:** no card. Upgrade later in Settings → Billing. Not offered when an owner already has a Free workspace: the card names it instead.
+- **Choose Starter** or **Start Pro trial:** opens Stripe Checkout and returns to the step.
 
-Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
+The trial clock starts when the workspace first opens Checkout (its Stripe customer is created), however long it was on Free; each workspace gets one trial. Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
 
 When a review is blocked, it is recorded as failed with a `Billing:` reason, visible on the pull request's review page. Blocked reviews are also counted on **Settings → Billing**.
 
@@ -68,7 +110,7 @@ On Vercel, Stripe can also be provisioned from the Vercel Marketplace. The keys 
    ```bash
    npx convex run billing:forgetStripeLinks '{"confirm":"switch-stripe-mode"}' --prod
    ```
-   Each workspace returns to its trial with the same end date, and its next Checkout creates a live customer.
+   Each workspace returns to Free, and its next Checkout creates a live customer with a fresh trial.
 5. **Old webhook:** cancel the test subscriptions and disable the test-mode webhook endpoint, so the sandbox stops sending events (and retries) that would now fail signature checks.
 6. **Referrals:** commissions, credits and payout accounts don't record the Stripe mode. Keep `REFERRALS_ENABLED` off on a deployment until it is live. A deployment where any test invoice earned a commission (any `referralCommissions` row) must not be switched to live, even after voiding them: its referrals stay marked as paid, so live Checkout gives no coupon, the commission window counts from the test invoice and the conversion email is not sent again. Use a separate deployment. If referrals were on but no commission was ever earned, only delete its `referralPayoutAccounts` rows (test `acct_…` IDs don't exist in live mode). Add the three charge events to the live webhook endpoint too, and enable Connect in live mode.
 
@@ -84,7 +126,7 @@ Off unless `REFERRALS_ENABLED=true` and `BILLING_ENABLED=true`, on both Convex a
   - The referrer gets one email when the workspace first pays, if they have a verified email (an email, Google, GitLab or SSO sign-in, or a verified address in Settings → Notifications).
 - **Self-referral:** you can't use your own code. Checkout gives no coupon to a workspace the referrer is or ever was a member of, and the referral is voided at its next paid invoice, with its commissions still on hold.
 - **Codes in Settings → Billing:** owners and admins can add a referral code to a workspace that has none, within its first 30 days and before it has subscribed. The code's owner must not be, or ever have been, a member of the workspace, nor someone the caller referred, and a caller who was already referred can only bring that same referral. Five attempts per person per hour.
-- **Refunds and disputes:** `charge.refunded`, `charge.dispute.created` and `charge.dispute.closed` take a commission back in proportion to the cash its invoice lost. The webhook only queues a job; the job reads the charge (and its dispute) from Stripe, then every invoice the charge's PaymentIntent paid (`/v1/invoice_payments`), so out-of-order events cannot leave a stale state. An open or lost dispute counts as lost; a won, `warning_closed` or `prevented` one gives the commission back. Clawbacks follow `BILLING_ENABLED`, not `REFERRALS_ENABLED`, so they continue after the program is switched off. A refund of a deleted workspace still counts. A failed Stripe read is retried at 1, 4, 16 and 64 minutes, then logged as `{"event":"referral.charge_unresolved"}`; re-run it with `npx convex run referralJobs:resolveChargeEvent '{"chargeId":"ch_…","kind":"refund"}'`. A refund that arrives before its invoice's commission exists is looked at again on the same schedule.
+- **Refunds and disputes:** `charge.refunded`, `charge.dispute.created` and `charge.dispute.closed` take a commission back in proportion to the cash its invoice lost. The webhook only queues a job; the job reads the charge (and its dispute) from Stripe, then every invoice the charge's PaymentIntent paid (`/v1/invoice_payments`), so out-of-order events cannot leave a stale state. An open or lost dispute counts as lost; a won, `warning_closed` or `prevented` one gives the commission back. Clawbacks follow `BILLING_ENABLED`, not `REFERRALS_ENABLED`, so they continue after the program is switched off. A refund of a deleted workspace still counts. A failed Stripe read is retried at 1, 4, 16 and 64 minutes, then logged as `{"event":"referral.charge_unresolved"}`; re-run it with `npx convex run referralJobs:resolveChargeEvent '{"chargeId":"ch_…","kind":"refund"}'`. A refund or dispute handled before its invoice's commission exists (a late `invoice.paid`) is caught when the commission accrues: that schedules one look at the invoice's payments and their charges (`referralJobs:checkInvoiceCharges`), retried the same way and logged as `{"event":"referral.invoice_unchecked"}`.
   - `refund.failed`, `refund.updated` and `charge.dispute.updated` are not handled: a refund that later fails, or a dispute that changes without closing, is corrected at that charge's next event or by hand.
   - **Negative balance:** a clawback after the referrer redeemed makes their balance negative. Credits already applied are not taken back; future commissions pay the difference first.
   - **Credit notes** that only credit the customer balance (no refund) send no charge event. Void the commission by hand with `referralOps:voidCommission`.

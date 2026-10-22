@@ -58,16 +58,16 @@ test('Notion connect stores encrypted credentials once; admins scope repositorie
  expect(stored!.credentials).not.toContain('ntn_access');
  expect(JSON.parse(decryptCredential(stored!.credentials,org+':notion'))).toMatchObject({accessToken:'ntn_access_initial',refreshToken:'ntn_refresh_ntn_access_initial'});
  // No repositories selected: nothing is fetched.
- expect((await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,actor:'alice',authorExternalId:'91',references:pageUrl})).files).toEqual([]);
+ expect((await t.action(internal.integrationJobs.requirements,{actor:'alice',authorExternalId:'91',repositoryId:repo._id,references:pageUrl})).files).toEqual([]);
  expect(await t.action(api.notionJobs.discover,{token:alice.token,id})).toEqual({pages:[{id:pageId,url:pageUrl,title:'Checkout'}]});
  await expect(t.action(api.notionJobs.configure,{token:bob.token,id,repositoryIds:[repo._id]})).rejects.toThrow();
  await t.action(api.notionJobs.configure,{token:alice.token,id,repositoryIds:[repo._id]});
  const before=calls.length;
- const result=await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,actor:'alice',authorExternalId:'91',references:`Implements ${pageUrl} and https://evil.example/1f2e3d4c5b6a47988796a5b4c3d2e1f0`});
+ const result=await t.action(internal.integrationJobs.requirements,{actor:'alice',authorExternalId:'91',repositoryId:repo._id,references:`Implements ${pageUrl} and https://evil.example/1f2e3d4c5b6a47988796a5b4c3d2e1f0`});
  expect(result.files).toEqual([{path:`requirements/notion/${id}/${pageId}.md`,content:`# Checkout\nSource: ${pageUrl}\nUpdated: 2026-10-02T09:00:00.000Z\n\nTotals stay in integer cents.`,sha:'2026-10-02T09:00:00.000Z',provenance:{repository:'Notion: Acme Notion',revision:'2026-10-02T09:00:00.000Z',sourceUrl:pageUrl}}]);
  expect(result.scopes).toEqual([{id,generation:2}]);
  expect(calls.slice(before).map(c=>c.path)).toEqual([`/v1/pages/${pageId}`,`/v1/blocks/${pageId}/children`]);
- const none=await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,actor:'alice',authorExternalId:'91',references:'No links here'});
+ const none=await t.action(internal.integrationJobs.requirements,{actor:'alice',authorExternalId:'91',repositoryId:repo._id,references:'No links here'});
  expect(none.coverage).toContain('No Notion page links were found in the PR title, description or branch; no Notion requirements were fetched.');
 });
 
@@ -77,7 +77,7 @@ test('a 401 refreshes the token once and retries; a revoked grant without refres
  const id=await t.action(api.notionJobs.connect,connectArgs(alice.token,org));
  await t.action(api.notionJobs.configure,{token:alice.token,id,repositoryIds:[repo._id]});
  state.tokens.ntn_access_initial='revoked';
- const recovered=await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,actor:'alice',authorExternalId:'91',references:pageUrl});
+ const recovered=await t.action(internal.integrationJobs.requirements,{actor:'alice',authorExternalId:'91',repositoryId:repo._id,references:pageUrl});
  expect(recovered.files).toHaveLength(1);
  expect(calls.filter(c=>c.path==='/v1/oauth/token').map(c=>c.body?.grant_type)).toEqual(['authorization_code','refresh_token']);
  const rotated=await t.run(ctx=>ctx.db.get(id));
@@ -85,14 +85,14 @@ test('a 401 refreshes the token once and retries; a revoked grant without refres
  expect(rotated!.error).toBeUndefined();
  // Refresh rejected: the page is skipped with coverage, and the connection shows an error.
  state.tokens.ntn_access_refreshed='revoked';state.refresh='fail';
- const failed=await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,actor:'alice',authorExternalId:'91',references:pageUrl});
+ const failed=await t.action(internal.integrationJobs.requirements,{actor:'alice',authorExternalId:'91',repositoryId:repo._id,references:pageUrl});
  expect(failed.files).toEqual([]);
  expect(failed.coverage.some(c=>c.startsWith(`Notion page ${pageId} was unavailable`))).toBe(true);
  expect((await t.run(ctx=>ctx.db.get(id)))!.error).toMatch(/Token refresh failed/);
  // A grant without a refresh token asks for a reconnect instead of refreshing.
  await t.run(ctx=>ctx.db.patch(id,{credentials:encryptCredential(JSON.stringify({accessToken:'ntn_access_dead',refreshToken:null,expiresAt:Date.now()+86400000}),org+':notion'),error:undefined}));
  const tokenCalls=calls.filter(c=>c.path==='/v1/oauth/token').length;
- expect((await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,actor:'alice',authorExternalId:'91',references:pageUrl})).files).toEqual([]);
+ expect((await t.action(internal.integrationJobs.requirements,{actor:'alice',authorExternalId:'91',repositoryId:repo._id,references:pageUrl})).files).toEqual([]);
  expect(calls.filter(c=>c.path==='/v1/oauth/token')).toHaveLength(tokenCalls);
  expect((await t.run(ctx=>ctx.db.get(id)))!.error).toBe('Notion rejected the stored token. Reconnect Notion to restore requirements access.');
 });
@@ -104,7 +104,7 @@ test('disconnect removes access immediately and revokes the token at Notion, ret
  await t.action(api.notionJobs.configure,{token:alice.token,id,repositoryIds:[repo._id]});
  await t.mutation(api.integrations.disconnect,{token:alice.token,id});
  expect(await t.run(ctx=>ctx.db.get(id))).toMatchObject({active:false,credentials:'',repositoryIds:[]});
- expect((await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,actor:'alice',authorExternalId:'91',references:pageUrl})).files).toEqual([]);
+ expect((await t.action(internal.integrationJobs.requirements,{actor:'alice',authorExternalId:'91',repositoryId:repo._id,references:pageUrl})).files).toEqual([]);
  const [revocation]=await t.run(ctx=>ctx.db.query('integrationRevocations').collect());
  await t.action(internal.notionJobs.revoke,{id:revocation._id});
  expect(calls.filter(c=>c.path==='/v1/oauth/revoke').map(c=>[c.body?.token,c.auth])).toEqual([['ntn_access_initial','Basic '+Buffer.from('notion-client:notion-secret').toString('base64')]]);

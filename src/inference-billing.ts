@@ -6,7 +6,6 @@ export type InferenceReceipt = { inputTokens: number; outputTokens: number; cach
 export type InferenceBilling = {
   reserve(quote: InferenceQuote): Promise<string | null>;
   settle(id: string, usage: InferenceReceipt): Promise<void>;
-  release(id: string): Promise<void>;
 };
 export class InferenceBudgetError extends Error {}
 
@@ -70,6 +69,16 @@ export function knownPrice(provider: string, model: string, baseUrl: string, inp
   if (!entry) return undefined;
   return entry.above && inputTokens > entry.above.inputTokens ? entry.above : { input: entry.input, output: entry.output, cacheRead: entry.cacheRead, cacheWrite: entry.cacheWrite };
 }
+
+// Models a workspace may pick: the operator's INFERENCE_PRICES entries for the configured provider, so every
+// choice is priced. Without such entries there is no list and any model name is accepted (self-host default).
+export function allowedModels(env: Record<string, string | undefined> = process.env): { model: string; input: number; output: number }[] {
+  const prefix = (env.LLM_PROVIDER ?? "openai") + ":";
+  let overrides: ReturnType<typeof priceOverrides> = {};
+  try { overrides = priceOverrides(env.INFERENCE_PRICES); } catch { return []; }
+  return Object.entries(overrides).filter(([key]) => key.startsWith(prefix) && !/embed/i.test(key)).map(([key, p]) => ({ model: key.slice(prefix.length), input: p.input, output: p.output }));
+}
+export const modelAllowed = (model: string, list = allowedModels()) => !list.length || list.some((m) => m.model === model);
 
 // Budget pricing: unknown providers/models/endpoints fail closed when a deployment budget is active.
 export function inferencePrice(quote: InferenceQuote): InferencePrice {

@@ -5,7 +5,7 @@ import { SiteFooter, SiteHeader, sourceRepository } from "./site-chrome";
 import { AgentReplica, AnalyticsReplica, ChatReplica, FindingReplica, ReviewReplica, SummaryReplica } from "./landing/replicas";
 import { Copy } from "./dashboard/live";
 import { ScrollTable } from "./dashboard/scroll-table";
-import { billingConfig } from "../src/billing";
+import { billingConfig, usdText } from "../src/billing";
 import { homeStructuredData, jsonLd } from "../src/structured-data";
 
 export const metadata: Metadata = { alternates: { canonical: "/" } };
@@ -43,7 +43,7 @@ const commands = ["pnpm install", "CONVEX_AGENT_MODE=anonymous pnpm exec convex 
 // links (/?error=…) are redirected to /login in next.config.ts.
 export default function Home() {
   const billing = billingConfig();
-  const structured = homeStructuredData({ url: process.env.APP_URL ?? "http://localhost:3000", repository: sourceRepository, billing, priceLabel: process.env.BILLING_SEAT_PRICE_LABEL });
+  const structured = homeStructuredData({ url: process.env.APP_URL ?? "http://localhost:3000", repository: sourceRepository, billing, priceLabel: process.env.BILLING_SEAT_PRICE_LABEL, proPriceLabel: process.env.BILLING_PRO_PRICE_LABEL });
   return <div className="landing">
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(structured) }} />
     <SiteHeader home />
@@ -55,7 +55,7 @@ export default function Home() {
           <Link className="button primary large" href="/signup">Get started</Link>
           <Link className="button large" href="/login">Sign in</Link>
         </div>
-        {billing.enabled && <p className="hero-note">{billing.trialDays} days free. Cancel anytime before the trial ends.</p>}
+        {billing.enabled && <p className="hero-note">Free plan, no card. Paid plans start with {billing.trialDays} days free.</p>}
         <p className="hero-links"><Link href="/docs/quickstart">Read the quickstart →</Link><Link href="/docs/self-hosting">Self-host it →</Link></p>
       </section>
       <div className="stage"><ReviewReplica /><p className="stage-hint">Live demo with sample data. Click around.</p></div>
@@ -110,10 +110,12 @@ export default function Home() {
 
       {billing.enabled && <section id="pricing" className="pricing" aria-labelledby="pricing-heading">
         <h2 id="pricing-heading">Pricing</h2>
-        <div className="feature-grid two">
-          <article className="feature-card"><h3>Free trial</h3><p className="price">Free for {billing.trialDays} days</p><p>Everything in Starter. Add a card when you set up your workspace; nothing is charged until the trial ends, and you can cancel before then.</p><p className="pricing-action"><Link className="button primary" href="/signup">Start free trial</Link></p></article>
-          <article className="feature-card"><h3>Starter</h3><p className="price">{process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>Unlimited reviews, with a fair-use limit of {billing.reviewsPerSeat} per seat each month. Owners, admins and members are seats; viewers are free.</p><p className="pricing-action"><Link className="button" href="/signup">Choose Starter</Link></p></article>
+        <div className="feature-grid">
+          <article className="feature-card"><h3>Free</h3><p className="price">$0</p><p>{usdText(billing.freeUsageMicros)} of model usage per workspace each month. Fast and standard reviews with security checks, every provider, and the CLI and MCP with browser sign-in. No card.</p><p className="pricing-action"><Link className="button" href="/signup">Start free</Link></p></article>
+          <article className="feature-card"><h3>Starter</h3><p className="price">{process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.usagePerSeatMicros)} of model usage per seat each month, pooled across the workspace, then optional pay-as-you-go extra usage up to a cap you set. Owners, admins and members are seats; viewers are free.</p><p className="pricing-action"><Link className="button" href="/signup">Choose Starter</Link></p></article>
+          <article className="feature-card"><h3>Pro</h3><p className="price">{process.env.BILLING_PRO_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.proUsagePerSeatMicros)} of model usage per seat each month, plus deep reviews, generated reproduction tests, fix pull requests, requirements checks, SSO, the audit log and API keys. {billing.trialDays} days free.</p><p className="pricing-action"><Link className="button primary" href="/signup">Start Pro trial</Link></p></article>
         </div>
+        <p className="muted">Self-hosting is free and unlimited: <Link href="/docs/self-hosting">self-hosting guide</Link>.</p>
       </section>}
 
       <section className="faq-band" aria-labelledby="faq-heading">

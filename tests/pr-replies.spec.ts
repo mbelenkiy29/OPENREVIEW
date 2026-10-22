@@ -7,7 +7,7 @@ import type {Id} from '../convex/_generated/dataModel';
 import {defaults} from '../src/review-settings';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='pr-replies-session-secret-at-least-32-chars';
-const env={SESSION_SECRET:secret,SERVICE_SECRET:'pr-replies-service',BILLING_ENABLED:'true',BILLING_TRIAL_REVIEWS:'1',BILLING_REVIEWS_PER_SEAT:'2',BILLING_GRACE_DAYS:'7',BILLING_TRIAL_DAYS:'60',APP_URL:'https://review.example.com'};
+const env={SESSION_SECRET:secret,SERVICE_SECRET:'pr-replies-service',BILLING_ENABLED:'true',BILLING_FREE_USAGE_USD:'0.01',BILLING_USAGE_PER_SEAT_USD:'0.01',BILLING_GRACE_DAYS:'7',BILLING_TRIAL_DAYS:'60',APP_URL:'https://review.example.com'};
 beforeEach(()=>{vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date']});vi.setSystemTime(Date.UTC(2026,9,16,12));Object.assign(process.env,env);});
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();for(const k of Object.keys(env))if(!['SESSION_SECRET','SERVICE_SECRET'].includes(k))delete process.env[k];});
 
@@ -28,6 +28,8 @@ test('a review the plan blocks schedules one pull request notice for GitHub acti
  const {t,repo}=await setup();
  const enqueue=(pr:number,trigger:'automatic'|'mention'|'manual')=>t.mutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:pr,headSha:String(pr).padStart(40,'a'),trigger});
  await enqueue(1,'automatic');
+ // The first review used the trial's whole allowance.
+ await t.run(async ctx=>{const [usage]=await ctx.db.query('billingUsage').collect();await ctx.db.patch(usage._id,{usedMicros:10000});});
  const blocked=await enqueue(2,'automatic');
  expect(await t.run(ctx=>ctx.db.get(blocked!))).toMatchObject({status:'failed'});
  await enqueue(3,'manual');

@@ -15,7 +15,6 @@ import { openSubscription } from "../src/billing";
 type Step =
   | { table: TableNames; via: "org"; index: string }
   | { table: TableNames; via: "repo"; index: string; field?: "repositoryId" }
-  | { table: TableNames; via: "repoChild"; parent: { table: TableNames; index: string }; index: string; field: string }
   | { table: TableNames; via: "child"; parent: { table: TableNames; index: string }; index: string; field: string }
   | { table: TableNames; via: "scan"; match: "organizationId" | "repositoryOrConnection" }
   | { table: "organizations"; via: "self" };
@@ -32,14 +31,14 @@ export const purgePlan: Step[] = [
   { table: "providerEvents", via: "child", parent: { table: "providerConnections", index: "by_org" }, index: "by_connection_created", field: "connectionId" },
   { table: "providerIdentities", via: "child", parent: { table: "providerConnections", index: "by_org" }, index: "by_connection_user", field: "connectionId" },
   { table: "teamMembers", via: "child", parent: { table: "teams", index: "by_org" }, index: "by_team", field: "teamId" },
-  { table: "indexSkippedFiles", via: "repoChild", parent: { table: "indexJobs", index: "by_repo" }, index: "by_job_path", field: "jobId" },
+  { table: "indexSkippedFiles", via: "child", parent: { table: "indexJobs", index: "by_org" }, index: "by_job_path", field: "jobId" },
   // Per repository.
   ...([["repositorySettings", "by_repo"], ["repositoryFiles", "by_repo"], ["graphModuleReferences", "by_path"], ["symbols", "by_repo"], ["relationships", "by_repo"], ["indexJobs", "by_repo"], ["knowledgeEntries", "by_repo"], ["pullCatalogJobs", "by_repo"], ["codeChunks", "by_file"], ["embeddings", "by_path"], ["chunkEmbeddings", "by_path"], ["conversations", "by_pr"], ["p4Identities", "by_repo_user"]] as const).map(([table, index]) => ({ table, via: "repo" as const, index })),
   // Small tables without a workspace index.
   ...(["providerInstallRequests", "notificationDeliveries", "oauthCodes", "bridgeDevices"] as const).map((table) => ({ table, via: "scan" as const, match: "organizationId" as const })),
   { table: "providerIdentityGrants", via: "scan", match: "repositoryOrConnection" },
   // Workspace-indexed tables; repositories and members near the end, the audit log last.
-  ...([["fileReviews", "by_org"], ["integrationConnections", "by_org"], ["modelKeys", "by_org"], ["approvalPolicies", "by_org"], ["approvalJobs", "by_org_status"], ["runtimePolicies", "by_org"], ["runtimeWorkers", "by_org"], ["runtimeJobs", "by_org_status"], ["p4Polls", "by_org"], ["providerConnections", "by_org"], ["scopeSettings", "by_org"], ["repositoryClusters", "by_org"], ["clusterSuggestions", "by_org_status"], ["modelCache", "by_key"], ["ssoConnections", "by_org"], ["emailInvitations", "by_org"], ["analyticsDaily", "by_org_day"], ["invitations", "by_org"], ["pullRequests", "by_org"], ["findings", "by_org"], ["reviews", "by_org"], ["billingAccounts", "by_org"], ["billingUsage", "by_org_period"], ["notificationChannels", "by_org"], ["slackInstallations", "by_org"], ["notificationPreferences", "by_org"], ["chatThreads", "by_org_user"], ["learnedRules", "by_org"], ["commentReactions", "by_org_time"], ["findingFeedback", "by_org"], ["findingSignals", "by_org_time"], ["learnedPreferences", "by_org_scope"], ["customRules", "by_org"], ["ruleSuggestions", "by_org_status"], ["ruleAssistantRuns", "by_org_time"], ["usageEvents", "by_org"], ["oauthGrants", "by_org"], ["apiKeys", "by_org"], ["teams", "by_org"], ["githubInstallations", "by_org"], ["repositories", "by_org"], ["organizationMembers", "by_org"], ["auditEvents", "by_org"]] as const).map(([table, index]) => ({ table, via: "org" as const, index })),
+  ...([["fileReviews", "by_org"], ["integrationConnections", "by_org"], ["modelKeys", "by_org"], ["cliReviews", "by_org"], ["approvalPolicies", "by_org"], ["approvalJobs", "by_org_status"], ["runtimePolicies", "by_org"], ["runtimeWorkers", "by_org"], ["runtimeJobs", "by_org_status"], ["p4Polls", "by_org"], ["providerConnections", "by_org"], ["scopeSettings", "by_org"], ["repositoryClusters", "by_org"], ["clusterSuggestions", "by_org_status"], ["modelCache", "by_key"], ["ssoConnections", "by_org"], ["emailInvitations", "by_org"], ["analyticsDaily", "by_org_day"], ["invitations", "by_org"], ["pullRequests", "by_org"], ["findings", "by_org"], ["reviews", "by_org"], ["billingAccounts", "by_org"], ["billingUsage", "by_org_period"], ["billingMeterEvents", "by_org_status"], ["notificationChannels", "by_org"], ["slackInstallations", "by_org"], ["notificationPreferences", "by_org"], ["chatThreads", "by_org_user"], ["learnedRules", "by_org"], ["commentReactions", "by_org_time"], ["findingFeedback", "by_org"], ["findingSignals", "by_org_time"], ["learnedPreferences", "by_org_scope"], ["customRules", "by_org"], ["ruleSuggestions", "by_org_status"], ["ruleAssistantRuns", "by_org_time"], ["usageEvents", "by_org"], ["oauthGrants", "by_org"], ["apiKeys", "by_org"], ["teams", "by_org"], ["githubInstallations", "by_org"], ["repositories", "by_org"], ["organizationMembers", "by_org"], ["auditEvents", "by_org"]] as const).map(([table, index]) => ({ table, via: "org" as const, index })),
   { table: "organizations", via: "self" },
 ];
 // Not owned by a workspace: kept on deletion, with the reason.
@@ -47,7 +46,7 @@ export const sharedTables: Partial<Record<TableNames, string>> = {
   users: "personal account; may belong to other workspaces", identities: "personal sign-in methods", sessions: "personal browser sessions",
   personalCredentials: "personal agent keys", personalSettings: "personal preferences", cliSessions: "personal CLI sessions", loginTokens: "magic-link tokens keyed by email",
   inferenceBudgets: "deployment-wide model budget", inferenceReservations: "deployment-wide budget reservations",
-  rateLimits: "short-lived counters", providerReceipts: "one-time install receipts that expire", ssoRequests: "SAML request ids that expire in 10 minutes",
+  rateLimits: "short-lived counters", changelogDigests: "which public changelog entries were last emailed", providerReceipts: "one-time install receipts that expire", ssoRequests: "SAML request ids that expire in 10 minutes",
   oauthClients: "MCP client registry shared by all workspaces", stripeEvents: "Stripe event ids kept for replay protection (no review data)",
   slackEventReceipts: "Slack event-id dedupe", webhookDeliveries: "provider payloads not linked to a workspace; pruned deployment-wide after 14 days",
   workspaceDeletions: "deletion receipts",
@@ -86,20 +85,13 @@ async function runStep(ctx: MutationCtx, organizationId: Id<"organizations">, st
     for (const r of rows) await remove(ctx, step.table, r);
     return { deleted: rows.length, done: rows.length < BATCH };
   }
-  if (step.via === "repo" || step.via === "repoChild") {
+  if (step.via === "repo") {
     // Repositories a page at a time through the cursor, so every repository is reached and each chunk stays bounded.
     const page = await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).paginate({ cursor, numItems: 25 });
     for (const repo of page.page) {
-      let deleted = 0, parents = 0;
-      if (step.via === "repo") { const rows = await byField(ctx, step.table, step.index, "repositoryId", repo._id).take(BATCH); for (const r of rows) await remove(ctx, step.table, r); deleted = rows.length; }
-      else for (const parent of await byField(ctx, step.parent.table, step.parent.index, "repositoryId", repo._id).take(25)) {
-        const rows = await byField(ctx, step.table, step.index, step.field, parent._id).take(BATCH);
-        for (const r of rows) await remove(ctx, step.table, r);
-        deleted += rows.length;
-        if (rows.length === BATCH) break;
-        await remove(ctx, step.parent.table, parent); parents++; // emptied parent goes now (its own step would), so later chunks reach the next parents instead of re-reading it
-      }
-      if (deleted || parents) return { deleted, done: false, ...(cursor ? { cursor } : {}) }; // more may remain: revisit this page
+      const rows = await byField(ctx, step.table, step.index, "repositoryId", repo._id).take(BATCH);
+      for (const r of rows) await remove(ctx, step.table, r);
+      if (rows.length) return { deleted: rows.length, done: false, ...(cursor ? { cursor } : {}) }; // more may remain: revisit this page
     }
     return page.isDone ? { deleted: 0, done: true } : { deleted: 0, done: false, cursor: page.continueCursor };
   }
@@ -218,12 +210,12 @@ async function removeReview(ctx: MutationCtx, review: Doc<"reviews">): Promise<b
   if (complete) await remove(ctx, "reviews", review as never);
   return complete;
 }
-// Pages through every workspace (500 per run), spacing each workspace's retention a second apart.
-export const retentionSweep = internalMutation({ args: { cursor: v.optional(v.union(v.string(), v.null())), offset: v.optional(v.number()) }, handler: async (ctx, a) => {
-  const page = await ctx.db.query("organizations").paginate({ numItems: 500, cursor: a.cursor ?? null });
-  let n = a.offset ?? 0;
-  for (const org of page.page) if (org.reviewRetentionDays || org.transcriptRetentionDays) await ctx.scheduler.runAfter(n++ * 1000, internal.dataControls.retention, { organizationId: org._id });
-  if (!page.isDone) await ctx.scheduler.runAfter(0, internal.dataControls.retentionSweep, { cursor: page.continueCursor, offset: n });
+// 25 workspaces per transaction (under 1,000 scheduled functions); the next page starts after this page's staggered runs.
+export const retentionSweep = internalMutation({ args: { cursor: v.optional(v.string()) }, handler: async (ctx, a) => {
+  const page = await ctx.db.query("organizations").paginate({ numItems: 25, cursor: a.cursor ?? null });
+  let n = 0;
+  for (const org of page.page) if (org.reviewRetentionDays || org.transcriptRetentionDays) { await ctx.scheduler.runAfter(n++ * 1000, internal.dataControls.retention, { organizationId: org._id }); }
+  if (!page.isDone) await ctx.scheduler.runAfter(n * 1000, internal.dataControls.retentionSweep, { cursor: page.continueCursor });
   return n;
 } });
 export const retention = internalMutation({ args: { organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<{ reviews: number; transcripts: number; more: boolean }> => {

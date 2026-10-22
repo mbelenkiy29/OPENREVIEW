@@ -4,9 +4,10 @@ import { backend } from "../../../src/server";
 
 // The API key's workspace, the owner's other workspaces (each needs its own key) and the dashboard
 // links CLI onboarding prints. Read scope; links are built from APP_URL, never from the request.
+// Open to every key on every plan: `openreview login --api-key` checks keys here, Perforce keys included.
 export async function GET(request: Request) {
   try {
-    const { token, organizationId } = await apiIdentity(request);
+    const { token, organizationId } = await apiIdentity(request, "read", { plan: false });
     const me = await backend().query(api.users.me, { token });
     const workspaces = me.organizations.filter((o) => o._id).map((o) => ({ id: o._id!, name: o.name ?? "Workspace", role: o.role, current: o._id === organizationId }));
     const workspace = workspaces.find((w) => w.current);

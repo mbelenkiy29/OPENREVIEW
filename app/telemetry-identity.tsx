@@ -2,6 +2,7 @@
 import * as Sentry from "@sentry/nextjs";
 import { useEffect, useRef } from "react";
 import type { Milestone } from "../convex/analyticsMilestones";
+import { measureSignup } from "../src/ads-pixel";
 import { withLoadedAnalytics } from "../src/analytics-loader";
 import { analyticsStartedEvent } from "../src/consent";
 import { sentryDsn } from "../src/telemetry";
@@ -17,7 +18,7 @@ export function TelemetryIdentity({ userId, workspaceId, milestones = [] }: { us
     // are marked reported only once PostHog has actually sent them.
     const identify = () => withLoadedAnalytics((a) => {
       a.identifyAnalytics(userId, workspaceId);
-      if (keys && sent.current !== keys && a.captureMilestones(milestones)) { sent.current = keys; void reportMilestones(milestones.map((m) => m.key)); }
+      if (keys && sent.current !== keys && a.captureMilestones(milestones)) { sent.current = keys; measureSignup(milestones, userId); void reportMilestones(milestones.map((m) => m.key)); }
     });
     identify();
     window.addEventListener(analyticsStartedEvent, identify);

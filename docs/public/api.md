@@ -24,6 +24,7 @@ The key owner's role still applies.
 | `GET /api/repositories/{id}` | read | Index status |
 | `GET /api/reviews`, `GET /api/reviews/{id}` | read | Reviews and their findings |
 | `POST /api/reviews` | write | Request a review of a revision (`headSha` defaults to the pull request's current head) |
+| `POST /api/reviews/local`, `GET /api/reviews/local/{id}` | write, read | Review local commits from their diff and changed files (the CLI's signed-in review); only the requester can read the result |
 | `GET /api/reviews/status?repositoryId=&prNumber=` | read | Latest review of a pull request and its open findings |
 | `GET /api/findings/unresolved` | read | Open findings on the key owner's open pull requests |
 | `POST /api/rules/suggestions` | write | Suggest a custom rule for an admin to approve |

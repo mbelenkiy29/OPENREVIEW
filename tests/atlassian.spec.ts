@@ -14,8 +14,7 @@ test('shared requirements action bounds the combined native Linear and Jira docu
  const t=convexTest(schema,modules),site={id:'11111111-1111-4111-8111-111111111111',name:'Native fixture',url:'https://fixture.atlassian.net',scopes:atlassianScopes};
  const repositoryId=await t.run(async ctx=>{
   const organizationId=await ctx.db.insert('organizations',{name:'Mixed requirements',createdAt:Date.now()}),repo=await ctx.db.insert('repositories',{organizationId,fullName:'fixture/repo',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()}),expiry=Date.now()+3600000;
-  // Requirements are fetched only for a PR author who is a linked workspace member.
-  const author=await ctx.db.insert('users',{login:'author',githubId:5,avatar:'',createdAt:Date.now()});await ctx.db.insert('organizationMembers',{organizationId,userId:author,role:'member'});
+  await ctx.db.insert('organizationMembers',{organizationId,userId:await ctx.db.insert('users',{githubId:7,login:'author',avatar:'',createdAt:Date.now()}),role:'member'});
   for(const kind of ['linear','atlassian'] as const)await ctx.db.insert('integrationConnections',{organizationId,kind,externalId:kind==='linear'?'native-org':'native-sites',name:kind,credentials:encryptCredential(JSON.stringify({accessToken:'fixture-access-token',refreshToken:'fixture-refresh-token',expiresAt:expiry}),organizationId+':'+kind),expiresAt:expiry,active:true,generation:1,teamIds:kind==='linear'?['native-team']:[],projectIds:[],repositoryIds:[repo],...(kind==='atlassian'?{sites:[site],jiraProjectIds:[site.id+':10'],confluenceSpaceIds:[]}:{}),createdAt:Date.now()});
   return repo;
  });
@@ -31,7 +30,7 @@ test('shared requirements action bounds the combined native Linear and Jira docu
   throw new Error('Unexpected native request');
  });
  try{
-  const result=await t.action(internal.integrationJobs.requirements,{repositoryId,references:'PAY-1',actor:'author',authorExternalId:'5'});
+  const result=await t.action(internal.integrationJobs.requirements,{repositoryId,references:'PAY-1',actor:'author',authorExternalId:'7'});
   expect(linearBody&&jiraBody).toBe(true);expect(result.scopes).toHaveLength(2);expect(result.files).toHaveLength(1);expect(result.files[0].path).toContain('/linear/');expect(result.files.reduce((n,f)=>n+Buffer.byteLength(f.content,'utf8'),0)).toBeLessThanOrEqual(100000);expect(result.coverage.join()).toContain('Combined Linear and Atlassian');
   expect(citesFetchedRequirements(site.url+'/browse/PAY-1',result.files.map(f=>f.provenance!.sourceUrl!))).toBe(false);
  }finally{vi.unstubAllGlobals();}

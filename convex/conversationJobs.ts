@@ -1,5 +1,6 @@
 "use node";
 import {budgetModel} from "./budgetModel";
+import { upgradeNote } from "../src/plans";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
@@ -36,6 +37,7 @@ async function fixAnswer(ctx:ActionCtx,p:{github:Scm;repo:Doc<"repositories">;fi
   let pullRequest:{url:string;reused:boolean}|undefined,pullRequestNote:string|undefined;
   if(p.openPullRequest){
     if(!p.fixPullRequests)pullRequestNote="Fix pull requests are turned off for this repository; a workspace admin can allow them in repository settings.";
+    else if(!await ctx.runQuery(internal.billing.entitlement,{organizationId:repo.organizationId,key:"fix.pullRequests"}))pullRequestNote=upgradeNote["fix.pullRequests"];
     else{const opened=await openFix({github,repo,pr,target,prepared,author:p.author,prNumber:p.prNumber,requestedIn:`#${p.prNumber}`});pullRequest=opened.pullRequest;pullRequestNote=opened.note;}
   }
   return fixReplyBody({title:target.title,explanation:prepared.explanation,block,problem:prepared.problem,handoff,pullRequest,pullRequestNote,revision:pr.head.sha});

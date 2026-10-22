@@ -73,7 +73,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 <h2 className="pull-title"><span className="muted">#{detail.review.prNumber}</span> {detail.review.title ?? "Awaiting PR ingestion"}</h2>
                 <div className="title-actions">
                   {chatLink}
-                  {!["completed", "failed", "cancelled"].includes(detail.review.status) && <form action={cancelReview}><input type="hidden" name="reviewId" value={detail.review._id} /><button>Cancel review</button></form>}
+                  {!["completed", "failed", "cancelled", "skipped"].includes(detail.review.status) && <form action={cancelReview}><input type="hidden" name="reviewId" value={detail.review._id} /><button>Cancel review</button></form>}
                   {detail.review.nativeP4&&isAdmin&&detail.review.status==="failed"&&detail.review.resultStorageId&&<form action={reviewAgain}><input type="hidden" name="reviewId" value={detail.review._id}/><input type="hidden" name="fresh" value="true"/><button>Re-review current shelf</button></form>}{(!detail.review.nativeP4||isAdmin)&&<form action={reviewAgain}><input type="hidden" name="reviewId" value={detail.review._id}/><button aria-label={detail.review.nativeP4?undefined:"Re-review current PR"}>{detail.review.nativeP4?(detail.review.status==="failed"&&detail.review.resultStorageId?"Retry saved publication":"Re-review current shelf"):<><span aria-hidden>↻</span> Re-review</>}</button></form>}
                 </div>
               </div>
@@ -123,7 +123,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                     {detail.review.verdict && <p className="muted">{verdictLabels[detail.review.verdict]} · computed from the score, unresolved findings and review coverage</p>}
                     <ReviewMarkdown>
                       {detail.review.summary ??
-                        (detail.review.status === "failed" ? "No summary was generated. Review the error above before retrying." : detail.review.status === "cancelled" ? "This review was cancelled before a summary was generated." : "The summary will appear when analysis finishes.")}
+                        (detail.review.status === "failed" ? "No summary was generated. Review the error above before retrying." : detail.review.status === "cancelled" ? "This review was cancelled before a summary was generated." : detail.review.status === "skipped" ? "This pull request was skipped by your review settings; the reason is under Processing lifecycle." : "The summary will appear when analysis finishes.")}
                     </ReviewMarkdown>
                   </div>
                 </div>
@@ -139,10 +139,10 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 <RuntimeReview token={user.token} reviewId={detail.review._id} evidence={detail.review.runtimeEvidence}/>{detail.review.nativeP4?<p>Automatic approval is not available for Perforce reviews.</p>:<ApprovalReview token={user.token} reviewId={detail.review._id}/>}
                 <p className="muted repository-identity">{repoLabel(detail.review.repositoryId)}</p>
                 <p className="muted">
-                  Started {when(detail.review.createdAt)} · {detail.review.status === "cancelled" ? "Cancelled" : "Finished"}{" "}
+                  Started {when(detail.review.createdAt)} · {detail.review.status === "cancelled" ? "Cancelled" : detail.review.status === "skipped" ? "Skipped" : "Finished"}{" "}
                   {detail.review.finishedAt
                     ? when(detail.review.finishedAt)
-                    : ["completed","failed","cancelled"].includes(detail.review.status) ? "Time not recorded" : "In progress"}{" "}
+                    : ["completed","failed","cancelled","skipped"].includes(detail.review.status) ? "Time not recorded" : "In progress"}{" "}
                   · Models: {detail.review.models || [...new Set(detail.modelCalls.map(call => call.model))].join(", ") || "Not called yet"}
                 </p>
               </>, false)}
@@ -177,7 +177,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                     </div>
                   </details>
                 ))}
-              </> : <p className="muted">{["completed", "failed", "cancelled"].includes(detail.review.status) ? "No verified findings for this revision." : "Findings appear when the review finishes."}</p>)}
+              </> : <p className="muted">{["completed", "failed", "cancelled", "skipped"].includes(detail.review.status) ? "No verified findings for this revision." : "Findings appear when the review finishes."}</p>)}
               </>}
               {tab === "code" && <>{filters.tourError && <p role="alert">{filters.tourError}</p>}<CodeTab token={user.token} review={detail.review} filters={filters} findings={detail.findings.map((f) => ({ _id: String(f._id), title: f.title, severity: f.severity, filePath: f.filePath, startLine: f.startLine, endLine: f.endLine, description: f.description }))} /></>}
               {tab === "discussion" && <>

@@ -32,7 +32,7 @@ async function setup(notionText:(page:string)=>string=()=>'Totals stay in intege
 
 test('requirements are fetched only for a PR author who is a linked workspace member with repository access',async()=>{
  const {t,repositoryId,calls}=await setup(),references=`PAY-1 ${url(2)}`;
- for(const author of [{},{actor:'mallory',authorExternalId:'666'},{actor:'alice',authorExternalId:'92'},{actor:'alice'}]){
+ for(const author of [{actor:''},{actor:'mallory',authorExternalId:'666'},{actor:'alice',authorExternalId:'92'},{actor:'alice'}] as {actor:string;authorExternalId?:string}[]){
   const denied=await t.action(internal.integrationJobs.requirements,{repositoryId,references,...author});
   expect(denied).toEqual({files:[],scopes:[],coverage:['Linked tickets and documents were not fetched: the PR author is not a linked workspace member with access to this repository.']});
  }

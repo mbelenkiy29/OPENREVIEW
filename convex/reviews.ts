@@ -83,8 +83,7 @@ export const enqueue = internalMutation({
       previous &&
       previous.revisionKey === args.revisionKey &&
       !args.force &&
-      previous.status !== "failed" &&
-      previous.status !== "cancelled"
+      !["failed", "cancelled", "skipped"].includes(previous.status)
     )
       return previous._id;
     // A burst of webhook reviews waits for the next minute instead of failing its delivery for good;
@@ -107,7 +106,7 @@ export const enqueue = internalMutation({
       .order("desc")
       .take(100);
     for (const r of pending)
-      if (!["completed", "failed", "cancelled"].includes(r.status))
+      if (!["completed", "failed", "cancelled", "skipped"].includes(r.status))
         await cancelReview(ctx,r);
     const reviewId = await ctx.db.insert("reviews", {
       organizationId: repo.organizationId,
@@ -180,7 +179,7 @@ export const stage = internalMutation({
       const retry=await ctx.db.system.get(review.retryScheduledId);
       if(retry?.state.kind==="pending")await ctx.scheduler.cancel(retry._id);
     }
-    if(args.status === "cancelled")await cancelReview(ctx,review);
+    if(args.status === "cancelled"||args.status === "skipped")await cancelReview(ctx,review,args.status);
     else await ctx.db.patch(review._id, {
       status: args.status,
       updatedAt: Date.now(),
@@ -270,7 +269,7 @@ export const recordPr = internalMutation({
       state: args.state,
       updatedAt: Date.now(),
     };
-    const prId = existing?._id ?? (await ctx.db.insert("pullRequests", data));
+    const prId = existing?._id ?? (await ctx.db.insert("pullRequests", { ...data, ...(args.state === "open" ? { openedAt: Date.now() } : {}) }));
     // Native intake owns current metadata; a delayed review only owns its revision.
     if (existing?.nativeObservedAt === undefined) {
       if (existing) await ctx.db.patch(existing._id, data);
@@ -618,7 +617,7 @@ export const cancel = mutation({
     const review = await ctx.db.get(args.reviewId);
     if (!review) throw new Error("Review not found");
     await authorizeRepository(ctx, args.token, review.repositoryId, true);
-    if (!["completed", "failed", "cancelled"].includes(review.status))
+    if (!["completed", "failed", "cancelled", "skipped"].includes(review.status))
       await cancelReview(ctx,review);
   },
 });

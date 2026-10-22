@@ -2,7 +2,7 @@ import { mutation, query, type QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { scheduleSeatSync } from "./billing";
 import { billingConfig } from "../src/billing";
-import { linkIdentity } from "./identity";
+import { githubAccounts, linkIdentity } from "./identity";
 import { v } from "convex/values";
 import { authenticated, authorize, service, audit } from "./auth";
 import { rateLimit } from "./rateLimit";
@@ -21,6 +21,7 @@ export const login = mutation({
     return linkIdentity(ctx, { provider: "github", providerUserId: String(args.githubId), login: args.login, avatar: args.avatar, emailVerified: false });
   },
 });
+const githubLogins = async (ctx: QueryCtx, user: Doc<"users">) => new Set((await githubAccounts(ctx, user)).flatMap((g) => (g.login ? [g.login.toLowerCase()] : [])));
 export const me = query({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
@@ -35,11 +36,13 @@ export const me = query({
         role: m.role,
       })),
     );
+    // Invitations name a GitHub login, so only logins GitHub reported count (other sign-ins choose `login`).
+    const invitations = (await Promise.all([...await githubLogins(ctx, user)].map((login) => ctx.db
+      .query("invitations")
+      .withIndex("by_login", (q) => q.eq("githubLogin", login))
+      .collect()))).flat();
     // The first verified sign-in email, for the feedback widget's profile (src/userjot.ts).
     const identities = await ctx.db.query("identities").withIndex("by_user", (q) => q.eq("userId", user._id)).take(20);
-    const invitations = await githubLinked(ctx, user)
-      ? await ctx.db.query("invitations").withIndex("by_login", (q) => q.eq("githubLogin", user.login.toLowerCase())).collect()
-      : [];
     return {
       user,
       email: identities.find((i) => i.emailVerified && i.email)?.email,
@@ -121,11 +124,6 @@ export const revokeInvitation = mutation({
     await audit(ctx,invitation.organizationId,user._id,"invitation.revoked",invitation._id);
   },
 });
-// Invitations name a GitHub login, and only a GitHub sign-in sets a user's login to one: a Google, email or
-// SSO account's login comes from its email or name, so it could match anyone's GitHub login.
-async function githubLinked(ctx: QueryCtx, user: Doc<"users">) {
-  return user.githubId !== undefined || Boolean(await ctx.db.query("identities").withIndex("by_user", (q) => q.eq("userId", user._id)).filter((q) => q.eq(q.field("provider"), "github")).first());
-}
 export const acceptInvitation = mutation({
   args: { token: v.string(), invitationId: v.id("invitations") },
   handler: async (ctx, args) => {
@@ -133,8 +131,7 @@ export const acceptInvitation = mutation({
       invitation = await ctx.db.get(args.invitationId);
     if (
       !invitation ||
-      invitation.githubLogin !== user.login.toLowerCase() ||
-      !(await githubLinked(ctx, user)) ||
+      !(await githubLogins(ctx, user)).has(invitation.githubLogin) ||
       invitation.expiresAt <= Date.now() ||
       !(await ctx.db.get(invitation.organizationId))
     )

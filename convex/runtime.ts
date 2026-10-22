@@ -4,6 +4,7 @@ import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { v,ConvexError } from "convex/values";
 import { authorize,authorizeRepository,audit } from "./auth";
+import { hasEntitlement } from "./billing";
 import { runtimePolicyValidator,runtimeEvidenceValidator } from "./schema";
 import { runtimeDefaults,runtimePolicySchema,runtimePolicyKey,generatedTestsKey } from "../src/runtime-policy";
 import { testCommand } from "../src/generated-tests";
@@ -45,7 +46,7 @@ export const worker=mutation({args:{token:v.string(),organizationId:v.id("organi
 }});
 export const revoke=mutation({args:{token:v.string(),workerId:v.id("runtimeWorkers")},handler:async(ctx,a)=>{const w=await ctx.db.get(a.workerId);if(!w)throw new Error("Worker missing");const {user}=await authorize(ctx,a.token,w.organizationId,true);await ctx.db.patch(w._id,{revoked:true});await audit(ctx,w.organizationId,user._id,"runtime.worker_revoked",w._id);}});
 export const request=internalMutation({args:{reviewId:v.id("reviews"),workerLease:v.optional(v.string())},handler:async(ctx,a)=>{
- const review=await ctx.db.get(a.reviewId);if(!review||["cancelled","completed","failed"].includes(review.status))return false;
+ const review=await ctx.db.get(a.reviewId);if(!review||["cancelled","skipped","completed","failed"].includes(review.status))return false;
  const repo=await ctx.db.get(review.repositoryId);if(!repo||!repo.enabled&&!review.nativeP4)return false;
  const policy=await runtimePolicy(ctx,repo);if(!policy.enabled)return false;
  requireP4Worker(review,a.workerLease);
@@ -63,7 +64,7 @@ const workerOnline=async(ctx:MutationCtx,organizationId:Doc<"repositories">["org
 // Generated reproduction tests for verified findings: one job per review, on the approved image and
 // test command template. The review waits like a runtime check and resumes when results arrive.
 export const requestTests=internalMutation({args:{reviewId:v.id("reviews"),tests:v.array(v.object({fingerprint:v.string(),path:v.string(),content:v.string()}))},handler:async(ctx,a)=>{
- const review=await ctx.db.get(a.reviewId);if(!review||["cancelled","completed","failed"].includes(review.status)||review.nativeP4||!a.tests.length)return false;
+ const review=await ctx.db.get(a.reviewId);if(!review||["cancelled","skipped","completed","failed"].includes(review.status)||review.nativeP4||!a.tests.length)return false;
  const repo=await ctx.db.get(review.repositoryId);if(!repo?.enabled)return false;
  const policy=await runtimePolicy(ctx,repo);if(!policy.generatedTests||!policy.testCommand)return false;
  if((await ctx.db.query("runtimeJobs").withIndex("by_review",q=>q.eq("reviewId",review._id)).collect()).some(j=>j.kind==="tests"))return false;
@@ -77,7 +78,13 @@ export const requestTests=internalMutation({args:{reviewId:v.id("reviews"),tests
 export const testsEnabled=internalQuery({args:{repositoryId:v.id("repositories")},handler:async(ctx,a)=>{
  const repo=await ctx.db.get(a.repositoryId);if(!repo?.enabled)return false;
  const policy=await runtimePolicy(ctx,repo);
- return !!policy.generatedTests&&!!policy.testCommand&&(await ctx.db.query("runtimeWorkers").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()).some(w=>!w.revoked&&w.expiresAt>Date.now()&&(w.lastSeen??0)>Date.now()-120000);
+ return !!policy.generatedTests&&!!policy.testCommand&&await hasEntitlement(ctx,repo.organizationId,"review.reproTests")&&(await ctx.db.query("runtimeWorkers").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()).some(w=>!w.revoked&&w.expiresAt>Date.now()&&(w.lastSeen??0)>Date.now()-120000);
+}});
+// Generated tests are set up for the repository but the plan lacks them: the review says so in its coverage notes.
+export const testsLocked=internalQuery({args:{repositoryId:v.id("repositories")},handler:async(ctx,a)=>{
+ const repo=await ctx.db.get(a.repositoryId);if(!repo?.enabled)return false;
+ const policy=await runtimePolicy(ctx,repo);
+ return !!policy.generatedTests&&!!policy.testCommand&&!await hasEntitlement(ctx,repo.organizationId,"review.reproTests");
 }});
 // The latest generated-test job for a review, with its recorded results (empty when none ran).
 export const generatedTests=internalQuery({args:{reviewId:v.id("reviews")},handler:async(ctx,a)=>{

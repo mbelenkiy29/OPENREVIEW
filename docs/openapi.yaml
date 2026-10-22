@@ -411,6 +411,47 @@ paths:
         "400": { $ref: "#/components/responses/Invalid" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /api/reviews/local:
+    post:
+      summary: Review local commits from their diff and changed files (scope write)
+      description: Counts as a review against the workspace plan. The uploaded code is deleted when the review ends and the result after a day.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repositoryId, baseSha, headSha, diff, files]
+              properties:
+                repositoryId: { $ref: "#/components/schemas/Id" }
+                baseSha: { type: string, pattern: "^[a-f0-9]{40}$" }
+                headSha: { type: string, pattern: "^[a-f0-9]{40}$" }
+                title: { type: string, maxLength: 300 }
+                mode: { type: string, enum: [fast, standard, deep], description: "Capped by the workspace's maximum review tier." }
+                security: { type: boolean, description: "Review security only." }
+                diff: { type: string, maxLength: 1000000, description: "Unified diff from baseSha to headSha." }
+                files:
+                  type: array
+                  maxItems: 300
+                  description: Changed files at headSha, at most 2,000,000 characters in total.
+                  items: { type: object, required: [path, sha, content], properties: { path: { type: string }, sha: { type: string }, content: { type: string, maxLength: 200000 } } }
+      responses:
+        "202": { description: "Review queued.", content: { application/json: { schema: { type: object, properties: { reviewId: { $ref: "#/components/schemas/Id" }, status: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/Invalid" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { description: "The workspace plan does not allow another review.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "The repository is not enabled or not indexed yet.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/reviews/local/{id}:
+    get:
+      summary: Status of a local review, with the summary and findings once completed (scope read; requester only)
+      parameters:
+        - { name: id, in: path, required: true, schema: { $ref: "#/components/schemas/Id" } }
+      responses:
+        "200": { description: "Status (queued, running, completed or failed), stage, error and result." }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/reviews/{id}:
     get:
       summary: Review detail (scope read)

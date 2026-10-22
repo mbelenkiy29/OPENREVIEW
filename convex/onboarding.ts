@@ -1,4 +1,5 @@
-import { choosePlanMessage, planMissing } from "./billing";
+import { choosePlanMessage, hasEntitlement, planMissing } from "./billing";
+import {upgradeNote} from "../src/plans";
 import {query,mutation,internalMutation} from "./_generated/server";
 import {internal} from "./_generated/api";
 import {v} from "convex/values";
@@ -92,6 +93,9 @@ export const saveDefaults=mutation({args:{token:v.string(),organizationId:v.id("
  if(!isConfigureStep(a.step))throw new Error("Unknown setup step");
  const allowed=stepKeys[a.step],rows=await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect(),row=rows.find(s=>!s.teamId);
  const changes=Object.fromEntries(allowed.map(key=>[key,(a.settings as Record<string,unknown>)[key]]).filter(([,value])=>value!==undefined));
+ // The tools step offers Pro options disabled on lower plans; refuse them here too.
+ if(changes.fixPullRequests===true&&!await hasEntitlement(ctx,a.organizationId,"fix.pullRequests"))throw new Error(upgradeNote["fix.pullRequests"]);
+ if(changes.mode==="deep"&&!await hasEntitlement(ctx,a.organizationId,"review.deep"))throw new Error("Deep reviews are on the Pro plan; a workspace admin can upgrade in Settings → Billing.");
  const merged={...(row?.settings??deploymentDefaults()),...changes} as Infer<typeof settingsValidator>,overrideKeys=[...new Set([...(row?.overrideKeys??[]),...allowed])];
  assertValidSettings(merged,overrideKeys);
  if(row)await ctx.db.patch(row._id,{settings:merged,overrideKeys});else await ctx.db.insert("scopeSettings",{organizationId:a.organizationId,settings:merged,overrideKeys});

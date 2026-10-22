@@ -1,6 +1,6 @@
 # Native incremental acceptance — October 4, 2026 UTC
 
-Production READY `dpl_CgfvJCpvYhJmvoR3mzpwDU6xuVEQ`, Vercel canonical https://openreview-flame-two.vercel.app and Convex `tidy-ocelot-457`. The expanded acceptance matrix remains incomplete.
+Production READY `<deployment-id>`, Vercel canonical `<vercel-url>` and Convex `<prod-deployment>`. The expanded acceptance matrix remains incomplete.
 
 The private disposable native project `openreview-incremental-acceptance` used existing scoped author/bot depot access, three real submitted files and native archived shelves. Its initial submitted change 16 indexed 3/3 files. Change 17 indexed only one changed file, and review 19 published an integer-cents contract defect. That first run enabled/restarted review polling after uploading, so it alone did not prove an uninterrupted automatic chain.
 

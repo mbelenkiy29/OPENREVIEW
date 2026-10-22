@@ -8,17 +8,41 @@ import {contextReadable,requireFindingReader} from "./repositoryContext";
 import type {Id} from "./_generated/dataModel";
 import {repositoryIdentity} from "./repositoryIdentity";
 
+// Per-rule stats from findings that cite the rule (Greptile's Usage / Addressed rate columns).
+const ruleUseCap=1000;
 export const rulesPage=query({
-  args:{token:v.string(),organizationId:v.id("organizations"),teamId:v.optional(v.id("teams")),repositoryId:v.optional(v.id("repositories")),cursor:v.optional(v.string())},
+  args:{token:v.string(),organizationId:v.id("organizations"),teamId:v.optional(v.id("teams")),repositoryId:v.optional(v.id("repositories")),cursor:v.optional(v.string()),search:v.optional(v.string()),status:v.optional(v.union(v.literal("active"),v.literal("disabled")))},
   handler:async(ctx,args)=>{
     await authorize(ctx,args.token,args.organizationId);
     const repositories=await visibleRepositories(ctx,args.token,args.organizationId,args.teamId);
     if(args.repositoryId&&!repositories.some(r=>r._id===args.repositoryId))throw new Error("Repository not accessible in this scope");
     // Rules that apply to the selected repository (any scope), or every rule whose scope the reader can see.
     const selected=args.repositoryId?repositories.find(r=>r._id===args.repositoryId):undefined;
-    const teamIds=new Set(repositories.map(r=>r.teamId).filter(Boolean).map(String));
-    const page=await ctx.db.query("customRules").withIndex("by_org",q=>q.eq("organizationId",args.organizationId)).order("desc").paginate({numItems:30,cursor:args.cursor??null});
-    return {...page,page:page.page.filter(r=>selected?ruleApplies(r,selected):r.repositoryId?repositories.some(x=>x._id===r.repositoryId):r.teamId?teamIds.has(String(r.teamId)):true)};
+    const teamIds=new Set(repositories.map(r=>r.teamId).filter(Boolean).map(String)),visible=new Set(repositories.map(r=>String(r._id)));
+    const search=args.search?.trim().toLowerCase();
+    const page=await ctx.db.query("customRules").withIndex("by_org",q=>q.eq("organizationId",args.organizationId)).order("desc").paginate({numItems:10,cursor:args.cursor??null});
+    // shortcut: search and status filter after paging, so a page can come back short; move them into the index if rule counts grow.
+    const rules=page.page.filter(r=>(selected?ruleApplies(r,selected):r.repositoryId?repositories.some(x=>x._id===r.repositoryId):r.teamId?teamIds.has(String(r.teamId)):true)
+      &&(!args.status||r.enabled===(args.status==="active"))&&(!search||`${r.title}\n${r.instructions}`.toLowerCase().includes(search)));
+    const monthStart=new Date(new Date().setUTCDate(1)).setUTCHours(0,0,0,0);
+    return {...page,page:await Promise.all(rules.map(async r=>{
+      const cited=await ctx.db.query("findings").withIndex("by_org_rule",q=>q.eq("organizationId",args.organizationId).eq("ruleId",r._id)).take(ruleUseCap);
+      const uses=cited.filter(f=>visible.has(String(f.repositoryId)));
+      return {...r,stats:{uses:uses.length,capped:cited.length===ruleUseCap,addressed:uses.filter(f=>f.status==="resolved").length,usesThisMonth:uses.filter(f=>f.createdAt>=monthStart).length,useful:uses.filter(f=>f.lastFeedback==="useful").length,notUseful:uses.filter(f=>f.lastFeedback==="not_useful"||f.lastFeedback==="false_positive").length}};
+    }))};
+  }
+});
+
+// The latest findings that cite a rule, for the rule's side panel.
+export const ruleUsage=query({
+  args:{token:v.string(),organizationId:v.id("organizations"),ruleId:v.id("customRules"),teamId:v.optional(v.id("teams"))},
+  handler:async(ctx,args)=>{
+    await authorize(ctx,args.token,args.organizationId);
+    const rule=await ctx.db.get(args.ruleId);
+    if(!rule||rule.organizationId!==args.organizationId)return [];
+    const visible=new Set((await visibleRepositories(ctx,args.token,args.organizationId,args.teamId)).map(r=>String(r._id)));
+    const cited=await ctx.db.query("findings").withIndex("by_org_rule",q=>q.eq("organizationId",args.organizationId).eq("ruleId",args.ruleId)).order("desc").take(50);
+    return cited.filter(f=>visible.has(String(f.repositoryId))).sort((a,b)=>b.createdAt-a.createdAt).slice(0,5).map(f=>({_id:f._id,title:f.title,repositoryId:f.repositoryId,prNumber:f.prNumber,reviewId:f.reviewId,status:f.status,createdAt:f.createdAt}));
   }
 });
 

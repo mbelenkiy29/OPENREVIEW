@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import {siteDescription as description} from "../src/structured-data";
 import {themeScript} from "../src/theme";
 import {ThemeProvider} from "./theme";
 import {ConsentBanner} from "./consent";
+import {AdsPageViews} from "./ads-page-views";
 import {UserJot} from "./userjot";
 import {userJotConfig} from "../src/userjot";
 // Fonts are bundled from npm so builds never fetch them: Inter for UI, JetBrains Mono for code
@@ -22,18 +24,21 @@ export const metadata: Metadata = {
   openGraph: { type: "website", siteName: "OpenReview", title: "OpenReview", description },
   twitter: { card: "summary_large_image", title: "OpenReview", description },
 };
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   // The theme is applied in the browser from its cookie (src/theme.ts), so this layout reads no
-  // cookies and public pages stay static. The script sets data-theme, which the server never renders.
+  // cookies. The script sets data-theme, which the server never renders. It runs under the request's
+  // CSP nonce from middleware.ts; reading it renders every page per request, which nonces require.
+  // Browsers hide nonce attributes from the DOM, hence suppressHydrationWarning on the script.
+  const nonce=(await headers()).get("x-nonce")??undefined;
   const userJot=userJotConfig();
   return (
     <html lang="en" suppressHydrationWarning data-userjot={userJot ? "" : undefined}>
-      <head><script dangerouslySetInnerHTML={{__html:themeScript}} /></head>
-      <body><ThemeProvider>{children}<ConsentBanner />{userJot&&<UserJot projectId={userJot.projectId} boardUrl={userJot.boardUrl} />}</ThemeProvider></body>
+      <head><script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{__html:themeScript}} /></head>
+      <body><ThemeProvider>{children}<ConsentBanner /><AdsPageViews />{userJot&&<UserJot projectId={userJot.projectId} boardUrl={userJot.boardUrl} />}</ThemeProvider></body>
     </html>
   );
 }

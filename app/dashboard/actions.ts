@@ -24,6 +24,7 @@ import {approvalPolicySchema} from "../../src/approval";
 import {runtimePolicySchema} from "../../src/runtime-policy";
 import {approvalDefaults,runtimeDefaults} from "../../src/review-settings";
 import { REFERRAL_PAYOUT_REVIEW_CENTS, formatMoney, parseMoneyInput, stripeHostedUrl } from "../../src/referrals";
+import { safeNext } from "../../src/identity";
 
 const text = (f: FormData, key: string) => z.string().parse(f.get(key) ?? "");
 export async function saveApprovalPolicy(_state:{error?:string;saved?:boolean},form:FormData):Promise<{error?:string;saved?:boolean}>{
@@ -157,8 +158,14 @@ export async function saveRule(form: FormData) {
     enabled: text(form, "enabled") !== "false",
     ...ruleScopeArgs(text(form, "scope"), text(form, "repositoryId"), text(form, "repositoryPattern")),
   });
-  await notify("Rule saved.");
+  await notify(text(form, "remove") === "true" ? "Rule deleted." : "Rule saved.");
   revalidatePath("/dashboard", "layout");
+  closeMemoryDialog(form);
+}
+// Forms in the Custom rules dialogs return to the rules list with the dialog closed (same-page paths only).
+function closeMemoryDialog(form: FormData) {
+  const back = text(form, "returnTo");
+  if (/^\/dashboard\/memory\/rules(\?[\w=&%.:+~-]*)?$/.test(back)) redirect(back);
 }
 export async function feedback(form: FormData) {
   const { token } = await current();
@@ -213,7 +220,7 @@ async function endSession(to: string): Promise<never> {
   if (token) await backend().mutation(api.identity.signOut, { token }).catch(() => undefined);
   jar.delete("openreview_session");
   jar.delete("openreview_github_setup");
-  redirect(to);
+  redirect(safeNext(to));
 }
 export async function logout() { await endSession("/"); }
 export async function signOutEverywhere() {
@@ -323,9 +330,15 @@ export async function setMinutesPerFinding(form: FormData) {
 export async function startCheckout(form: FormData) {
   const { token } = await current();
   let url: string;
-  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: text(form, "organizationId") as Id<"organizations"> }); }
+  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: text(form, "organizationId") as Id<"organizations">, plan: z.enum(["starter", "pro"]).catch("starter").parse(text(form, "plan")) }); }
   catch { redirect("/dashboard/settings/billing?billing=error"); }
   redirect(url);
+}
+export async function changePlan(form: FormData) {
+  const { token } = await current();
+  try { await backend().action(api.billingJobs.changePlan, { token, organizationId: text(form, "organizationId") as Id<"organizations">, plan: z.enum(["starter", "pro"]).parse(text(form, "plan")) }); await notify("Plan change requested. It shows here once Stripe confirms it."); }
+  catch (e) { await notify(backendMessage(e, "Could not change the plan."), "error"); }
+  revalidatePath("/dashboard/settings/billing");
 }
 export async function applyReferralCode(form: FormData) {
   const { token } = await current();
@@ -371,6 +384,18 @@ export async function openBillingPortal(form: FormData) {
   try { url = await backend().action(api.billingJobs.portal, { token, organizationId: text(form, "organizationId") as Id<"organizations"> }); }
   catch { redirect("/dashboard/settings/billing?billing=error"); }
   redirect(url);
+}
+export async function setSpendingCap(form: FormData) {
+  const { token } = await current();
+  try { await backend().mutation(api.billing.setSpendingCap, { token, organizationId: text(form, "organizationId") as Id<"organizations">, capUsd: Number(text(form, "capUsd")) }); await notify("Extra usage cap saved."); }
+  catch { await notify("Could not save the extra usage cap.", "error"); }
+  revalidatePath("/dashboard/settings/billing");
+}
+export async function setWorkspaceModel(form: FormData) {
+  const { token } = await current();
+  try { await backend().mutation(api.scopes.setWorkspaceModel, { token, organizationId: text(form, "organizationId") as Id<"organizations">, model: text(form, "model") }); await notify("Model saved."); }
+  catch { await notify("Could not save the model.", "error"); }
+  revalidatePath("/dashboard/settings/model");
 }
 export async function saveSlackChannel(form: FormData) {
   const { token } = await current();
@@ -432,6 +457,7 @@ export async function requestRuleAssistant(form: FormData) {
     await notify("The rule assistant is working. Refresh in a moment to review its suggestions.");
   } catch (e) { await notify(backendMessage(e, "The rule assistant could not start."), "error"); }
   revalidatePath("/dashboard", "layout");
+  closeMemoryDialog(form);
 }
 export async function decideRuleSuggestion(form: FormData) {
   const { token } = await current();
@@ -486,7 +512,7 @@ export async function createApiKey(
       name: text(form, "name"),
       hash: createHash("sha256").update(key).digest("hex"),
       prefix: key.slice(0, 11),
-      scopes: [z.enum(["read", "write", "admin"]).parse(text(form, "scope") || "read")],
+      ...(text(form, "scope") === "perforce" ? { perforce: true } : { scopes: [z.enum(["read", "write", "admin"]).parse(text(form, "scope") || "read")] }),
     });
   } catch (e) {
     // The form shows any returned string as the new key, so report refusals (e.g. the key cap) as a toast.

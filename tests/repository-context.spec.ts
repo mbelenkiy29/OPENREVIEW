@@ -11,9 +11,28 @@ test('GitHub context rejects recycled usernames and legacy receipts, and survive
   const denied=await s.t.query(internal.repositoryContext.select,{repositoryId:s.main._id,actor:'alice',...(id?{authorExternalId:id}:{})});expect(denied.receipt).toBeNull();expect(denied.sources).toEqual([]);
  }
  const legacy={...selected.receipt!};delete legacy.githubActorId;await expect(s.t.query(internal.repositoryContext.validate,{receipt:legacy})).rejects.toThrow('identity changed');
- await s.t.run(ctx=>ctx.db.patch(s.user,{githubId:5101}));await expect(s.t.query(internal.repositoryContext.validate,{receipt:selected.receipt!})).rejects.toThrow('identity changed');expect((await s.select()).receipt).toBeNull();
- await s.t.run(ctx=>ctx.db.patch(s.user,{githubId:5100,login:'renamed'}));await expect(s.t.query(internal.repositoryContext.validate,{receipt:selected.receipt!})).rejects.toThrow('identity changed');
+ const githubRow=await s.t.run(ctx=>ctx.db.query('identities').withIndex('by_user',q=>q.eq('userId',s.user)).filter(q=>q.eq(q.field('provider'),'github')).unique());
+ await s.t.run(async ctx=>{await ctx.db.patch(s.user,{githubId:5101});await ctx.db.patch(githubRow!._id,{providerUserId:'5101'});});await expect(s.t.query(internal.repositoryContext.validate,{receipt:selected.receipt!})).rejects.toThrow('identity changed');expect((await s.select()).receipt).toBeNull();
+ await s.t.run(async ctx=>{await ctx.db.patch(s.user,{githubId:5100,login:'renamed'});await ctx.db.patch(githubRow!._id,{providerUserId:'5100',login:'renamed'});});await expect(s.t.query(internal.repositoryContext.validate,{receipt:selected.receipt!})).rejects.toThrow('identity changed');
  const renamed=await s.t.query(internal.repositoryContext.select,{repositoryId:s.main._id,actor:'renamed',authorExternalId:'5100'});expect(renamed.receipt?.userId).toBe(s.user);expect(renamed.sources).toHaveLength(1);expect(await s.t.query(internal.repositoryContext.validate,{receipt:renamed.receipt!})).toBe(true);
+});
+test('a member who signed up with Google and linked GitHub later gets GitHub context and GitHub-login invitations',async()=>{
+ const s=await setup(),sid='d'.repeat(64);
+ const dana=await s.t.mutation(api.identity.signIn,{secret:'context-service',provider:'google',providerUserId:'g-dana',login:'dana',avatar:'',emailVerified:false,sessionHash:sid});
+ const token=await new SignJWT({}).setSubject(dana).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setIssuedAt().setExpirationTime('1h').sign(new TextEncoder().encode(secret));
+ const invitationId=await s.t.mutation(api.users.invite,{token:s.token,organizationId:s.organizationId,githubLogin:'dana',role:'member'});
+ // The Google login "dana" is self-chosen, so it neither reaches the invitation nor the PR author's context.
+ expect((await s.t.query(api.users.me,{token})).invitations).toEqual([]);
+ await s.t.run(ctx=>ctx.db.insert('organizationMembers',{organizationId:s.organizationId,userId:dana,role:'member'}));
+ const pick=()=>s.t.query(internal.repositoryContext.select,{repositoryId:s.main._id,actor:'dana',authorExternalId:'5105'});
+ expect((await pick()).receipt).toBeNull();
+ await s.t.mutation(api.identity.signIn,{secret:'context-service',provider:'github',providerUserId:'5105',login:'dana',avatar:'',emailVerified:false,sessionHash:'e'.repeat(64),linkToken:token});
+ expect((await s.t.query(api.users.me,{token})).invitations.map(i=>i._id)).toEqual([invitationId]);
+ expect(await s.t.mutation(api.users.acceptInvitation,{token,invitationId})).toBe(s.organizationId);
+ const linked=await pick();expect(linked.receipt?.userId).toBe(dana);expect(linked.sources).toHaveLength(1);
+ expect(await s.t.query(internal.repositoryContext.validate,{receipt:linked.receipt!})).toBe(true);
+ // Same login, different GitHub account: still denied.
+ expect((await s.t.query(internal.repositoryContext.select,{repositoryId:s.main._id,actor:'dana',authorExternalId:'5106'})).receipt).toBeNull();
 });
 async function setup(){
  process.env.SESSION_SECRET=secret;process.env.SERVICE_SECRET='context-service';
@@ -335,6 +354,6 @@ test('resolving a GitHub author uses indexes instead of scanning every workspace
  });
  expect((await t.query(internal.repositoryContext.select,{repositoryId,actor:'mallory',authorExternalId:'6666'})).coverage.join()).toContain('not linked');
  expect((await t.query(internal.repositoryContext.select,{repositoryId,actor:'alice',authorExternalId:'5100'})).sources).toHaveLength(1);
- expect(await t.query(internal.repositoryContext.authorMember,{repositoryId,actor:'mallory',authorExternalId:'6666'})).toContain('not a linked workspace member');
- expect(await t.query(internal.repositoryContext.authorMember,{repositoryId,actor:'alice',authorExternalId:'5100'})).toBeNull();
+ expect(await t.query(internal.repositoryContext.requirementsAuthor,{repositoryId,actor:'mallory',authorExternalId:'6666'})).toContain('not a linked workspace member');
+ expect(await t.query(internal.repositoryContext.requirementsAuthor,{repositoryId,actor:'alice',authorExternalId:'5100'})).toBeNull();
 });

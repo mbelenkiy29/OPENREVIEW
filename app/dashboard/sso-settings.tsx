@@ -1,19 +1,24 @@
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { backend } from "../../src/server";
+import { proGatesAt, type Entitlement } from "../../src/plans";
+import { Locked } from "./locked";
 import { addSsoDomain, removeSsoDomain, saveSsoConnection, setSsoEnforcement, verifySsoDomain } from "./actions";
 
 // Settings → People: single sign-on for this workspace (admins only).
-export async function SsoSettings({ token, organizationId }: { token: string; organizationId: Id<"organizations"> }) {
+export async function SsoSettings({ token, organizationId, locked }: { token: string; organizationId: Id<"organizations">; locked: readonly Entitlement[] }) {
   const { connection: c, domains } = await backend().query(api.sso.settings, { token, organizationId });
   const base = (process.env.APP_URL ?? "").replace(/\/+$/, "");
   const verified = domains.filter((d) => d.verified).length;
+  // A connection made since the Pro gates, on a plan without SSO: it keeps signing people in, and can only be turned off.
+  const lapsed = Boolean(c && c.createdAt >= proGatesAt && locked.includes("auth.sso"));
   return <section aria-labelledby="sso-heading">
     <h2 id="sso-heading">Single sign-on</h2>
     <p className="muted">Connect your identity provider with SAML 2.0 or OpenID Connect. People sign in with their work email; an address counts as verified only on a domain you prove below with a DNS TXT record.</p>
     {c?.protocol === "saml" && base && <p className="muted">Service provider entity ID and metadata: <code>{`${base}/api/sso/saml/${c._id}`}</code> · ACS URL: <code>{`${base}/api/sso/saml/${c._id}/acs`}</code></p>}
     {c?.protocol === "oidc" && base && <p className="muted">Redirect URI: <code>{`${base}/api/sso/oidc/callback`}</code></p>}
-    <form action={saveSsoConnection} className="form-grid">
+    {lapsed && <><Locked feature="auth.sso" locked={locked} /><p className="muted">Sign-in keeps working. Without Pro you can still turn the connection off or stop requiring SSO.</p></>}
+    <Locked feature="auth.sso" locked={c ? [] : locked}><form action={saveSsoConnection} className="form-grid">
       <input type="hidden" name="organizationId" value={organizationId} />
       <label>Protocol<select name="protocol" defaultValue={c?.protocol ?? "saml"}><option value="saml">SAML 2.0</option><option value="oidc">OpenID Connect</option></select></label>
       <label>Name<input name="name" required maxLength={100} defaultValue={c?.name ?? "Company SSO"} /></label>
@@ -26,7 +31,7 @@ export async function SsoSettings({ token, organizationId }: { token: string; or
       <label>New members from SSO<select name="jitRole" defaultValue={c?.jitRole ?? "none"}><option value="none">Invite only</option><option value="member">Join as member</option><option value="viewer">Join as viewer</option></select></label>
       <label className="check"><input type="checkbox" name="active" defaultChecked={c?.active ?? true} />Connection active</label>
       <button className="primary">Save SSO connection</button>
-    </form>
+    </form></Locked>
     {c && <>
       <h3>Domains</h3>
       {domains.map((d) => <div key={d._id} className="row">

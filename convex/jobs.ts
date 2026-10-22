@@ -38,7 +38,8 @@ import { osvClient, osvEnabled } from "../src/osv";
 import { applyGeneratedTests, reproduceSystem, testCandidates, testDraftSchema } from "../src/generated-tests";
 import { knowledgeTokenBudgets, selectKnowledge } from "../src/knowledge-context";
 import { detectAiAuthored, reviewModelFor } from "../src/ai-authored";
-import { resolveTier, tiers } from "../src/review-tier";
+import { modes, resolveTier, tiers } from "../src/review-tier";
+import { upgradeNote } from "../src/plans";
 import { repositoryGuidance, selectPacks } from "../src/guidance-packs";
 import { AzureDevOps } from "../src/azure-devops";
 import { semanticChunks, sourceChunks } from "../src/engine/chunks";
@@ -220,7 +221,7 @@ export const indexBatch = internalAction({
         if (process.env.EMBEDDING_MODEL) {
           // Chunk-level embeddings at definition boundaries; unchanged blobs with the current
           // model are skipped, so re-index backfills are idempotent.
-          const embedder = new Embeddings(inferenceBilling(ctx)), started = Date.now();
+          const embedder = new Embeddings(inferenceBilling(ctx, data.repo.organizationId)), started = Date.now();
           const state = await ctx.runQuery(internal.embeddings.chunkState, { repositoryId: data.repo._id, path: file.path });
           if (state?.sha !== file.sha || state.model !== embedder.model) {
             // Variable declarations (including locals) are not chunk boundaries.
@@ -333,7 +334,7 @@ export const review = internalAction({
   handler: async (ctx, args) => {
     const stepStarted = Date.now();
     const state = await ctx.runQuery(internal.reviews.data, args);
-    if (["completed", "cancelled"].includes(state.review.status)) return;
+    if (["completed", "cancelled", "skipped"].includes(state.review.status)) return;
     if(state.review.nativeP4){await ctx.runAction(internal.p4ReviewJobs.run,args);return;}
     const indexState = await ctx.runQuery(internal.repositories.data, {
       repositoryId: state.review.repositoryId,
@@ -435,14 +436,14 @@ export const review = internalAction({
       }
       const limit = state.review.trigger === "mention" || state.review.trigger === "manual" ? undefined : sizeLimitIssue(pr.diff, settings);
       if (limit) {
-        await ctx.runMutation(internal.reviews.stage, { ...args, status: "cancelled", detail: limit });
+        await ctx.runMutation(internal.reviews.stage, { ...args, status: "skipped", detail: limit });
         return;
       }
       if (pr.draft && !settings.drafts) {
         await ctx.runMutation(internal.reviews.stage, {
           ...args,
-          status: "cancelled",
-          detail: "Draft reviews disabled",
+          status: "skipped",
+          detail: "Skipped: draft reviews are off. Mark the pull request ready for review, or turn on draft reviews.",
         });
         return;
       }
@@ -474,9 +475,13 @@ export const review = internalAction({
         return { ...(resolved.settings.categories ? { categories: resolved.settings.categories } : {}), minimumConfidence: thresholds.minimumConfidence, severityThreshold: z.enum(severities).parse(thresholds.severityThreshold), ignored: resolved.ignored, ...(resolved.ignoredBy ? { ignoredBy: resolved.ignoredBy } : {}) };
       };
       // K2: comment > label > configured tier (raised by touched folders); the admin cap applies last.
-      const tier = resolveTier({ configured: z.enum(tiers).parse(effective.mode), requested: state.review.requestedMode ? { mode: state.review.requestedMode, source: state.review.requestedModeSource ?? "comment" } : undefined, cap: z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep") });
+      // A plan without deep reviews caps the tier at standard, below any admin cap.
+      const deepAllowed = await ctx.runQuery(internal.billing.entitlement, { organizationId: repo.organizationId, key: "review.deep" }), adminCap = z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep");
+      const tier = resolveTier({ configured: z.enum(modes).parse(effective.mode), diff: pr.diff, requested: state.review.requestedMode ? { mode: state.review.requestedMode, source: state.review.requestedModeSource ?? "comment" } : undefined, cap: deepAllowed || adminCap !== "deep" ? adminCap : "standard" });
+      const planCapped = !deepAllowed && tier.requested === "deep";
+      const testsLocked = await ctx.runQuery(internal.runtime.testsLocked, { repositoryId: repo._id });
       const touchedDirectories = pr.diff.flatMap((f) => { const d = directorySettings(f.path); return d && !d.ignored ? [d] : []; });
-      const configNotes = [...repoConfig.warnings, ...guidance.rejected, ...(configured.blocked.length ? [`Repository config values for ${configured.blocked.join(", ")} were not applied because an administrator locked them.`] : [])];
+      const configNotes = [...repoConfig.warnings, ...guidance.rejected, ...(planCapped ? [upgradeNote["review.deep"]] : []), ...(testsLocked ? [upgradeNote["review.reproTests"]] : []), ...(configured.blocked.length ? [`Repository config values for ${configured.blocked.join(", ")} were not applied because an administrator locked them.`] : [])];
       // Incremental review when the last reviewed head is an ancestor of this head.
       const previousHead = await ctx.runQuery(internal.reviews.previousHead, args);
       const comparison = previousHead && github.compare ? await github.compare(repo.fullName, previousHead, pr.head.sha).catch(() => "unavailable" as const) : undefined;
@@ -716,7 +721,8 @@ export const review = internalAction({
         verdict: result.metadata.verdict,
         requirementsNotMet: result.metadata.requirementsNotMet,
         modeDecision: tier,
-        aiAuthored: aiAuthored ? { ...aiAuthored, ...(routed.routed ? { model: routed.model } : {}) } : undefined,
+        // The model that ran: a workspace's own key keeps its own model whatever the routing asked for.
+        aiAuthored: aiAuthored ? { ...aiAuthored, ...(routed.routed ? { model: modelProvider.modelFor("review") } : {}) } : undefined,
         coverageLimits: result.metadata.coverageLimits,
         findings: [...result.findings,...(result.metadata.carriedForward??[])],
         resolved: result.metadata.resolvedFingerprints,
