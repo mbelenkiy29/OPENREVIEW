@@ -4,7 +4,7 @@ import { api } from "../../../../convex/_generated/api";
 import { backend } from "../../../../src/server";
 import type { Id } from "../../../../convex/_generated/dataModel";
 const hash=(s:string)=>createHash("sha256").update(s).digest("hex");
-// shortcut: trusts the proxy's x-real-ip / x-forwarded-for (set by Vercel and common proxies); without a proxy every caller shares one limit.
+// shortcut: trusts the proxy's x-real-ip / x-forwarded-for (set by Vercel and common proxies); without a proxy the caller sets it, so startPair's shared 300/minute cap is the bound.
 const clientAddress=(request:Request)=>(request.headers.get("x-real-ip")??request.headers.get("x-forwarded-for")?.split(",")[0]??"unknown").trim().slice(0,100);
 export async function POST(request:Request,{params}:{params:Promise<{action:string}>}) {
  const {action}=await params;const secret=process.env.SERVICE_SECRET??"";

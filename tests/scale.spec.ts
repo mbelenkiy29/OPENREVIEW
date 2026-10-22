@@ -126,6 +126,9 @@ test('a failed webhook is retried for about half an hour; recovery restarts stuc
  await t.mutation(internal.recovery.sweep,{});
  expect(await retries(queued)).toEqual([0]);expect(await retries(stuck)).toEqual([0]);expect(await retries(exhausted)).toEqual([]);
  expect(await t.run(ctx=>ctx.db.get(exhausted))).toMatchObject({status:'failed',error:'Webhook recovery attempts exhausted'});
+ // A delivery from two days ago is not replayed (it could undo newer state); it is closed as failed.
+ const ancient=await insert('queued',0,Date.now()-2*86400000);await t.mutation(internal.recovery.sweep,{});
+ expect(await retries(ancient)).toEqual([]);expect(await t.run(ctx=>ctx.db.get(ancient))).toMatchObject({status:'failed',error:'Too old to replay'});
  vi.useRealTimers();
 });
 

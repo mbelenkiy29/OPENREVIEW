@@ -2045,3 +2045,10 @@ test("Findings read models hide stale, resolved, low-confidence, disabled and vi
  await t.run(ctx=>ctx.db.patch(newer,{status:"completed"}));expect(await eligibility()).toBe(false);
  expect(await t.run(ctx=>ctx.db.get(findingId))).toMatchObject({status:"open",commitSha:head,reviewId});
 });
+test("device pairing keeps a shared cap so spoofed client addresses cannot pair without limit",async()=>{
+ vi.useFakeTimers();vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));try{
+  const t=convexTest(schema,modules),pair=(i:number)=>t.mutation(api.bridge.startPair,{secret:"integration-service-secret",hash:i.toString(16).padStart(64,"0"),code:"a".repeat(12),name:"Spoofed",client:`10.0.${i}`});
+  for(let i=0;i<300;i++) await pair(i);
+  await expect(pair(300)).rejects.toThrow(/Rate limit/);
+ }finally{vi.useRealTimers();}
+});

@@ -67,6 +67,9 @@ export const sweep = internalMutation({
       .withIndex("by_status", (q) => q.eq("status", status))
       .take(100))
       if (delivery.updatedAt >= stale) continue;
+      // An old event replayed later can undo newer state, so only deliveries from the last 6 hours restart; older
+      // ones are closed as failed, which also keeps them from filling this 100-row window.
+      else if (delivery.createdAt < Date.now() - 6 * 3600000) await ctx.db.patch(delivery._id, { status: "failed", error: "Too old to replay", updatedAt: Date.now() });
       else if (delivery.attempts < maxWebhookAttempts) await ctx.scheduler.runAfter(0, internal.webhookJobs.process, { deliveryId: delivery._id });
       else await ctx.db.patch(delivery._id, { status: "failed", error: "Webhook recovery attempts exhausted", updatedAt: Date.now() });
   },

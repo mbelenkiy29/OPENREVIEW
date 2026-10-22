@@ -271,3 +271,21 @@ test("transcript retention reaches old threads and conversations behind hundreds
   const next = (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).filter((s) => s.name.includes("retentionSweep"));
   expect(next).toHaveLength(1);expect((next[0].args[0] as { cursor?: string }).cursor).toBeTruthy();
 });
+
+test("review retention deletes a review's children 500 at a time and the review only once none are left", async () => {
+  const t = convexTest(schema, modules);
+  const now = Date.now(), old = now - 60 * 86_400_000;
+  const { organizationId, reviewId } = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Old", reviewRetentionDays: 30, createdAt: now });
+    const repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: "old/app", defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: now });
+    const reviewId = await ctx.db.insert("reviews", { organizationId, repositoryId, prNumber: 1, headSha: "a".repeat(40), status: "completed", mode: "standard", attempts: 1, createdAt: old, updatedAt: old });
+    for (let i = 0; i < 501; i++) await ctx.db.insert("modelCalls", { organizationId, reviewId, task: "review", provider: "p", model: "m", inputTokens: 1, outputTokens: 1, latencyMs: 1, estimatedCost: 0, cached: false, createdAt: old });
+    return { organizationId, reviewId };
+  });
+  const state = () => t.run(async (ctx) => [!!(await ctx.db.get(reviewId)), (await ctx.db.query("modelCalls").withIndex("by_review", (q) => q.eq("reviewId", reviewId)).collect()).length]);
+  // Fake timers keep the self-rescheduled run from firing between these calls.
+  expect(await t.mutation(internal.dataControls.retention, { organizationId })).toMatchObject({ reviews: 0, more: true });
+  expect(await state()).toEqual([true, 1]);
+  expect(await t.mutation(internal.dataControls.retention, { organizationId })).toMatchObject({ reviews: 1, more: false });
+  expect(await state()).toEqual([false, 0]);
+});

@@ -232,7 +232,7 @@ export const retention = internalMutation({ args: { organizationId: v.id("organi
     // Agent transcripts: reviews keep their row, so a time cursor on the workspace marks how far the clearing got.
     const reviews = await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", org._id).gte("createdAt", org.transcriptsClearedBefore ?? 0).lt("createdAt", cutoff)).take(100);
     for (const r of reviews) if (r.agentStateStorageId) { await ctx.storage.delete(r.agentStateStorageId).catch(() => undefined); await ctx.db.patch(r._id, { agentStateStorageId: undefined }); transcripts++; }
-    if (reviews.length) await ctx.db.patch(org._id, { transcriptsClearedBefore: reviews.at(-1)!.createdAt });
+    if (reviews.length && reviews.at(-1)!.createdAt !== org.transcriptsClearedBefore) await ctx.db.patch(org._id, { transcriptsClearedBefore: reviews.at(-1)!.createdAt });
     const threads = await ctx.db.query("chatThreads").withIndex("by_org_updated", (q) => q.eq("organizationId", org._id).lt("updatedAt", cutoff)).take(20);
     for (const thread of threads) {
       const messages = await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", thread._id)).take(500);
