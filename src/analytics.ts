@@ -4,10 +4,12 @@
 import posthog from "posthog-js";
 import { startAdsPixel, stopAdsPixel } from "./ads-pixel";
 import { analyticsStartedEvent, clearAnalyticsStorage } from "./consent";
+import { startRedditPixel, stopRedditPixel } from "./reddit-pixel";
 import { posthogBeforeSend, posthogHosts, posthogProxyPath, posthogToken } from "./telemetry";
 
 export function startAnalytics() {
   startAdsPixel();
+  startRedditPixel();
   if (!posthogToken || posthog.__loaded) return;
   posthog.init(posthogToken, {
     api_host: posthogProxyPath,
@@ -31,6 +33,7 @@ export function stopAnalytics() {
     posthog.set_config({ disable_persistence: true });
   }
   stopAdsPixel();
+  stopRedditPixel();
   clearAnalyticsStorage();
 }
 

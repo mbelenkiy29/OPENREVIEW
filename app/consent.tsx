@@ -32,7 +32,7 @@ export function ConsentBanner() {
   };
   return <section className="consent" aria-labelledby="consent-heading">
     <h2 id="consent-heading">Analytics cookies</h2>
-    <p>May we use cookies to count visits, see which features people use, and measure whether our ads in ChatGPT lead to sign-ups? No tracking on other sites. See the <Link href="/privacy">Privacy Policy</Link>.</p>
+    <p>May we use cookies to count visits, see which features people use, and measure whether our ads in ChatGPT and on Reddit lead to sign-ups? No tracking on other sites. See the <Link href="/privacy">Privacy Policy</Link>.</p>
     <div className="consent-actions">
       <button ref={first} type="button" onClick={() => choose("denied")}>Decline</button>
       <button type="button" onClick={() => choose("granted")}>Accept</button>
