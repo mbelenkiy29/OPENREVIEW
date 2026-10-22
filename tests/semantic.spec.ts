@@ -8,8 +8,8 @@ const modules=import.meta.glob('../convex/**/*.ts');
 const secret='integration-session-secret-at-least-32-characters';
 beforeEach(()=>{process.env.SESSION_SECRET=secret;process.env.SERVICE_SECRET='integration-service-secret';});
 
-async function setup(installationId:number){
- const t=convexTest(schema,modules);
+async function setup(installationId:number,transactionLimits?:{documentsRead:number;bytesRead:number}){
+ const t=convexTest({schema,modules,transactionLimits});
  const userId=await t.mutation(api.users.login,{secret:'integration-service-secret',githubId:installationId,login:'alice'+installationId,avatar:''});
  const token=await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(userId).setExpirationTime('1h').sign(new TextEncoder().encode(secret));
  const organizationId=await t.mutation(api.users.createOrganization,{token,name:'Semantic workspace'});
@@ -81,4 +81,14 @@ test('chunk hits only resolve rows from the requested repository',async()=>{
  const otherRepo=await b.t.run(async ctx=>ctx.db.insert('repositories',{organizationId:b.repo.organizationId,fullName:'other/repo',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:0}));
  expect(await b.t.query(internal.embeddings.chunkHits,{ids:[id],repositoryId:otherRepo})).toEqual([]);
  expect(a.repo._id).toBeTruthy();
+});
+
+test('dashboard status stays under the 8MB read limit for a large repository and says the count is a floor',async()=>{
+ vi.stubEnv('EMBEDDING_MODEL','text-embedding-3-small');
+ try{
+  const {t,token,repo}=await setup(403,{documentsRead:16384,bytesRead:8*1024*1024});
+  // ~14KB per row (1,536-number vector): the old 1,001-row read was ~14MB.
+  await t.run(async ctx=>{for(let i=0;i<1001;i++)await ctx.db.insert('chunkEmbeddings',{organizationId:repo.organizationId,repositoryId:repo._id,path:`src/f${String(i).padStart(4,'0')}.ts`,sha:'s',model:'text-embedding-3-small',scope:repo._id+':text-embedding-3-small',startLine:1,endLine:2,vector:Array(1536).fill(0.5),updatedAt:1});});
+  expect(await t.query(api.embeddings.status,{token,repositoryId:repo._id})).toEqual({configured:true,model:'text-embedding-3-small',chunks:500,more:true,files:500,stale:0});
+ }finally{vi.unstubAllEnvs();}
 });

@@ -103,7 +103,7 @@ export default defineSchema({
   integrationConnections:defineTable({organizationId:org,kind:v.union(v.literal("linear"),v.literal("atlassian"),v.literal("notion")),sites:v.optional(v.array(v.object({id:v.string(),name:v.string(),url:v.string(),scopes:v.array(v.string())}))),jiraProjectIds:v.optional(v.array(v.string())),confluenceSpaceIds:v.optional(v.array(v.string())),externalId:v.string(),name:v.string(),credentials:v.string(),expiresAt:v.number(),active:v.boolean(),generation:v.number(),teamIds:v.array(v.string()),projectIds:v.array(v.string()),repositoryIds:v.array(repo),refreshLease:v.optional(v.string()),refreshExpiresAt:v.optional(v.number()),error:v.optional(v.string()),createdAt:v.number()}).index("by_org",["organizationId"]).index("by_account",["organizationId","kind","externalId"]),
   integrationRevocations:defineTable({connectionId:v.id("integrationConnections"),organizationId:org,credentials:v.string(),attempts:v.number(),createdAt:v.number(),status:v.string(),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number())}).index("by_connection",["connectionId"]),
   approvalPolicies:defineTable({organizationId:org,teamId:v.optional(v.id("teams")),repositoryId:v.optional(repo),policy:approvalPolicyValidator,updatedAt:v.number()}).index("by_org",["organizationId"]),
-  approvalJobs:defineTable({organizationId:org,repositoryId:repo,reviewId:review,prNumber:v.number(),headSha:v.string(),policyKey:v.string(),status:v.string(),reasons:v.array(v.string()),providerReviewId:v.optional(v.union(v.number(),v.string())),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number()),createdAt:v.number(),updatedAt:v.number()}).index("by_review",["reviewId"]).index("by_repo_pr",["repositoryId","prNumber"]).index("by_status",["status"]).index("by_org_status",["organizationId","status"]),
+  approvalJobs:defineTable({organizationId:org,repositoryId:repo,reviewId:review,prNumber:v.number(),headSha:v.string(),policyKey:v.string(),status:v.string(),reasons:v.array(v.string()),providerReviewId:v.optional(v.union(v.number(),v.string())),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number()),createdAt:v.number(),updatedAt:v.number()}).index("by_review",["reviewId"]).index("by_repo_pr",["repositoryId","prNumber"]).index("by_repo_head",["repositoryId","headSha"]).index("by_status",["status"]).index("by_org_status",["organizationId","status"]),
   runtimePolicies:defineTable({organizationId:org,teamId:v.optional(v.id("teams")),repositoryId:v.optional(repo),policy:runtimePolicyValidator,updatedAt:v.number()}).index("by_org",["organizationId"]),
   runtimeWorkers:defineTable({organizationId:org,tokenHash:v.string(),name:v.string(),expiresAt:v.number(),revoked:v.boolean(),lastSeen:v.optional(v.number()),createdAt:v.number()}).index("by_hash",["tokenHash"]).index("by_org",["organizationId"]),
   runtimeJobs:defineTable({organizationId:org,repositoryId:repo,reviewId:review,headSha:v.string(),revisionKey:v.optional(v.string()),policy:runtimePolicyValidator,policyKey:v.string(),status:v.string(),error:v.optional(v.string()),sourceStorageId:v.optional(v.id("_storage")),workerId:v.optional(v.id("runtimeWorkers")),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number()),attempts:v.number(),evidence:v.optional(runtimeEvidenceValidator),
@@ -278,7 +278,7 @@ export default defineSchema({
   loginTokens: defineTable({ email: v.string(), tokenHash: v.string(), expiresAt: v.number(), usedAt: v.optional(v.number()), createdAt: v.number(), referralCode: v.optional(v.string()) }).index("by_token", ["tokenHash"]),
   // onboarding: guided setup progress for workspaces created with it (absent on older workspaces,
   // which are never sent to setup). reviewsPaused marks automatic reviews held off while indexing.
-  organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), defaultHandoff:v.optional(handoffValidator), defaultCloudAgent:v.optional(cloudAgentValidator), /* billing deployments: a new workspace must choose a plan (Stripe-confirmed) before setup, indexing or reviews; older workspaces have no flag */ planRequired:v.optional(v.boolean()), planSelectedAt:v.optional(v.number()), plan:v.optional(v.string()), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), createdAt: v.number() }),
+  organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), /* how far transcript retention has cleared reviews' agent state */ transcriptsClearedBefore: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), defaultHandoff:v.optional(handoffValidator), defaultCloudAgent:v.optional(cloudAgentValidator), /* billing deployments: a new workspace must choose a plan (Stripe-confirmed) before setup, indexing or reviews; older workspaces have no flag */ planRequired:v.optional(v.boolean()), planSelectedAt:v.optional(v.number()), plan:v.optional(v.string()), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), createdAt: v.number() }),
   // Workspace deletion receipts (M3): survive the purge; step + cursor make the purge resumable.
   workspaceDeletions: defineTable({ organizationId: org, name: v.string(), requestedBy: v.id("users"), requestedAt: v.number(), scheduledFor: v.number(), scheduledId: v.optional(v.id("_scheduled_functions")), status: v.string() /* scheduled | cancelled | purging | done */, step: v.number(), cursor: v.optional(v.string()), counts: v.record(v.string(), v.number()), startedAt: v.optional(v.number()), cancelledAt: v.optional(v.number()), completedAt: v.optional(v.number()) }).index("by_org", ["organizationId"]),
   // Daily analytics rollup per (repository, UTC day, PR author), recomputed from raw tables for
@@ -372,7 +372,9 @@ export default defineSchema({
     .index("by_connection", ["connectionId", "externalId"])
     .index("by_github", ["githubId"])
     .index("by_org", ["organizationId"])
-    .index("by_installation", ["installationId"]),
+    .index("by_installation", ["installationId"])
+    .index("by_knowledge_status", ["knowledgeStatus"])
+    .index("by_conventions_synced", ["conventionsSyncedAt"]),
   repositorySettings: defineTable({
     repositoryId: repo,
     organizationId: org,
@@ -471,6 +473,8 @@ export default defineSchema({
   }).index("by_repo",["repositoryId"]).index("by_status",["status"]),
   pullRequests: defineTable({
     reactionsSyncedAt: v.optional(v.number()),
+    // When the PR next needs a reaction sync: set when a review completes, cleared once its window ends.
+    reactionsDueAt: v.optional(v.number()),
     organizationId: org,
     repositoryId: repo,
     number: v.number(),
@@ -483,14 +487,22 @@ export default defineSchema({
     updatedAt: v.number(),
     nativeObservedAt: v.optional(v.number()),
     revisionKey: v.optional(v.string()),
+    isDraft: v.optional(v.boolean()),
+    additions: v.optional(v.number()),
+    deletions: v.optional(v.number()),
+    changedFiles: v.optional(v.number()),
+    requestedReviewers: v.optional(v.array(v.string())),
     // For Analytics merge time: first time OpenReview saw the PR, and when the merge webhook arrived.
     openedAt: v.optional(v.number()),
     mergedAt: v.optional(v.number()),
   })
     .index("by_repo_number", ["repositoryId", "number"])
     .index("by_org", ["organizationId"])
+    .index("by_org_state", ["organizationId", "state"])
+    .index("by_repo_state", ["repositoryId", "state", "number"])
+    .index("by_reactions_due", ["reactionsDueAt"])
     .index("by_org_merged", ["organizationId", "mergedAt"])
-    .searchIndex("by_title",{searchField:"title",filterFields:["organizationId"]}),
+    .searchIndex("by_title",{searchField:"title",filterFields:["organizationId","state"]}),
   pullRequestCommits: defineTable({
     organizationId: org,
     pullRequestId: v.id("pullRequests"),
@@ -516,6 +528,10 @@ export default defineSchema({
     baseBranch: v.optional(v.string()),
     findingCount: v.optional(v.number()),
     findingSeverity: v.optional(v.string()),
+    // Per-priority counts (P0–P3) plus security, for the pull request list badges.
+    findingCounts: v.optional(v.record(v.string(), v.number())),
+    // On-demand guided tour of the change (Code tab), grouped by the model; paths are checked against the diff.
+    tour: v.optional(v.object({ steps: v.array(v.object({ title: v.string(), explanation: v.string(), files: v.array(v.string()) })), createdAt: v.number() })),
     models: v.optional(v.string()),
     runtimeEvidence: v.optional(runtimeEvidenceValidator),
     organizationId: org,
@@ -538,6 +554,8 @@ export default defineSchema({
     // Agentic tool-loop transcript/state, kept between execution steps and deleted when the review ends.
     agentStateStorageId: v.optional(v.id("_storage")),
     agentStateHead: v.optional(v.string()),
+    // Agent suspensions so far; bounds resumes even when the saved state cannot be loaded.
+    agentResumes: v.optional(v.number()),
     // GitHub check run created for this review's head (checks:write only).
     checkRunId: v.optional(v.number()),
     trigger: v.optional(v.string()),
@@ -557,6 +575,7 @@ export default defineSchema({
     .index("by_head", ["repositoryId", "prNumber", "headSha"])
     .index("by_pr", ["repositoryId", "prNumber"])
     .index("by_status", ["status"])
+    .index("by_repo_status", ["repositoryId", "status"])
     .index("by_org_time", ["organizationId", "createdAt"]),
   reviewRuns: defineTable({
     organizationId: org,
@@ -590,6 +609,7 @@ export default defineSchema({
     .index("by_repo", ["repositoryId"])
     .index("by_repo_path", ["repositoryId", "filePath"])
     .index("by_pr", ["repositoryId", "prNumber"])
+    .index("by_pr_status", ["repositoryId", "prNumber", "status"])
     .index("by_fingerprint", ["repositoryId", "prNumber", "fingerprint"])
     .index("by_org_time", ["organizationId", "createdAt"])
     .index("by_org_rule", ["organizationId", "ruleId"]),
@@ -750,15 +770,27 @@ export default defineSchema({
   }).index("by_key", ["key"]),
   slackEventReceipts: defineTable({ eventId: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Codebase chat (web): threads are private to the member who started them.
+  // Per-developer "Reviewed" marks on changed files; a mark counts only for the head it was made at.
+  fileReviews: defineTable({
+    organizationId: org,
+    userId: v.id("users"),
+    repositoryId: repo,
+    prNumber: v.number(),
+    path: v.string(),
+    headSha: v.string(),
+    updatedAt: v.number(),
+  }).index("by_user_pr", ["userId", "repositoryId", "prNumber"]).index("by_org", ["organizationId"]),
   chatThreads: defineTable({
     organizationId: org,
     userId: v.id("users"),
     title: v.string(),
     repositoryIds: v.array(repo),
     origin: v.optional(v.string()), // web (default) | api
+    // "Chat with PR": the pull request whose review the agent is given as context.
+    pullRequestId: v.optional(v.id("pullRequests")),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_org_user", ["organizationId", "userId", "updatedAt"]),
+  }).index("by_org_user", ["organizationId", "userId", "updatedAt"]).index("by_org_updated", ["organizationId", "updatedAt"]),
   // Assistant messages stream progress through `events` (persisted deltas read by the SSE route);
   // `content` and `citations` are written only after citation validation.
   chatMessages: defineTable({
@@ -778,6 +810,8 @@ export default defineSchema({
     estimatedCost: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
+    // A pull request action the agent suggested; it runs only when the developer approves it.
+    proposal: v.optional(v.object({ action: v.string(), reason: v.string(), body: v.optional(v.string()), head: v.optional(v.string()) })),
   }).index("by_thread", ["threadId"]), // ordered by insertion (_creationTime)
   learnedRules: defineTable({
     organizationId: org,
@@ -950,6 +984,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_pr", ["repositoryId", "prNumber"])
+    .index("by_org_created", ["organizationId", "createdAt"])
+    .index("by_org_updated", ["organizationId", "updatedAt"])
     .index("by_comment", ["githubCommentId"])
     .index("by_repository_comment", ["repositoryId", "githubCommentId"])
     .index("by_native_review", ["nativeP4.reviewId"])

@@ -28,7 +28,7 @@ export default async function GithubLink({ searchParams }: { searchParams: Promi
   let installations: UserInstallation[] = [], error: string | undefined;
   try { installations = await userInstallations(credentials.token); }
   catch { error = "GitHub didn’t return your installations. Try again in a minute."; }
-  const ownership = installations.length ? await backend().query(api.repositories.installationOwnership, { token, organizationId: organizationId as Id<"organizations">, installationIds: installations.map((i) => i.id) }) : {};
+  const ownership = installations.length ? await backend().query(api.repositories.installationOwnership, { token, secret: process.env.SERVICE_SECRET ?? "", organizationId: organizationId as Id<"organizations">, installationIds: installations.map((i) => i.id) }) : {};
   return <main className="welcome">
     <Link className="brand" href="/dashboard">OpenReview</Link>
     <h1>Link a GitHub installation</h1>

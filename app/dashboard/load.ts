@@ -49,7 +49,8 @@ export async function loadDashboard({
   }
   if(route === "settings" && !settingsNavigation().some(([key])=>key === section[1]))notFound();
   const view = route === "analytics" ? "overview" : route === "pulls" ? section[1] === "findings" ? "findings" : "reviews" : route === "memory" ? section[1] === "knowledge" ? "knowledge" : "rules" : route === "settings" ? ({ repositories: "repositories", people: "team", usage: "usage" }[section[1] ?? ""] ?? "settings") : route;
-  const reviewDetailId = route === "pulls" && section[1] !== "findings" ? section[1] : undefined;
+  const reviewDetailId = route === "pulls" && section[1] !== "findings" && section[1] !== "pr" ? section[1] : undefined;
+  const pullDetailId = route === "pulls" && section[1] === "pr" ? section[2] : undefined;
   const requestedRepository = filters.repository;
   if (!navigation.some((n) => n.toLowerCase() === view)) notFound();
   const scopes=await backend().query(api.scopes.list,{token:user.token,organizationId:organization._id});
@@ -122,6 +123,13 @@ export async function loadDashboard({
       historyCursor: filters.historyCursor,
     });
   if(detail&&!['completed','failed','cancelled','skipped'].includes(detail.review.status))active=true;
+  // The pull request row behind a review (size, draft, reviewers), or an unreviewed pull request opened by id.
+  const pull = detail ? await backend().query(api.pulls.get, { token: user.token, repositoryId: detail.review.repositoryId, number: detail.review.prNumber })
+    : pullDetailId ? await backend().query(api.pulls.get, { token: user.token, pullRequestId: pullDetailId as Id<"pullRequests"> }).catch(() => null) : null;
+  if (pullDetailId && !pull) notFound();
+  if (pullDetailId && pull?.latest) redirect(`/dashboard/pulls/${pull.latest._id}`);
+  // Live CI for the open pull request (GitHub and GitHub Enterprise); a provider error just hides the panel.
+  const checks = pull ? await backend().action(api.pullInsights.checks, { token: user.token, pullRequestId: pull._id }).catch(() => null) : null;
   const diagnostics=detail?.review.resultStorageId?await backend().action(api.jobs.diagnostics,{token:user.token,reviewId:detail.review._id}):null;
   const personalAgent=(await backend().query(api.bridge.personal,{token:user.token,organizationId:detail?.review.organizationId??organization._id})).agent;
   if(view === "knowledge" && requestedRepository && !data.repositories.some(r=>r._id===requestedRepository))notFound();
@@ -158,6 +166,6 @@ export async function loadDashboard({
   const workspace = organization as typeof organization & { _id: Id<"organizations"> };
   // Pro features this plan lacks: their settings render inside <Locked> (none with billing off).
   const locked = await backend().query(api.billing.locked, { token: user.token, organizationId: workspace._id });
-  return { kind: "dashboard" as const, active, aliases, apiKeys, locked, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, filters, findingsPage, isAdmin, jar, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleUsage, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
+  return { kind: "dashboard" as const, active, aliases, apiKeys, locked, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, pull, checks, filters, findingsPage, isAdmin, jar, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleUsage, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
 }
 export type DashboardContext = Extract<Awaited<ReturnType<typeof loadDashboard>>, { kind: "dashboard" }>;

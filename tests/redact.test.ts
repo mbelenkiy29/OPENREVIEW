@@ -124,3 +124,14 @@ test("every token or secret assignment the security checks flag is masked by red
     assert.equal(finding.evidence[0].quote, maskSecrets(line));
   }
 });
+
+test("private key blocks are redacted to the first END, and unterminated headers stay linear", () => {
+  const begin = "-----BEGIN RSA PRIVATE" + " KEY-----", end = "-----END RSA PRIVATE" + " KEY-----";
+  assert.equal(redact(`a\n${begin}\nMIIE\n${end}\nb`), "a\n[REDACTED KEY]\nb");
+  assert.equal(redact(`${begin}\nx\n${end}\n${begin}\ny\n${end}`), "[REDACTED KEY]\n[REDACTED KEY]");
+  assert.equal(redact(`${begin}\n${begin}\nx\n${end}\n${end}`), `[REDACTED KEY]\n${end}`);
+  assert.equal(redact(`${begin}\nx\n${end}\n${begin}\nunterminated`), `[REDACTED KEY]\n${begin}\nunterminated`);
+  const unmatched = `${begin}\n`.repeat(20000), started = performance.now();
+  assert.equal(redact(unmatched), unmatched);
+  assert.ok(performance.now() - started < 200);
+});

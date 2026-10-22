@@ -8,9 +8,12 @@ import {AdsPageViews} from "./ads-page-views";
 import {UserJot} from "./userjot";
 import {userJotConfig} from "../src/userjot";
 // Fonts are bundled from npm so builds never fetch them: Inter for UI, JetBrains Mono for code
-// and metadata, EB Garamond for editorial subheads.
+// and metadata, EB Garamond for editorial subheads, DM Sans and Space Mono for the Pull Requests
+// tab's Greptile look (browsers download a font file only where a page uses it).
 import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
+import "@fontsource-variable/dm-sans";
+import "@fontsource/space-mono/400.css";
 import "@fontsource/eb-garamond/400.css";
 import "@fontsource/eb-garamond/500.css";
 import "./globals.css";

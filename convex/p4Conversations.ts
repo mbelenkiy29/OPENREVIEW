@@ -8,7 +8,7 @@ import {p4PollingReference} from './schema';
 import {rateLimit} from './rateLimit';
 import {authorizeRepository,audit} from './auth';
 import {nativeConversationCommand,nativeCommandAnswer} from '../src/conversation-commands';
-import {p4Baseline} from './p4Index';
+import {p4BaselineMetadata} from './p4Index';
 const id={conversationId:v.id('conversations')},worker={...id,leaseId:v.string()};
 export async function p4ConversationAuthority(ctx:QueryCtx|MutationCtx,conversationId:Id<'conversations'>,leaseId?:string){
  const conversation=await ctx.db.get(conversationId),native=conversation?.nativeP4;
@@ -37,7 +37,7 @@ export const saveCommand=internalMutation({args:{...worker,inputStorageId:v.opti
  if(row.nativeP4!.command)return;
  let preferenceId:Id<'learnedPreferences'>|undefined;
  if(kind==='rereview'){
-  if(!a.inputStorageId)throw new Error('Prepared re-review input required');await p4Baseline(ctx,{repositoryId:state.repo._id,requestedBy:state.identity.userId,baselineJobId:state.baselineJob._id});
+  if(!a.inputStorageId)throw new Error('Prepared re-review input required');await p4BaselineMetadata(ctx,{repositoryId:state.repo._id,requestedBy:state.identity.userId,baselineJobId:state.baselineJob._id});
  }else{
   if(a.inputStorageId||!row.parentCommentId)throw new Error('Reply to a current published finding to ignore its pattern');
   const comment=await ctx.db.query('reviewComments').withIndex('by_review',q=>q.eq('reviewId',state.review._id)).filter(q=>q.eq(q.field('githubId'),row.parentCommentId)).unique();

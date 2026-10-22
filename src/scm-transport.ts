@@ -53,6 +53,15 @@ export function dispatcherFor(network: ScmNetwork, deps: TransportDeps = {}) {
   if (ca) return (deps.agent ?? ((o) => new Agent(o)))({ connect: { ca } });
   return undefined;
 }
+// Like Github.request: idempotent GETs get 3 attempts on 429/5xx, waiting retry-after seconds (max 15s).
+export async function retrying(method: string | undefined, send: () => Promise<Response>) {
+  for (let attempt = 0; ; attempt++) {
+    const response = await send();
+    if (attempt >= 2 || (method ?? "GET").toUpperCase() !== "GET" || (response.status !== 429 && response.status < 500)) return response;
+    await response.body?.cancel();
+    await new Promise((r) => setTimeout(r, Math.min(15000, Number(response.headers.get("retry-after") ?? 2 ** attempt) * 1000)));
+  }
+}
 const redirects = new Set([301, 302, 303, 307, 308]);
 export function scmFetch(network: ScmNetwork = {}, deps: TransportDeps = {}) {
   const dispatcher = dispatcherFor(network, deps);
@@ -61,7 +70,7 @@ export function scmFetch(network: ScmNetwork = {}, deps: TransportDeps = {}) {
     let current = new URL(url);
     const origin = current.origin, method = (init.method ?? "GET").toUpperCase();
     for (let hop = 0; ; hop++) {
-      const response = await send(current.toString(), { ...init, redirect: "manual", ...(dispatcher ? { dispatcher } : {}) });
+      const response = await retrying(method, () => send(current.toString(), { ...init, redirect: "manual", ...(dispatcher ? { dispatcher } : {}) }));
       if (!redirects.has(response.status)) return response;
       await response.body?.cancel();
       const location = response.headers.get("location");

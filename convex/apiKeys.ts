@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { authorize, service, audit } from "./auth";
 import { apiScopes, legacyScopes } from "../src/api-scopes";
+import { rateLimit } from "./rateLimit";
 import { hasEntitlement } from "./billing";
 import { upgradeNote } from "../src/plans";
 export const create = mutation({
@@ -27,6 +28,8 @@ export const create = mutation({
       throw new Error("Invalid API key");
     const scopes = args.perforce ? ["admin"] : [...new Set(args.scopes ?? ["read"])];
     if (!scopes.length || scopes.some((s) => !(apiScopes as readonly string[]).includes(s))) throw new Error("Invalid API key scopes");
+    // Settings lists 100 keys; past that an active key could not be seen or revoked there.
+    if ((await ctx.db.query("apiKeys").withIndex("by_org", (q) => q.eq("organizationId", args.organizationId)).filter((q) => q.eq(q.field("revoked"), false)).take(100)).length >= 100) throw new Error("A workspace can have at most 100 active API keys; revoke one first");
     const id=await ctx.db.insert("apiKeys", {
       organizationId: args.organizationId,
       userId: user._id,
@@ -46,10 +49,15 @@ export const list = query({
   args: { token: v.string(), organizationId: v.id("organizations") },
   handler: async (ctx, args) => {
     await authorize(ctx, args.token, args.organizationId, true);
-    const keys = await ctx.db
+    // Newest first, every active key (create caps them at 100) before recently revoked ones.
+    const recent = (revoked: boolean) => ctx.db
       .query("apiKeys")
       .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+      .order("desc")
+      .filter((q) => q.eq(q.field("revoked"), revoked))
       .take(100);
+    const active = await recent(false);
+    const keys = [...active, ...(await recent(true)).slice(0, 100 - active.length)];
     return keys.map((k) => ({
       _id: k._id,
       name: k.name,
@@ -93,5 +101,14 @@ export const resolve = query({
       throw new Error("API key owner no longer has workspace access");
     // Keys outlive a plan change: the caller answers 402 while the plan lacks API access.
     return { userId: key.userId, organizationId: key.organizationId, scopes: key.scopes ?? legacyScopes, perforce: Boolean(key.perforce), apiAccess: await hasEntitlement(ctx, key.organizationId, "api.access") };
+  },
+});
+// Per-key public API budget, keyed on the key hash; the route answers 429 when it is spent.
+export const consume = mutation({
+  args: { secret: v.string(), hash: v.string() },
+  handler: async (ctx, args) => {
+    service(args.secret);
+    // A boolean, not the thrown message: production Convex redacts error messages.
+    return rateLimit(ctx, "api_key:" + args.hash, 120).then(() => true, () => false);
   },
 });

@@ -257,7 +257,7 @@ test('Bitbucket personal authorization is single-use, exact-connection bound, ex
  await s.t.run(async ctx=>{const member=await ctx.db.query('organizationMembers').withIndex('by_org_user',q=>q.eq('organizationId',s.organizationId).eq('userId',viewer)).unique();await ctx.db.patch(member!._id,{role:'member'});});
  const viewerHash='f'.repeat(64);await s.t.mutation(api.bitbucketPersonal.begin,{token:viewerToken,repositoryId:s.main._id,tokenHash:viewerHash});await expect(s.t.mutation(api.bitbucketPersonal.save,{...s.proof,tokenHash:viewerHash,invocationId:'other-fit'})).rejects.toThrow('another workspace account');
  const expired='d'.repeat(64);await s.t.mutation(api.bitbucketPersonal.begin,{token:s.token,repositoryId:s.main._id,tokenHash:expired});const grantId=await s.t.run(async ctx=>{const grant=await ctx.db.query('providerIdentityGrants').withIndex('by_hash',q=>q.eq('tokenHash',expired)).unique();await ctx.db.patch(grant!._id,{expiresAt:Date.now()-1});return grant!._id;});await expect(s.t.query(api.bitbucketPersonal.inspect,{secret:'context-service',tokenHash:expired})).rejects.toThrow('expired');await s.t.mutation(internal.bitbucketPersonal.expireGrant,{id:grantId});expect(await s.t.run(ctx=>ctx.db.get(grantId))).toBeNull();
- await s.t.run(ctx=>ctx.db.patch(identityId,{active:true,credentials:'old-fixture',expiresAt:Date.now()-1,generation:3}));await s.t.mutation(internal.bitbucketPersonal.expireIdentity,{id:identityId,generation:3});expect(await s.t.run(ctx=>ctx.db.get(identityId))).toMatchObject({active:false,generation:4});expect((await s.t.run(ctx=>ctx.db.get(identityId)))?.credentials).toBeUndefined();
+ await s.t.run(ctx=>ctx.db.patch(identityId,{active:true,credentials:'old-fixture',expiresAt:Date.now()-1,generation:3}));await s.t.mutation(internal.bitbucketPersonal.expireIdentity,{id:identityId,generation:3});expect(await s.t.run(ctx=>ctx.db.get(identityId))).toMatchObject({active:true,generation:4});expect((await s.t.run(ctx=>ctx.db.get(identityId)))?.credentials).toBeUndefined();
  await s.t.run(ctx=>ctx.db.patch(identityId,{active:true,credentials:s.proof.credentials,expiresAt:s.proof.expiresAt}));
  expect((await s.t.query(api.providerIdentities.list,{token:s.token,organizationId:s.organizationId}))[0].identity?.status).toBe('linked');
  const third='c'.repeat(64);await s.t.mutation(api.bitbucketPersonal.begin,{token:s.token,repositoryId:s.main._id,tokenHash:third});await s.t.run(ctx=>ctx.db.patch(s.connectionId,{credentials:'replaced'}));await expect(s.t.query(api.bitbucketPersonal.inspect,{secret:'context-service',tokenHash:third})).rejects.toThrow('connection changed');
@@ -341,4 +341,19 @@ test('bridge claim rechecks finding evidence access after its source team grant 
  await expect(s.t.mutation(internal.bridge.claimData,{secret:'context-service',hash,requestId})).rejects.toThrow('Team access denied');
  await expect(s.t.mutation(internal.bridge.claim,{secret:'context-service',hash,requestId,current:{headSha:head,state:'open'}})).rejects.toThrow('Team access denied');
  expect(await s.t.run(ctx=>ctx.db.get(requestId))).toMatchObject({status:'pending'});
+});
+
+test('resolving a GitHub author uses indexes instead of scanning every workspace member',async()=>{
+ process.env.SERVICE_SECRET='context-service';
+ const t=convexTest({schema,modules,transactionLimits:{documentsRead:100}}),alice=await t.mutation(api.users.login,{secret:'context-service',githubId:5100,login:'alice',avatar:''});
+ const repositoryId=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Big',createdAt:0}),repo=(fullName:string)=>ctx.db.insert('repositories',{organizationId,fullName,defaultBranch:'main',enabled:true,indexStatus:'ready',indexedSha:'a'.repeat(40),createdAt:0});
+  for(let i=0;i<150;i++)await ctx.db.insert('organizationMembers',{organizationId,userId:await ctx.db.insert('users',{login:'member'+i,avatar:'',createdAt:0}),role:'member'});
+  await ctx.db.insert('organizationMembers',{organizationId,userId:alice,role:'member'});
+  const main=await repo('big/main');await ctx.db.insert('repositoryClusters',{organizationId,name:'Big',repositoryIds:[main,await repo('big/source')],createdAt:0});return main;
+ });
+ expect((await t.query(internal.repositoryContext.select,{repositoryId,actor:'mallory',authorExternalId:'6666'})).coverage.join()).toContain('not linked');
+ expect((await t.query(internal.repositoryContext.select,{repositoryId,actor:'alice',authorExternalId:'5100'})).sources).toHaveLength(1);
+ expect(await t.query(internal.repositoryContext.requirementsAuthor,{repositoryId,actor:'mallory',authorExternalId:'6666'})).toContain('not a linked workspace member');
+ expect(await t.query(internal.repositoryContext.requirementsAuthor,{repositoryId,actor:'alice',authorExternalId:'5100'})).toBeNull();
 });

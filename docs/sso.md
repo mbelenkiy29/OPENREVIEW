@@ -33,6 +33,7 @@ People sign in from the landing page with **Use single sign-on**. Their email do
 - **OIDC** (`openid-client`):
   - The authorization code flow uses PKCE (S256), state and nonce.
   - The ID token's signature is always checked against the issuer's keys, together with its issuer, audience and expiry.
+  - Discovery, key and token requests may only reach public addresses, since the issuer is entered by a workspace owner. A self-hosted operator whose IdP is on an internal network sets `SSO_ALLOW_PRIVATE=true` on the web server.
 - **Account linking** follows the same rule as other sign-in methods: an identity joins an existing account only when both carry the same verified email.
   - An email asserted by an IdP counts as verified only on a domain this workspace proved with DNS.
   - For OIDC, it must also not be marked `email_verified: false`.

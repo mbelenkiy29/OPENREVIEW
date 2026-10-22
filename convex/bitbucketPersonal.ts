@@ -43,4 +43,5 @@ export const save=mutation({args:{secret:v.string(),tokenHash:v.string(),digest:
  await audit(ctx,repo.organizationId,user._id,'provider.identity.linked',c._id);return {expiresAt:a.expiresAt};
 }});
 export const expireGrant=internalMutation({args:{id:v.id('providerIdentityGrants')},handler:async(ctx,a)=>{const g=await ctx.db.get(a.id);if(g&&g.expiresAt<=Date.now())await ctx.db.delete(g._id);}});
-export const expireIdentity=internalMutation({args:{id:v.id('providerIdentities'),generation:v.number()},handler:async(ctx,a)=>{const i=await ctx.db.get(a.id);if(i&&i.generation===a.generation&&i.expiresAt<=Date.now())await ctx.db.patch(i._id,{active:false,credentials:undefined,generation:i.generation+1,updatedAt:Date.now()});}});
+// Expiry drops only the credentials: the link stays active (as for other providers) so requirements still see a linked member.
+export const expireIdentity=internalMutation({args:{id:v.id('providerIdentities'),generation:v.number()},handler:async(ctx,a)=>{const i=await ctx.db.get(a.id);if(i&&i.generation===a.generation&&i.expiresAt<=Date.now())await ctx.db.patch(i._id,{credentials:undefined,generation:i.generation+1,updatedAt:Date.now()});}});

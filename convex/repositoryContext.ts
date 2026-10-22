@@ -55,17 +55,33 @@ async function reviewAuthor(ctx:QueryCtx,repo:Doc<"repositories">,a:ReviewAuthor
  else if(a.nativeActor){const native=await p4IdentityAuthority(ctx,a.nativeActor.id,a.nativeActor.generation);if(native.repo._id!==repo._id||native.identity.username!==a.actor)throw new Error("Native context author mismatch");userId=native.identity.userId;}
  else{
   if(!a.authorExternalId||!/^([1-9][0-9]*)$/.test(a.authorExternalId))return "GitHub review author has no verified immutable account ID.";
-  for(const m of await ctx.db.query("organizationMembers").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()){const u=await ctx.db.get(m.userId);if(u&&await holdsGithub(ctx,u,a.authorExternalId,a.actor)){userId=m.userId;githubActorId=a.authorExternalId;break;}}
+  const u=await githubMember(ctx,repo.organizationId,a.authorExternalId);if(u&&await holdsGithub(ctx,u,a.authorExternalId,a.actor)){userId=u._id;githubActorId=a.authorExternalId;}
  }
  if(!userId)return "review author is not linked to a workspace identity.";
  await repositoryAccess(ctx,userId,repo._id);
  return {userId,githubActorId,providerActor};
 }
 const authorArgs={actor:v.string(),authorExternalId:v.optional(v.string()),nativeActor:v.optional(identityRef),nativeAuthor:v.optional(v.boolean())};
-// Linked tickets and documents are quoted into the review, so only a verified workspace author with repository access pulls them in.
-export const requirementsAuthor=internalQuery({args:{repositoryId:v.id("repositories"),...authorArgs},handler:async(ctx,a):Promise<string|null>=>{
- const repo=await ctx.db.get(a.repositoryId);if(!repo)throw new Error("Requirements repository missing");
- try{const author=await reviewAuthor(ctx,repo,a);return typeof author==="string"?author:null;}catch{return "review author has no access to this repository.";}
+// GitHub author -> workspace member by immutable account id (identities, then legacy users.githubId); indexed, never scans members.
+async function githubMember(ctx:QueryCtx,organizationId:Id<"organizations">,githubId:string){
+ const userId=(await ctx.db.query("identities").withIndex("by_provider_user",q=>q.eq("provider","github").eq("providerUserId",githubId)).unique())?.userId??(await ctx.db.query("users").withIndex("by_github",q=>q.eq("githubId",Number(githubId))).first())?._id;
+ const member=userId&&await ctx.db.query("organizationMembers").withIndex("by_org_user",q=>q.eq("organizationId",organizationId).eq("userId",userId)).unique();
+ return member?await ctx.db.get(member.userId):null;
+}
+// Linked tickets and documents are quoted into the review, so only a linked workspace author with repository access pulls them in.
+// Linkage only (not token freshness, unlike cross-repository context). Returns why tickets are withheld, or null.
+export const requirementsAuthor=internalQuery({args:{repositoryId:v.id("repositories"),...authorArgs},handler:async(ctx,{repositoryId,actor,authorExternalId,nativeAuthor}):Promise<string|null>=>{
+ const denied="the PR author is not a linked workspace member with access to this repository.";
+ const repo=await ctx.db.get(repositoryId);if(!repo)throw new Error("Requirements repository missing");
+ const connection=repo.connectionId?await ctx.db.get(repo.connectionId):null;
+ let userId:Id<"users">|undefined;
+ if(connection?.kind==="perforce"||nativeAuthor){const i=await ctx.db.query("p4Identities").withIndex("by_repo_username",q=>q.eq("repositoryId",repo._id).eq("username",actor)).unique();if(i?.active&&i.connectionId===repo.connectionId)userId=i.userId;}
+ else if(!connection){if(authorExternalId)userId=(await githubMember(ctx,repo.organizationId,authorExternalId))?._id;}
+ else if(personalIdentityProviders.includes(connection.kind)){const i=authorExternalId?await ctx.db.query("providerIdentities").withIndex("by_connection_external",q=>q.eq("connectionId",connection._id).eq("externalId",authorExternalId)).unique():null;if(i?.active)userId=i.userId;}
+ // shortcut: no author linking for this provider (Azure DevOps) and the job does not pass fork data, so outsiders cannot be excluded; pass source/target repository ids to allow same-repository PRs.
+ else return connection.kind+" PR authors cannot be linked to workspace members, so fork PRs cannot be told apart.";
+ if(!userId)return denied;
+ try{await repositoryAccess(ctx,userId,repo._id);return null;}catch{return denied;}
 }});
 
 export const select=internalQuery({args:{repositoryId:v.id("repositories"),...authorArgs},handler:async(ctx,a)=>{

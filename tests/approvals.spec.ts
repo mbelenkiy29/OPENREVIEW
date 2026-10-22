@@ -8,6 +8,7 @@ import {BitbucketCloud} from "../src/bitbucket-cloud";
 import {encryptCredential} from "../src/credentials";
 import {Github} from "../src/github";
 import {approvalDefaults} from "../src/approval";
+import {runtimeDefaults} from "../src/runtime-policy";
 const modules=import.meta.glob("../convex/**/*.ts"),secret="approval-fixture-secret-at-least-32-characters",head="a".repeat(40),policy={...approvalDefaults,enabled:true,requiredChecks:[{name:"regression",appId:42}]};
 beforeEach(()=>vi.useFakeTimers());
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();});
@@ -56,7 +57,7 @@ test("duplicate events publish once and a later human objection invalidates the 
 test("approval leases, missing checks, and policy changes during publication fail closed",async()=>{
  const s=await setup();await s.t.mutation(api.approvals.save,{token:s.token,organizationId:s.organizationId,policy});
  const id=(await s.t.mutation(internal.approvals.request,{reviewId:s.reviewId}))!;
- expect(await s.t.mutation(internal.approvals.claim,{id,lease:randomUUID()})).toBe(true);
+ expect(await s.t.mutation(internal.approvals.claim,{id,lease:randomUUID()})).toBe('pending');
  expect(await s.t.mutation(internal.approvals.claim,{id,lease:randomUUID()})).toBe(false);
  await s.t.run(ctx=>ctx.db.patch(id,{leaseExpiresAt:0}));
  s.snapshot.checks=[];await s.t.action(internal.approvalJobs.process,{id});expect(s.approve).not.toHaveBeenCalled();
@@ -246,7 +247,7 @@ test('failed withdrawals retain durable intent and retry without re-approval whe
  expect(await s.t.query(api.approvals.review,{token:s.token,reviewId:s.reviewId})).toMatchObject({status:'revocation_pending',providerReviewId:101});
  expect(s.snapshot.reviews[0].state).toBe('APPROVED');
  // Concurrent retry cannot steal a live withdrawal lease.
- expect(await s.t.mutation(internal.approvals.claim,{id,lease:'active-withdrawal'})).toBe(true);
+ expect(await s.t.mutation(internal.approvals.claim,{id,lease:'active-withdrawal'})).toBe('revocation_pending');
  expect(await s.t.mutation(internal.approvals.claim,{id,lease:'duplicate-withdrawal'})).toBe(false);
  await s.t.run(ctx=>ctx.db.patch(id,{leaseExpiresAt:0}));
  await s.t.action(internal.approvalJobs.process,{id});
@@ -298,4 +299,81 @@ test('legacy failed jobs with native receipts are withdrawn rather than accepted
  await s.t.action(internal.approvalJobs.process,{id});
  expect(s.approve).not.toHaveBeenCalled();expect(s.dismiss).toHaveBeenCalledWith(s.repo.fullName,1,101);
  expect(await s.t.query(api.approvals.review,{token:s.token,reviewId:s.reviewId})).toMatchObject({status:'invalidated',providerReviewId:101});
+});
+
+test('the periodic sweep skips recently checked approvals and a rate limit never revokes one',async()=>{
+ const s=await setup();await s.t.mutation(api.approvals.save,{token:s.token,organizationId:s.organizationId,policy});
+ const id=(await s.t.mutation(internal.approvals.request,{reviewId:s.reviewId}))!;
+ await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(await s.t.query(api.approvals.review,{token:s.token,reviewId:s.reviewId})).toMatchObject({status:'approved',providerReviewId:101});
+ const reads=vi.mocked(s.scm.approvalSnapshot!).mock.calls.length;
+ vi.advanceTimersByTime(600000);await s.t.mutation(internal.approvals.sweep,{});
+ await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(s.scm.approvalSnapshot).toHaveBeenCalledTimes(reads);
+ const {GithubApiError}=await import('../src/github');
+ vi.mocked(s.scm.approvalSnapshot!).mockRejectedValueOnce(new GithubApiError('GitHub GET /repos/x/pulls/1: HTTP 429',429));
+ vi.advanceTimersByTime(3600000);await s.t.mutation(internal.approvals.sweep,{});
+ await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(s.scm.approvalSnapshot).toHaveBeenCalledTimes(reads+1);expect(s.dismiss).not.toHaveBeenCalled();
+ // Kept, and marked due so the next 5-minute sweep checks it again.
+ expect(await s.t.run(ctx=>ctx.db.get(id))).toMatchObject({status:'approved',providerReviewId:101,updatedAt:Date.now()-3600000});
+ expect(s.snapshot.reviews[0].state).toBe('APPROVED');
+ // GitHub also reports rate limits as 403; that is retried later too, never a revocation.
+ vi.mocked(s.scm.approvalSnapshot!).mockRejectedValueOnce(new GithubApiError('GitHub GET /repos/x/pulls/1: HTTP 403',403,false,true));
+ await s.t.mutation(internal.approvals.sweep,{});await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(s.dismiss).not.toHaveBeenCalled();expect(await s.t.run(ctx=>ctx.db.get(id))).toMatchObject({status:'approved'});
+});
+
+test('forRevision reads only approval jobs for the matching head',async()=>{
+ const t=convexTest({schema,modules,transactionLimits:{documentsRead:20}});
+ const repositoryId=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Busy',createdAt:Date.now()});
+  const repositoryId=await ctx.db.insert('repositories',{organizationId,fullName:'fixture/busy',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()});
+  const reviewId=await ctx.db.insert('reviews',{organizationId,repositoryId,prNumber:1,headSha:head,status:'completed',mode:'standard',attempts:1,createdAt:0,updatedAt:0});
+  for(let i=0;i<=50;i++)await ctx.db.insert('approvalJobs',{organizationId,repositoryId,reviewId,prNumber:i,headSha:i?String(i).padStart(40,'0'):head,policyKey:'p',status:'invalidated',reasons:[],createdAt:0,updatedAt:0});
+  return repositoryId;
+ });
+ await t.mutation(internal.approvals.forRevision,{repositoryId,headSha:head});
+});
+
+test('a GitHub check re-run on an approved head rechecks the approval without waiting for the sweep',async()=>{
+ const s=await setup();await s.t.mutation(api.approvals.save,{token:s.token,organizationId:s.organizationId,policy});
+ const id=(await s.t.mutation(internal.approvals.request,{reviewId:s.reviewId}))!;
+ await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(await s.t.run(ctx=>ctx.db.get(id))).toMatchObject({status:'approved'});
+ vi.advanceTimersByTime(600000);s.snapshot.checks=[{name:"regression",appId:42,status:"completed",conclusion:"failure"}];
+ // A started check cannot change the gates, so it costs no provider reads.
+ const reads=vi.mocked(s.scm.approvalSnapshot!).mock.calls.length;
+ const created=await s.t.run(ctx=>ctx.storage.store(new Blob([JSON.stringify({action:"created",installation:{id:9301},repository:{id:9310},check_run:{head_sha:head}})])));
+ await s.t.mutation(internal.webhooks.receive,{deliveryId:"check-created",event:"check_run",payloadStorageId:created});
+ await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(s.scm.approvalSnapshot).toHaveBeenCalledTimes(reads);expect(s.dismiss).not.toHaveBeenCalled();
+ const payloadStorageId=await s.t.run(ctx=>ctx.storage.store(new Blob([JSON.stringify({action:"completed",installation:{id:9301},repository:{id:9310},check_run:{head_sha:head}})])));
+ await s.t.mutation(internal.webhooks.receive,{deliveryId:"check-rerun",event:"check_run",payloadStorageId});
+ await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(s.dismiss).toHaveBeenCalledWith(s.repo.fullName,1,101);expect((await s.t.run(ctx=>ctx.db.get(id)))?.status).not.toBe('approved');
+});
+
+test('policy saves recheck only the saving workspace and are rate limited',async()=>{
+ const s=await setup();await s.t.mutation(api.approvals.save,{token:s.token,organizationId:s.organizationId,policy});
+ const own=(await s.t.mutation(internal.approvals.request,{reviewId:s.reviewId}))!;
+ await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(await s.t.run(ctx=>ctx.db.get(own))).toMatchObject({status:'approved'});
+ const otherOrg=await s.t.mutation(api.users.createOrganization,{token:s.token,name:'Other tenant'});
+ const foreign=await s.t.run(async ctx=>{
+  const {_id:unusedId,_creationTime:unusedTime,...repoFields}=s.repo;void unusedId;void unusedTime;
+  const repositoryId=await ctx.db.insert('repositories',{...repoFields,organizationId:otherOrg,fullName:'other/tenant',githubId:9399});
+  const reviewId=await ctx.db.insert('reviews',{organizationId:otherOrg,repositoryId,prNumber:7,headSha:head,status:'completed',mode:'standard',attempts:1,createdAt:0,updatedAt:0});
+  return ctx.db.insert('approvalJobs',{organizationId:otherOrg,repositoryId,reviewId,prNumber:7,headSha:head,policyKey:'p',status:'approved',providerReviewId:5,reasons:[],createdAt:0,updatedAt:0});
+ });
+ const processed=(id:string)=>s.t.run(async ctx=>(await ctx.db.system.query('_scheduled_functions').collect()).filter(f=>f.name.includes('approvalJobs')&&(f.args[0] as {id?:string})?.id===id).length);
+ const ownBefore=await processed(own);
+ await s.t.mutation(api.approvals.save,{token:s.token,organizationId:s.organizationId,policy});
+ await s.t.mutation(api.runtime.save,{token:s.token,organizationId:s.organizationId,policy:runtimeDefaults});
+ await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(await processed(own)).toBe(ownBefore+2);expect(await processed(foreign)).toBe(0);
+ for(let i=2;i<10;i++)await s.t.mutation(api.approvals.save,{token:s.token,organizationId:s.organizationId,policy});
+ await expect(s.t.mutation(api.approvals.save,{token:s.token,organizationId:s.organizationId,policy})).rejects.toThrow('Rate limit');
+ for(let i=1;i<10;i++)await s.t.mutation(api.runtime.save,{token:s.token,organizationId:s.organizationId,policy:runtimeDefaults});
+ await expect(s.t.mutation(api.runtime.save,{token:s.token,organizationId:s.organizationId,policy:runtimeDefaults})).rejects.toThrow('Rate limit');
 });

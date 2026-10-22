@@ -7,12 +7,14 @@ import { mcpResource, oauthBase, tokenHash } from "./oauth-server";
 import { upgradeNote } from "./plans";
 
 export class ApiAuthError extends Error {
-  constructor(readonly status: 401 | 402 | 403, message: string) { super(message); }
+  constructor(readonly status: 401 | 402 | 403 | 429, message: string) { super(message); }
 }
 // Requests that reach a handler through the remote MCP endpoint (the endpoint's own request and its
 // in-process tool dispatch). Only these may carry an MCP OAuth access token: those tokens are issued
 // for the MCP resource (RFC 8707 audience) and are refused by every other API route.
 export const mcpRequests = new WeakSet<Request>();
+// Tool calls the MCP endpoint replays in-process; the outer MCP request was already counted against the key.
+export const inProcessRequests = new WeakSet<Request>();
 // Resolves a Bearer API key (or, at the MCP endpoint, an OAuth access token) to its workspace and
 // owner, and requires a scope (default read). API keys need a plan with API access (402 otherwise), except
 // for `plan: false` callers: the Perforce routes (a code provider, not the public API) and the key check in
@@ -47,6 +49,9 @@ export async function apiIdentity(request: Request, scope: ApiScope = "read", { 
   if (!hasScope(identity.scopes, scope)) throw new ApiAuthError(403, `This API key does not have the ${scope} scope`);
   if (plan && !identity.apiAccess) throw new ApiAuthError(402, upgradeNote["api.access"]);
   if (plan && identity.perforce) throw new ApiAuthError(403, "This API key only works for Perforce indexing and reviews");
+  // Only resolved keys are counted, so unknown keys cannot fill the rate limit table.
+  if (!inProcessRequests.has(request) && !await backend().mutation(api.apiKeys.consume, { secret: process.env.SERVICE_SECRET ?? "", hash }))
+    throw new ApiAuthError(429, "API key rate limit exceeded (120 requests per minute); retry shortly");
   return { ...identity, token: await signSession(identity.userId) };
 }
 // Authentication/scope failures keep their status; callers fall back to their own error for the rest.

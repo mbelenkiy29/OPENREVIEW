@@ -1,12 +1,13 @@
 import { choosePlanMessage, hasEntitlement, planMissing } from "./billing";
 import {upgradeNote} from "../src/plans";
-import {query,mutation} from "./_generated/server";
+import {query,mutation,internalMutation} from "./_generated/server";
+import {internal} from "./_generated/api";
 import {v} from "convex/values";
 import {authorize,visibleRepositories,audit} from "./auth";
 import {indexingAccess,enableIndexing} from "./repositories";
 import {connectionDigest} from "./indexAuthority";
 import type {QueryCtx,MutationCtx} from "./_generated/server";
-import type {Doc} from "./_generated/dataModel";
+import type {Doc,Id} from "./_generated/dataModel";
 import {repositoryIdentity} from "./repositoryIdentity";
 import {settingsValidator} from "./schema";
 import {assertValidSettings} from "./scopes";
@@ -73,11 +74,18 @@ export const start=mutation({args:{token:v.string(),organizationId:v.id("organiz
  }
  const repos=await visibleRepositories(ctx,a.token,a.organizationId),ids=organization?.onboardingRepositoryIds??repos.filter(r=>r.enabled).map(r=>r._id);
  if(!ids.length)throw new Error("Select repositories before indexing");
- let started=false;
- for(const id of ids){const r=repos.find(r=>r._id===id);if(!r)throw new Error("Selected repository is unavailable");const access=await setupAccess(ctx,r);if(access.setupError)throw new Error(access.setupError);if(!access.nativeIndex){await enableIndexing(ctx,r);started=true;}}
- if(!started)throw new Error("Use native Perforce indexing setup for the selected repositories");
+ const enable:Id<"repositories">[]=[];
+ for(const id of ids){const r=repos.find(r=>r._id===id);if(!r)throw new Error("Selected repository is unavailable");const access=await setupAccess(ctx,r);if(access.setupError)throw new Error(access.setupError);if(!access.nativeIndex)enable.push(id);}
+ if(!enable.length)throw new Error("Use native Perforce indexing setup for the selected repositories");
+ await enableRepositories(ctx,a.organizationId,enable);
  await audit(ctx,a.organizationId,user._id,"onboarding.indexing_started",a.organizationId);
 }});
+// A new repository schedules a catalog and an index job and Convex allows 1,000 scheduled functions per mutation, so enable 100 per transaction and continue with the rest.
+async function enableRepositories(ctx:MutationCtx,organizationId:Id<"organizations">,ids:Id<"repositories">[]){
+ for(const id of ids.slice(0,100)){const r=await ctx.db.get(id);if(r?.organizationId===organizationId&&!(await setupAccess(ctx,r)).setupError)await enableIndexing(ctx,r);}
+ if(ids.length>100)await ctx.scheduler.runAfter(0,internal.onboarding.enableBatch,{organizationId,repositoryIds:ids.slice(100)});
+}
+export const enableBatch=internalMutation({args:{organizationId:v.id("organizations"),repositoryIds:v.array(v.id("repositories"))},handler:(ctx,a)=>enableRepositories(ctx,a.organizationId,a.repositoryIds)});
 
 // Guided setup: each configuration step writes only its own workspace defaults.
 export const saveDefaults=mutation({args:{token:v.string(),organizationId:v.id("organizations"),step:v.string(),settings:settingsValidator},handler:async(ctx,a)=>{

@@ -264,3 +264,7 @@ export const stages = [
   "skipped",
 ] as const;
 export type Stage = (typeof stages)[number];
+// How many times an agentic review may suspend and resume (shared by the engine and the review row counter).
+export const maxAgentResumes = 6;
+// How findings read on the pull request (the shape of Greptile's review comments); shared by every engine.
+export const findingWriting = `Write each finding for a busy developer in plain English. title: the result a user or caller sees, in at most 8 words (for example "Replies lose their deal link"), not the code construct. description: at most 3 short sentences on what the changed code does and the concrete situation that breaks it, step by step, naming the function or line involved. impact: one short sentence with the consequence. suggestedFix: one or two sentences with the smallest fix, plus the test to add when a test would catch it.`;

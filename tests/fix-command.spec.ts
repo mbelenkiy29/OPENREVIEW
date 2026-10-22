@@ -16,8 +16,8 @@ const patch='@@ -1,2 +1,3 @@\n const a = 1;\n+const total = price * 100;\n expor
 beforeEach(()=>{process.env.SESSION_SECRET=secret;process.env.SERVICE_SECRET='integration-service-secret';process.env.LLM_API_KEY='fixture';process.env.APP_URL='https://review.example.com';});
 afterEach(()=>{vi.restoreAllMocks();delete process.env.APP_URL;});
 
-async function setup(options:{suggestion?:boolean;permissions?:Record<string,string>}={}){
- const t=convexTest(schema,modules);
+async function setup(options:{suggestion?:boolean;permissions?:Record<string,string>;documentsRead?:number}={}){
+ const t=convexTest({schema,modules,...(options.documentsRead?{transactionLimits:{documentsRead:options.documentsRead}}:{})});
  const userId=await t.mutation(api.users.login,{secret:'integration-service-secret',githubId:81,login:'alice',avatar:''});
  const token=await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(userId).setExpirationTime('1h').sign(new TextEncoder().encode(secret));
  const organizationId=await t.mutation(api.users.createOrganization,{token,name:'Fixes'});
@@ -40,7 +40,7 @@ async function setup(options:{suggestion?:boolean;permissions?:Record<string,str
  const requests:ModelRequest[]=[];
  const model=(replacement:string,explanation='Round the converted total once.')=>vi.spyOn(HttpModel.prototype,'generate').mockImplementation(async function<T>(request:ModelRequest,validator:z.ZodType<T>){requests.push(request);return {value:validator.parse({replacement,explanation}),usage:{task:request.task,provider:'fixture',model:'fixture',inputTokens:10,outputTokens:5,latencyMs:1,estimatedCost:0.001,cached:false}};});
  const ask=(question:string,commentId=601)=>t.action(internal.conversationJobs.reply,{repositoryId:repo._id,prNumber:3,commentId,author:'carol',question,inline:true,parentCommentId:500});
- return {t,token,repo,reviewId,findingId,canReply,reply,openFix,model,requests,ask};
+ return {t,token,repo,reviewId,findingId,canReply,reply,openFix,model,requests,ask,scm};
 }
 
 test('a stored suggestion that still applies is replied with as a committable block and the Fix handoff link, without a model call',async()=>{
@@ -114,4 +114,30 @@ test('fix pull requests need the repository setting and contents:write, and only
  expect(fetchSpy).not.toHaveBeenCalled();
  expect(s.reply.mock.calls[0][2]).toContain('No fix pull request was opened: the GitHub App does not have Contents: Read and write permission.');
  expect(s.reply.mock.calls[0][2]).toContain('```suggestion');
+});
+
+test('after a push moves the lines, a fix command asks for a re-review and publishes no suggestion or pull request',async()=>{
+ const s=await setup({suggestion:true,permissions:{contents:'write',pull_requests:'write'}});
+ await s.t.mutation(api.repositories.configure,{token:s.token,repositoryId:s.repo._id,enabled:true,settings:{...defaults,fixPullRequests:true}});
+ const pushed=(await s.scm.pullRequest('alice/fixes',3)) as {head:{sha:string}};
+ vi.mocked(s.scm.pullRequest).mockResolvedValue({...pushed,head:{...pushed.head,sha:'n'.repeat(40)}} as never);
+ s.model('unused');
+ await s.ask('@openreview fix this in a new PR');
+ const body=s.reply.mock.calls[0][2];
+ expect(body).toContain('this finding is from an older revision');expect(body).toContain('re-review');
+ expect(body).not.toContain('```suggestion');
+ expect(s.openFix).not.toHaveBeenCalled();
+ expect(s.requests).toHaveLength(0);
+});
+
+test('a question on a pull request with many files looks up related code only for the paths it can fetch',async()=>{
+ const s=await setup({documentsRead:80});
+ const diff=Array.from({length:150},(_,i)=>({path:`src/f${i}.ts`,patch:'@@ -1 +1 @@\n+x',status:'modified'}));
+ const pr=(await s.scm.pullRequest('alice/fixes',3)) as object;
+ vi.mocked(s.scm.pullRequest).mockResolvedValue({...pr,diff} as never);
+ await s.t.run(async ctx=>{for(const {path} of diff)await ctx.db.insert('relationships',{organizationId:s.repo.organizationId,repositoryId:s.repo._id,from:path,sourcePath:path,to:'lib/'+path,kind:'import'});});
+ vi.spyOn(HttpModel.prototype,'generate').mockImplementation(async function<T>(request:ModelRequest,validator:z.ZodType<T>){s.requests.push(request);return {value:validator.parse({answer:'The total is multiplied by 100 twice.',citations:[{filePath:'src/a.ts',startLine:2,quote:'const total = price * 100;'}]}),usage:{task:request.task,provider:'fixture',model:'fixture',inputTokens:1,outputTokens:1,latencyMs:1,estimatedCost:0,cached:false}};});
+ await s.ask('why is this here?',620);
+ expect(s.requests[0].task).toBe('conversation');
+ expect(s.reply.mock.calls[0][2]).toContain('multiplied by 100 twice');
 });

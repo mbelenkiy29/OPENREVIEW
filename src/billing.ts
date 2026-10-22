@@ -61,6 +61,8 @@ export function usageAlertEmail(workspace: string, threshold: number, d: Billing
 
 /** A linked Stripe subscription that has not ended yet, so Stripe can still charge for it. */
 export const openSubscription = (account: { subscriptionId?: string; status: string } | null | undefined) => Boolean(account?.subscriptionId) && !["canceled", "incomplete_expired"].includes(account!.status);
+/** A subscription in good standing: Checkout refuses a second one, and the webhook keeps it over another. */
+export const liveSubscription = (account: { subscriptionId?: string | null; status: string }) => Boolean(account.subscriptionId) && ["active", "trialing", "past_due"].includes(account.status);
 /** When a trial that has not started yet would end if it started now. */
 export const trialEndsFrom = (now: number, config: BillingConfig) => now + config.trialDays * 86400000;
 /** Checkout carries the remaining app trial into the subscription; Stripe needs it 48+ hours out. */

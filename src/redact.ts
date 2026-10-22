@@ -19,12 +19,22 @@ const quotedSecret = /((?:password|passwd|secret|api[_-]?key|access[_-]?token|au
 // the upper-case KEY ends in a secret word. No spaces around "=", which keeps code assignments out.
 const envSecret = /^([ \t+-]*(?:(?:export|ENV|ARG)[ \t]+)?(?:[A-Z][A-Z0-9]*_)*(?:PASS(?:WORD|WD|PHRASE)?|SECRET|TOKEN|CREDENTIALS?|(?:API|ACCESS|SECRET|PRIVATE|ENCRYPTION|SIGNING|MASTER)_?KEY)(?:_BASE)?=)(["']?)([^\s"'`]{8,})\2(?=[ \t]*(?:#.*)?\r?$)/gm;
 
+// Same as replacing /BEGIN…[\s\S]*?END…/g, but stops at the first header with no END after it instead
+// of rescanning the rest of the input for every later header (quadratic on unterminated headers).
+function redactKeys(content: string): string {
+  const begin = /-----BEGIN [^-]*PRIVATE KEY-----/g, end = /-----END [^-]*PRIVATE KEY-----/g;
+  let out = "", last = 0;
+  for (let m; (m = begin.exec(content)); ) {
+    end.lastIndex = begin.lastIndex;
+    if (!end.exec(content)) break;
+    out += content.slice(last, m.index) + "[REDACTED KEY]";
+    last = begin.lastIndex = end.lastIndex;
+  }
+  return out + content.slice(last);
+}
+
 export function redact(content: string): string {
-  return content
-    .replace(
-      /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
-      "[REDACTED KEY]",
-    )
+  return redactKeys(content)
     .replace(
       /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b/g,
       "[REDACTED TOKEN]",

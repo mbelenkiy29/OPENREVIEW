@@ -1,7 +1,7 @@
 import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { StripeError, checkoutTrialEnd, stripe, stripeKey } from "../src/billing";
+import { StripeError, checkoutTrialEnd, liveSubscription, stripe, stripeKey } from "../src/billing";
 
 // Extra usage is metered in micro-dollars of inference cost; the markup lives in the Stripe price.
 const usagePrice = () => { const id = process.env.STRIPE_USAGE_PRICE_ID; return id && /^price_[A-Za-z0-9]+$/.test(id) ? id : undefined; };
@@ -15,7 +15,7 @@ const returnPaths = { settings: "/dashboard/settings/billing", onboarding: "/das
 const integrationIdentifier = "openreview-starter-seats-qkvmhzrt";
 export const checkout = action({ args: { token: v.string(), organizationId: v.id("organizations"), returnTo: v.optional(v.union(v.literal("settings"), v.literal("onboarding"))), plan: v.optional(v.union(v.literal("starter"), v.literal("pro"))) }, handler: async (ctx, a): Promise<string> => {
   const context = await ctx.runQuery(internal.billing.checkoutContext, { token: a.token, organizationId: a.organizationId });
-  if (context.subscriptionId && ["active", "trialing", "past_due"].includes(context.status)) throw new Error("This workspace already has a subscription; manage it in the billing portal");
+  if (liveSubscription(context)) throw new Error("This workspace already has a subscription; manage it in the billing portal");
   const key = stripeKey(), price = priceFor(a.plan ?? "starter");
   let customer = context.customerId;
   if (!customer) {

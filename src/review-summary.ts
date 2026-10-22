@@ -109,19 +109,23 @@ export function reviewSummary(data:Summary,selected:readonly string[]=summarySec
   `### Coverage\n${plural(data.files.length,"changed file")}; ${plural(data.contextCount,"retrieved context file")}. ${plural(data.candidates,"candidate")}; ${plural(data.findings.length,"verified finding")}; ${data.suppressed} suppressed.`+(data.coverageLimits.length?"\n\n"+data.coverageLimits.map(l=>"- "+l).join("\n"):"")+(selected.includes("skipped")?"":skippedList(data.skippedFiles))+(data.knowledgeUsed?.length?"\n\nKnowledge base entries supplied as background (not evidence): "+data.knowledgeUsed.slice(0,10).map(k=>code(k.slice(0,100))).join(", ")+(data.knowledgeUsed.length>10?" and "+(data.knowledgeUsed.length-10)+" more":"")+".":"")+(data.guidanceUsed?.length?"\n\nAPI guidance packs applied (guidance only): "+data.guidanceUsed.slice(0,4).map(g=>code(g.slice(0,80))).join(", ")+".":"")+fetchedContextLinks(data.requirementsContext)].join("\n\n");
 }
 
+// Inline finding, in the shape of Greptile's review comments: priority and a plain-English title, one paragraph on
+// what goes wrong (description, then impact), one on the fix, and on GitHub a folded "Prompt To Fix With AI".
+// Confidence and evidence quotes stay on the dashboard; the comment already sits on the cited lines.
 export function findingComment(f: Finding, style: string = "detailed", suggestion?: { syntax: SuggestionSyntax; start: number; end: number }, options: { agentPrompt?: boolean } = {}): string {
   const question = f.question ? `\n\n**Question for the author:** ${f.question.replace(/[\r\n]+/g, " ").replace(/@(?=[\w-])/g, "@​")}` : "";
   // Compact: badge and title, plain prose, the suggestion, and the agent prompt folded away; no labels or evidence.
   if (style === "compact") return `**${priorityBadge(f.severity)} · ${f.title}**${tagBadges(f).map((t) => " · " + t).join("")}\n\n${f.description} ${f.impact}\n\n${f.suggestedFix}${f.suggestion && suggestion ? suggestionBlock(f.suggestion, suggestion.syntax, suggestion) : ""}${f.generatedTest ? generatedTestSection(f.generatedTest) : ""}${question}${options.agentPrompt ? "\n\n<details><summary>Prompt To Fix With AI</summary>\n\n" + agentPrompt([f]) + "\n\n</details>" : ""}\n\n<!-- openreview-finding:${f.fingerprint} -->`;
-  const evidence = f.evidence
-    .map((e) =>
-      style === "concise"
-        ? `Evidence: \`${e.filePath}:${e.startLine}\` — ${codeSpan(e.quote.split("\n")[0].trim())}`
-        : `Evidence: \`${e.filePath}:${e.startLine}\`\n\n\`\`\`\n${e.quote.replace(/```/g, "` ` `")}\n\`\`\``,
-    )
-    .join("\n\n") + f.evidence.filter(e => e.sourceUrl).map(e => "\n\n[Source: "+e.repository+" @ "+e.revision+"]("+e.sourceUrl+")").join("");
+  const text = (value: string) => (style === "concise" ? firstSentence(value) : value.trim());
+  const problem = style === "concise" ? text(f.description) : [f.description.trim(), f.impact.trim()].filter(Boolean).join(" ");
+  const body = [problem, text(f.suggestedFix)].filter(Boolean).join("\n\n");
+  const title = `**${f.title.replace(/[\r\n]+/g, " ")}**`;
   const fix = f.suggestion && suggestion ? suggestionBlock(f.suggestion, suggestion.syntax, suggestion) : "";
-  return `**${priorityBadge(f.severity)} · ${f.title}**${tagBadges(f).map((t) => " · " + t).join("")} (${f.severity}, ${Math.round(f.confidence * 100)}% confidence)\n\n${f.description}\n\n**Impact:** ${f.impact}\n\n**Fix:** ${f.suggestedFix}${fix}${f.generatedTest ? generatedTestSection(f.generatedTest) : ""}${question}\n\n${evidence}${options.agentPrompt ? "\n\n<details><summary>Prompt for your coding agent</summary>\n\n" + agentPrompt([f]) + "\n\n</details>" : ""}\n\n<!-- openreview-finding:${f.fingerprint} -->`;
+  // Evidence from another repository keeps its source link, since the reader cannot see it on these lines.
+  const sources = f.evidence.filter((e) => e.sourceUrl).map((e) => "\n\n[Source: " + e.repository + " @ " + e.revision + "](" + e.sourceUrl + ")").join("");
+  const lines = f.startLine + (f.endLine > f.startLine ? "-" + f.endLine : "");
+  const prompt = options.agentPrompt ? "\n\n<details><summary>Prompt To Fix With AI</summary>\n\n" + fenced(`This is a comment left during a code review.\nPath: ${f.filePath}\nLine: ${lines}\n\nComment:\n${title}\n\n${body}\n\n---\n\nFor each issue above, determine whether it is valid and should be fixed. If so, fix it directly.`, "markdown") + "\n</details>" : "";
+  return `${priorityBadge(f.severity)} ${title}${tagBadges(f).map((t) => " · " + t).join("")}\n\n${body}${fix}${sources}${f.generatedTest ? generatedTestSection(f.generatedTest) : ""}${f.question ? `\n\n**Question for the author:** ${f.question.replace(/[\r\n]+/g, " ").replace(/@(?=[\w-])/g, "@\u200b")}` : ""}${prompt}\n\n<!-- openreview-finding:${f.fingerprint} -->`;
 }
 
 // Footer line: which review this is on the pull request, and the comment that re-runs it where the
@@ -135,11 +139,13 @@ export function reviewFooter(reviewNumber:number|undefined,provider:FooterProvid
  const parts=[reviewNumber?"Review "+reviewNumber+" on this pull request":"",command?"Comment `"+command+"` to re-run it":"Re-run it from the dashboard"].filter(Boolean);
  return "\n\n"+parts.join(" · ")+"."+(tip&&tip.sections.includes("tips")?tipLine(tip.key,tip.ticket):"");
 }
-export function reviewLinks(reviewId:string,unresolvedCount:number){
- if(!process.env.APP_URL)return "";
+export function reviewLinks(reviewId:string,unresolvedCount:number){const items=reviewLinkItems(reviewId,unresolvedCount);return items.length?"\n\n"+items.join(" · "):"";}
+// The dashboard links under a summary: the review page, and Fix All while findings are unresolved.
+export function reviewLinkItems(reviewId:string,unresolvedCount:number,viewLabel="View review / Re-review"):string[]{
+ if(!process.env.APP_URL)return [];
  const origin=new URL(process.env.APP_URL);
  if(!["http:","https:"].includes(origin.protocol)||origin.username||origin.password||origin.pathname!=="/"||origin.search||origin.hash)throw new Error("Invalid application origin");
  if(!Number.isSafeInteger(unresolvedCount)||unresolvedCount<0)throw new Error("Invalid unresolved finding count");
  const id=encodeURIComponent(reviewId);
- return `\n\n[View review / Re-review](${origin.origin}/dashboard/pulls/${id})`+(unresolvedCount?` · [Fix All](${origin.origin}/fix/${id})`:"");
+ return [`[${viewLabel}](${origin.origin}/dashboard/pulls/${id})`,...(unresolvedCount?[`[Fix All](${origin.origin}/fix/${id})`]:[])];
 }

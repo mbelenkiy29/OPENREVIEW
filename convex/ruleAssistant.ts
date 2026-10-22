@@ -89,8 +89,8 @@ export const page = query({ args: { token: v.string(), organizationId: v.id("org
 } });
 
 const ruleRow = (r: Doc<"customRules">) => ({ id: r._id as string, title: r.title, instructions: r.instructions, category: r.category, severity: r.severity, globs: r.globs, enabled: r.enabled, createdAt: r.createdAt, ...(r.repositoryId ? { repositoryId: r.repositoryId as string } : {}), ...(r.teamId ? { teamId: r.teamId as string } : {}), ...(r.repositoryPattern ? { repositoryPattern: r.repositoryPattern } : {}) });
-// Everything a run needs, read once: the workspace's rules and, for suggestions, resolved findings and
-// approved conventions. Usage is attributed to the scoped repository or the workspace's first one.
+// Everything a run needs, read once: the workspace's rules and, for suggestions, resolved findings (newest 300:
+// full finding rows are ~3KB, so more risks the 8MB read limit) and approved conventions. Usage is attributed to the scoped repository or the workspace's first one.
 export const context = internalQuery({ args: { runId: v.id("ruleAssistantRuns") }, handler: async (ctx, a) => {
   const run = await ctx.db.get(a.runId);
   if (!run || run.status !== "pending") return null;
@@ -99,7 +99,7 @@ export const context = internalQuery({ args: { runId: v.id("ruleAssistantRuns") 
   const names = new Map(repositories.map((r) => [r._id as string, r.fullName]));
   const usageRepositoryId = run.repositoryId ?? repositories[0]?._id;
   if (run.kind !== "suggest") return { run, rules, usageRepositoryId, findings: [], conventions: [] };
-  const findings = (await ctx.db.query("findings").withIndex("by_org_time", (q) => q.eq("organizationId", run.organizationId)).order("desc").take(2000))
+  const findings = (await ctx.db.query("findings").withIndex("by_org_time", (q) => q.eq("organizationId", run.organizationId)).order("desc").take(300))
     .filter((f) => f.status === "resolved" && names.has(f.repositoryId))
     .map((f) => ({ id: f._id as string, repositoryId: f.repositoryId as string, repository: names.get(f.repositoryId)!, prNumber: f.prNumber, title: f.title, category: f.category, severity: f.severity, filePath: f.filePath }));
   const conventions = (await ctx.db.query("learnedRules").withIndex("by_org", (q) => q.eq("organizationId", run.organizationId)).take(500))

@@ -35,7 +35,7 @@ test("suggestion blocks use GitHub and GitLab syntax for the commented range", (
   assert.equal(suggestionBlock({ ...s, endLine: 4 }, "github", { start: 2, end: 2 }), "", "GitHub needs a comment spanning the whole range");
   assert.equal(suggestionBlock({ ...s, endLine: 4 }, "gitlab", { start: 2, end: 2 }), "\n\n```suggestion:-0+2\n  return amount;\n```");
   const finding: Finding = { ...base, fingerprint: "f".repeat(64), agent: "correctness", commitSha: head };
-  assert.match(findingComment(finding, "concise", { syntax: "github", start: 2, end: 2 }), /\*\*Fix:\*\* Return the integer cents amount\.\n\n```suggestion\n  return amount;\n```/);
+  assert.match(findingComment(finding, "concise", { syntax: "github", start: 2, end: 2 }), /\n\nReturn the integer cents amount\.\n\n```suggestion\n  return amount;\n```/);
   assert.doesNotMatch(findingComment(finding, "concise"), /```suggestion/, "providers without suggestion support render none");
 });
 

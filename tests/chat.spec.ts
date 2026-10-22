@@ -119,3 +119,63 @@ test('answers are withheld when the member loses access; one answer runs at a ti
  for(let i=0;i<6;i++)await t.mutation(api.chat.ask,{token:alice.token,organizationId:org,repositoryIds:[shop._id],question:'Question '+i});
  await expect(t.mutation(api.chat.ask,{token:alice.token,organizationId:org,repositoryIds:[shop._id],question:'One too many'})).rejects.toThrow(/Rate limit/);
 });
+
+test('Chat with PR gives the agent the pull request review as context, only for a pull request in the selected repositories',async()=>{
+ const {t,alice,org,shop,secretRepo}=await setup();
+ const pr=await t.run(async ctx=>{
+  const id=await ctx.db.insert('pullRequests',{organizationId:org,repositoryId:shop._id,number:12,title:'Totals in cents',author:'bob',url:'https://github.com/acme/shop/pull/12',headSha:'d'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:1});
+  const reviewId=await ctx.db.insert('reviews',{organizationId:org,repositoryId:shop._id,prNumber:12,headSha:'d'.repeat(40),status:'completed',mode:'standard',attempts:1,summary:'Moves totals to integer cents.',reviewScore:{value:3,reason:'One rounding defect remains.'},createdAt:1,updatedAt:1});
+  const f={title:'Rounding drops a cent',description:'total() truncates.',severity:'high',confidence:.9,category:'correctness',filePath:'src/cart.ts',startLine:2,endLine:2,commitSha:'d'.repeat(40),evidence:[{filePath:'src/cart.ts',startLine:2,quote:'return cents * qty;'}],impact:'Wrong totals.',suggestedFix:'Round.',agent:'correctness',symbol:'total',fingerprint:'fp-12'};
+  const findingId=await ctx.db.insert('findings',{...f,organizationId:org,repositoryId:shop._id,reviewId,prNumber:12,status:'open',createdAt:1,updatedAt:1});
+  await ctx.db.insert('reviewFindings',{reviewId,findingId,snapshot:f});
+  return id;
+ });
+ await expect(t.mutation(api.chat.ask,{token:alice.token,organizationId:org,repositoryIds:[secretRepo._id],question:'What changed?',pullRequestId:pr})).rejects.toThrow(/not available/);
+ const {threadId,messageId}=await t.mutation(api.chat.ask,{token:alice.token,organizationId:org,repositoryIds:[shop._id],question:'What changed?',pullRequestId:pr});
+ expect((await t.query(api.chat.thread,{token:alice.token,threadId})).pullRequestId).toBe(pr);
+ const job=await t.query(internal.chat.job,{messageId});
+ expect(job?.context).toContain('pull request #12');expect(job?.context).toContain('Moves totals to integer cents.');expect(job?.context).toContain('[P1] Rounding drops a cent (src/cart.ts:2)');
+ // The agent may suggest an action on the pull request; it is stored for the developer to approve.
+ let turn=0;
+ const answer=(proposal?:unknown)=>call('answer',{answer:'Totals multiply integer cents by quantity [1].',citations:[{repository:'acme/shop',filePath:'src/cart.ts',startLine:2,quote:'  return cents * qty;'}],...(proposal?{proposal}:{})});
+ const requests=script(()=>++turn===1?[call('read_file',{repository:'acme/shop',path:'src/cart.ts'})]:turn===2?[answer({action:'approve',reason:'No blocking findings remain.'})]:null);
+ await t.action(internal.chatJobs.answer,{messageId});
+ expect(JSON.stringify(requests[0].messages[0])).toContain('Pull request (unverified context)');
+ expect((await t.query(api.chat.thread,{token:alice.token,threadId})).messages.at(-1)).toMatchObject({status:'completed',proposal:{action:'approve',reason:'No blocking findings remain.',head:'d'.repeat(40)}});
+ // A push after the answer does not move the suggestion to code the agent never saw.
+ await t.run(ctx=>ctx.db.patch(pr,{headSha:'e'.repeat(40)}));
+ expect((await t.query(api.chat.thread,{token:alice.token,threadId})).messages.at(-1)?.proposal?.head).toBe('d'.repeat(40));
+ // Without a pull request the suggestion is dropped.
+ const plain=await t.mutation(api.chat.ask,{token:alice.token,organizationId:org,repositoryIds:[shop._id],question:'Approve it?'});
+ turn=0;
+ await t.action(internal.chatJobs.answer,{messageId:plain.messageId});
+ expect((await t.query(api.chat.thread,{token:alice.token,threadId:plain.threadId})).messages.at(-1)?.proposal).toBeUndefined();
+});
+
+test('a thread longer than one page answers and shows its newest question, not an old one',async()=>{
+ const {t,alice,org,shop}=await setup();
+ const threadId=await t.run(async ctx=>{
+  const threadId=await ctx.db.insert('chatThreads',{organizationId:org,userId:alice.id as Id<'users'>,title:'Long',repositoryIds:[shop._id],createdAt:0,updatedAt:0});
+  for(let i=0;i<205;i++)await ctx.db.insert('chatMessages',{organizationId:org,threadId,userId:alice.id as Id<'users'>,role:i%2?'assistant':'user',content:'Old '+i,status:'completed',repositoryIds:[shop._id],createdAt:i,updatedAt:i});
+  return threadId;
+ });
+ const {messageId}=await t.mutation(api.chat.ask,{token:alice.token,organizationId:org,threadId,repositoryIds:[shop._id],question:'The newest question'});
+ const job=await t.query(internal.chat.job,{messageId});
+ expect(job?.question).toBe('The newest question');
+ expect(job?.history.at(-1)?.content).toBe('Old 204');
+ const messages=(await t.query(api.chat.thread,{token:alice.token,threadId})).messages;
+ expect(messages.slice(-2).map(m=>[m.role,m.content])).toEqual([['user','The newest question'],['assistant','']]);
+ expect(messages.at(-1)?._id).toBe(messageId);
+});
+
+test('deleting a thread longer than one batch removes every message and then the thread',async()=>{
+ const {t,alice,org,shop}=await setup();
+ const threadId=await t.run(async ctx=>{
+  const threadId=await ctx.db.insert('chatThreads',{organizationId:org,userId:alice.id as Id<'users'>,title:'Long',repositoryIds:[shop._id],createdAt:0,updatedAt:0});
+  for(let i=0;i<501;i++)await ctx.db.insert('chatMessages',{organizationId:org,threadId,userId:alice.id as Id<'users'>,role:i%2?'assistant':'user',content:'Old '+i,status:'completed',repositoryIds:[shop._id],createdAt:i,updatedAt:i});
+  return threadId;
+ });
+ await t.mutation(api.chat.deleteThread,{token:alice.token,threadId});
+ await t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(await t.run(async ctx=>[await ctx.db.get(threadId),(await ctx.db.query('chatMessages').withIndex('by_thread',q=>q.eq('threadId',threadId)).collect()).length])).toEqual([null,0]);
+});

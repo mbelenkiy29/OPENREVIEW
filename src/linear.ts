@@ -41,7 +41,9 @@ export class Linear {
  private async query<T>(query:string,variables:Record<string,unknown>,schema:z.ZodType<T>):Promise<T>{
   assertEgress("integrations","Linear");const response=await fetch(endpoint+"/graphql",{method:"POST",redirect:"error",headers:{authorization:"Bearer "+this.accessToken,"content-type":"application/json"},body:JSON.stringify({query,variables}),signal:AbortSignal.timeout(30000)});
   if(!response.ok)throw new LinearError("Linear API request failed ("+response.status+")",response.status);
-  const result=z.object({data:z.unknown().optional(),errors:z.array(z.unknown()).optional()}).parse(await response.json());
+  const raw=await response.text();
+  if(Buffer.byteLength(raw,"utf8")>2000000)throw new Error("Linear response exceeds 2MB retrieval limit");
+  const result=z.object({data:z.unknown().optional(),errors:z.array(z.unknown()).optional()}).parse(JSON.parse(raw));
   if(result.errors?.length)throw new LinearError("Linear GraphQL returned incomplete data",response.status);
   return schema.parse(result.data);
  }

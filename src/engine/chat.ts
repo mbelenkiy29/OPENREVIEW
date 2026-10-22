@@ -15,6 +15,9 @@ export type ChatSource = { repository: string; path: string; content: string; re
 export const chatBudget: AgentBudget = { toolCalls: 20, tokens: 250_000, wallMs: 4 * 60_000, turns: 12 };
 
 const repository = z.string().min(1).max(300);
+// Pull request actions the agent may suggest in a thread about a pull request; the developer approves
+// each one in the dashboard, and it runs with their own GitHub account. The agent never runs them.
+export const proposableActions = ["approve", "request_changes", "comment", "merge", "close", "reopen", "ready", "update_branch"] as const;
 export const chatToolInputs = {
   search_code: z.object({ query: z.string().min(2).max(200), repository: repository.optional() }),
   read_file: z.object({ repository, path: repoPath, startLine: z.number().int().positive().optional(), endLine: z.number().int().positive().optional() }),
@@ -22,7 +25,7 @@ export const chatToolInputs = {
   find_references: z.object({ symbol: z.string().min(1).max(200), repository: repository.optional() }),
   list_directory: z.object({ repository, path: z.string().max(500).refine((p) => !p.startsWith("/") && !p.split("/").includes(".."), "Use a repository-relative path") }),
   get_related_files: z.object({ repository, path: repoPath }),
-  answer: z.object({ answer: z.string(), citations: z.array(z.object({ repository, filePath: z.string(), startLine: z.number().int(), quote: z.string() })) }),
+  answer: z.object({ answer: z.string(), citations: z.array(z.object({ repository, filePath: z.string(), startLine: z.number().int(), quote: z.string() })), proposal: z.object({ action: z.enum(proposableActions), reason: z.string().min(3).max(300), body: z.string().max(2000).optional() }).optional() }),
 };
 const descriptions: Record<keyof typeof chatToolInputs, string> = {
   search_code: "Search the indexed repositories (all selected ones unless repository is given). Returns paths, lines and snippets; confirm with read_file before citing.",
@@ -31,7 +34,7 @@ const descriptions: Record<keyof typeof chatToolInputs, string> = {
   find_references: "Find lines that reference a symbol.",
   list_directory: "List entries directly under a directory ('' for the root).",
   get_related_files: "Files connected to a path by imports, calls or tests.",
-  answer: "Give the final answer in GitHub Markdown. Mark every claim with [n] referring to citations[n-1]; each citation copies complete lines exactly (without the 'N: ' prefix) from read_file output, starting at startLine. Call this once, when finished.",
+  answer: "Give the final answer in GitHub Markdown. Mark every claim with [n] referring to citations[n-1]; each citation copies complete lines exactly (without the 'N: ' prefix) from read_file output, starting at startLine. Call this once, when finished. Only when the developer asks you to act on the pull request under discussion (approve, request changes, comment, merge, close, reopen, mark ready, update branch), add proposal with the action, a one-line reason and any review or comment body; the developer approves it first, so never say it was done.",
 };
 const toJsonSchema = (schema: z.ZodTypeAny) => { const json = zodToJsonSchema(schema, { $refStrategy: "none", effectStrategy: "input" }) as Record<string, unknown>; delete json.$schema; return json; };
 export const chatTools: ToolDefinition[] = (Object.keys(chatToolInputs) as (keyof typeof chatToolInputs)[]).map((name) => ({ name, description: descriptions[name], inputSchema: toJsonSchema(chatToolInputs[name]) }));
@@ -64,9 +67,10 @@ export function chatAnswerProblems(value: z.infer<typeof chatToolInputs.answer>,
 }
 
 const shorten = (value: unknown) => String(value ?? "").replace(/[\r\n\t]+/g, " ").slice(0, 80);
-export type ChatRun = { answer?: { text: string; citations: ChatCitation[] }; usage: ModelUsage[]; limits: string[]; toolCalls: number; stopReason: string };
+export type ChatProposal = { action: (typeof proposableActions)[number]; reason: string; body?: string };
+export type ChatRun = { answer?: { text: string; citations: ChatCitation[]; proposal?: ChatProposal }; usage: ModelUsage[]; limits: string[]; toolCalls: number; stopReason: string };
 
-export async function runChatAgent(args: { question: string; history: { role: "user" | "assistant"; content: string }[]; repositories: ChatRepository[]; model: ModelProvider; budget?: AgentBudget; signal?: AbortSignal; usage?: ModelUsage[]; onEvent?: (event: ChatEvent) => Promise<unknown> | void }): Promise<ChatRun> {
+export async function runChatAgent(args: { question: string; history: { role: "user" | "assistant"; content: string }[]; context?: string; repositories: ChatRepository[]; model: ModelProvider; budget?: AgentBudget; signal?: AbortSignal; usage?: ModelUsage[]; onEvent?: (event: ChatEvent) => Promise<unknown> | void }): Promise<ChatRun> {
   const { model } = args;
   if (!model.runTools) throw new Error("The configured model provider does not support tool calling");
   if (!args.repositories.length) throw new Error("Select at least one indexed repository");
@@ -76,7 +80,7 @@ export async function runChatAgent(args: { question: string; history: { role: "u
   const sources: ChatSource[] = [], usage: ModelUsage[] = args.usage ?? [], limits: string[] = [];
   const emit = async (event: ChatEvent) => { await args.onEvent?.({ kind: event.kind, text: event.text.slice(0, 200) }); };
   const history = args.history.slice(-8).map((m) => `${m.role === "user" ? "Developer" : "OpenReview"}: ${m.content.slice(0, 2000)}`).join("\n\n");
-  const messages: ToolMessage[] = [{ role: "user", content: `Selected repositories: ${names.join(", ")}.${history ? `\n\nEarlier in this thread (unverified context):\n${history}` : ""}\n\nQuestion: ${args.question}` }];
+  const messages: ToolMessage[] = [{ role: "user", content: `Selected repositories: ${names.join(", ")}.${args.context ? `\n\nPull request (unverified context):\n${args.context}` : ""}${history ? `\n\nEarlier in this thread (unverified context):\n${history}` : ""}\n\nQuestion: ${args.question}` }];
   let toolCalls = 0, tokens = 0, turns = 0, nudged = false, answer: ChatRun["answer"], stopReason = "completed";
   const started = Date.now();
   const unknownRepository = (name: string) => ({ isError: true, content: `Unknown repository ${shorten(name)}; use one of: ${names.join(", ")}` });
@@ -126,7 +130,7 @@ export async function runChatAgent(args: { question: string; history: { role: "u
           const value = a as z.infer<typeof chatToolInputs.answer>;
           const problems = chatAnswerProblems(value, sources, names);
           if (problems.length) { await emit({ kind: "status", text: "Revising the answer so every citation matches the source" }); return fail("Answer rejected; fix and call answer again: " + problems.slice(0, 12).join(" ")); }
-          answer = { text: value.answer.trim(), citations: value.citations.map((c) => { const source = sources.find((s) => s.repository === c.repository && s.path === c.filePath)!, quote = c.quote.replace(/\r\n/g, "\n").replace(/\n+$/, ""); return { repository: c.repository, filePath: c.filePath, startLine: c.startLine, endLine: c.startLine + quote.split("\n").length - 1, quote, revision: source.revision }; }) };
+          answer = { text: value.answer.trim(), ...(value.proposal && args.context ? { proposal: value.proposal } : {}), citations: value.citations.map((c) => { const source = sources.find((s) => s.repository === c.repository && s.path === c.filePath)!, quote = c.quote.replace(/\r\n/g, "\n").replace(/\n+$/, ""); return { repository: c.repository, filePath: c.filePath, startLine: c.startLine, endLine: c.startLine + quote.split("\n").length - 1, quote, revision: source.revision }; }) };
           return { id: call.id, content: "Answer accepted." };
         }
       }

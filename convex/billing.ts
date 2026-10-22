@@ -4,7 +4,7 @@ import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authorize } from "./auth";
-import { billingConfig, billingDecision, freeTakenReason, nextPeriodStart, openSubscription, periodKey, seatCount, trialEndsFrom } from "../src/billing";
+import { billingConfig, billingDecision, freeTakenReason, liveSubscription, nextPeriodStart, openSubscription, periodKey, seatCount, trialEndsFrom } from "../src/billing";
 import { entitled, entitlements, planCatalog, planEntitlements, planForPrice, type Entitlement, type Plan } from "../src/plans";
 import { referralConfig } from "../src/referrals";
 import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus } from "./referralLedger";
@@ -202,11 +202,18 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
   if (await ctx.db.query("stripeEvents").withIndex("by_event", (q) => q.eq("eventId", a.eventId)).unique()) return "duplicate";
   const record = async (outcome: string) => { await ctx.db.insert("stripeEvents", { eventId: a.eventId, type: a.type.slice(0, 100), outcome, createdAt: Date.now() }); return outcome; };
   const byCustomer = (customer: string) => ctx.db.query("billingAccounts").withIndex("by_customer", (q) => q.eq("customerId", customer)).unique();
+  // Two open Checkout tabs can both complete: the second subscription must not replace (or, when cancelled, end) the
+  // first, so it is left alone and logged for the operator to cancel and refund.
+  const other = async (account: Doc<"billingAccounts">, subscription: string) => {
+    console.error(JSON.stringify({ event: "billing.duplicate_subscription", eventId: a.eventId, type: a.type, organizationId: account.organizationId, subscription, kept: account.subscriptionId }));
+    return record("other subscription");
+  };
   if (a.checkout) {
     const organizationId = ctx.db.normalizeId("organizations", a.checkout.organizationId);
     if (!organizationId || !await ctx.db.get(organizationId)) return record("unknown workspace");
     const account = await ensureAccount(ctx, organizationId);
     if (account.customerId && account.customerId !== a.checkout.customer) return record("customer mismatch");
+    if (a.checkout.subscription && liveSubscription(account) && a.checkout.subscription !== account.subscriptionId) return other(account, a.checkout.subscription);
     await ctx.db.patch(account._id, { customerId: a.checkout.customer, ...(a.checkout.subscription ? { subscriptionId: a.checkout.subscription } : {}), updatedAt: Date.now() });
     // A completed subscription Checkout collected the card and created the subscription.
     if (a.checkout.subscription) await recordPlanSelected(ctx, organizationId, "checkout");
@@ -217,6 +224,7 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
     const account = await byCustomer(s.customer);
     if (!account) return record("unknown customer");
     if (s.organizationId && s.organizationId !== account.organizationId) return record("workspace mismatch");
+    if (liveSubscription(account) && s.id !== account.subscriptionId) return other(account, s.id);
     if (account.lastEventCreated && a.created < account.lastEventCreated) return record("stale");
     const deleted = a.type === "customer.subscription.deleted", plan = planForPrice(s.price);
     // An unknown seat price keeps the recorded plan.

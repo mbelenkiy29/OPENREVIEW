@@ -34,7 +34,7 @@ const enqueue=(t:Awaited<ReturnType<typeof setup>>['t'],repositoryId:Id<'reposit
 const reviewOf=(t:Awaited<ReturnType<typeof setup>>['t'],id:Id<'reviews'>|null)=>t.run(ctx=>ctx.db.get(id!));
 function signed(event:Record<string,unknown>,key=whsec){const body=JSON.stringify(event),ts=Math.floor(Date.now()/1000);return {body,headers:{'content-type':'application/json','stripe-signature':`t=${ts},v1=${createHmac('sha256',key).update(`${ts}.${body}`).digest('hex')}`}};}
 const deliver=(t:Awaited<ReturnType<typeof setup>>['t'],event:Record<string,unknown>,key?:string)=>{const {body,headers}=signed(event,key);return t.fetch('/stripe/webhook',{method:'POST',headers,body});};
-const subscription=(id:string,type:string,status:string,quantity:number,created:number,org?:string)=>({id,type,created,data:{object:{id:'sub_1',customer:'cus_1',status,metadata:org?{organizationId:org}:{},items:{data:[{id:'si_1',quantity,current_period_end:created+30*86400}]}}}});
+const subscription=(id:string,type:string,status:string,quantity:number,created:number,org?:string,sub='sub_1')=>({id,type,created,data:{object:{id:sub,customer:'cus_1',status,metadata:org?{organizationId:org}:{},items:{data:[{id:'si_1',quantity,current_period_end:created+30*86400}]}}}});
 
 test('Free usage is enforced on every model call and at enqueue; blocked reviews are recorded with the billing reason and counted',async()=>{
  process.env.BILLING_TRIAL_DAYS='60';
@@ -169,6 +169,21 @@ test('signed Stripe webhooks link the workspace, apply once, and ignore replays 
  expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).plan).toBe('free');
 });
 
+test('a second subscription from another open Checkout neither replaces nor, once cancelled, ends the first',async()=>{
+ const {t,org}=await setup();
+ const created=Math.floor(Date.now()/1000),log=vi.spyOn(console,'error').mockImplementation(()=>{});
+ await deliver(t,{id:'evt_c1',type:'checkout.session.completed',created,data:{object:{mode:'subscription',client_reference_id:org,customer:'cus_1',subscription:'sub_1'}}});
+ await deliver(t,subscription('evt_s1','customer.subscription.created','active',2,created+1,org));
+ await deliver(t,{id:'evt_c2',type:'checkout.session.completed',created:created+2,data:{object:{mode:'subscription',client_reference_id:org,customer:'cus_1',subscription:'sub_2'}}});
+ await deliver(t,subscription('evt_s2','customer.subscription.created','active',2,created+3,org,'sub_2'));
+ const account=async()=>(await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0];
+ expect(await account()).toMatchObject({subscriptionId:'sub_1',status:'active'});
+ expect((await t.run(ctx=>ctx.db.query('stripeEvents').collect())).filter(e=>['evt_c2','evt_s2'].includes(e.eventId)).map(e=>e.outcome)).toEqual(['other subscription','other subscription']);
+ expect(log).toHaveBeenCalledWith(expect.stringContaining('"event":"billing.duplicate_subscription"'));
+ await deliver(t,subscription('evt_d2','customer.subscription.deleted','canceled',2,created+4,org,'sub_2'));
+ expect(await account()).toMatchObject({subscriptionId:'sub_1',status:'active'});
+});
+
 test('seats follow membership: viewers are free and changes resync the subscription quantity',async()=>{
  const {t,alice,bob,org,members}=await setup();
  const calls:{url:string;body:string;key:string|null}[]=[];
@@ -203,6 +218,8 @@ test('seats follow membership: viewers are free and changes resync the subscript
  expect(await t.action(internal.billingJobs.syncSeats,{organizationId:org})).toBe('updated');
  const update=calls.at(-1)!;
  expect(update.url).toBe('https://api.stripe.com/v1/subscriptions/sub_1');
+ // No idempotency key: a key made of the seat counts repeats (3→4→3→4) and Stripe would replay the old answer.
+ expect(update.key).toBeNull();
  expect(Object.fromEntries(new URLSearchParams(update.body))).toEqual({'items[0][id]':'si_1','items[0][quantity]':'3',proration_behavior:'create_prorations'});
  // No idempotency key: within Stripe's 24h key window a later 2→3 change (after 3→2) would otherwise replay this one.
  expect(update.key).toBeNull();
@@ -280,6 +297,23 @@ test('a new workspace must choose a plan: nothing indexes, reviews or finishes s
  expect((await t.run(ctx=>ctx.db.query('auditEvents').collect())).filter(e=>e.action==='billing.plan_selected').map(e=>[e.organizationId,e.target])).toEqual([[fresh,'pro'],[freeOrg,'free']]);
  // Workspaces from before plans were required are untouched.
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:repo.organizationId})).toMatchObject({planRequired:false,planMissing:false});
+});
+
+test('a push cancels and refunds a review that never ran; a blocked push leaves the running review alone',async()=>{
+ process.env.BILLING_TRIAL_DAYS='60';
+ const {t,org,repo}=await setup();
+ const push=(pr:number,sha:string)=>t.mutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:pr,headSha:sha.repeat(40),trigger:'automatic'});
+ const used=async()=>(await t.run(ctx=>ctx.db.query('billingUsage').withIndex('by_org_period',q=>q.eq('organizationId',org)).collect()))[0]?.reviews;
+ const first=await push(1,'a');await push(1,'b');
+ expect((await reviewOf(t,first))?.status).toBe('cancelled');
+ expect(await used()).toBe(1);
+ const running=await push(2,'c');
+ expect(await used()).toBe(2);
+ // Free's $0.02 is spent, so the next push is blocked.
+ await spend(t,org);await spend(t,org);
+ const blocked=await push(2,'d');
+ expect((await reviewOf(t,blocked))?.status).toBe('failed');
+ expect((await reviewOf(t,running))?.status).toBe('queued');
 });
 
 test('Free is one workspace per owner: a second one gets no allowance until it subscribes, and billing off is unlimited',async()=>{

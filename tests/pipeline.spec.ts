@@ -384,3 +384,38 @@ test("webhook through indexing, cross-file review, persistence, publish, feedbac
   const usage=(await t.query(api.dashboard.overview,{token,organizationId})).usage.filter(u=>u.kind==="conversation");expect(usage.some(u=>u.estimatedCost===0.01&&u.inputTokens===100&&u.outputTokens===50)).toBe(true);
   await t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());expect(reply).toHaveBeenCalledTimes(repliesBefore+1);
 });
+test("a review cancelled by a newer push sends no further model requests", async () => {
+  process.env.SERVICE_SECRET = "pipeline-service";
+  process.env.SESSION_SECRET = "pipeline-session-secret-at-least-32-characters";
+  process.env.LLM_API_KEY = "fixture";
+  vi.useFakeTimers();
+  const t = convexTest(schema, modules);
+  const userId = await t.mutation(api.users.login, { secret: "pipeline-service", githubId: -201, login: "cancel-fixture", avatar: "" });
+  const token = await new SignJWT({}).setProtectedHeader({ alg: "HS256" }).setSubject(userId).setIssuer("openreview").setAudience("openreview").setExpirationTime("1h").sign(new TextEncoder().encode(process.env.SESSION_SECRET));
+  const organizationId = await t.mutation(api.users.createOrganization, { token, name: "Cancel test" });
+  await t.mutation(api.repositories.connect, { token, secret: "pipeline-service", organizationId, installationId: -201, accountId: -201, account: "test", repositories: [{ id: -201, fullName: "test/cancel", defaultBranch: "main" }] });
+  const [repo] = await t.query(api.repositories.list, { token, organizationId });
+  await t.mutation(api.repositories.configure, { token, repositoryId: repo._id, enabled: true });
+  await t.run((ctx) => ctx.db.patch(repo._id, { indexStatus: "ready", indexedSha: "a".repeat(40) }));
+  const scm = new Github("test-only-token");
+  vi.spyOn(Github, "installation").mockResolvedValue(scm);
+  vi.spyOn(scm, "tree").mockResolvedValue([{ path: "total.ts", sha: "t", type: "blob", size: 40 }]);
+  vi.spyOn(scm, "blob").mockImplementation(async (_r, path, sha) => ({ path, sha, content: "export const total = (c: number) => c / 100;" }));
+  vi.spyOn(scm, "pullRequest").mockResolvedValue({ number: 1, title: "Totals", body: "", draft: false, state: "open", html_url: "https://github.com/test/cancel/pull/1", user: { login: "author" }, head: { sha: "b".repeat(40), ref: "feature" }, base: { sha: "a".repeat(40), ref: "main" }, diff: [{ path: "total.ts", status: "modified", patch: "@@ -1 +1 @@\n-export const total = (c: number) => c;\n+export const total = (c: number) => c / 100;" }], comments: [], reviews: [], commits: [], checks: [] } as never);
+  const publish = vi.spyOn(scm, "publish").mockResolvedValue({ id: 5, reused: false, comments: [] });
+  const reviewId = (await t.mutation(internal.reviews.enqueue, { repositoryId: repo._id, prNumber: 1, headSha: "b".repeat(40) }))!;
+  const requests: string[] = [];
+  vi.spyOn(HttpModel.prototype, "generate").mockImplementation(async function <T>(request: ModelRequest, validator: z.ZodType<T>) {
+    // The newer push lands while the first model call is in flight.
+    if (!requests.length) await t.run((ctx) => ctx.db.patch(reviewId, { status: "cancelled" }));
+    requests.push(request.task);
+    const value = request.task.startsWith("review:") ? { findings: [] } : request.task === "diagram" ? { diagram: null } : { summary: "Totals divide by 100.", reviewScore: { value: 4, reason: "No verified findings." } };
+    return { value: validator.parse(value), usage: { task: request.task, provider: "fixture", model: "fixture", inputTokens: 1, outputTokens: 1, latencyMs: 0, estimatedCost: 0, cached: false } };
+  });
+  await t.action(internal.jobs.review, { reviewId });
+  // Only the calls already in flight with the first one (two concurrent specialists) may finish.
+  expect(requests.length).toBeGreaterThan(0);
+  expect(requests.length).toBeLessThanOrEqual(2);
+  expect((await t.query(internal.reviews.data, { reviewId })).review.status).toBe("cancelled");
+  expect(publish).not.toHaveBeenCalled();
+});

@@ -188,9 +188,12 @@ export const githubInstallations = query({
   },
 });
 // Which of these GitHub installations are linked here, linked to another workspace, or unlinked.
+// Web server only (service secret): it passes installation ids read with the user's own GitHub token, so a
+// workspace owner cannot probe arbitrary ids to learn which installations belong to other workspaces.
 export const installationOwnership = query({
-  args: { token: v.string(), organizationId: v.id("organizations"), installationIds: v.array(v.number()) },
+  args: { token: v.string(), secret: v.string(), organizationId: v.id("organizations"), installationIds: v.array(v.number()) },
   handler: async (ctx, a) => {
+    service(a.secret);
     await authorize(ctx, a.token, a.organizationId, true);
     const result: Record<string, "here" | "elsewhere" | "none"> = {};
     for (const id of a.installationIds.slice(0, 200)) {
