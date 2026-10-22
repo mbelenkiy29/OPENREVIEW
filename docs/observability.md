@@ -1,6 +1,6 @@
 # Error tracking and analytics (cloud)
 
-The hosted site can report errors to [Sentry](https://sentry.io), product analytics to [PostHog](https://posthog.com) and ad conversions to OpenAI Ads. All are off unless their public keys are set when the web app is built, so self-hosted installs send nothing to any of them.
+The hosted site can report errors to [Sentry](https://sentry.io), product analytics to [PostHog](https://posthog.com) and ad conversions to OpenAI Ads and Reddit Ads. All are off unless their public keys are set when the web app is built, so self-hosted installs send nothing to any of them.
 
 ## What is collected
 
@@ -42,6 +42,13 @@ The hosted site can report errors to [Sentry](https://sentry.io), product analyt
 - **Advanced matching:** if automatic advanced matching is on for the pixel in Ads Manager, the SDK itself hashes contact details it finds on the page (SHA-256) and sends the hashes. The privacy policy covers this; turn it off in Ads Manager to send none.
 - **Self-hosted:** off without `NEXT_PUBLIC_OPENAI_ADS_PIXEL_ID`.
 
+**Reddit Pixel (ad measurement):** tells [Reddit Ads](https://ads.reddit.com) which visits and sign-ups came from our ads on Reddit. It runs Events Manager's base code from the bundle; code in `src/reddit-pixel.ts`.
+- **Consent:** it starts and stops with PostHog, under the same banner choice. Declining stops its events in the page and removes its `_rdt_*` cookies and storage (`_rdt_uuid`, `_rdt_cid`).
+- **Page views:** `PageVisit` when it starts and on each client-side navigation. We attach no URL, and the site's `Referrer-Policy` gives the pixel's requests only the origin as Referer.
+- **Sign-up:** `SignUp` is sent with the `signed_up` milestone above, by the same rule as the OpenAI pixel: once per account, never on a later sign-in, and never for accounts more than a day old. Its `conversionId` is `signed_up:<user id>`, so Reddit drops a repeat, including the same sign-up sent later through its Conversions API.
+- **Advanced matching:** we pass no email, phone or external ID. Keep automatic advanced matching off for the pixel in Events Manager so it sends none.
+- **Self-hosted:** off without `NEXT_PUBLIC_REDDIT_PIXEL_ID`.
+
 **URLs:** before any event leaves the browser or server, each URL keeps only a short allowlist of query parameters (`utm_*`, `ref`, `checkout`, `billing`, `signedout`) and loses its fragment. Invitation tokens, sign-in codes, error messages and repository filters are never sent. Referral links (`/r/<code>`) are reported as `/r/[code]`, in errors and performance traces alike, because a code identifies the person who shared it. Clicks aren't captured on those pages or on sign-up pages opened from them.
 
 **Same-origin delivery:** events go through this site's own origin, so ad blockers that block Sentry and PostHog domains don't drop them:
@@ -63,6 +70,9 @@ Set these on the **web app** (Vercel → Project → Settings → Environment Va
 | `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` | The project API key, `phc_…` (PostHog → Project settings) | No (public by design) |
 | `NEXT_PUBLIC_POSTHOG_HOST` | `https://us.i.posthog.com` (default) or `https://eu.i.posthog.com` | No |
 | `NEXT_PUBLIC_OPENAI_ADS_PIXEL_ID` | The pixel ID (Ads Manager → Conversions → Data Source) | No (public by design) |
+| `NEXT_PUBLIC_REDDIT_PIXEL_ID` | The pixel ID, `a2_…` (Reddit Ads → Events Manager) | No (public by design) |
+
+**Ad pixels need PostHog:** set `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` too. Both ad pixels start from PostHog's consent banner, and their sign-ups ride the `signed_up` milestone, which is loaded and marked reported only with PostHog. With a pixel ID but no PostHog token, the pixel never starts.
 
 **Release builds:** with `SENTRY_AUTH_TOKEN` set, a build uploads source maps and deletes them from the output, so they are never served publicly. Errors are tagged with the Vercel environment (`production` or `preview`) and the commit.
 
@@ -77,3 +87,5 @@ Remove the variables and redeploy. Without `NEXT_PUBLIC_SENTRY_DSN`:
 Without `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN`:
 - PostHog isn't initialized.
 - The `/lantern` proxy doesn't exist.
+
+Without `NEXT_PUBLIC_OPENAI_ADS_PIXEL_ID` or `NEXT_PUBLIC_REDDIT_PIXEL_ID`, that ad pixel's script is never added to the page.

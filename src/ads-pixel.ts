@@ -43,13 +43,18 @@ export function adsPageViewed(path: string) {
   window.oaiq?.("measure", "page_viewed", { type: "contents", contents: [{ id, name: id, content_type: "page" }] });
 }
 
-/** Reports a new account to the pixel. The `signed_up` milestone stays pending only until it is
- *  reported (convex/analyticsMilestones.ts), so this runs once per account, not on every sign-in;
- *  accounts older than a day never count, nor do ones from before the pixel existed. The event id
- *  lets Ads Manager drop a repeat if marking the milestone reported failed. */
-export function measureSignup(milestones: { key: string; at: number }[], userId: string, now = Date.now()) {
+/** A new account, for the ad pixels. The `signed_up` milestone stays pending only until it is
+ *  reported (convex/analyticsMilestones.ts), so this holds once per account, not on every sign-in;
+ *  accounts older than a day never count, nor do ones from before the pixels existed. */
+export function isNewSignup(milestones: { key: string; at: number }[], now = Date.now()) {
   const signedUp = milestones.find((m) => m.key === "signed_up");
-  if (!signedUp || now - signedUp.at > 86_400_000 || typeof window.oaiq !== "function") return false;
+  return Boolean(signedUp && now - signedUp.at <= 86_400_000);
+}
+
+/** Reports a new account to the pixel (isNewSignup). The event id lets Ads Manager drop a repeat if
+ *  marking the milestone reported failed. */
+export function measureSignup(milestones: { key: string; at: number }[], userId: string, now = Date.now()) {
+  if (!isNewSignup(milestones, now) || typeof window.oaiq !== "function") return false;
   window.oaiq("measure", "registration_completed", { type: "customer_action" }, { event_id: `signed_up:${userId}` });
   return true;
 }

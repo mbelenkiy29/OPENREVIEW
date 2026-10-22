@@ -78,7 +78,9 @@ If you allow it, PostHog also stores a random identifier in a cookie and in your
 
 If you allow it, the OpenAI Ads pixel also stores two cookies, so we can tell whether a visit or sign-up came from one of our ads in ChatGPT: `__oppref`, the ad click it came from, for 30 days, and `__obref`, a random identifier for your browser, for a year. It follows the same choice as PostHog; declining removes both and leaves only `__oaiq_consent`, which remembers that you said no.
 
-Apart from that ad measurement, we do not use advertising cookies, and we do not use cookies to track you across other websites.
+If you allow it, the Reddit Pixel also stores identifiers in cookies and in your browser's local storage, so we can tell whether a visit or sign-up came from one of our ads on Reddit: `_rdt_cid`, the ad click it came from, and `_rdt_uuid`, a random identifier for your browser, for about 90 days. It follows the same choice as PostHog; declining removes them. Reddit may also link these events to a Reddit account signed in on the same browser, under Reddit's own privacy policy.
+
+Apart from this ad measurement, we do not use advertising cookies, and we do not use cookies to track you across other websites.
 
 ## How we use information
 
@@ -91,7 +93,7 @@ We use the information above to:
 - keep the service reliable, diagnose problems and understand which features are used;
 - meet legal obligations.
 
-We do not sell personal information. If you accept cookies, we tell OpenAI when a visit or sign-up follows one of our ads, so we can measure them. To match a sign-up to an ad, the pixel may also send a one-way (SHA-256) hash of contact details shown on the page, such as an email address, never the details themselves. We do not otherwise use your information for advertising.
+We do not sell personal information. If you accept cookies, we tell OpenAI and Reddit when a visit or sign-up follows one of our ads, so we can measure them. To match a sign-up to an ad, the pixels may also send a one-way (SHA-256) hash of contact details shown on the page, such as an email address, never the details themselves. We do not otherwise use your information for advertising.
 
 Feedback you give on reviews, such as reactions, replies and approved rules, is used only to tune reviews within your own workspace. It is not shared with other workspaces.
 
@@ -108,6 +110,7 @@ We share information only as needed to run the service, with:
 | Vercel | Website hosting |
 | Convex | Database and backend processing |
 | OpenAI | AI model processing for reviews and answers; with your consent, measuring our ads in ChatGPT |
+| Reddit | With your consent, measuring our ads on Reddit |
 | Stripe | Payments, subscriptions and referral payouts |
 | GitHub (and other code hosts you connect) | Sign-in and repository access |
 | OSV.dev | Checking package names and versions from dependency changes for known vulnerabilities (no source code is sent) |

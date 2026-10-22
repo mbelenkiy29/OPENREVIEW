@@ -34,7 +34,7 @@ test("the banner shows only when analytics is configured and no choice or refusa
   assert.equal(needsChoice(true, "", { doNotTrack: "1" }), false, "the browser already said no");
 });
 
-test("only PostHog's and the ad pixel's cookies and storage keys are cleared on refusal", () => {
-  for (const key of ["ph_phc_abc_posthog", "__ph_opt_in_out_phc_abc", "__oppref", "__obref"]) assert.equal(isAnalyticsStorageKey(key), true, key);
+test("only PostHog's and the ad pixels' cookies and storage keys are cleared on refusal", () => {
+  for (const key of ["ph_phc_abc_posthog", "__ph_opt_in_out_phc_abc", "__oppref", "__obref", "_rdt_uuid", "_rdt_cid"]) assert.equal(isAnalyticsStorageKey(key), true, key);
   for (const key of ["openreview_session", "openreview_consent", "theme", "photo"]) assert.equal(isAnalyticsStorageKey(key), false, key);
 });
