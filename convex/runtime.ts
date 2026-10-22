@@ -24,6 +24,7 @@ export const settings=query({args:{token:v.string(),organizationId:v.id("organiz
 }});
 export const save=mutation({args:{token:v.string(),organizationId:v.id("organizations"),teamId:v.optional(v.id("teams")),repositoryId:v.optional(v.id("repositories")),policy:runtimePolicyValidator,inherit:v.optional(v.boolean())},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true);
+ await rateLimit(ctx,"runtime-policy:"+a.organizationId,10);
  if(a.teamId&&a.repositoryId)throw new Error("Choose a team or repository scope");
  if(a.teamId&&(await ctx.db.get(a.teamId))?.organizationId!==a.organizationId)throw new Error("Team belongs to another workspace");
  if(a.repositoryId&&(await authorizeRepository(ctx,a.token,a.repositoryId,true,true)).repo.organizationId!==a.organizationId)throw new Error("Repository belongs to another workspace");
@@ -32,7 +33,7 @@ export const save=mutation({args:{token:v.string(),organizationId:v.id("organiza
  else if(old)await ctx.db.patch(old._id,{policy,updatedAt:Date.now()});
  else await ctx.db.insert("runtimePolicies",{organizationId:a.organizationId,teamId:a.teamId,repositoryId:a.repositoryId,policy,updatedAt:Date.now()});
  await audit(ctx,a.organizationId,user._id,"runtime.policy_changed",a.repositoryId??a.teamId??a.organizationId);
- await ctx.scheduler.runAfter(0,internal.approvals.sweep,{force:true});
+ await ctx.scheduler.runAfter(0,internal.approvals.policyRecheck,{organizationId:a.organizationId,repositoryId:a.repositoryId,teamId:a.teamId});
 }});
 export const worker=mutation({args:{token:v.string(),organizationId:v.id("organizations"),name:v.string(),hash:v.string()},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true);

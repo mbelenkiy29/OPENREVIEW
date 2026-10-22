@@ -479,14 +479,20 @@ export async function createApiKey(
 ): Promise<string> {
   const { token } = await current();
   const key = "or_" + randomBytes(32).toString("hex");
-  await backend().mutation(api.apiKeys.create, {
-    token,
-    organizationId: text(form, "organizationId") as Id<"organizations">,
-    name: text(form, "name"),
-    hash: createHash("sha256").update(key).digest("hex"),
-    prefix: key.slice(0, 11),
-    scopes: [z.enum(["read", "write", "admin"]).parse(text(form, "scope") || "read")],
-  });
+  try {
+    await backend().mutation(api.apiKeys.create, {
+      token,
+      organizationId: text(form, "organizationId") as Id<"organizations">,
+      name: text(form, "name"),
+      hash: createHash("sha256").update(key).digest("hex"),
+      prefix: key.slice(0, 11),
+      scopes: [z.enum(["read", "write", "admin"]).parse(text(form, "scope") || "read")],
+    });
+  } catch (e) {
+    // The form shows any returned string as the new key, so report refusals (e.g. the key cap) as a toast.
+    await notify(userMessage(e, "Could not create the API key."), "error");
+    return "";
+  }
   revalidatePath("/dashboard/settings/keys");
   return key;
 }

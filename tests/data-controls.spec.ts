@@ -359,3 +359,35 @@ test("the purge deletes skipped-file rows of every index job, not only a reposit
   await purgeStep(t, organizationId, userId, "indexSkippedFiles");
   expect(await t.run((ctx) => ctx.db.query("indexSkippedFiles").collect())).toEqual([]);
 });
+
+test("webhook pruning reads byte-bounded pages, so large inline event bodies never stop it", async () => {
+  const t = convexTest({ schema, modules, transactionLimits: { bytesRead: 8_000_000 } });
+  const day = 86_400_000, now = Date.now(), old = now - 20 * day, body = "x".repeat(400_000);
+  await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Big bodies", createdAt: now });
+    const connectionId = await ctx.db.insert("providerConnections", { organizationId, kind: "gitlab", instance: "https://gitlab.example", name: "GitLab", credentials: "encrypted", webhookSecret: "encrypted", active: true, createdAt: now });
+    // A retried event at the head of the index keeps its body; the next pages step past it instead of rereading it.
+    await ctx.db.insert("providerEvents", { connectionId, externalId: "retried", body, status: "failed", attempts: 2, createdAt: old - day, updatedAt: now - day });
+    for (let i = 0; i < 30; i++) await ctx.db.insert("providerEvents", { connectionId, externalId: "e" + i, body, status: "completed", attempts: 1, createdAt: old });
+    await ctx.db.insert("webhookDeliveries", { deliveryId: "old", event: "push", payloadStorageId: await ctx.storage.store(new Blob(["{}"])), status: "completed", attempts: 1, createdAt: old, updatedAt: old });
+  });
+  await t.mutation(internal.dataControls.pruneWebhookPayloads, {});
+  await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
+  const events = await t.run(async (ctx) => (await ctx.db.query("providerEvents").collect()).filter((e) => e.body !== "").map((e) => e.externalId));
+  expect(events).toEqual(["retried"]);
+  expect(await t.run(async (ctx) => (await ctx.db.query("webhookDeliveries").collect()).length)).toBe(0);
+});
+
+test("an undated old conversation expires even behind 100 older conversations that are still active", async () => {
+  const t = convexTest(schema, modules);
+  const day = 86_400_000, now = Date.now();
+  const ids = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Legacy", transcriptRetentionDays: 14, createdAt: now });
+    const repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: "legacy/app", defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: now });
+    for (let i = 0; i < 100; i++) await ctx.db.insert("conversations", { organizationId, repositoryId, prNumber: 1, githubCommentId: i, author: "a", question: "q", status: "completed", createdAt: now - 40 * day, updatedAt: now - day });
+    return { organizationId, undated: await ctx.db.insert("conversations", { organizationId, repositoryId, prNumber: 2, githubCommentId: 999, author: "a", question: "q", status: "completed", createdAt: now - 30 * day }) };
+  });
+  await t.mutation(internal.dataControls.retention, { organizationId: ids.organizationId });
+  expect(await t.run((ctx) => ctx.db.get(ids.undated))).toBeNull();
+  expect((await t.run((ctx) => ctx.db.query("conversations").collect())).length).toBe(100);
+});

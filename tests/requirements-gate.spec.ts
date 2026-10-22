@@ -57,13 +57,21 @@ async function provider(t:Awaited<ReturnType<typeof setup>>['t'],repositoryId:Id
 }
 const linked={connectionDigest:'digest',credentials:'enc',generation:1,expiresAt:Date.now()-1000,createdAt:0,updatedAt:0};
 
-test('a GitLab member whose personal token expired still gets tickets; outsiders and revoked links do not',async()=>{
+test('a GitLab member whose personal token expired, or who renamed the account, still gets tickets; outsiders and revoked links do not',async()=>{
  const {t,repositoryId,alice}=await setup(),{organizationId,connectionId}=await provider(t,repositoryId,'gitlab'),references='PAY-1';
  const identity=await t.run(ctx=>ctx.db.insert('providerIdentities',{organizationId,connectionId,userId:alice,externalId:'501',username:'alice-gl',active:true,...linked}));
- expect((await t.action(internal.integrationJobs.requirements,{repositoryId,references,actor:'alice-gl',authorExternalId:'501'})).files.map(f=>f.path.split('/')[1])).toEqual(['linear']);
- for(const author of [{actor:'mallory',authorExternalId:'666'},{actor:'mallory',authorExternalId:'501'}])expect((await t.action(internal.integrationJobs.requirements,{repositoryId,references,...author})).coverage).toEqual([denied]);
+ for(const actor of ['alice-gl','alice-renamed'])expect((await t.action(internal.integrationJobs.requirements,{repositoryId,references,actor,authorExternalId:'501'})).files.map(f=>f.path.split('/')[1])).toEqual(['linear']);
+ for(const author of [{actor:'mallory',authorExternalId:'666'},{actor:'alice-gl'}])expect((await t.action(internal.integrationJobs.requirements,{repositoryId,references,...author})).coverage).toEqual([denied]);
  await t.run(ctx=>ctx.db.patch(identity,{active:false,credentials:undefined}));
  expect((await t.action(internal.integrationJobs.requirements,{repositoryId,references,actor:'alice-gl',authorExternalId:'501'})).coverage).toEqual([denied]);
+});
+
+test('an expired Bitbucket Cloud link loses its credentials but still counts as a linked member',async()=>{
+ const {t,repositoryId,alice}=await setup(),{organizationId,connectionId}=await provider(t,repositoryId,'bitbucket-cloud'),uuid='33333333-3333-4333-8333-333333333333';
+ const identity=await t.run(ctx=>ctx.db.insert('providerIdentities',{organizationId,connectionId,userId:alice,externalId:uuid,username:'{'+uuid+'}',active:true,...linked}));
+ await t.mutation(internal.bitbucketPersonal.expireIdentity,{id:identity,generation:1});
+ const expired=await t.run(ctx=>ctx.db.get(identity));expect(expired).toMatchObject({active:true,generation:2});expect(expired?.credentials).toBeUndefined();
+ expect((await t.action(internal.integrationJobs.requirements,{repositoryId,references:'PAY-1',actor:'{'+uuid+'}',authorExternalId:uuid})).files.map(f=>f.path.split('/')[1])).toEqual(['linear']);
 });
 
 test('a GitHub member linked through identities (no users.githubId) gets tickets even after a login rename',async()=>{

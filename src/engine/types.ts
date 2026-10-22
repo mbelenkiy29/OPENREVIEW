@@ -255,3 +255,5 @@ export const stages = [
   "cancelled",
 ] as const;
 export type Stage = (typeof stages)[number];
+// How many times an agentic review may suspend and resume (shared by the engine and the review row counter).
+export const maxAgentResumes = 6;

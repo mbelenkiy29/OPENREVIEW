@@ -250,8 +250,8 @@ export const retention = internalMutation({ args: { organizationId: v.id("organi
     }
     // Conversations expire by last activity: a thread replied to yesterday survives; rows without updatedAt fall back to createdAt.
     const idle = await ctx.db.query("conversations").withIndex("by_org_updated", (q) => q.eq("organizationId", org._id).gte("updatedAt", 0).lt("updatedAt", cutoff)).take(50);
-    const legacy = await ctx.db.query("conversations").withIndex("by_org_created", (q) => q.eq("organizationId", org._id).lt("createdAt", cutoff)).take(100);
-    const undated = legacy.filter((c) => c.updatedAt === undefined).slice(0, 50);
+    // Undated (legacy) rows come oldest-first by creation time; the row cap keeps a large legacy set from passing the read limit.
+    const undated = (await ctx.db.query("conversations").withIndex("by_org_updated", (q) => q.eq("organizationId", org._id).eq("updatedAt", undefined)).filter((q) => q.lt(q.field("createdAt"), cutoff)).paginate({ numItems: 50, cursor: null, maximumRowsRead: 1000 })).page;
     for (const c of [...idle, ...undated]) { await remove(ctx, "conversations", c as never); transcripts++; }
     if (reviews.length === 100 || threads.length === 20 || idle.length === 50 || undated.length === 50) more = true;
   }
@@ -262,15 +262,17 @@ export const retention = internalMutation({ args: { organizationId: v.id("organi
 // failed after retries, or abandoned). GitHub deliveries carry no workspace link and are deleted with their
 // payload files. Other providers' events keep their row, which dedupes redeliveries and lists the delivery,
 // and lose the body. Full batches continue right away, so a busy deployment never falls behind.
-export const pruneWebhookPayloads = internalMutation({ args: {}, handler: async (ctx): Promise<{ deliveries: number; events: number }> => {
+export const pruneWebhookPayloads = internalMutation({ args: { cursor: v.optional(v.string()) }, handler: async (ctx, a): Promise<{ deliveries: number; events: number }> => {
   const now = Date.now(), cutoff = now - 14 * 86_400_000;
   const deliveries = await ctx.db.query("webhookDeliveries").withIndex("by_updated", (q) => q.lt("updatedAt", cutoff)).take(200);
   for (const d of deliveries) await remove(ctx, "webhookDeliveries", d as never);
-  // Events retried by an admin since they arrived count from that retry.
-  const scanned = await ctx.db.query("providerEvents").withIndex("by_body_deleted", (q) => q.eq("bodyDeletedAt", undefined).lt("createdAt", cutoff)).take(500);
-  const events = scanned.filter((e) => (e.updatedAt ?? e.createdAt) < cutoff).slice(0, 200);
+  // Event bodies are inline (up to ~1 MB each), so events are read in byte-bounded pages (one .paginate() per function;
+  // delivery rows are small) or a row count alone could pass the 8 MB read limit every run. Events retried by an admin
+  // since they arrived count from that retry; the cursor steps past them.
+  const scanned = await ctx.db.query("providerEvents").withIndex("by_body_deleted", (q) => q.eq("bodyDeletedAt", undefined).lt("createdAt", cutoff)).paginate({ numItems: 200, cursor: a.cursor ?? null, maximumBytesRead: 2_000_000 });
+  const events = scanned.page.filter((e) => (e.updatedAt ?? e.createdAt) < cutoff);
   for (const e of events) await ctx.db.patch(e._id, { body: "", bodyDeletedAt: now });
-  if (deliveries.length === 200 || events.length === 200) await ctx.scheduler.runAfter(0, internal.dataControls.pruneWebhookPayloads, {});
+  if (deliveries.length === 200 || !scanned.isDone) await ctx.scheduler.runAfter(0, internal.dataControls.pruneWebhookPayloads, scanned.isDone ? {} : { cursor: scanned.continueCursor });
   return { deliveries: deliveries.length, events: events.length };
 } });
 

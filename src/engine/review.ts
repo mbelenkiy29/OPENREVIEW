@@ -49,6 +49,8 @@ export type ReviewOptions = {
   advisories?: AdvisoryLookup;
   // Configured turn and tool-call budgets for the agentic and hypothesis engines (K3).
   budgets?: BudgetSettings;
+  // When the surrounding action started (ms), so hypothesis runs stop in time for the rest of the review.
+  startedAt?: number;
 };
 
 const specialties = {
@@ -248,7 +250,7 @@ export async function reviewChange(
   }
   if (engineUsed === "hypotheses") {
     try {
-      hypothesisRun = await runHypotheses({ input, payload, model, tools: options.tools!, categories: selected, rules, signal, hooks: { checkpoint: options.agent?.checkpoint }, budget: hypothesisBudget });
+      hypothesisRun = await runHypotheses({ input, payload, model, tools: options.tools!, categories: selected, rules, signal, hooks: { checkpoint: options.agent?.checkpoint }, budget: hypothesisBudget, startedAt: options.startedAt });
       usage.push(...hypothesisRun.usage);
       candidates.push(...hypothesisRun.candidates);
       engineLimits.push(...hypothesisRun.limits);

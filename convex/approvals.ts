@@ -9,6 +9,7 @@ import {approvalDefaults,approvalPolicySchema,approvalPolicyKey} from "../src/ap
 import {runtimePolicy} from "./runtime";
 import {runtimePolicyKey} from "../src/runtime-policy";
 import {requireContextReader} from "./repositoryContext";
+import {rateLimit} from "./rateLimit";
 export async function approvalPolicy(ctx:QueryCtx|MutationCtx,repo:Doc<"repositories">){
  const policies=await ctx.db.query("approvalPolicies").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect();
  return policies.find(p=>p.repositoryId===repo._id)?.policy??policies.find(p=>!p.repositoryId&&p.teamId===repo.teamId&&p.teamId)?.policy??policies.find(p=>!p.repositoryId&&!p.teamId)?.policy??approvalDefaults;
@@ -21,6 +22,8 @@ export const settings=query({args:{token:v.string(),organizationId:v.id("organiz
 }});
 export const save=mutation({args:{token:v.string(),organizationId:v.id("organizations"),teamId:v.optional(v.id("teams")),repositoryId:v.optional(v.id("repositories")),policy:approvalPolicyValidator,inherit:v.optional(v.boolean())},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true);
+ // Each save rechecks the workspace's approvals against the git provider.
+ await rateLimit(ctx,"approval-policy:"+a.organizationId,10);
  if(a.repositoryId&&a.teamId)throw new Error("Choose a team or repository scope");
  if(a.teamId&&(await ctx.db.get(a.teamId))?.organizationId!==a.organizationId)throw new Error("Team belongs to another workspace");
  if(a.repositoryId){
@@ -34,8 +37,7 @@ export const save=mutation({args:{token:v.string(),organizationId:v.id("organiza
  else if(old)await ctx.db.patch(old._id,{policy,updatedAt:Date.now()});
  else await ctx.db.insert("approvalPolicies",{organizationId:a.organizationId,teamId:a.teamId,repositoryId:a.repositoryId,policy,updatedAt:Date.now()});
  await audit(ctx,a.organizationId,user._id,"approval.policy_changed",a.repositoryId??a.teamId??a.organizationId);
- // Existing approvals are checked against the new inherited policy by the sweep.
- await ctx.scheduler.runAfter(0,internal.approvals.sweep,{force:true});
+ // Existing approvals in this workspace are checked against the new inherited policy.
  await ctx.scheduler.runAfter(0,internal.approvals.policyRecheck,{organizationId:a.organizationId,repositoryId:a.repositoryId,teamId:a.teamId});
 }});
 export const request=internalMutation({args:{reviewId:v.id("reviews")},handler:async(ctx,a)=>{
@@ -96,11 +98,12 @@ export const sweepStatus=internalMutation({args:{status:sweptStatus,cursor:v.opt
  for(const job of page.page){if(!a.force&&job.status==="approved"&&job.updatedAt>Date.now()-3600000)continue;if(!["evaluating","revocation_pending"].includes(job.status)||(job.leaseExpiresAt??0)<=Date.now())await ctx.scheduler.runAfter(0,internal.approvalJobs.process,{id:job._id});}
  if(!page.isDone)await ctx.scheduler.runAfter(0,internal.approvals.sweepStatus,{...a,cursor:page.continueCursor});
 }});
-// Blocked jobs do not need periodic provider reads, but trusted policy edits must refresh them.
-export const policyRecheck=internalMutation({args:{organizationId:v.id("organizations"),repositoryId:v.optional(v.id("repositories")),teamId:v.optional(v.id("teams")),cursor:v.optional(v.string())},handler:async(ctx,a)=>{
- const page=await ctx.db.query("approvalJobs").withIndex("by_org_status",q=>q.eq("organizationId",a.organizationId).eq("status","blocked")).paginate({numItems:100,cursor:a.cursor??null});
+// Trusted policy edits refresh the editing workspace's live and blocked jobs (blocked ones get no periodic reads).
+export const policyRecheck=internalMutation({args:{organizationId:v.id("organizations"),repositoryId:v.optional(v.id("repositories")),teamId:v.optional(v.id("teams")),status:v.optional(v.union(v.literal("blocked"),sweptStatus)),cursor:v.optional(v.string())},handler:async(ctx,a)=>{
+ if(!a.status){for(const status of ["blocked",...sweptStatuses] as const)await ctx.scheduler.runAfter(0,internal.approvals.policyRecheck,{...a,status});return;}
+ const page=await ctx.db.query("approvalJobs").withIndex("by_org_status",q=>q.eq("organizationId",a.organizationId).eq("status",a.status!)).paginate({numItems:100,cursor:a.cursor??null});
  for(const job of page.page){
-  if(a.repositoryId&&job.repositoryId!==a.repositoryId)continue;
+  if(a.repositoryId&&job.repositoryId!==a.repositoryId||["evaluating","revocation_pending"].includes(job.status)&&(job.leaseExpiresAt??0)>Date.now())continue;
   const repo=await ctx.db.get(job.repositoryId);
   if(!repo||repo.organizationId!==a.organizationId||(a.teamId&&repo.teamId!==a.teamId))continue;
   await ctx.scheduler.runAfter(0,internal.approvalJobs.process,{id:job._id});

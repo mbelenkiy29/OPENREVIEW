@@ -544,6 +544,8 @@ export default defineSchema({
     // Agentic tool-loop transcript/state, kept between execution steps and deleted when the review ends.
     agentStateStorageId: v.optional(v.id("_storage")),
     agentStateHead: v.optional(v.string()),
+    // Agent suspensions so far; bounds resumes even when the saved state cannot be loaded.
+    agentResumes: v.optional(v.number()),
     // GitHub check run created for this review's head (checks:write only).
     checkRunId: v.optional(v.number()),
     trigger: v.optional(v.string()),

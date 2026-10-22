@@ -2,7 +2,7 @@
 import type { ActionCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { agentStateSchema, type AgentHooks, type AgentState, type AgentToolbox } from "../src/engine/agent";
+import { agentStateSchema, maxAgentResumes, type AgentHooks, type AgentState, type AgentToolbox } from "../src/engine/agent";
 import type { SourceFile } from "../src/engine/types";
 import { indexedFiles } from "./fileReads";
 import { semanticHits } from "./semanticSearch";
@@ -47,11 +47,13 @@ export function reviewAgentHooks(ctx: ActionCtx, reviewId: Id<"reviews">, stepSt
   return {
     async load() {
       const status = await ctx.runQuery(internal.reviews.agentStatus, { reviewId });
-      if (!status?.agentStateStorageId || status.agentStateHead !== status.headSha) return null;
-      const stored = await ctx.storage.get(status.agentStateStorageId);
-      if (!stored || stored.size > 8_000_000) return null;
-      const parsed = agentStateSchema.safeParse(JSON.parse(await stored.text()));
-      return parsed.success ? (parsed.data as AgentState) : null;
+      const resumes = status?.agentResumes ?? 0;
+      const stored = status?.agentStateStorageId && status.agentStateHead === status.headSha ? await ctx.storage.get(status.agentStateStorageId) : null;
+      const parsed = stored && stored.size <= 8_000_000 ? agentStateSchema.safeParse(JSON.parse(await stored.text())) : null;
+      // The review row counts suspensions, so a state that restarted (or was lost) still hits the resume limit.
+      if (parsed?.success) return { ...(parsed.data as AgentState), resumes: Math.max(parsed.data.resumes, resumes) };
+      if (resumes >= maxAgentResumes) throw new Error(`Agentic review stopped: its saved investigation could not be restored after ${resumes} resumes`);
+      return null;
     },
     async save(state) {
       const storageId = await ctx.storage.store(new Blob([JSON.stringify(state)], { type: "application/json" }));

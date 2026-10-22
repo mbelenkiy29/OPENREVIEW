@@ -37,7 +37,9 @@ export const agentBudgets: Record<ReviewInput["mode"], AgentBudget> = {
   standard: { toolCalls: 30, tokens: 400_000, wallMs: 10 * 60_000, turns: 16 },
   deep: { toolCalls: 80, tokens: 1_200_000, wallMs: 30 * 60_000, turns: 40 },
 };
-export const maxAgentResumes = 6;
+import { maxAgentResumes } from "./types";
+export { maxAgentResumes };
+export const maxSourceBytes = 4_000_000;
 // Operator hard caps on configurable budgets (environment); settings may lower or raise within them.
 export const agentHardCaps = (env: Record<string, string | undefined> = process.env) => ({
   turns: Math.max(1, Math.min(1000, Number.parseInt(env.AGENT_MAX_TURNS ?? "", 10) || 60)),
@@ -189,8 +191,15 @@ export async function runReviewAgent(args: {
   if (loaded && loaded.headSha === input.headSha) state = { ...loaded, resumes: loaded.resumes + 1 };
   const usage: ModelUsage[] = [];
   const allowed = new Set(args.categories);
+  // Memoized file text is capped so the saved state stays under the 8MB load limit; later reads still work, unkept.
+  const jsonBytes = (text: string) => new TextEncoder().encode(JSON.stringify(text)).length;
+  let sourceBytes = state.sources.reduce((n, s) => n + jsonBytes(s.content), 0), capped = false;
   const remember = (file: SourceFile) => {
-    if (!state.sources.some((s) => s.path === file.path) && state.sources.length < 200) state.sources.push(file);
+    if (state.sources.some((s) => s.path === file.path) || state.sources.length >= 200) return;
+    const size = jsonBytes(file.content);
+    if (sourceBytes + size > maxSourceBytes) { capped = true; return; }
+    sourceBytes += size;
+    state.sources.push(file);
   };
   const execute = async (call: ToolCall): Promise<{ id: string; content: string; isError?: boolean }> => {
     const fail = (message: string) => ({ id: call.id, content: message, isError: true });
@@ -280,6 +289,8 @@ export async function runReviewAgent(args: {
     await hooks?.save?.(state);
   }
   await hooks?.save?.(state);
+  // shortcut: only reads past the cap in this step are noted; a resumed step that reads nothing new omits it.
+  if (capped) limits.push(`Agentic investigation read more file text than it keeps (${maxSourceBytes / 1_000_000}MB); findings in files read after that may not verify.`);
   if (state.stopReason && state.stopReason !== "completed") limits.push(`Agentic investigation stopped early (${state.stopReason}) after ${state.toolCalls} tool calls; findings reported so far were verified.`);
   return { candidates: state.reported, usage, sources: state.sources, limits, state };
 }

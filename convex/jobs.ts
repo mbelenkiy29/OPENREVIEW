@@ -699,8 +699,8 @@ export const review = internalAction({
           await ctx.runMutation(internal.reviews.stage, { ...args, status });
         },
         cancel.signal,
-        // Hypothesis runs fit in one action and do not suspend; they only honour cancellation.
-        { budgets: { agentTurns: effective.agentTurns, agentToolCalls: effective.agentToolCalls, hypothesisTurns: effective.hypothesisTurns, hypothesisToolCalls: effective.hypothesisToolCalls }, ...(osvEnabled() ? { advisories: osvClient({ base: process.env.OSV_API_URL || undefined }) } : {}), ...(engine ? { engine, tools: reviewToolbox(ctx, repo, pr.head.sha, head, (repository, path, sha) => github.blob(repository, path, sha), sources), agent: engine === "agentic" ? reviewAgentHooks(ctx, args.reviewId, stepStarted) : { checkpoint: reviewAgentHooks(ctx, args.reviewId, stepStarted).checkpoint } } : {}) },
+        // Hypothesis runs fit in one action and do not suspend; they only honour cancellation and stop by the action start time.
+        { startedAt: stepStarted, budgets: { agentTurns: effective.agentTurns, agentToolCalls: effective.agentToolCalls, hypothesisTurns: effective.hypothesisTurns, hypothesisToolCalls: effective.hypothesisToolCalls }, ...(osvEnabled() ? { advisories: osvClient({ base: process.env.OSV_API_URL || undefined }) } : {}), ...(engine ? { engine, tools: reviewToolbox(ctx, repo, pr.head.sha, head, (repository, path, sha) => github.blob(repository, path, sha), sources), agent: engine === "agentic" ? reviewAgentHooks(ctx, args.reviewId, stepStarted) : { checkpoint: reviewAgentHooks(ctx, args.reviewId, stepStarted).checkpoint } } : {}) },
       ),integrationScopes:requirements.scopes,repositoryContext:cross.receipt??undefined};
       const storageId = await ctx.storage.store(
         new Blob([JSON.stringify(result)], { type: "application/json" }),

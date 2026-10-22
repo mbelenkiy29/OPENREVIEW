@@ -275,16 +275,16 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
     }
    }
   }else if(c.kind==="github-enterprise"){
-   const payload=z.object({installation:z.object({id:z.number().int().positive()}),repository:z.object({id:z.number()}).optional(),action:z.string().optional(),ref:z.string().optional(),pull_request:z.object({number:z.number().int().positive()}).optional(),check_run:z.object({head_sha:z.string()}).optional(),check_suite:z.object({head_sha:z.string()}).optional(),sha:z.string().optional(),issue:z.object({number:z.number().int().positive(),pull_request:z.unknown().optional()}).optional(),comment:z.object({id:z.number().int().positive(),body:z.string().max(16000),in_reply_to_id:z.number().int().positive().optional(),user:z.object({login:z.string(),type:z.string()})}).optional(),review:z.object({id:z.number().int().positive(),body:z.string().nullable(),user:z.object({login:z.string(),type:z.string()})}).optional()}).parse(JSON.parse(event.body));
-   const configuration=z.object({installationId:z.number().int().positive()}).parse(JSON.parse(decryptCredential(c.credentials,c.organizationId+":"+c.kind)));
+   const payload=z.object({installation:z.object({id:z.number().int().positive()}),repository:z.object({id:z.number()}).optional(),action:z.string().optional(),ref:z.string().optional(),pull_request:z.object({number:z.number().int().positive()}).optional(),check_run:z.object({head_sha:z.string(),app:z.object({id:z.number()}).nullish()}).optional(),check_suite:z.object({head_sha:z.string()}).optional(),sha:z.string().optional(),state:z.string().optional(),issue:z.object({number:z.number().int().positive(),pull_request:z.unknown().optional()}).optional(),comment:z.object({id:z.number().int().positive(),body:z.string().max(16000),in_reply_to_id:z.number().int().positive().optional(),user:z.object({login:z.string(),type:z.string()})}).optional(),review:z.object({id:z.number().int().positive(),body:z.string().nullable(),user:z.object({login:z.string(),type:z.string()})}).optional()}).parse(JSON.parse(event.body));
+   const configuration=z.object({installationId:z.number().int().positive(),appId:z.string().optional()}).parse(JSON.parse(decryptCredential(c.credentials,c.organizationId+":"+c.kind)));
    if(payload.installation.id!==configuration.installationId)throw new Error("GitHub Enterprise installation mismatch");
    const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:String(payload.repository?.id)});
    if(repo?.enabled){
     if(event.eventType==="push"&&payload.ref==="refs/heads/"+repo.defaultBranch)await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
     const number=payload.pull_request?.number??(payload.issue?.pull_request?payload.issue.number:undefined);
     if(number&&["pull_request","pull_request_review"].includes(event.eventType??""))await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:number});
-    // As on github.com: a check re-run on the same head sends no pull_request event.
-    const checkedSha=event.eventType==="check_run"?payload.check_run?.head_sha:event.eventType==="check_suite"?payload.check_suite?.head_sha:event.eventType==="status"?payload.sha:undefined;
+    // As on github.com: a check re-run on the same head sends no pull_request event; only finished, foreign checks matter.
+    const checkedSha=event.eventType==="check_run"&&payload.action==="completed"&&String(payload.check_run?.app?.id)!==configuration.appId?payload.check_run?.head_sha:event.eventType==="check_suite"&&payload.action==="completed"?payload.check_suite?.head_sha:event.eventType==="status"&&payload.state!=="pending"?payload.sha:undefined;
     if(checkedSha)await ctx.runMutation(internal.approvals.forRevision,{repositoryId:repo._id,headSha:checkedSha});
     if(number&&event.eventType==="pull_request"){
      const pr=await (await provider(ctx,repo)).changeMetadata(repo.fullName,number);
@@ -361,7 +361,8 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
     if(reaction&&e.object_attributes.awardable_type==="Note"&&e.merge_request)await ctx.runMutation(internal.reactions.emoji,{repositoryId:repo._id,prNumber:e.merge_request.iid,noteId:String(e.object_attributes.awardable_id),user:e.user.username,reaction,award:e.event_type==="award"});
    }
    // Pipeline re-runs on the same head send no MR event; merged-result pipelines run a merge sha, so prefer the MR.
-   if(payload.object_kind==="pipeline"){const p=z.object({object_attributes:z.object({sha:z.string()}),merge_request:z.object({iid:z.number().int().positive()}).nullish()}).parse(payload);if(p.merge_request)await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:p.merge_request.iid});else await ctx.runMutation(internal.approvals.forRevision,{repositoryId:repo._id,headSha:p.object_attributes.sha});}
+   // Only a finished pipeline can change the gates; created/pending/running updates are ignored.
+   if(payload.object_kind==="pipeline"){const p=z.object({object_attributes:z.object({sha:z.string(),status:z.string().optional()}),merge_request:z.object({iid:z.number().int().positive()}).nullish()}).parse(payload);if(["success","failed","canceled","skipped"].includes(p.object_attributes.status??"")){if(p.merge_request)await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:p.merge_request.iid});else await ctx.runMutation(internal.approvals.forRevision,{repositoryId:repo._id,headSha:p.object_attributes.sha});}}
    if(payload.object_kind==="merge_request"&&payload.object_attributes?.iid){
     const attributes=z.object({action:z.string(),oldrev:z.string().nullish()}).parse(payload.object_attributes);
     await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:payload.object_attributes.iid});

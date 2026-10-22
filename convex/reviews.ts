@@ -27,6 +27,7 @@ import {p4AutomaticAuthority} from "./p4Polling";
 import {cancelReview,requireP4Worker} from "./reviewLifecycle";
 import {p4BaselineMetadata} from "./p4Index";
 import {findingTags,priorityOf,findingCounts} from "../src/priority";
+import { maxAgentResumes } from "../src/engine/types";
 
 const usageValidator = v.object({
   task: v.string(),
@@ -435,7 +436,7 @@ export const checkRun = internalQuery({args:{reviewId:v.id("reviews")},handler:a
 export const setCheckRun = internalMutation({args:{reviewId:v.id("reviews"),checkRunId:v.number(),checkRunHead:v.string()},handler:async(ctx,a)=>{const r=await ctx.db.get(a.reviewId);if(r)await ctx.db.patch(r._id,{checkRunId:a.checkRunId,checkRunHead:a.checkRunHead});}});
 export const agentStatus = internalQuery({args:{reviewId:v.id("reviews")},handler:async(ctx,a)=>{
   const review=await ctx.db.get(a.reviewId);
-  return review?{status:review.status,headSha:review.headSha,agentStateStorageId:review.agentStateStorageId,agentStateHead:review.agentStateHead}:null;
+  return review?{status:review.status,headSha:review.headSha,agentStateStorageId:review.agentStateStorageId,agentStateHead:review.agentStateHead,agentResumes:review.agentResumes??0}:null;
 }});
 export const saveAgentState = internalMutation({args:{reviewId:v.id("reviews"),storageId:v.id("_storage"),headSha:v.string()},handler:async(ctx,a)=>{
   const review=await ctx.db.get(a.reviewId);
@@ -449,7 +450,10 @@ export const saveAgentState = internalMutation({args:{reviewId:v.id("reviews"),s
 export const suspendAgent = internalMutation({args:{reviewId:v.id("reviews")},handler:async(ctx,a)=>{
   const review=await ctx.db.get(a.reviewId);
   if(!review||!["ingesting","retrieving_context","reviewing"].includes(review.status)||!review.agentStateStorageId)return false;
-  await ctx.db.patch(review._id,{status:"waiting_agent",updatedAt:Date.now()});
+  // Counted here, not only in the saved state: a lost state would otherwise restart every budget forever.
+  const agentResumes=(review.agentResumes??0)+1;
+  if(agentResumes>maxAgentResumes)return false;
+  await ctx.db.patch(review._id,{status:"waiting_agent",agentResumes,updatedAt:Date.now()});
   await ctx.db.insert("reviewRuns",{organizationId:review.organizationId,reviewId:review._id,stage:"waiting_agent",detail:"Agentic investigation continues in a new step",createdAt:Date.now()});
   await ctx.scheduler.runAfter(0,internal.jobs.review,{reviewId:review._id});
   return true;

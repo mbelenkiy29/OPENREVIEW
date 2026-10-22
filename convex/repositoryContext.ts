@@ -70,7 +70,7 @@ export const authorMember=internalQuery({args:{repositoryId:v.id("repositories")
  let userId:Id<"users">|undefined;
  if(connection?.kind==="perforce"||nativeAuthor){const i=await ctx.db.query("p4Identities").withIndex("by_repo_username",q=>q.eq("repositoryId",repo._id).eq("username",actor)).unique();if(i?.active&&i.connectionId===repo.connectionId)userId=i.userId;}
  else if(!connection){if(authorExternalId)userId=(await githubMember(ctx,repo.organizationId,authorExternalId))?._id;}
- else if(personalIdentityProviders.includes(connection.kind)){const i=authorExternalId?await ctx.db.query("providerIdentities").withIndex("by_connection_external",q=>q.eq("connectionId",connection._id).eq("externalId",authorExternalId)).unique():null;if(i?.active&&i.username===actor)userId=i.userId;}
+ else if(personalIdentityProviders.includes(connection.kind)){const i=authorExternalId?await ctx.db.query("providerIdentities").withIndex("by_connection_external",q=>q.eq("connectionId",connection._id).eq("externalId",authorExternalId)).unique():null;if(i?.active)userId=i.userId;}
  // shortcut: no author linking for this provider (Azure DevOps) and the job does not pass fork data, so outsiders cannot be excluded; pass source/target repository ids to allow same-repository PRs.
  else return "Linked tickets and documents were not fetched: "+connection.kind+" PR authors cannot be linked to workspace members, so fork PRs cannot be told apart.";
  if(!userId)return denied;

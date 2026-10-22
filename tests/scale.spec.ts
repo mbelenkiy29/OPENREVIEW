@@ -184,3 +184,20 @@ test('a review that keeps dying before ingesting is failed after three recoverie
  expect(await t.run(ctx=>ctx.db.get(reviewId))).toMatchObject({status:'failed',error:'Review recovery attempts exhausted',attempts:3});
  vi.useRealTimers();
 });
+
+test('knowledge stuck behind 100 repositories whose index failed or was cancelled is still recovered',async()=>{
+ vi.useFakeTimers();
+ const t=convexTest(schema,modules);
+ const stale=Date.now()-20*60000;
+ const recoverable=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Many tenants',createdAt:Date.now()});
+  for(let i=0;i<100;i++)await ctx.db.insert('repositories',{organizationId,fullName:`fixture/dead${i}`,defaultBranch:'main',enabled:true,indexStatus:i%2?'failed':'cancelled',knowledgeStatus:'queued',knowledgeUpdatedAt:stale,createdAt:Date.now()});
+  return ctx.db.insert('repositories',{organizationId,fullName:'fixture/live',defaultBranch:'main',enabled:true,indexStatus:'ready',knowledgeStatus:'queued',knowledgeUpdatedAt:stale,createdAt:Date.now()});
+ });
+ await t.mutation(internal.recovery.sweep,{});
+ await t.mutation(internal.recovery.sweep,{});
+ const scheduled=await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect());
+ expect(scheduled.some(s=>s.name.includes('knowledgeJobs')&&(s.args[0] as {repositoryId:string}).repositoryId===recoverable)).toBe(true);
+ expect((await t.run(ctx=>ctx.db.query('repositories').withIndex('by_knowledge_status',q=>q.eq('knowledgeStatus','waiting_for_index')).collect())).length).toBe(100);
+ vi.useRealTimers();
+});

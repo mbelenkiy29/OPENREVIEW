@@ -8,8 +8,8 @@ const modules=import.meta.glob('../convex/**/*.ts');
 const secret='integration-session-secret-at-least-32-characters';
 beforeEach(()=>{process.env.SESSION_SECRET=secret;process.env.SERVICE_SECRET='integration-service-secret';});
 
-async function setup(){
- const t=convexTest(schema,modules);
+async function setup(limits?:{documentsRead:number;bytesRead:number}){
+ const t=convexTest({schema,modules,...(limits?{transactionLimits:limits}:{})});
  const userId=await t.mutation(api.users.login,{secret:'integration-service-secret',githubId:95,login:'alice',avatar:''});
  const token=await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(userId).setExpirationTime('1h').sign(new TextEncoder().encode(secret));
  const organizationId=await t.mutation(api.users.createOrganization,{token,name:'Reactions'});
@@ -74,7 +74,18 @@ test('a reviewed PR behind 1,000 never-synced unreviewed open PRs is still picke
   for(let n=100;n<1100;n++)await ctx.db.insert('pullRequests',{organizationId,repositoryId:repo._id,number:n,title:'Imported',author:'bob',url:'u',headSha:'h'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:Date.now()});
  });
  expect(await t.mutation(internal.reactions.due,{limit:50})).toEqual([{repositoryId:repo._id,prNumber:3}]);
- expect((await t.run(ctx=>ctx.db.query('pullRequests').withIndex('by_repo_number',q=>q.eq('repositoryId',repo._id).eq('number',100)).unique()))?.reactionsSyncedAt).toBeUndefined();
+ expect((await t.run(ctx=>ctx.db.query('pullRequests').withIndex('by_repo_number',q=>q.eq('repositoryId',repo._id).eq('number',100)).unique()))?.reactionsDueAt).toBeUndefined();
+});
+
+test('due stays under the 8MB read limit when queued PRs carry many large reviews',async()=>{
+ const {t,organizationId,repo}=await setup({documentsRead:16384,bytesRead:8*1024*1024});
+ await t.run(async ctx=>{
+  for(let n=200;n<250;n++){
+   await ctx.db.insert('pullRequests',{organizationId,repositoryId:repo._id,number:n,title:'Busy',author:'bob',url:'u',headSha:'h'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:Date.now(),reactionsDueAt:Date.now()-1});
+   for(let i=0;i<10;i++)await ctx.db.insert('reviews',{organizationId,repositoryId:repo._id,prNumber:n,headSha:'h'.repeat(40),status:'completed',mode:'standard',attempts:1,summary:'x'.repeat(22000),createdAt:Date.now(),updatedAt:Date.now()});
+  }
+ });
+ expect(await t.mutation(internal.reactions.due,{limit:50})).toHaveLength(50);
 });
 
 test('queued PRs without a completed review in the last 7 days leave the queue',async()=>{

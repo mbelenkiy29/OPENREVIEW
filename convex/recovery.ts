@@ -22,7 +22,9 @@ export const sweep = internalMutation({
     // Native conversation recovery runs in its own transaction so a large P4 backlog never stalls every tenant's sweep.
     await ctx.scheduler.runAfter(0, internal.p4Conversations.recover, {});
     for (const knowledgeStatus of ["queued", "generating"]) for (const repo of await ctx.db.query("repositories").withIndex("by_knowledge_status", (q) => q.eq("knowledgeStatus", knowledgeStatus)).take(100))
-      if (
+      // A failed or cancelled index never starts knowledge, so park it like finishIndex does; left queued it would fill this window.
+      if (repo.indexStatus === "failed" || repo.indexStatus === "cancelled") await ctx.db.patch(repo._id, { knowledgeStatus: "waiting_for_index" });
+      else if (
         repo.indexStatus === "ready" &&
         (repo.knowledgeUpdatedAt ?? 0) < stale
       ) {

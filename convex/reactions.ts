@@ -83,8 +83,12 @@ export const due = internalMutation({ args: { limit: v.number() }, handler: asyn
   // gte(0) skips rows without reactionsDueAt, which sort below every number.
   for (const pr of await ctx.db.query("pullRequests").withIndex("by_reactions_due", (q) => q.gte("reactionsDueAt", 0).lt("reactionsDueAt", now)).take(300)) {
     if (out.length >= Math.min(50, a.limit)) break;
-    const reviews = await ctx.db.query("reviews").withIndex("by_pr", (q) => q.eq("repositoryId", pr.repositoryId).eq("prNumber", pr.number)).order("desc").take(20);
-    const live = pr.state === "open" && reviews.some((r) => r.status === "completed" && !r.nativeP4 && r.createdAt >= since);
+    // Review rows are large (summaries, runtime output): stream newest-first and stop at the first answer.
+    let live = false, n = 0;
+    if (pr.state === "open") for await (const r of ctx.db.query("reviews").withIndex("by_pr", (q) => q.eq("repositoryId", pr.repositoryId).eq("prNumber", pr.number)).order("desc")) {
+      if (r.createdAt < since || ++n > 20) break;
+      if (r.status === "completed" && !r.nativeP4) { live = true; break; }
+    }
     await ctx.db.patch(pr._id, { reactionsDueAt: live ? now + 3600000 : undefined });
     if (live) out.push({ repositoryId: pr.repositoryId, prNumber: pr.number });
   }
