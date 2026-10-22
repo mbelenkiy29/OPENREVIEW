@@ -22,10 +22,11 @@ test("severities map to P0–P3 with text and emoji only; security findings get 
   assert.deepEqual(findingTags({}), []);
 });
 
-test("inline comments lead with the priority badge, then the Security tag, severity and confidence", () => {
+test("inline comments lead with the priority badge and a bold title, then the Security tag (Greptile's shape)", () => {
   const security = finding("high", "security", "Deleted accounts stay authorized");
-  for (const style of ["detailed", "concise"]) assert.match(findingComment(security, style), /^\*\*🟠 P1 · Deleted accounts stay authorized\*\* · 🔒 Security \(high, 95% confidence\)\n/);
-  assert.match(findingComment(finding("medium", "correctness", "Rounding drops a cent")), /^\*\*🟡 P2 · Rounding drops a cent\*\* \(medium, 95% confidence\)\n/);
+  for (const style of ["detailed", "concise"]) assert.match(findingComment(security, style), /^🟠 P1 \*\*Deleted accounts stay authorized\*\* · 🔒 Security\n\n/);
+  assert.match(findingComment(finding("medium", "correctness", "Rounding drops a cent")), /^🟡 P2 \*\*Rounding drops a cent\*\*\n\n/);
+  assert.doesNotMatch(findingComment(security), /% confidence|\*\*Impact:\*\*|Evidence:/, "confidence, impact label and evidence stay on the dashboard");
   assert.doesNotMatch(findingComment(security), /<img|https?:\/\/[^\s)]*\.(?:svg|png)/, "no hosted badge images");
 });
 

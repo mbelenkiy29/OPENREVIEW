@@ -16,7 +16,7 @@ test("the footer names the review number and each provider's re-run command", ()
   assert.match("@openreview review again", /^@openreview\s+(?:re-review|rereview|review\s+again)[.!]?$/i);
 });
 
-test("GitHub renders the footer above the dashboard links and the last reviewed commit", async (t) => {
+test("GitHub renders one small footer line: review count, last reviewed commit, dashboard link, re-run command", async (t) => {
   t.mock.method(console, "log", () => {});
   process.env.APP_URL = "https://review.example.com";
   const head = "a".repeat(40);
@@ -31,7 +31,7 @@ test("GitHub renders the footer above the dashboard links and the last reviewed 
   });
   try {
     await new Github("fixture", undefined, async () => "openreview").publish("o/r", 1, head, "Summary body" + reviewFooter(4, "other"), [], "review-4");
-    assert.match(comments[0].body, /Summary body\n\nReview 4 on this pull request · Comment `@openreview review` to re-run it\.\n\n\[View review \/ Re-review\]\(https:\/\/review\.example\.com\/dashboard\/pulls\/review-4\)\n\n\*\*Last reviewed commit:\*\*/);
+    assert.match(comments[0].body, /Summary body\n\n<sub>Reviews \(4\) · Last reviewed commit: \[`aaaaaaa`\]\([^)]+\) · \[View in OpenReview\]\(https:\/\/review\.example\.com\/dashboard\/pulls\/review-4\) · Comment `@openreview review` to re-run · Reviewed by OpenReview<\/sub>/);
     assert.equal(reviewLinks("review-4", 0), "\n\n[View review / Re-review](https://review.example.com/dashboard/pulls/review-4)");
   } finally { delete process.env.APP_URL; }
 });

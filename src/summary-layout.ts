@@ -1,13 +1,12 @@
 import {summaryLabels} from "./review-settings";
 
-// Publication layout for hosts that render HTML disclosure widgets (GitHub). The stored summary stays
-// plain headings, which is what the dashboard and the other providers show. Here the confidence reason
-// moves under the verdict line, the overview and issues come next, then the open diagram, then the
-// collapsed details (the coding-agent prompt first), so a reader sees the verdict and issues first.
-const collapsed = new Set<string>([summaryLabels.affectedAreas, summaryLabels.agentPrompt, summaryLabels.risk, summaryLabels.resolved, summaryLabels.skipped, summaryLabels.testSource, "Test execution", "Coverage"]);
-const open = new Set<string>([summaryLabels.diagram]);
-// The review footer (see reviewFooter) and any tip after it stay outside the collapsed sections.
-const footer = /\n\n(?:Review \d+ on this pull request · )?(?:Comment `[^`\n]+` to re-run it|Re-run it from the dashboard)\.[\s\S]*$/;
+// GitHub publication layout, in the shape of Greptile's PR summary: a "Confidence Score: N/5" heading with the
+// verdict and its reason, a folded Summary, the issues, the open diagram, everything else folded into one
+// "More details" block, then one small footer line. The stored summary stays plain headings, which is what the
+// dashboard and the other providers show.
+const shown = new Set<string>([summaryLabels.findings, summaryLabels.requirements, "Outside the changed code"]);
+// The review footer (see reviewFooter) and any tip after it.
+const footer = /\n\n(?:Review (\d+) on this pull request · )?(Comment `[^`\n]+` to re-run it|Re-run it from the dashboard)\.([\s\S]*)$/;
 
 // Model text outside code fences must not open or close a disclosure widget.
 function escapeDisclosure(body: string) {
@@ -18,30 +17,29 @@ function escapeDisclosure(body: string) {
     return fence ? line : line.replace(/<(\/?)(details|summary)/gi, "&lt;$1$2");
   }).join("\n");
 }
+const fold = (label: string, body: string, open = false) => `<details${open ? " open" : ""}><summary><h3>${label}</h3></summary>\n\n${escapeDisclosure(body)}\n\n</details>`;
 
-export function disclosureLayout(summary: string) {
-  const tail = summary.match(footer)?.[0] ?? "";
-  const [verdict, ...chunks] = summary.slice(0, summary.length - tail.length).split(/\n\n(?=### )/);
-  let head = verdict;
-  const blocks: string[] = [], shown: string[] = [], folded: string[] = [];
+// footerItems go on the footer line after the review count (commit and dashboard links).
+export function disclosureLayout(summary: string, footerItems: readonly string[] = []) {
+  const tail = summary.match(footer);
+  const [verdictText, ...chunks] = summary.slice(0, tail?.index ?? summary.length).split(/\n\n(?=### )/);
+  const verdict = verdictText.match(/^\*\*([^*\n]+)\*\*(?: · Confidence score \*\*(\d)\/5\*\*)?$/);
+  let score = verdict?.[2], reason = "", overview = "", diagram = "";
+  const main: string[] = [], more: string[] = [];
   for (const chunk of chunks) {
     const newline = chunk.indexOf("\n");
     const label = (newline < 0 ? chunk : chunk.slice(0, newline)).slice(4).trim();
     const body = newline < 0 ? "" : chunk.slice(newline + 1);
-    if (label === summaryLabels.score) {
-      // "**N/5** — reason": the score is already on the verdict line, so only the reason moves up.
-      const reason = body.replace(/^\*\*\d\/5\*\* — /, "");
-      if (/Confidence score \*\*\d\/5\*\*/.test(head) && reason !== body) head += "\n\n" + reason;
-      else blocks.push(chunk);
-      continue;
-    }
-    const widget = `<details${open.has(label) ? " open" : ""}><summary><strong>${label}</strong></summary>\n\n${escapeDisclosure(body)}\n\n</details>`;
-    if (open.has(label)) shown.push(widget);
-    else if (label === summaryLabels.agentPrompt) folded.unshift(widget);
-    else if (collapsed.has(label)) folded.push(widget);
-    else blocks.push(chunk);
+    const scored = label === summaryLabels.score ? body.match(/^\*\*(\d)\/5\*\* — ([\s\S]*)$/) : null;
+    if (scored) { score ??= scored[1]; reason = scored[2]; }
+    else if (label === summaryLabels.overview) overview = body;
+    else if (label === summaryLabels.diagram) diagram = body.replace(/^```mermaid\n/, "```mermaid\n%%{init: {'theme': 'neutral'}}%%\n");
+    else if (shown.has(label)) main.push(chunk);
+    else more.push(chunk);
   }
-  return [head, ...blocks, ...shown, ...folded].join("\n\n") + tail;
+  const head = (score ? `<h2>Confidence Score: ${score}/5</h2>` : "<h2>OpenReview</h2>") + "\n\n" + (verdict ? `**${verdict[1]}.**${reason ? " " + escapeDisclosure(reason) : ""}` : verdictText);
+  const line = [tail?.[1] ? `Reviews (${tail[1]})` : "", ...footerItems, tail ? tail[2].replace(/ it$/, "") : "", "Reviewed by OpenReview"].filter(Boolean).join(" · ");
+  return [head, overview && fold("Summary", overview), ...main, diagram && fold("Diagram", diagram, true), more.length ? fold("More details", more.join("\n\n")) : "", `<sub>${line}</sub>`].filter(Boolean).join("\n\n") + (tail?.[3] ?? "");
 }
 
 // Each issue row links to its inline thread when the thread is known; otherwise the token is dropped.

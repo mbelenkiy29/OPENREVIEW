@@ -1,7 +1,7 @@
 import {changeMetadataSchema,catalogPageSize,numberedPage,validateChangePage,type ChangeMetadata,type ChangePage} from "./change-metadata";
-import { fixHandoffLink, safeFixBranch } from "./fix-command";
+import { fixAgentButtons, safeFixBranch } from "./fix-command";
 import {githubWebOrigin} from "./github-enterprise";
-import { reviewLinks, inlineFindings } from "./review-summary";
+import { reviewLinkItems, inlineFindings } from "./review-summary";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { repositorySourceUrl } from "./source-url";
 import { importPKCS8, SignJWT } from "jose";
@@ -45,7 +45,7 @@ const summaryPointer = "## OpenReview\n\nThe review summary for this pull reques
 // Where the review summary goes on GitHub: the pull request description (between hidden markers,
 // the author's text kept) or one issue comment (the default here; review settings choose). Both are
 // edited in place on every review.
-// fixLabel: the inline "Fix with …" link text, from the workspace's default fix agent.
+// fixLabel: the inline "Fix with …" link text on hosts with a single fix link (GitHub shows one per agent instead).
 export type PublishOptions = { placement?: "description" | "comment"; fixLabel?: string };
 // GitHub rejects pull request bodies longer than 65,536 characters; past that the comment is used.
 const descriptionLimit = 65000;
@@ -685,7 +685,7 @@ export class Github {
           line: range.end,
           side: "RIGHT",
           ...(range.start < range.end ? { start_line: range.start, start_side: "RIGHT" } : {}),
-          body: findingComment(f, style, { syntax: "github", start: range.start, end: range.end }, { agentPrompt: true }) + fixHandoffLink(process.env.APP_URL, marker, f.fingerprint, options.fixLabel),
+          body: findingComment(f, style, { syntax: "github", start: range.start, end: range.end }, { agentPrompt: true }) + fixAgentButtons(process.env.APP_URL, marker, f.fingerprint),
         };
       });
       const result = await this.request(
@@ -707,8 +707,8 @@ export class Github {
     await current();
     const commit = `${githubWebOrigin(this.base)}/${repository.split("/").map(encodeURIComponent).join("/")}/commit/${sha}`;
     const threads = summary.includes("<!-- openreview-thread:") ? await this.findingThreads(repository, number, publisher) : new Map<string, string>();
-    const layout = threadLinks(disclosureLayout(summary), (fingerprint) => threads.get(fingerprint));
-    const body = `## OpenReview\n\n${layout}${reviewLinks(marker,unresolvedCount)}\n\n**Last reviewed commit:** [\`${sha.slice(0, 7)}\`](${commit})\n\n${summaryMarker}\n<!-- openreview:${marker} -->`;
+    const layout = threadLinks(disclosureLayout(summary, [`Last reviewed commit: [\`${sha.slice(0, 7)}\`](${commit})`, ...reviewLinkItems(marker, unresolvedCount, "View in OpenReview")]), (fingerprint) => threads.get(fingerprint));
+    const body = `${layout}\n\n${summaryMarker}\n<!-- openreview:${marker} -->`;
     const note = (options.placement === "description" && await this.upsertDescriptionSummary(repository, number, body, publisher, description)) || await this.upsertSummary(repository, number, body, publisher, description);
     await current();
     return review ?? { id: note.id, reused: note.reused, comments: [] };

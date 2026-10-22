@@ -448,7 +448,7 @@ test("summary outcomes must match recorded execution rather than command startup
   assert.equal(reviewSummarySchema({...evidence,exitCode:1}).safeParse({summary:"The tests did not pass; test source adds a regression case."}).success,true);
 });
 
-test("comment style changes evidence formatting while preserving impact, remediation and identity", () => {
+test("comment style: detailed reads problem then impact then fix, concise keeps first sentences; both keep identity", () => {
   const finding = {
     ...candidate,
     agent: "security",
@@ -457,13 +457,12 @@ test("comment style changes evidence formatting while preserving impact, remedia
   };
   const detailed = findingComment(finding, "detailed"),
     concise = findingComment(finding, "concise");
-  assert.ok(detailed.includes("```"));
-  assert.ok(!concise.includes("```"));
+  assert.ok(detailed.includes(finding.description.trim() + " " + finding.impact), "impact follows the description in one paragraph");
+  assert.ok(!concise.includes(finding.impact));
   for (const body of [detailed, concise]) {
-    assert.ok(body.includes(finding.impact));
-    assert.ok(body.includes(finding.suggestedFix));
+    assert.ok(body.includes(finding.suggestedFix.split(/(?<=[.!?])\s/)[0]));
     assert.ok(body.includes(finding.fingerprint));
-    assert.ok(body.includes("Evidence:"));
+    assert.ok(!body.includes("Evidence:") && !body.includes("```"), "the comment sits on the cited lines, so evidence is not quoted again");
   }
 });
 

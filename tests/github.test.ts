@@ -107,7 +107,7 @@ test("carried findings retain Fix All without posting duplicate inline comments"
   // No inline findings: no review is created, only the summary comment (edited in place later).
   assert.ok(posted);assert.equal(posted.comments,undefined);assert.match(posted.body,/<!-- openreview:summary -->/);
   assert.match(posted.body,/\[Fix All\]\(https:\/\/review.example.com\/fix\/latest-review\)/);
-  assert.equal((posted.body.match(/View review \/ Re-review/g)??[]).length,1);
+  assert.equal((posted.body.match(/View in OpenReview/g)??[]).length,1);
   await github.publish("owner/repo",1,sha,"No unresolved findings.",[],"clean-review","detailed",undefined,0);
   assert.ok(!posted.body.includes("[Fix All]"));
  }finally{if(previous===undefined)delete process.env.APP_URL;else process.env.APP_URL=previous;}

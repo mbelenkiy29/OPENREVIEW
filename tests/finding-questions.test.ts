@@ -28,7 +28,7 @@ test("a finding may carry one short question for the author, rendered under the 
   assert.equal(findingSchema.safeParse({ ...candidate, question: "x".repeat(301) }).success, false);
   assert.equal(findingSchema.safeParse({ ...candidate, question: "why" }).success, false);
   const comment = findingComment({ ...base, question: "Should @alice confirm whether\nguests count as active?" });
-  assert.match(comment, /\*\*Fix:\*\* Require a present user and active === true\.\n\n\*\*Question for the author:\*\* Should @​alice confirm whether guests count as active\?\n\nEvidence:/);
+  assert.match(comment, /Require a present user and active === true\.\n\n\*\*Question for the author:\*\* Should @​alice confirm whether guests count as active\?\n\n<!-- openreview-finding:/);
   assert.doesNotMatch(findingComment(base), /Question for the author/);
 });
 
