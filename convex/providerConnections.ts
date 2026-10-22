@@ -120,7 +120,7 @@ export const originLifecycle=internalMutation({args:{id:v.id("providerConnection
 export const claimEvent=internalMutation({args:{id:v.id("providerEvents")},handler:async(ctx,a)=>{
  const event=await ctx.db.get(a.id);if(!event||event.status==="completed"||event.bodyDeletedAt)return false;
  if(event.status==="processing"&&(event.updatedAt??event.createdAt)>Date.now()-15*60000)return false;
- if(event.attempts>=3){await ctx.db.patch(event._id,{status:"failed",error:"Provider event recovery exhausted",updatedAt:Date.now()});return false;}
+ if(event.attempts>=maxWebhookAttempts){await ctx.db.patch(event._id,{status:"failed",error:"Provider event recovery exhausted",updatedAt:Date.now()});return false;}
  await ctx.db.patch(event._id,{status:"processing",attempts:event.attempts+1,updatedAt:Date.now()});
  await ctx.scheduler.runAfter(15*60000+1,internal.providerJobs.event,a);
  return true;

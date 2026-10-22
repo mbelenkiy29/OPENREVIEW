@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { audit, authenticated, authorize, service } from "./auth";
 import { apiScopes } from "../src/api-scopes";
+import { rateLimit } from "./rateLimit";
 
 // OAuth state for the remote MCP endpoint. The Next.js routes generate secrets and hash them; only the
 // hashes reach the database. Service functions take the backend secret; consent and connection
@@ -20,7 +21,11 @@ export const saveClient = mutation({ args: { secret: v.string(), clientId: v.str
   const existing = await ctx.db.query("oauthClients").withIndex("by_client", (q) => q.eq("clientId", a.clientId)).unique();
   const data = { name: a.name.slice(0, 100), redirectUris: a.redirectUris.slice(0, 10), kind: a.kind, ...(a.kind === "metadata" ? { fetchedAt: Date.now() } : {}) };
   if (existing) { if (existing.kind !== a.kind) throw new Error("Client id already in use"); await ctx.db.patch(existing._id, data); }
-  else await ctx.db.insert("oauthClients", { clientId: a.clientId, ...data, createdAt: Date.now() });
+  else {
+    // Registration is unauthenticated, so cap new rows deployment-wide.
+    if (a.kind === "registered") await rateLimit(ctx, "oauth-register", 30);
+    await ctx.db.insert("oauthClients", { clientId: a.clientId, ...data, createdAt: Date.now() });
+  }
 } });
 
 // Consent: the signed-in user approves a client for one workspace; scopes are bounded by their role.

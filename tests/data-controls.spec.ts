@@ -307,3 +307,42 @@ test("review retention deletes a review's children 500 at a time and the review 
   expect(await t.mutation(internal.dataControls.retention, { organizationId })).toMatchObject({ reviews: 1, more: false });
   expect(await state()).toEqual([false, 0]);
 });
+
+// Runs one purge step by hand from a receipt parked on it, until the purge moves to the next step.
+async function purgeStep(t: ReturnType<typeof convexTest>, organizationId: Id<"organizations">, requestedBy: Id<"users">, table: TableNames) {
+  const step = purgePlan.findIndex((s) => s.table === table), now = Date.now();
+  const deletionId = await t.run((ctx) => ctx.db.insert("workspaceDeletions", { organizationId, name: "Big", requestedBy, requestedAt: now, scheduledFor: now, status: "purging", step, counts: {} }));
+  for (let i = 0; i < 100 && (await t.run((ctx) => ctx.db.get(deletionId)))!.step === step; i++) await t.mutation(internal.dataControls.purge, { deletionId });
+  expect((await t.run((ctx) => ctx.db.get(deletionId)))!.step).toBe(step + 1);
+}
+
+test("the purge deletes identity grants of every repository, however many the workspace has", async () => {
+  const t = convexTest(schema, modules);
+  const userId = await t.mutation(api.users.login, { secret: "data-service", githubId: 531, login: "u531", avatar: "" }), now = Date.now();
+  const { organizationId, grantId } = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Big", createdAt: now }), other = await ctx.db.insert("organizations", { name: "Other", createdAt: now });
+    const connectionId = await ctx.db.insert("providerConnections", { organizationId: other, kind: "gitlab", instance: "https://gitlab.com", name: "g", credentials: "c", webhookSecret: "w", active: true, createdAt: now });
+    let repositoryId!: Id<"repositories">;
+    for (let i = 0; i < 2001; i++) repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: `big/r${i}`, defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: now });
+    const grantId = await ctx.db.insert("providerIdentityGrants", { repositoryId, connectionId, userId, digest: "d", tokenHash: "h", expiresAt: now, consumed: false });
+    return { organizationId, grantId };
+  });
+  await purgeStep(t, organizationId, userId, "providerIdentityGrants");
+  expect(await t.run((ctx) => ctx.db.get(grantId))).toBeNull();
+});
+
+test("the purge deletes skipped-file rows of every index job, not only a repository's first 500", async () => {
+  const t = convexTest(schema, modules);
+  const userId = await t.mutation(api.users.login, { secret: "data-service", githubId: 532, login: "u532", avatar: "" }), now = Date.now();
+  const organizationId = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Big", createdAt: now });
+    const repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: "big/app", defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: now });
+    for (let i = 0; i < 501; i++) {
+      const jobId = await ctx.db.insert("indexJobs", { organizationId, repositoryId, sha: "a".repeat(40), status: "done", attempts: 1, processed: 1, total: 1, changed: 1, createdAt: now, updatedAt: now });
+      if (i === 500) await ctx.db.insert("indexSkippedFiles", { jobId, path: "big.bin" });
+    }
+    return organizationId;
+  });
+  await purgeStep(t, organizationId, userId, "indexSkippedFiles");
+  expect(await t.run((ctx) => ctx.db.query("indexSkippedFiles").collect())).toEqual([]);
+});

@@ -6,6 +6,11 @@ import schema from '../convex/schema';
 import {api,internal} from '../convex/_generated/api';
 import type {Id} from '../convex/_generated/dataModel';
 const modules=import.meta.glob('../convex/**/*.ts');
+// The magic-link route runs against convex-test; Next's request scope and backend() are faked.
+const holder=vi.hoisted(()=>({t:undefined as unknown,jar:new Map<string,string>()}));
+vi.mock('next/headers',()=>({cookies:async()=>({get:(n:string)=>holder.jar.has(n)?{value:holder.jar.get(n)}:undefined,set:(n:string,v:string)=>{holder.jar.set(n,v);},delete:(n:string)=>{holder.jar.delete(n);}}),headers:async()=>new Headers({'user-agent':'vitest'})}));
+vi.mock('../src/server',()=>({backend:()=>holder.t,signSession:async()=>'session-jwt',cookieOptions:{httpOnly:true,secure:false,sameSite:'lax',path:'/'},origin:()=>'https://review.example.com'}));
+import {GET as openMagicLink,POST as confirmMagicLink} from '../app/api/auth/email/verify/route';
 const secret='identity-session-secret-at-least-32-characters',svc='identity-service';
 beforeEach(()=>{vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date']});vi.setSystemTime(Date.UTC(2026,9,14,12));Object.assign(process.env,{SESSION_SECRET:secret,SERVICE_SECRET:svc,APP_URL:'https://review.example.com'});});
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();delete process.env.RESEND_API_KEY;delete process.env.EMAIL_FROM;});
@@ -171,4 +176,24 @@ test('a GitHub-login invitation is only shown to and accepted by a user who sign
  const alice=await signIn(t,{provider:'github',providerUserId:'503',login:'alice',emailVerified:false});
  expect((await t.query(api.users.me,{token:alice.token})).invitations.map(i=>i._id)).toEqual([invitationId]);
  expect(await t.mutation(api.users.acceptInvitation,{token:alice.token,invitationId})).toBe(organizationId);
+});
+
+test('opening a magic link only shows a confirm button; the same-origin POST consumes it and starts the session',async()=>{
+ const t=convexTest(schema,modules);holder.t=t;holder.jar.clear();
+ process.env.RESEND_API_KEY='re_fixture';process.env.EMAIL_FROM='OpenReview <noreply@example.com>';
+ let text='';vi.spyOn(globalThis,'fetch').mockImplementation(async(_u:string|URL|Request,init?:RequestInit)=>{text=JSON.parse(String(init?.body)).text;return Response.json({id:'m1'});});
+ await t.action(api.identityJobs.requestMagicLink,{secret:svc,email:'scan@example.com',next:'/settings'});
+ const page=await openMagicLink(new Request(/https:\/\/\S+\/api\/auth\/email\/verify\?\S+/.exec(text)![0]));
+ const html=await page.text(),token=/name="token" value="([^"]+)"/.exec(html)![1];
+ // A prefetch (mail scanner) or a planted link leaves the token unused and signs no one in.
+ expect([page.status,page.headers.get('content-type')]).toEqual([200,'text/html; charset=utf-8']);
+ expect((await t.run(ctx=>ctx.db.query('loginTokens').collect()))[0].usedAt).toBeUndefined();
+ expect(holder.jar.has('openreview_session')).toBe(false);
+ const confirm=(origin:string)=>confirmMagicLink(new Request('https://review.example.com/api/auth/email/verify',{method:'POST',headers:{origin},body:new URLSearchParams({token,next:'/settings'})}));
+ expect((await confirm('https://evil.example')).headers.get('location')).toBe('https://review.example.com/login?error=signin');
+ expect(holder.jar.has('openreview_session')).toBe(false);
+ const ok=await confirm('https://review.example.com');
+ expect([ok.status,ok.headers.get('location'),holder.jar.get('openreview_session')]).toEqual([303,'https://review.example.com/settings','session-jwt']);
+ expect((await t.run(ctx=>ctx.db.query('loginTokens').collect()))[0].usedAt).toBeDefined();
+ expect((await confirm('https://review.example.com')).headers.get('location')).toBe('https://review.example.com/login?error=link');
 });

@@ -293,7 +293,10 @@ test("provider event leases prevent duplicate claims and bound recovery after a 
  expect(await t.mutation(internal.providerConnections.claimEvent,{id})).toBe(false);
  await t.run(ctx=>ctx.db.patch(id,{updatedAt:Date.now()-16*60000}));
  expect(await t.mutation(internal.providerConnections.claimEvent,{id})).toBe(true);
- await t.run(ctx=>ctx.db.patch(id,{attempts:3,updatedAt:Date.now()-16*60000}));
+ // Claims follow the same six-attempt retry window as event failures (webhookRetryDelay).
+ await t.run(ctx=>ctx.db.patch(id,{attempts:5,updatedAt:Date.now()-16*60000}));
+ expect(await t.mutation(internal.providerConnections.claimEvent,{id})).toBe(true);
+ await t.run(ctx=>ctx.db.patch(id,{attempts:6,updatedAt:Date.now()-16*60000}));
  expect(await t.mutation(internal.providerConnections.claimEvent,{id})).toBe(false);
  expect((await t.run(ctx=>ctx.db.get(id)))?.status).toBe("failed");
 });

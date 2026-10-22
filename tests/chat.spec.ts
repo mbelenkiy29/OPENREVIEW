@@ -167,3 +167,15 @@ test('a thread longer than one page answers and shows its newest question, not a
  expect(messages.slice(-2).map(m=>[m.role,m.content])).toEqual([['user','The newest question'],['assistant','']]);
  expect(messages.at(-1)?._id).toBe(messageId);
 });
+
+test('deleting a thread longer than one batch removes every message and then the thread',async()=>{
+ const {t,alice,org,shop}=await setup();
+ const threadId=await t.run(async ctx=>{
+  const threadId=await ctx.db.insert('chatThreads',{organizationId:org,userId:alice.id as Id<'users'>,title:'Long',repositoryIds:[shop._id],createdAt:0,updatedAt:0});
+  for(let i=0;i<501;i++)await ctx.db.insert('chatMessages',{organizationId:org,threadId,userId:alice.id as Id<'users'>,role:i%2?'assistant':'user',content:'Old '+i,status:'completed',repositoryIds:[shop._id],createdAt:i,updatedAt:i});
+  return threadId;
+ });
+ await t.mutation(api.chat.deleteThread,{token:alice.token,threadId});
+ await t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(await t.run(async ctx=>[await ctx.db.get(threadId),(await ctx.db.query('chatMessages').withIndex('by_thread',q=>q.eq('threadId',threadId)).collect()).length])).toEqual([null,0]);
+});

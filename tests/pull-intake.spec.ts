@@ -207,3 +207,10 @@ test("the Open tab reads open changes through the state index, not by scanning m
  expect(closed.capped).toBe(true);expect(closed.page.map(p=>p.number)).toEqual([4002,4001,4000,3999,3998,3997,3996,3995,3994,3993]);
  expect((await s.t.query(api.pulls.browse,{...args,repositoryId:s.repo._id,state:"open"})).page.map(p=>p.number)).toEqual([4003,1]);
 });
+test("a list cut off at the read limit is reported capped even when the author filter drops most rows",async()=>{
+ const s=await setup();
+ const base={organizationId:s.organizationId,repositoryId:s.repo._id,title:"Change",url:s.observation.url,headSha:s.observation.headSha,baseSha:s.observation.baseSha,state:"open",updatedAt:1};
+ await s.t.run(async ctx=>{for(let number=1;number<=1001;number++)await ctx.db.insert("pullRequests",{...base,number,author:number%100?"bob":"alice"});});
+ const alice=await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,author:"alice",page:1,pageSize:30});
+ expect(alice.capped).toBe(true);expect(alice.total).toBeLessThanOrEqual(10);
+});

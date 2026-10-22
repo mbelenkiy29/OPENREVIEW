@@ -529,7 +529,8 @@ export const review = internalAction({
       const cached = new Map((await indexedFiles(ctx, repo._id, paths.filter((path) => head.has(path)))).map((f) => [f.path, f]));
       for (const path of paths) {
         const entry = head.get(path);
-        if (!entry || bytes > 500000) continue;
+        // Known-oversized files would be refused after download anyway.
+        if (!entry || bytes > 500000 || (entry.size ?? 0) > 200000) continue;
         const old = cached.get(path);
         const blob =
           old?.sha === entry.sha ? await ctx.storage.get(old.storageId) : null;

@@ -132,6 +132,20 @@ test('a failed webhook is retried for about half an hour; recovery restarts stuc
  vi.useRealTimers();
 });
 
+test('recovery restarts stuck or never-started provider events, closes old ones and fails exhausted ones',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(Date.UTC(2026,9,14,12));
+ const t=convexTest(schema,modules);
+ const connectionId=await t.run(async ctx=>ctx.db.insert('providerConnections',{organizationId:await ctx.db.insert('organizations',{name:'GitLab shop',createdAt:Date.now()}),kind:'gitlab',instance:'https://gitlab.example',name:'GitLab',credentials:'x',webhookSecret:'',active:true,createdAt:Date.now()}));
+ const insert=(status:string,attempts:number,at:number)=>t.run(ctx=>ctx.db.insert('providerEvents',{connectionId,externalId:`e-${status}-${attempts}-${at}`,body:'{}',status,attempts,createdAt:at,updatedAt:at}));
+ const retries=async(id:string)=>(await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).filter(s=>(s.args[0] as {id?:string}).id===id).length;
+ const old=Date.now()-20*60000,queued=await insert('queued',0,old),stuck=await insert('processing',2,old),fresh=await insert('processing',1,Date.now()),exhausted=await insert('processing',6,old),ancient=await insert('queued',0,Date.now()-2*86400000);
+ await t.mutation(internal.recovery.sweep,{});
+ expect([await retries(queued),await retries(stuck),await retries(fresh),await retries(exhausted),await retries(ancient)]).toEqual([1,1,0,0,0]);
+ expect(await t.run(ctx=>ctx.db.get(exhausted))).toMatchObject({status:'failed',error:'Provider event recovery attempts exhausted'});
+ expect(await t.run(ctx=>ctx.db.get(ancient))).toMatchObject({status:'failed',error:'Too old to replay'});
+ vi.useRealTimers();
+});
+
 test('device pairing is rate limited per caller, so one caller cannot block pairing for everyone',async()=>{
  process.env.SERVICE_SECRET='pair-service';
  const t=convexTest(schema,modules);

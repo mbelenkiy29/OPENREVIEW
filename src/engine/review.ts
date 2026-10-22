@@ -355,6 +355,10 @@ export async function reviewChange(
   for (const f of plausible.sort((a, b) => b.confidence - a.confidence))
     if (!unique.some((u) => overlaps(f, u))) unique.push(f);
     else suppress(f, "Duplicate candidate");
+  // The verifier returns at most 210 decisions, one per candidate; keep the 200 most confident (unique is sorted).
+  const overflow = unique.splice(200);
+  for (const f of overflow) suppress(f, "Verifier capacity: lower-confidence candidate was not verified");
+  if (overflow.length) engineLimits.push(`${overflow.length} lower-confidence candidates exceeded verifier capacity and were not verified`);
   const findings: Finding[] = [];
   const carriedForward: Finding[] = [];
   if (unique.length) {

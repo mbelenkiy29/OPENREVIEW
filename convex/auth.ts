@@ -66,8 +66,16 @@ export async function organizationAccess(ctx:QueryCtx|MutationCtx,userId:Id<"use
     throw new Error("Forbidden");
   return { user, member };
 }
+// Constant-time: fixed-length SHA-256 digests compared with an XOR loop, as convex/http.ts does.
+export function secretMatches(expected: string | undefined, provided: string) {
+  if (!expected) return false;
+  const a = sessionHash(expected), b = sessionHash(provided);
+  let difference = 0;
+  for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return difference === 0;
+}
 export function service(secret: string) {
-  if (!process.env.SERVICE_SECRET || process.env.SERVICE_SECRET !== secret)
+  if (!secretMatches(process.env.SERVICE_SECRET, secret))
     throw new Error("Unauthorized service");
 }
 

@@ -93,3 +93,14 @@ test('snapshot credential rejection terminates without retrying or reporting',as
  catch(error){assert.equal(runtimeWorkerExitCode(error),78);}
  assert.equal(requests,2);
 });
+
+test('ordinary jobs read the whole snapshot before docker starts, so a slow image pull cannot stall the download',async t=>{
+ let drained=false,reported='';
+ t.mock.method(globalThis,'fetch',async(input:URL,options:RequestInit)=>{
+  if(input.pathname.endsWith('claim'))return Response.json({id:'pull-job',headSha:'a'.repeat(40),repository:'fixture/repo',image:'unapproved-image',command:'node --test',timeout:1});
+  if(input.pathname.endsWith('snapshot')){let sent=0;return new Response(new ReadableStream({pull(c){if(++sent>3){drained=true;c.close();}else c.enqueue(new TextEncoder().encode('chunk'));}}));}
+  reported=JSON.parse(String(options.body)).error;return Response.json({ok:true});
+ });
+ await runtimeWorker('http://127.0.0.1:3211','orw_'+'d'.repeat(64),true);
+ assert.match(reported,/pinned/);assert.equal(drained,true);
+});

@@ -52,13 +52,15 @@ export async function runtimeWorker(url:string,credential:string,once=false){
     try{
      const response=await request("snapshot",{id:job.id,lease},executionStop.signal);
      if(!response.body)throw new Error("Missing runtime snapshot");
+     // Buffer before docker starts: an uncached image pull leaves stdin unread until the request timeout aborts it.
+     const snapshot=await snapshotBuffer(response.body);
      if(job.kind==="tests"){
-      const snapshot=await snapshotBuffer(response.body);tests=[];
+      tests=[];
       for(const test of job.tests??[]){
        try{const result=await validateRuntimeArchive(job.image,test.command,job.timeout,job.headSha,Readable.from(snapshot),1,executionStop.signal,{path:test.path,content:test.content});tests.push({fingerprint:test.fingerprint,evidence:{...result,output:result.output.slice(-8000)}});}
        catch(e){if(executionStop.signal.aborted)throw e;tests.push({fingerprint:test.fingerprint,error:e instanceof Error?e.message.slice(0,1000):"Generated test failed to run"});}
       }
-     }else evidence=await validateRuntimeArchive(job.image,job.command,job.timeout,job.headSha,Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),1,executionStop.signal);
+     }else evidence=await validateRuntimeArchive(job.image,job.command,job.timeout,job.headSha,Readable.from(snapshot),1,executionStop.signal);
     }catch(e){
      if(e instanceof RuntimeWorkerCredentialError){credentialError=e;executionStop.abort(e);}
      error=e instanceof Error?e.message.slice(0,1000):"Runtime execution failed";

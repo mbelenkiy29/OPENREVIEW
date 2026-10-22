@@ -72,6 +72,15 @@ export const sweep = internalMutation({
       else if (delivery.createdAt < Date.now() - 6 * 3600000) await ctx.db.patch(delivery._id, { status: "failed", error: "Too old to replay", updatedAt: Date.now() });
       else if (delivery.attempts < maxWebhookAttempts) await ctx.scheduler.runAfter(0, internal.webhookJobs.process, { deliveryId: delivery._id });
       else await ctx.db.patch(delivery._id, { status: "failed", error: "Webhook recovery attempts exhausted", updatedAt: Date.now() });
+    // Non-GitHub provider events get the same recovery: their action can die before marking the event too.
+    for (const status of ["processing", "queued"]) for (const event of await ctx.db
+      .query("providerEvents")
+      .withIndex("by_status", (q) => q.eq("status", status))
+      .take(100))
+      if ((event.updatedAt ?? event.createdAt) >= stale) continue;
+      else if (event.createdAt < Date.now() - 6 * 3600000) await ctx.db.patch(event._id, { status: "failed", error: "Too old to replay", updatedAt: Date.now() });
+      else if (event.attempts < maxWebhookAttempts) await ctx.scheduler.runAfter(0, internal.providerJobs.event, { id: event._id });
+      else await ctx.db.patch(event._id, { status: "failed", error: "Provider event recovery attempts exhausted", updatedAt: Date.now() });
   },
 });
 export const sweepIndexJobs = internalMutation({

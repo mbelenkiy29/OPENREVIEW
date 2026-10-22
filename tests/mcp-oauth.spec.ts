@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { convexTest } from "convex-test";
 import { SignJWT } from "jose";
 import { createHash, randomBytes } from "node:crypto";
@@ -160,4 +160,20 @@ test("MCP OAuth: discovery, client metadata documents, consent, PKCE code exchan
   expect((await rpc(key, initialize)).status).toBe(200);
   const audits = (await t.run((ctx) => ctx.db.query("auditEvents").collect())).map((a) => a.action);
   for (const action of ["oauth.authorized", "oauth.revoked", "oauth.revoked_by_client"]) expect(audits).toContain(action);
+});
+
+test("dynamic registration is unauthenticated, so it is capped at 30 new clients a minute", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(Date.UTC(2026, 9, 21, 12)); onTestFinished(() => { vi.useRealTimers(); });
+  holder.t = convexTest(schema, modules);
+  const reg = async () => (await register(new Request(`${base}/api/oauth/register`, { method: "POST", body: JSON.stringify({ redirect_uris: ["http://localhost:4545/cb"] }) }))).status;
+  for (let i = 0; i < 30; i++) expect(await reg()).toBe(201);
+  expect(await reg()).toBe(400);
+  vi.setSystemTime(Date.UTC(2026, 9, 21, 12, 1));
+  expect(await reg()).toBe(201);
+});
+
+test("service functions accept only the exact backend secret", async () => {
+  const t = convexTest(schema, modules), client = (secret: string) => t.query(api.oauth.client, { secret, clientId: "orc_none" });
+  expect(await client("oauth-service-secret")).toBeNull();
+  for (const wrong of ["oauth-service-secreT", "oauth-service-secret-and-more", ""]) await expect(client(wrong)).rejects.toThrow("Unauthorized service");
 });

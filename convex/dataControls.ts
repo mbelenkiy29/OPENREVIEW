@@ -90,10 +90,16 @@ async function runStep(ctx: MutationCtx, organizationId: Id<"organizations">, st
     // Repositories a page at a time through the cursor, so every repository is reached and each chunk stays bounded.
     const page = await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).paginate({ cursor, numItems: 25 });
     for (const repo of page.page) {
-      let rows: ({ _id: string } & Record<string, unknown>)[] = [];
-      if (step.via === "repo") rows = await byField(ctx, step.table, step.index, "repositoryId", repo._id).take(BATCH);
-      else for (const parent of await byField(ctx, step.parent.table, step.parent.index, "repositoryId", repo._id).take(500)) { rows = await byField(ctx, step.table, step.index, step.field, parent._id).take(BATCH); if (rows.length) break; }
-      if (rows.length) { for (const r of rows) await remove(ctx, step.table, r); return { deleted: rows.length, done: false, ...(cursor ? { cursor } : {}) }; } // more may remain: revisit this page
+      let deleted = 0, parents = 0;
+      if (step.via === "repo") { const rows = await byField(ctx, step.table, step.index, "repositoryId", repo._id).take(BATCH); for (const r of rows) await remove(ctx, step.table, r); deleted = rows.length; }
+      else for (const parent of await byField(ctx, step.parent.table, step.parent.index, "repositoryId", repo._id).take(25)) {
+        const rows = await byField(ctx, step.table, step.index, step.field, parent._id).take(BATCH);
+        for (const r of rows) await remove(ctx, step.table, r);
+        deleted += rows.length;
+        if (rows.length === BATCH) break;
+        await remove(ctx, step.parent.table, parent); parents++; // emptied parent goes now (its own step would), so later chunks reach the next parents instead of re-reading it
+      }
+      if (deleted || parents) return { deleted, done: false, ...(cursor ? { cursor } : {}) }; // more may remain: revisit this page
     }
     return page.isDone ? { deleted: 0, done: true } : { deleted: 0, done: false, cursor: page.continueCursor };
   }
@@ -110,9 +116,10 @@ async function runStep(ctx: MutationCtx, organizationId: Id<"organizations">, st
   }
   // Bounded scans of small tables.
   const page = await table(ctx, step.table).paginate({ cursor, numItems: BATCH });
-  const repos = step.match === "repositoryOrConnection" ? new Set((await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).take(2000)).map((r) => r._id as string)) : null;
-  const connections = step.match === "repositoryOrConnection" ? new Set((await ctx.db.query("providerConnections").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).take(500)).map((c) => c._id as string)) : null;
-  const mine = page.page.filter((r) => step.match === "organizationId" ? r.organizationId === organizationId : repos!.has(r.repositoryId as string) || connections!.has(r.connectionId as string));
+  // Grants are matched by looking up each row's repository and connection, so no workspace is too big to reach.
+  const ours = async (id: unknown) => (await ctx.db.get(id as Id<"repositories"> | Id<"providerConnections">))?.organizationId === organizationId;
+  const mine = [];
+  for (const r of page.page) if (step.match === "organizationId" ? r.organizationId === organizationId : await ours(r.repositoryId) || await ours(r.connectionId)) mine.push(r);
   for (const r of mine) await remove(ctx, step.table, r);
   return page.isDone ? { deleted: mine.length, done: true } : { deleted: mine.length, done: false, cursor: page.continueCursor };
 }

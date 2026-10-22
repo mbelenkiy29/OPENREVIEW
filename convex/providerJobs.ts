@@ -8,6 +8,7 @@ import { z } from "zod";
 import { createHash,timingSafeEqual } from "node:crypto";
 import { decryptCredential,encryptCredential } from "../src/credentials";
 import { verifyWebhook } from "../src/github";
+import { secretMatches } from "./auth";
 import { provider,discover as discoverRepositories } from "./scm";
 import { verifyOriginWebhook } from "../src/origin-auth";
 import { Origin } from "../src/origin";
@@ -56,7 +57,7 @@ export const refreshP4Ticket=action({args:{token:v.string(),connectionId:v.id("p
  await ctx.runMutation(internal.providerConnections.refreshP4,{token:a.token,id:c._id,previousCredentials:c.credentials,credentials:encryptCredential(JSON.stringify(next),c.organizationId+":perforce"),projectIds:projects.map(p=>p.id)});
 }});
 export const originWebhook=action({args:{secret:v.string(),body:v.string(),externalId:v.string(),timestamp:v.string(),signature:v.string()},handler:async(ctx,a)=>{
- if(!process.env.SERVICE_SECRET||a.secret!==process.env.SERVICE_SECRET)throw new Error("Unauthorized service");
+ if(!secretMatches(process.env.SERVICE_SECRET,a.secret))throw new Error("Unauthorized service");
  if(a.body.length>4000000||!process.env.ORIGIN_APP_ID)throw new Error("Invalid Origin webhook configuration or body");
  if(!await verifyOriginWebhook(a.body,a.externalId,a.timestamp,a.signature))throw new Error("Invalid Origin signature");
  const e=originEnvelope.parse(JSON.parse(a.body));
@@ -125,7 +126,7 @@ export const select=action({args:{token:v.string(),connectionId:v.id("providerCo
  await ctx.runMutation(internal.providerConnections.select,{token:a.token,connectionId:c._id,repositories});
 }});
 export const webhook=action({args:{secret:v.string(),connectionId:v.id("providerConnections"),signature:v.string(),externalId:v.string(),eventType:v.optional(v.string()),body:v.string()},handler:async(ctx,a)=>{
- if(!process.env.SERVICE_SECRET||a.secret!==process.env.SERVICE_SECRET)throw new Error("Unauthorized service");
+ if(!secretMatches(process.env.SERVICE_SECRET,a.secret))throw new Error("Unauthorized service");
  if(Buffer.byteLength(a.body)>4000000||!a.externalId||a.externalId.length>200)throw new Error("Invalid delivery");
  const c=await ctx.runQuery(internal.providerConnections.data,{id:a.connectionId});
  if(!["gitlab","gitea","github-enterprise","bitbucket-dc","azure-devops"].includes(c.kind))throw new Error("Webhook verifier unavailable");

@@ -174,7 +174,16 @@ export class Gitlab implements Scm {
   return bytes;
  }
  async tree(repo:string,sha:string){return (await this.paginate(this.prefix(repo)+"/repository/tree?recursive=true&ref="+encodeURIComponent(sha),z.object({id:z.string(),path:z.string(),type:z.string()}))).filter(f=>f.type==="blob").map(f=>({path:f.path,sha:f.id,type:f.type}));}
- async blob(repo:string,path:string,sha:string):Promise<SourceFile>{const file=await this.request(this.prefix(repo)+"/repository/blobs/"+encodeURIComponent(sha),z.object({content:z.string(),encoding:z.literal("base64"),size:z.number()}));if(file.size>200000)return {path,sha,size:file.size,content:""};return {path,sha,content:Buffer.from(file.content,"base64").toString("utf8")};}
+ async blob(repo:string,path:string,sha:string):Promise<SourceFile>{
+  const endpoint=this.prefix(repo)+"/repository/blobs/"+encodeURIComponent(sha)+"/raw";
+  const response=await this.send(this.api+"/api/v4"+endpoint,{headers:{"PRIVATE-TOKEN":this.token},signal:AbortSignal.timeout(60000)});
+  if(!response.ok){await response.body?.cancel();throw new GitlabError(response.status,endpoint);}
+  const reader=response.body?.getReader();if(!reader)throw new Error("GitLab source body missing");
+  // Raw bytes read only up to the 200 KB review limit, so a huge file is never downloaded in full.
+  const chunks:Uint8Array[]=[];let size=0;
+  try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>200000)return {path,sha,size:Number(response.headers.get("content-length"))||size,content:""};chunks.push(value);}}finally{await reader.cancel();}
+  return {path,sha,content:Buffer.concat(chunks).toString("utf8")};
+ }
  async branches(repo:string){const branches=await this.paginate(this.prefix(repo)+"/repository/branches",z.object({name:z.string(),protected:z.boolean(),commit:z.object({id:z.string()})}));return {branches:branches.slice(0,200).map(b=>({name:b.name,sha:b.commit.id,protected:b.protected})),limited:branches.length>200};}
  async changeMetadata(repo:string,number:number):Promise<ChangeMetadata>{
   const pr=await this.request(this.prefix(repo)+"/merge_requests/"+number,prSchema);

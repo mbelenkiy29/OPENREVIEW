@@ -37,9 +37,10 @@ export const browse=query({args:{token:v.string(),organizationId:v.id("organizat
  const lists=await Promise.all((a.state==="closed"?["closed","merged"]:[a.state]).map(state=>read(state).take(limit+1)));
  const scanned=lists.length===1?lists[0]:lists.flat().sort((x,y)=>a.search?0:a.repositoryId?y.number-x.number:y._creationTime-x._creationTime).slice(0,limit+1);
  const author=a.author?.toLowerCase(),reviewer=a.reviewer?.toLowerCase();
- const rows=scanned.filter(pr=>allowed.has(pr.repositoryId)&&(!author||pr.author.toLowerCase()===author)&&(!reviewer||Boolean(pr.requestedReviewers?.some(r=>r.toLowerCase()===reviewer))));
- let matched:PullDoc[]|Awaited<ReturnType<typeof enrich>>=rows.slice(0,limit);
- if(reviewFilters)matched=(await enrich(ctx,viewer._id,rows.slice(0,limit))).filter(pr=>{
+ // Filter only the read window, so `capped` reflects what was read, not what survived the filter.
+ const rows=scanned.slice(0,limit).filter(pr=>allowed.has(pr.repositoryId)&&(!author||pr.author.toLowerCase()===author)&&(!reviewer||Boolean(pr.requestedReviewers?.some(r=>r.toLowerCase()===reviewer))));
+ let matched:PullDoc[]|Awaited<ReturnType<typeof enrich>>=rows;
+ if(reviewFilters)matched=(await enrich(ctx,viewer._id,rows)).filter(pr=>{
   const r=pr.latest&&pr.latest.headSha===pr.headSha?pr.latest:null,score=r?.reviewScore?.value;
   if(a.status&&(a.status==="unreviewed"?r!==null:a.status==="running"?!r||!running.has(r.status):r?.status!==a.status))return false;
   if(a.impact&&r?.approvalAssessment?.risk!==a.impact)return false;
@@ -47,7 +48,7 @@ export const browse=query({args:{token:v.string(),organizationId:v.id("organizat
   return a.scoreMax===undefined||score!==undefined&&score<=a.scoreMax;
  });
  const page=matched.slice((a.page-1)*a.pageSize,a.page*a.pageSize);
- return {page:reviewFilters?page as Awaited<ReturnType<typeof enrich>>:await enrich(ctx,viewer._id,page as PullDoc[]),total:matched.length,capped:rows.length>limit};
+ return {page:reviewFilters?page as Awaited<ReturnType<typeof enrich>>:await enrich(ctx,viewer._id,page as PullDoc[]),total:matched.length,capped:scanned.length>limit};
 }});
 
 export const observationFields={

@@ -90,11 +90,18 @@ export const ask = mutation({ args: { token: v.string(), organizationId: v.id("o
   return { threadId, messageId };
 } });
 
+// Messages go 500 per transaction and the thread only once none are left, so no message outlives its thread.
+async function removeThread(ctx: MutationCtx, threadId: Id<"chatThreads">) {
+  const messages = await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", threadId)).take(500);
+  for (const m of messages) await ctx.db.delete(m._id);
+  if (messages.length < 500) await ctx.db.delete(threadId);
+  else await ctx.scheduler.runAfter(0, internal.chat.deleteThreadRest, { threadId });
+}
 export const deleteThread = mutation({ args: { token: v.string(), threadId: v.id("chatThreads") }, handler: async (ctx, a) => {
   const { thread } = await ownThread(ctx, a.token, a.threadId);
-  for (const m of await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", thread._id)).take(500)) await ctx.db.delete(m._id);
-  await ctx.db.delete(thread._id);
+  await removeThread(ctx, thread._id);
 } });
+export const deleteThreadRest = internalMutation({ args: { threadId: v.id("chatThreads") }, handler: async (ctx, a) => { if (await ctx.db.get(a.threadId)) await removeThread(ctx, a.threadId); } });
 
 // Job inputs: the asking member must still see every selected repository.
 export const job = internalQuery({ args: { messageId: v.id("chatMessages") }, handler: async (ctx, a) => {
