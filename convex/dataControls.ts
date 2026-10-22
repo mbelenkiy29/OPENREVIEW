@@ -87,13 +87,15 @@ async function runStep(ctx: MutationCtx, organizationId: Id<"organizations">, st
     return { deleted: rows.length, done: rows.length < BATCH };
   }
   if (step.via === "repo" || step.via === "repoChild") {
-    for (const repo of await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).take(2000)) {
+    // Repositories a page at a time through the cursor, so every repository is reached and each chunk stays bounded.
+    const page = await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).paginate({ cursor, numItems: 25 });
+    for (const repo of page.page) {
       let rows: ({ _id: string } & Record<string, unknown>)[] = [];
       if (step.via === "repo") rows = await byField(ctx, step.table, step.index, "repositoryId", repo._id).take(BATCH);
       else for (const parent of await byField(ctx, step.parent.table, step.parent.index, "repositoryId", repo._id).take(500)) { rows = await byField(ctx, step.table, step.index, step.field, parent._id).take(BATCH); if (rows.length) break; }
-      if (rows.length) { for (const r of rows) await remove(ctx, step.table, r); return { deleted: rows.length, done: false }; }
+      if (rows.length) { for (const r of rows) await remove(ctx, step.table, r); return { deleted: rows.length, done: false, ...(cursor ? { cursor } : {}) }; } // more may remain: revisit this page
     }
-    return { deleted: 0, done: true };
+    return page.isDone ? { deleted: 0, done: true } : { deleted: 0, done: false, cursor: page.continueCursor };
   }
   if (step.via === "child") {
     const page = await byField(ctx, step.parent.table, step.parent.index, "organizationId", organizationId).paginate({ cursor, numItems: 25 });

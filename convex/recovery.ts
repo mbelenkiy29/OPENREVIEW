@@ -150,6 +150,8 @@ export const sweepReviews = internalMutation({
           else {
             await ctx.db.patch(review._id, {
               status: "queued",
+              // A run stuck in "queued" died before ingesting (which counts attempts itself), so count it here.
+              ...(stage === "queued" ? { attempts: review.attempts + 1 } : {}),
               updatedAt: Date.now(),
               finishedAt: undefined,
               retryScheduledId: undefined,

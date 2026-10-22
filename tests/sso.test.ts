@@ -101,3 +101,21 @@ test("OIDC: discovery, PKCE + state + nonce, and ID-token checks against the IdP
   idToken = await token({});
   await assert.rejects(oidcFinish(config, callback("forged-state"), start), refused(/"state"/));
 });
+
+test("OIDC: owner-supplied issuers and endpoints at private addresses are refused before any request", async (t) => {
+  const issuer = "https://login.example.com", sent: string[] = [];
+  // A discovery document the owner controls, pointing the token endpoint at an internal host.
+  t.mock.method(globalThis, "fetch", async (url: string) => { sent.push(String(url)); return Response.json({ issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: "https://10.0.0.5/token", jwks_uri: `${issuer}/jwks`, response_types_supported: ["code"] }); });
+  const privateAddress = (e: Error & { cause?: Error }) => /private address/.test(`${e.message} ${e.cause?.message ?? ""}`);
+  for (const internal of ["https://10.0.0.5:8443", "https://127.0.0.1", "https://[::1]", "https://169.254.169.254"]) await assert.rejects(oidcConfiguration({ issuer: internal, clientId: "c", clientSecret: "s" }), privateAddress, internal);
+  assert.deepEqual(sent, []);
+  const config = await oidcConfiguration({ issuer, clientId: "c", clientSecret: "s" });
+  assert.deepEqual(sent, [`${issuer}/.well-known/openid-configuration`], "a public issuer is still discovered");
+  const start = await oidcStart(config, `${base}/api/sso/oidc/callback`);
+  await assert.rejects(oidcFinish(config, new URL(`${base}/api/sso/oidc/callback?code=abc&state=${start.state}`), start), privateAddress);
+  assert.equal(sent.length, 1, "the internal token endpoint is never contacted");
+  // A self-hosted operator can allow an IdP on the internal network.
+  process.env.SSO_ALLOW_PRIVATE = "true";
+  try { await oidcConfiguration({ issuer: "https://10.0.0.5:8443", clientId: "c", clientSecret: "s" }).catch(() => undefined); assert.equal(sent.at(-1), "https://10.0.0.5:8443/.well-known/openid-configuration"); }
+  finally { delete process.env.SSO_ALLOW_PRIVATE; }
+});

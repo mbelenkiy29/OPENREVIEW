@@ -209,15 +209,18 @@ export const data = internalQuery({
   handler: async (ctx, args) => {
     const review = await ctx.db.get(args.reviewId);
     if (!review) throw new Error("Review not found");
+    // Only open findings: a long-lived PR's resolved history can pass a function's read limit.
+    // shortcut: at most 1000 open findings are deduped/carried forward, page them if a PR ever exceeds that.
     const findings = await ctx.db
       .query("findings")
-      .withIndex("by_pr", (q) =>
+      .withIndex("by_pr_status", (q) =>
         q
           .eq("repositoryId", review.repositoryId)
-          .eq("prNumber", review.prNumber),
+          .eq("prNumber", review.prNumber)
+          .eq("status", "open"),
       )
-      .collect();
-    return { review, findings: findings.filter((f) => f.status === "open") };
+      .take(1000);
+    return { review, findings };
   },
 });
 export const history = internalQuery({

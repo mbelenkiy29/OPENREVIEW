@@ -572,8 +572,12 @@ export const review = internalAction({
           });
         },
       });
+      // A newer push cancels this row; stop before each further model call instead of at the next stage.
+      const cancel = new AbortController();
+      const live = async () => { if ((await ctx.runQuery(internal.reviews.agentStatus, args))?.status === "cancelled") { cancel.abort(new Error("Review cancelled")); cancel.signal.throwIfAborted(); } };
       const model: ModelProvider = {
         generate: async (request, validator) => {
+          await live();
           if(cross.receipt)await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:cross.receipt});
           const started = Date.now();
           const result = await modelProvider
@@ -605,6 +609,7 @@ export const review = internalAction({
           return result;
         },
         runTools: async (request) => {
+          await live();
           if(cross.receipt)await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:cross.receipt});
           try {
             const turn = await modelProvider.runTools(request);
@@ -685,7 +690,7 @@ export const review = internalAction({
         async (status) => {
           await ctx.runMutation(internal.reviews.stage, { ...args, status });
         },
-        undefined,
+        cancel.signal,
         // Hypothesis runs fit in one action and do not suspend; they only honour cancellation.
         { budgets: { agentTurns: effective.agentTurns, agentToolCalls: effective.agentToolCalls, hypothesisTurns: effective.hypothesisTurns, hypothesisToolCalls: effective.hypothesisToolCalls }, ...(osvEnabled() ? { advisories: osvClient({ base: process.env.OSV_API_URL || undefined }) } : {}), ...(engine ? { engine, tools: reviewToolbox(ctx, repo, pr.head.sha, head, (repository, path, sha) => github.blob(repository, path, sha), sources), agent: engine === "agentic" ? reviewAgentHooks(ctx, args.reviewId, stepStarted) : { checkpoint: reviewAgentHooks(ctx, args.reviewId, stepStarted).checkpoint } } : {}) },
       ),integrationScopes:requirements.scopes,repositoryContext:cross.receipt??undefined};

@@ -171,6 +171,24 @@ test("the purge resumes after an interruption: each chunk is a separate transact
   expect(await owned(t, rival.organizationId, rival.repo._id)).toEqual(rivalBefore);
 });
 
+test("the purge reaches every repository's rows, paging repositories across chunks", async () => {
+  process.env.WORKSPACE_DELETION_GRACE_DAYS = "0";
+  const t = convexTest(schema, modules);
+  const acme = await workspace(t, 521, "Acme");
+  // 60 repositories span several repository pages, each with stored source.
+  await t.run(async (ctx) => {
+    const storageId = await ctx.storage.store(new Blob(["source"]));
+    for (let i = 0; i < 60; i++) {
+      const repositoryId = await ctx.db.insert("repositories", { organizationId: acme.organizationId, fullName: `acme/r${i}`, defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: Date.now() });
+      await ctx.db.insert("repositoryFiles", { organizationId: acme.organizationId, repositoryId, path: "a.ts", sha: "s", storageId, language: "typescript", updatedAt: Date.now() });
+    }
+  });
+  await t.mutation(api.dataControls.requestDeletion, { token: acme.token, organizationId: acme.organizationId, confirmName: "Acme" });
+  await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
+  expect((await t.run((ctx) => ctx.db.query("workspaceDeletions").collect()))[0]).toMatchObject({ status: "done", counts: { repositoryFiles: 61, repositories: 61 } });
+  expect(await t.run((ctx) => ctx.db.query("repositoryFiles").collect())).toEqual([]);
+});
+
 test("retention, data sharing and webhook pruning", async () => {
   const t = convexTest(schema, modules);
   const acme = await workspace(t, 521, "Acme"), rival = await workspace(t, 522, "Rival");

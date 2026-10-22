@@ -37,7 +37,8 @@ export const threads = query({ args: { token: v.string(), organizationId: v.id("
 
 export const thread = query({ args: { token: v.string(), threadId: v.id("chatThreads") }, handler: async (ctx, a) => {
   const { thread, user } = await ownThread(ctx, a.token, a.threadId);
-  const messages = await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", thread._id)).take(200);
+  // Newest 200, shown oldest first: a long thread still shows its latest turns.
+  const messages = (await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", thread._id)).order("desc").take(200)).reverse();
   const visible = await readable(ctx, user._id, messages.flatMap((m) => m.repositoryIds));
   return { _id: thread._id, title: thread.title, repositoryIds: thread.repositoryIds.filter((id) => visible.has(id)), pullRequestId: thread.pullRequestId, messages: messages.map((m) => present(m, visible)) };
 } });
@@ -107,7 +108,8 @@ export const job = internalQuery({ args: { messageId: v.id("chatMessages") }, ha
     const source = connection?.organizationId === repo.organizationId ? { kind: connection.kind, instance: connection.instance } : repo.connectionId ? undefined : { kind: "github", instance: "https://github.com" };
     repositories.push({ repo, source });
   }
-  const earlier = (await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", message.threadId)).take(200)).filter((m) => m._creationTime < message._creationTime && m.status === "completed");
+  // The 20 messages just before this answer, oldest first: the question plus the history below, however long the thread.
+  const earlier = (await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", message.threadId).lt("_creationTime", message._creationTime)).order("desc").take(20)).reverse().filter((m) => m.status === "completed");
   const question = earlier.filter((m) => m.role === "user").at(-1)?.content ?? "";
   // Chat with PR: the pull request's latest readable review and findings, when the thread has one.
   const thread = await ctx.db.get(message.threadId), pr = thread?.pullRequestId ? await ctx.db.get(thread.pullRequestId) : null;

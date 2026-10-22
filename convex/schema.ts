@@ -592,6 +592,7 @@ export default defineSchema({
     .index("by_repo", ["repositoryId"])
     .index("by_repo_path", ["repositoryId", "filePath"])
     .index("by_pr", ["repositoryId", "prNumber"])
+    .index("by_pr_status", ["repositoryId", "prNumber", "status"])
     .index("by_fingerprint", ["repositoryId", "prNumber", "fingerprint"])
     .index("by_org_time", ["organizationId", "createdAt"]),
   // Team conventions learned from human review comments (review guidance only).

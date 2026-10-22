@@ -28,7 +28,7 @@ const enqueue=(t:Awaited<ReturnType<typeof setup>>['t'],repositoryId:Id<'reposit
 const reviewOf=(t:Awaited<ReturnType<typeof setup>>['t'],id:Id<'reviews'>|null)=>t.run(ctx=>ctx.db.get(id!));
 function signed(event:Record<string,unknown>,key=whsec){const body=JSON.stringify(event),ts=Math.floor(Date.now()/1000);return {body,headers:{'content-type':'application/json','stripe-signature':`t=${ts},v1=${createHmac('sha256',key).update(`${ts}.${body}`).digest('hex')}`}};}
 const deliver=(t:Awaited<ReturnType<typeof setup>>['t'],event:Record<string,unknown>,key?:string)=>{const {body,headers}=signed(event,key);return t.fetch('/stripe/webhook',{method:'POST',headers,body});};
-const subscription=(id:string,type:string,status:string,quantity:number,created:number,org?:string)=>({id,type,created,data:{object:{id:'sub_1',customer:'cus_1',status,metadata:org?{organizationId:org}:{},items:{data:[{id:'si_1',quantity,current_period_end:created+30*86400}]}}}});
+const subscription=(id:string,type:string,status:string,quantity:number,created:number,org?:string,sub='sub_1')=>({id,type,created,data:{object:{id:sub,customer:'cus_1',status,metadata:org?{organizationId:org}:{},items:{data:[{id:'si_1',quantity,current_period_end:created+30*86400}]}}}});
 
 test('trial quota is enforced at enqueue; blocked reviews are recorded with the billing reason and counted',async()=>{
  process.env.BILLING_TRIAL_DAYS='60';
@@ -135,6 +135,21 @@ test('signed Stripe webhooks link the workspace, apply once, and ignore replays 
  await deliver(t,subscription('evt_back','customer.subscription.created','active',3,Math.floor(Date.now()/1000)+10,org));
  await deliver(t,{id:'evt_failed_old',type:'invoice.payment_failed',created:Math.floor(Date.now()/1000),data:{object:{customer:'cus_1',subscription:'sub_1'}}});
  expect((await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0]).toMatchObject({status:'active'});
+});
+
+test('a second subscription from another open Checkout neither replaces nor, once cancelled, ends the first',async()=>{
+ const {t,org}=await setup();
+ const created=Math.floor(Date.now()/1000),log=vi.spyOn(console,'error').mockImplementation(()=>{});
+ await deliver(t,{id:'evt_c1',type:'checkout.session.completed',created,data:{object:{mode:'subscription',client_reference_id:org,customer:'cus_1',subscription:'sub_1'}}});
+ await deliver(t,subscription('evt_s1','customer.subscription.created','active',2,created+1,org));
+ await deliver(t,{id:'evt_c2',type:'checkout.session.completed',created:created+2,data:{object:{mode:'subscription',client_reference_id:org,customer:'cus_1',subscription:'sub_2'}}});
+ await deliver(t,subscription('evt_s2','customer.subscription.created','active',2,created+3,org,'sub_2'));
+ const account=async()=>(await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0];
+ expect(await account()).toMatchObject({subscriptionId:'sub_1',status:'active'});
+ expect((await t.run(ctx=>ctx.db.query('stripeEvents').collect())).filter(e=>['evt_c2','evt_s2'].includes(e.eventId)).map(e=>e.outcome)).toEqual(['other subscription','other subscription']);
+ expect(log).toHaveBeenCalledWith(expect.stringContaining('"event":"billing.duplicate_subscription"'));
+ await deliver(t,subscription('evt_d2','customer.subscription.deleted','canceled',2,created+4,org,'sub_2'));
+ expect(await account()).toMatchObject({subscriptionId:'sub_1',status:'active'});
 });
 
 test('seats follow membership: viewers are free and changes resync the subscription quantity',async()=>{

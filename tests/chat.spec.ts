@@ -151,3 +151,19 @@ test('Chat with PR gives the agent the pull request review as context, only for 
  await t.action(internal.chatJobs.answer,{messageId:plain.messageId});
  expect((await t.query(api.chat.thread,{token:alice.token,threadId:plain.threadId})).messages.at(-1)?.proposal).toBeUndefined();
 });
+
+test('a thread longer than one page answers and shows its newest question, not an old one',async()=>{
+ const {t,alice,org,shop}=await setup();
+ const threadId=await t.run(async ctx=>{
+  const threadId=await ctx.db.insert('chatThreads',{organizationId:org,userId:alice.id as Id<'users'>,title:'Long',repositoryIds:[shop._id],createdAt:0,updatedAt:0});
+  for(let i=0;i<205;i++)await ctx.db.insert('chatMessages',{organizationId:org,threadId,userId:alice.id as Id<'users'>,role:i%2?'assistant':'user',content:'Old '+i,status:'completed',repositoryIds:[shop._id],createdAt:i,updatedAt:i});
+  return threadId;
+ });
+ const {messageId}=await t.mutation(api.chat.ask,{token:alice.token,organizationId:org,threadId,repositoryIds:[shop._id],question:'The newest question'});
+ const job=await t.query(internal.chat.job,{messageId});
+ expect(job?.question).toBe('The newest question');
+ expect(job?.history.at(-1)?.content).toBe('Old 204');
+ const messages=(await t.query(api.chat.thread,{token:alice.token,threadId})).messages;
+ expect(messages.slice(-2).map(m=>[m.role,m.content])).toEqual([['user','The newest question'],['assistant','']]);
+ expect(messages.at(-1)?._id).toBe(messageId);
+});

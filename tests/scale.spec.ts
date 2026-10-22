@@ -140,3 +140,33 @@ test('device pairing is rate limited per caller, so one caller cannot block pair
  await expect(pair(30,'203.0.113.9')).rejects.toThrow('Rate limit');
  expect(await pair(31,'198.51.100.7')).toBeTruthy();
 });
+
+test('a long-lived pull request with more findings than one read allows still loads its open findings for review',async()=>{
+ const t=convexTest({schema,modules,transactionLimits:{documentsRead:50}});
+ const reviewId=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Long PR',createdAt:Date.now()});
+  const repositoryId=await ctx.db.insert('repositories',{organizationId,fullName:'fixture/long',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()});
+  const reviewId=await ctx.db.insert('reviews',{organizationId,repositoryId,prNumber:7,headSha:'a'.repeat(40),status:'queued',mode:'standard',attempts:0,createdAt:Date.now(),updatedAt:Date.now()});
+  for(let i=0;i<63;i++)await ctx.db.insert('findings',{organizationId,repositoryId,reviewId,prNumber:7,title:'Finding '+i,description:'d',severity:'medium',confidence:.9,category:'correctness',filePath:'a.ts',startLine:1,endLine:1,commitSha:'b'.repeat(40),evidence:[],impact:'i',suggestedFix:'f',agent:'correctness',symbol:'s',fingerprint:'fp'+i,status:i<3?'open':'resolved',createdAt:Date.now(),updatedAt:Date.now()});
+  return reviewId;
+ });
+ const data=await t.query(internal.reviews.data,{reviewId});
+ expect(data.findings.map(f=>f.fingerprint).sort()).toEqual(['fp0','fp1','fp2']);
+});
+
+test('a review that keeps dying before ingesting is failed after three recoveries, not requeued forever',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(Date.UTC(2026,9,14,12));
+ const t=convexTest(schema,modules);
+ const reviewId=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Stuck',createdAt:Date.now()});
+  const repositoryId=await ctx.db.insert('repositories',{organizationId,fullName:'fixture/stuck-review',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()});
+  return ctx.db.insert('reviews',{organizationId,repositoryId,prNumber:1,headSha:'a'.repeat(40),status:'queued',mode:'standard',attempts:0,createdAt:Date.now(),updatedAt:Date.now()});
+ });
+ // The requeued job never runs here, standing in for one that throws before "ingesting".
+ for(let i=0;i<4;i++){
+  await t.run(ctx=>ctx.db.patch(reviewId,{updatedAt:Date.now()-20*60000}));
+  await t.mutation(internal.recovery.sweepReviews,{});
+ }
+ expect(await t.run(ctx=>ctx.db.get(reviewId))).toMatchObject({status:'failed',error:'Review recovery attempts exhausted',attempts:3});
+ vi.useRealTimers();
+});
