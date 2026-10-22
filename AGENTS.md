@@ -13,4 +13,4 @@ Rules:
 
 ## Knowledge graph setup
 
-`graphify-out/` is not committed. Git hooks (`graphify hook install`) rebuild it in the background after every commit, checkout and new worktree on a machine where graphify is installed. If `graphify-out/graph.json` is missing (fresh clone, cloud session), install graphify (`uv tool install graphifyy` or `pip install graphifyy`) and run `graphify update .` — it takes a few seconds and needs no API key.
+`graphify-out/` is not committed; each checkout builds its own. If `graphify-out/graph.json` is missing, install graphify (`uv tool install graphifyy` or `pip install graphifyy`) and run `graphify update .` (about 8 seconds, no API key). Run it again after changing code: only Claude Code sessions and the main checkout's git hooks rebuild it automatically.
