@@ -13,12 +13,16 @@ export const report = query({
     const repos = await visibleRepositories(ctx,a.token,a.organizationId,a.teamId);
     const allowed = new Set(repos.map(r=>String(r._id)));
     if (a.repositoryId && !repos.some(r => r._id === a.repositoryId)) throw new Error("Repository not accessible");
-    // ponytail: indexed period reads, not recent-record samples; daily aggregates when periods exceed Convex read limits.
-    const [reviews, findings, usage] = await Promise.all([
-      ctx.db.query("reviews").withIndex("by_org_time", q => q.eq("organizationId", a.organizationId).gte("createdAt", a.since).lte("createdAt", a.until)).collect(),
-      ctx.db.query("findings").withIndex("by_org_time", q => q.eq("organizationId", a.organizationId).gte("createdAt", a.since).lte("createdAt", a.until)).collect(),
-      ctx.db.query("usageEvents").withIndex("by_org_time", q => q.eq("organizationId", a.organizationId).gte("createdAt", a.since).lte("createdAt", a.until)).collect(),
+    // Newest-first capped reads stay under Convex's per-function read limit (16,384 documents), leaving room for access checks.
+    // shortcut: busy periods return partial totals with `capped: true`; serve them from analyticsDaily once rollup rows carry repository-context access.
+    const cap = { reviews: 1200, findings: 2500, usage: 8000, reactions: 1000 };
+    const [reviews, findings, usage, reactionsRead] = await Promise.all([
+      ctx.db.query("reviews").withIndex("by_org_time", q => q.eq("organizationId", a.organizationId).gte("createdAt", a.since).lte("createdAt", a.until)).order("desc").take(cap.reviews),
+      ctx.db.query("findings").withIndex("by_org_time", q => q.eq("organizationId", a.organizationId).gte("createdAt", a.since).lte("createdAt", a.until)).order("desc").take(cap.findings),
+      ctx.db.query("usageEvents").withIndex("by_org_time", q => q.eq("organizationId", a.organizationId).gte("createdAt", a.since).lte("createdAt", a.until)).order("desc").take(cap.usage),
+      ctx.db.query("commentReactions").withIndex("by_org_time", (q) => q.eq("organizationId", a.organizationId).gte("createdAt", a.since).lte("createdAt", a.until)).order("desc").take(cap.reactions),
     ]);
+    const capped = reviews.length === cap.reviews || findings.length === cap.findings || usage.length === cap.usage || reactionsRead.length === cap.reactions;
     const viewer=await authenticated(ctx,a.token),permitted=await Promise.all(reviews.map(r=>contextReadable(ctx,viewer._id,r)));
     const selected = reviews.filter((r,i)=>permitted[i]).filter(r => allowed.has(r.repositoryId) && (!a.repositoryId || r.repositoryId === a.repositoryId) && (!a.author || r.author === a.author.replace(/^@/, "")));
     const ids = new Set(selected.map(r => String(r._id)));
@@ -45,10 +49,9 @@ export const report = query({
     const rated = bugs.filter(f => f.lastFeedback === "useful" || f.lastFeedback === "not_useful" || f.lastFeedback === "false_positive");
     // 👍/👎 on OpenReview finding comments in the period (visible repositories, author filter via PR).
     const findingIds = new Set(bugs.map((f) => String(f._id)));
-    const reactionRows = (await ctx.db.query("commentReactions").withIndex("by_org_time", (q) => q.eq("organizationId", a.organizationId).gte("createdAt", a.since).lte("createdAt", a.until)).take(5000))
-      .filter((r) => allowed.has(r.repositoryId) && (!a.repositoryId || r.repositoryId === a.repositoryId) && (!a.author || (r.findingId && findingIds.has(String(r.findingId)))));
+    const reactionRows = reactionsRead.filter((r) => allowed.has(r.repositoryId) && (!a.repositoryId || r.repositoryId === a.repositoryId) && (!a.author || (r.findingId && findingIds.has(String(r.findingId)))));
     const reactions = { up: reactionRows.filter((r) => r.reaction === "+1").length, down: reactionRows.filter((r) => r.reaction === "-1").length };
-    return { reactions, totalReviews: selected.length, completed: completed.length, totalPRs: new Set(selected.map(r => `${r.repositoryId}:${r.prNumber}`)).size, findings: bugs.length, severity: Object.fromEntries(["critical", "high", "medium", "low"].map(s => [s, bugs.filter(f => f.severity === s).length])), addressedRate: bugs.length ? bugs.filter(f => f.status === "resolved").length / bugs.length : null, usefulness: rated.length ? rated.filter(f => f.lastFeedback === "useful").length / rated.length : null, cost: costs.reduce((n, u) => n + u.estimatedCost, 0), tokens: costs.reduce((n, u) => n + u.inputTokens + u.outputTokens, 0), averageDuration: completed.length ? completed.reduce((n,r) => n + ((r.finishedAt ?? r.updatedAt) - r.createdAt), 0) / completed.length : null, daily: Object.entries(daily).sort(([a],[b]) => a.localeCompare(b)).map(([date, values]) => ({ date, ...values })), recent: selected.sort((a,b) => b.createdAt - a.createdAt).slice(0,10) };
+    return { capped, reactions, totalReviews: selected.length, completed: completed.length, totalPRs: new Set(selected.map(r => `${r.repositoryId}:${r.prNumber}`)).size, findings: bugs.length, severity: Object.fromEntries(["critical", "high", "medium", "low"].map(s => [s, bugs.filter(f => f.severity === s).length])), addressedRate: bugs.length ? bugs.filter(f => f.status === "resolved").length / bugs.length : null, usefulness: rated.length ? rated.filter(f => f.lastFeedback === "useful").length / rated.length : null, cost: costs.reduce((n, u) => n + u.estimatedCost, 0), tokens: costs.reduce((n, u) => n + u.inputTokens + u.outputTokens, 0), averageDuration: completed.length ? completed.reduce((n,r) => n + ((r.finishedAt ?? r.updatedAt) - r.createdAt), 0) / completed.length : null, daily: Object.entries(daily).sort(([a],[b]) => a.localeCompare(b)).map(([date, values]) => ({ date, ...values })), recent: selected.sort((a,b) => b.createdAt - a.createdAt).slice(0,10) };
   },
 });
 
@@ -62,8 +65,9 @@ export const trends = query({
     if (a.repositoryId && !repos.some((r) => r._id === a.repositoryId)) throw new Error("Repository not accessible");
     const names = new Map(repos.map((r) => [String(r._id), r.fullName]));
     const from = new Date(a.since).toISOString().slice(0, 10), to = new Date(a.until).toISOString().slice(0, 10), author = a.author?.replace(/^@/, "");
-    const rows = (await ctx.db.query("analyticsDaily").withIndex("by_org_day", (q) => q.eq("organizationId", a.organizationId).gte("day", from).lte("day", to)).take(20000))
-      .filter((r) => names.has(String(r.repositoryId)) && (!a.repositoryId || r.repositoryId === a.repositoryId) && (!author || r.author === author));
+    // Newest first under the 16,384-document read limit, so a cap drops the oldest days and says so.
+    const read = await ctx.db.query("analyticsDaily").withIndex("by_org_day", (q) => q.eq("organizationId", a.organizationId).gte("day", from).lte("day", to)).order("desc").take(15000);
+    const rows = read.filter((r) => names.has(String(r.repositoryId)) && (!a.repositoryId || r.repositoryId === a.repositoryId) && (!author || r.author === author));
     const days: string[] = [];
     for (let t = Date.parse(from + "T00:00:00Z"); t <= Date.parse(to + "T00:00:00Z") && days.length < 367; t += 86400000) days.push(new Date(t).toISOString().slice(0, 10));
     const empty = () => ({ reviews: 0, findings: 0, high: 0, addressed: 0, commitAddressed: 0, ignored: 0 });
@@ -84,6 +88,7 @@ export const trends = query({
       byRepository: top(byRepo, (k) => names.get(k) ?? "Unknown repository"),
       byAuthor: top(byAuthor, (k) => "@" + k),
       updatedAt: rows.reduce((m, r) => Math.max(m, r.updatedAt), 0) || null,
+      capped: read.length === 15000,
     };
   },
 });

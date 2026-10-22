@@ -150,7 +150,7 @@ export const index = internalAction({
 export const indexBatch = internalAction({
   args: { jobId: v.id("indexJobs") },
   handler: async (ctx, args) => {
-    const leaseId=crypto.randomUUID();
+    let leaseId=crypto.randomUUID();const started=Date.now();
     const job = await ctx.runMutation(internal.repositories.claimIndexBatch, {...args,leaseId});
     if (!job || job.status !== "running") return;
     try {
@@ -171,7 +171,7 @@ export const indexBatch = internalAction({
       })
       .parse(JSON.parse(await blob.text()));
     if(manifest.sha!==job.sha)throw new Error("Index manifest revision does not match its job");
-    const cursor = job.cursor ?? 0;
+    let cursor = job.cursor ?? 0;
       const inventory=job.nativeDepot?parseP4SubmittedInventory(manifest.inventory):null;
       let p4:P4CodeReview|undefined;
       if(inventory){
@@ -184,6 +184,9 @@ export const indexBatch = internalAction({
       const github = inventory?undefined:await provider(ctx,data.repo);
       const allPaths = manifest.entries.map((f) => f.path);
       const pathSet=new Set(allPaths);
+      const p4Files=new Map(inventory?.manifest.map(f=>[f.depotFile.slice(2),f]));
+      // Several 20-file batches per invocation, so the manifest is read once per ~4 minutes rather than per batch.
+      for(;;){
       const batch=manifest.entries.slice(cursor,cursor+20);
       const known = new Map((await indexedFiles(ctx, data.repo._id, batch.map((f) => f.path))).map((f) => [f.path, f]));
       const receipts=await ctx.runQuery(internal.repositories.indexModuleReferences,{repositoryId:data.repo._id,paths:batch.map(f=>f.path)});
@@ -196,7 +199,7 @@ export const indexBatch = internalAction({
           const embedded = await ctx.runQuery(internal.embeddings.chunkState, { repositoryId: data.repo._id, path: entry.path });
           if (embedded?.sha === entry.sha && embedded.model === process.env.EMBEDDING_MODEL) continue;
         }
-        const expected=inventory?.manifest.find(f=>f.depotFile.slice(2)===entry.path);
+        const expected=p4Files.get(entry.path);
         if(inventory&&!expected)throw new Error("P4 index entry outside pinned inventory");
         const file = inventory?await p4!.submittedContent(inventory.project,expected!,inventory.serverId,inventory.change):await github!.blob(data.repo.fullName,entry.path,entry.sha);
         if(file.sha!==entry.sha)throw new Error("Index source identity mismatch");
@@ -258,13 +261,18 @@ export const indexBatch = internalAction({
         });
       }
       const next = Math.min(cursor + 20, manifest.entries.length);
-      if (next < manifest.entries.length)
-        await ctx.runMutation(internal.repositories.indexProgress, {
-          jobId: job._id,
-          cursor: next,
-          leaseId,
-        });
-      else {
+      if (next >= manifest.entries.length) break;
+      await ctx.runMutation(internal.repositories.indexProgress, {
+        jobId: job._id,
+        cursor: next,
+        leaseId,
+      });
+      if (Date.now() - started > 4 * 60000) return;
+      // indexProgress releases the lease and schedules a continuation; carry on only if this run re-claims it at the same cursor (claim also refuses cancelled jobs).
+      const lease = crypto.randomUUID();
+      if ((await ctx.runMutation(internal.repositories.claimIndexBatch, { jobId: job._id, leaseId: lease }))?.cursor !== next) return;
+      leaseId = lease; cursor = next;
+      }
         if(inventory&&JSON.stringify(await p4!.project(inventory.project.id))!==JSON.stringify(inventory.project))throw new Error("P4 project views changed before index completion");
         // Sweep stored files missing from this revision in small batches before completing.
         const stale=[...(await fileInventory(ctx,data.repo._id)).keys()].filter(path=>!pathSet.has(path));
@@ -289,7 +297,6 @@ export const indexBatch = internalAction({
             files: allPaths.length,
           }),
         );
-      }
     } catch (error) {
       await ctx.runMutation(internal.repositories.finishIndex, {
         repositoryId: job.repositoryId,
@@ -545,7 +552,7 @@ export const review = internalAction({
       const permittedHistory=new Set(history.filter(f=>hasCurrentRepositoryEvidence(f,cross.files)).map(f=>f.title+"\0"+f.filePath));
       historicalFindings=historicalFindings.filter(f=>permittedHistory.has(f.title+"\0"+f.filePath));
       const clusterHints=cross.hints;
-      const requirements=await ctx.runAction(internal.integrationJobs.requirements,{repositoryId:repo._id,references:[pr.title,pr.body??"",pr.head.ref].join("\n")});
+      const requirements=await ctx.runAction(internal.integrationJobs.requirements,{repositoryId:repo._id,references:[pr.title,pr.body??"",pr.head.ref].join("\n"),actor:pr.user.login,authorExternalId:pr.authorExternalId});
       sources.push(...requirements.files);
       const integrationContext={repositoryId:repo._id,scopes:requirements.scopes,repositoryContext:cross.receipt??undefined};
       const existingFindings = state.findings.filter(f=>hasCurrentRepositoryEvidence(f,cross.files)).map((f) => ({

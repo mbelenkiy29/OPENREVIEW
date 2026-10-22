@@ -70,16 +70,15 @@ export const emoji = internalMutation({
     return true;
   },
 });
-// Open pull requests with recent OpenReview reviews whose reactions were not synced in the last hour.
-export const due = internalQuery({ args: { limit: v.number() }, handler: async (ctx, a) => {
-  const since = Date.now() - 7 * 86400000, out: { repositoryId: Id<"repositories">; prNumber: number }[] = [];
-  for (const review of await ctx.db.query("reviews").withIndex("by_status", (q) => q.eq("status", "completed")).order("desc").take(400)) {
-    if (review.createdAt < since || review.nativeP4 || out.some((o) => o.repositoryId === review.repositoryId && o.prNumber === review.prNumber)) continue;
-    const pr = await ctx.db.query("pullRequests").withIndex("by_repo_number", (q) => q.eq("repositoryId", review.repositoryId).eq("number", review.prNumber)).unique();
-    if (pr && pr.state !== "open") continue;
-    if ((pr?.reactionsSyncedAt ?? 0) > Date.now() - 3600000) continue;
-    out.push({ repositoryId: review.repositoryId, prNumber: review.prNumber });
-    if (out.length >= Math.min(50, a.limit)) break;
+// Open pull requests synced longest ago (never synced first: undefined sorts lowest) that have a recent
+// completed OpenReview review. Stamps each PR it examines so unreviewed PRs and failed syncs go to the back.
+export const due = internalMutation({ args: { limit: v.number() }, handler: async (ctx, a) => {
+  const now = Date.now(), since = now - 7 * 86400000, out: { repositoryId: Id<"repositories">; prNumber: number }[] = [];
+  for (const pr of await ctx.db.query("pullRequests").withIndex("by_state_reactions", (q) => q.eq("state", "open")).take(300)) {
+    if ((pr.reactionsSyncedAt ?? 0) > now - 3600000 || out.length >= Math.min(50, a.limit)) break;
+    await ctx.db.patch(pr._id, { reactionsSyncedAt: now });
+    const reviews = await ctx.db.query("reviews").withIndex("by_pr", (q) => q.eq("repositoryId", pr.repositoryId).eq("prNumber", pr.number)).order("desc").take(20);
+    if (reviews.some((r) => r.status === "completed" && !r.nativeP4 && r.createdAt >= since)) out.push({ repositoryId: pr.repositoryId, prNumber: pr.number });
   }
   return out;
 } });

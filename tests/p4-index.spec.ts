@@ -8,8 +8,8 @@ import {encryptCredential} from "../src/credentials";
 import {p4SubmittedInventory} from "../src/p4-index";
 const modules=import.meta.glob("../convex/**/*.ts");
 const project={id:"payments",name:"Payments",branches:[{id:"main",name:"Main",paths:["//depot/main/..."]}]};
-async function setup(){
- const t=convexTest(schema,modules),secret="p4-index-session-secret-at-least-32-characters";
+async function setup(documentsRead?:number){
+ const t=convexTest({schema,modules,...(documentsRead?{transactionLimits:{documentsRead}}:{})}),secret="p4-index-session-secret-at-least-32-characters";
  process.env.SESSION_SECRET=secret;process.env.SERVICE_SECRET="p4-index-service";process.env.CREDENTIAL_ENCRYPTION_KEY="a".repeat(64);process.env.SCM_ALLOWED_HOSTS="p4.example";
  const userId=await t.mutation(api.users.login,{secret:"p4-index-service",githubId:1,login:"alice",avatar:""});
  const token=await new SignJWT({}).setProtectedHeader({alg:"HS256"}).setIssuer("openreview").setAudience("openreview").setSubject(userId).setExpirationTime("1h").sign(new TextEncoder().encode(secret));
@@ -24,7 +24,7 @@ async function setup(){
  // Rebuild after setting the cross-file baseline rather than trusting a stale manifest.
  const shelfInventory=p4SubmittedInventory({project,serverId:"main",change:42,manifest:files.map(f=>({code:"stat",depotFile:f.path,headRev:3,headChange:40,headAction:"edit",headType:"text",fileSize:Buffer.byteLength(f.content),digest:createHash("md5").update(f.content).digest("hex")}))});
  const shelfSource=files[0].content.replace("price * 100","price / 100");
- let projectChanged=false,badDigest=false,sourceReads=0,shelfState="needsReview",shelfArchive=44,onShelfRead:(()=>Promise<void>)|undefined;
+ let projectChanged=false,badDigest=false,sourceReads=0,shelfState="needsReview",shelfArchive=44,onShelfRead:(()=>Promise<void>)|undefined,onSourceRead:((reads:number)=>void)|undefined;
  const nativeReview={id:12,author:"alice",description:"Change currency calculation",updated:1,pending:true,projects:{payments:["main"]},versions:[{change:43,archiveChange:44,pending:true,time:1}]};
  vi.stubGlobal("fetch",async(input:unknown,init?:RequestInit)=>{
   const u=new URL(String(input));expect(u.origin).toBe("https://p4.example");expect(init?.redirect).toBe("error");expect(init?.method).not.toBe("POST");
@@ -35,16 +35,16 @@ async function setup(){
   if(u.pathname==="/api/v11/reviews/12/files")return Response.json({error:null,data:{limited:false,files:[{depotFile:files[0].path,action:"edit",type:"text",rev:3,fileSize:Buffer.byteLength(shelfSource),digest:createHash("md5").update(shelfSource).digest("hex")}]}});
   if(u.pathname.endsWith("/diff")){expect(u.searchParams.get("from")).toBe("#3");expect(u.searchParams.get("to")).toBe("@="+shelfArchive);return Response.json({error:null,data:{isCut:false,isSame:false,header:`--- a/${files[0].path}#3\n+++ b/${files[0].path}@=${shelfArchive}\n`,diffs:[`@@ -1 +1 @@\n-${files[0].content.trimEnd()}\n+${shelfSource.trimEnd()}\n`],paging:{diffs:1,offset:null}}});}
   if(u.pathname.startsWith("/api/v11/files/")){const path=Buffer.from(u.pathname.split("/").at(-1)!,"base64url").toString();const revision=u.searchParams.get("fileRevision");expect(["#3","@="+shelfArchive]).toContain(revision);return Response.json({error:null,data:{filename:path,fileRevision:revision,contentLink:"https://p4.example/view/"+path.slice(2)+(revision==="@="+shelfArchive?"?shelf=44":"")}});}
-  if(u.pathname.startsWith("/view/")){sourceReads++;if(u.searchParams.has("shelf")){await onShelfRead?.();return new Response(shelfSource);}return new Response(badDigest?"corrupted source":files.find(f=>"/view/"+f.path.slice(2)===u.pathname)!.content);}
+  if(u.pathname.startsWith("/view/")){sourceReads++;onSourceRead?.(sourceReads);if(u.searchParams.has("shelf")){await onShelfRead?.();return new Response(shelfSource);}return new Response(badDigest?"corrupted source":files.find(f=>"/view/"+f.path.slice(2)===u.pathname)!.content);}
   throw new Error("Unexpected P4 index endpoint");
  });
  const args={token,organizationId,repositoryId:repo._id,instance:"https://p4.example",inventory:JSON.stringify(shelfInventory)};
- return {t,args,userId,connectionId,repo,inventory:shelfInventory,files,setShelfState:(state:string)=>{shelfState=state;},setShelfArchive:(change:number)=>{shelfArchive=change;},setOnShelfRead:(callback:(()=>Promise<void>)|undefined)=>{onShelfRead=callback;},setProjectChanged:(v:boolean)=>{projectChanged=v;},setBadDigest:(v:boolean)=>{badDigest=v;},reads:()=>sourceReads};
+ return {t,args,userId,connectionId,repo,inventory:shelfInventory,files,setShelfState:(state:string)=>{shelfState=state;},setShelfArchive:(change:number)=>{shelfArchive=change;},setOnSourceRead:(callback:typeof onSourceRead)=>{onSourceRead=callback;},setOnShelfRead:(callback:(()=>Promise<void>)|undefined)=>{onShelfRead=callback;},setProjectChanged:(v:boolean)=>{projectChanged=v;},setBadDigest:(v:boolean)=>{badDigest=v;},reads:()=>sourceReads};
 }
 
 test("hosted manual P4 index persists verified context across batches and durable recovery while automatic reviews stay disabled",async()=>{
  vi.useFakeTimers();try{
- const {t,args,repo,reads}=await setup();
+ const {t,args,repo,reads,setOnSourceRead}=await setup();
  await t.mutation(api.onboarding.select,{token:args.token,organizationId:args.organizationId,repositoryIds:[repo._id]});
  expect((await t.query(api.onboarding.status,{token:args.token,organizationId:args.organizationId})).step).toBe(4);
  const {defaults}=await import("../src/review-settings");
@@ -54,6 +54,8 @@ test("hosted manual P4 index persists verified context across batches and durabl
  expect((await t.run(ctx=>ctx.db.get(repo._id)))?.enabled).toBe(false);
  const result=await t.action(api.p4IndexJobs.upload,args);expect(result.total).toBe(21);
  await expect(t.action(api.p4IndexJobs.upload,args)).rejects.toThrow("already running");
+ // One run now indexes batches for up to 4 minutes; jump the clock at the first batch so it stops there.
+ setOnSourceRead(reads=>{if(reads===20)vi.setSystemTime(Date.now()+5*60000);});
  await t.action(internal.jobs.indexBatch,{jobId:result.jobId});
  expect(await t.run(ctx=>ctx.db.get(result.jobId))).toMatchObject({status:"running",cursor:20,processed:20});
  expect(reads()).toBe(20);
@@ -334,6 +336,22 @@ test('P4 polling enforces baseline, generation, native branch and automatic sett
  }finally{vi.unstubAllGlobals();vi.useRealTimers();}
 });
 
+test('P4 permission checks and polling configuration stay within read limits on large depots and long review histories',async()=>{
+ vi.useFakeTimers();try{
+ const {t,args,connectionId,userId}=await setup(400);const index=await t.action(api.p4IndexJobs.upload,args);await t.finishAllScheduledFunctions(vi.runAllTimers);
+ // More submitted files and finished reviews than one transaction may read.
+ await t.run(async ctx=>{const storageId=await ctx.storage.store(new Blob(['x']));for(let i=0;i<450;i++){await ctx.db.insert('repositoryFiles',{organizationId:args.organizationId,repositoryId:args.repositoryId,path:`depot/main/bulk${i}.ts`,sha:'p4:main:3:bulk',storageId,language:'typescript',updatedAt:0});await ctx.db.insert('reviews',{organizationId:args.organizationId,repositoryId:args.repositoryId,prNumber:1000+i,headSha:'p4:old',status:i%2?'completed':'cancelled',mode:'standard',attempts:1,createdAt:0,updatedAt:0});}});
+ await t.mutation(api.p4Polling.configure,{token:args.token,repositoryId:args.repositoryId,enabled:true});
+ const poll=(await t.run(ctx=>ctx.db.query('p4Polls').unique()))!,worker={id:poll._id,generation:poll.generation,leaseId:'large'};await t.mutation(internal.p4Polling.claim,worker);
+ expect((await t.query(internal.p4Polling.data,worker)).job._id).toBe(index.jobId);
+ const prepared=await t.run(async ctx=>({storageId:await ctx.storage.store(new Blob(['{}']))}));
+ const automatic=await t.mutation(internal.p4Reviews.enqueue,{repositoryId:args.repositoryId,requestedBy:userId,nativeNumber:12,revision:'p4:12:1:44:fixture',baseRevision:index.revision,baselineJobId:index.jobId,inputStorageId:prepared.storageId,connectionId,credentialDigest:poll.credentialDigest,polling:{id:poll._id,generation:poll.generation},pollLease:worker.leaseId,branches:['main']});
+ await t.mutation(api.p4Polling.configure,{token:args.token,repositoryId:args.repositoryId,enabled:false});
+ expect(await t.run(ctx=>ctx.db.get(automatic))).toMatchObject({status:'cancelled'});expect(await t.run(ctx=>ctx.db.get(poll._id))).toMatchObject({enabled:false,status:'disabled'});
+ await t.finishAllScheduledFunctions(vi.runAllTimers);
+ }finally{vi.unstubAllGlobals();vi.useRealTimers();}
+});
+
 test('completed P4 submitted refresh atomically adopts enabled polling, revokes stale workers and never enables disabled polling',async()=>{
  vi.useFakeTimers();try{
  const {t,args,userId,inventory}=await setup();
@@ -550,6 +568,9 @@ test('native recovery replaces expired leases, stale workers cannot persist answ
  const f=await nativeConversationFixture(),{t,discovery,args,identityId}=f;await t.action(internal.p4ConversationJobs.discover,discovery);const [row]=await t.run(ctx=>ctx.db.query('conversations').collect());
  expect(await t.mutation(internal.p4Conversations.claim,{conversationId:row._id,leaseId:'old-native'})).toBe(true);
  await t.run(async ctx=>{const current=await ctx.db.get(row._id);await ctx.db.patch(row._id,{nativeP4:{...current!.nativeP4!,lease:{id:'old-native',expiresAt:Date.now()-1}}});});
+ // The global sweep schedules native recovery in its own transaction instead of running it inline.
+ await t.mutation(internal.recovery.sweep,{});expect((await t.run(ctx=>ctx.db.get(row._id)))!.nativeP4!.lease?.id).toBe('old-native');
+ expect((await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).filter(s=>s.name.startsWith('p4Conversations')&&s.name.endsWith('recover')&&s.state.kind==='pending')).toHaveLength(1);
  await t.mutation(internal.p4Conversations.recover,{});expect(await t.mutation(internal.p4Conversations.claim,{conversationId:row._id,leaseId:'new-native'})).toBe(true);
  await expect(t.mutation(internal.p4Conversations.save,{conversationId:row._id,leaseId:'old-native',answer:'Untrusted saved answer',answerText:'Untrusted saved answer',citations:[]})).rejects.toThrow('lease expired');expect(await t.mutation(internal.p4Conversations.finish,{conversationId:row._id,leaseId:'old-native',error:'old failure'})).toBe(false);
  await t.mutation(internal.p4Conversations.finish,{conversationId:row._id,leaseId:'new-native',error:'Transient failure'});await t.mutation(api.p4Identities.revoke,{token:args.token,identityId});await t.action(internal.p4ConversationJobs.reply,{conversationId:row._id});expect(await t.run(ctx=>ctx.db.get(row._id))).toMatchObject({status:'failed',error:expect.stringContaining('revoked')});expect(f.modelCalls()).toBe(0);

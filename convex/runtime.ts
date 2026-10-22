@@ -11,7 +11,7 @@ import { runtimeEvidenceSchema } from "../src/engine/types";
 import { redact } from "../src/redact";
 import { rateLimit } from "./rateLimit";
 import { requireP4Worker } from "./reviewLifecycle";
-import { p4FixAuthority } from "./p4FixAuthority";
+import { p4FixMetadata } from "./p4FixAuthority";
 import { p4AutomaticAuthority } from "./p4Polling";
 
 export async function runtimePolicy(ctx:QueryCtx|MutationCtx,repo:Doc<"repositories">){
@@ -32,7 +32,7 @@ export const save=mutation({args:{token:v.string(),organizationId:v.id("organiza
  else if(old)await ctx.db.patch(old._id,{policy,updatedAt:Date.now()});
  else await ctx.db.insert("runtimePolicies",{organizationId:a.organizationId,teamId:a.teamId,repositoryId:a.repositoryId,policy,updatedAt:Date.now()});
  await audit(ctx,a.organizationId,user._id,"runtime.policy_changed",a.repositoryId??a.teamId??a.organizationId);
- await ctx.scheduler.runAfter(0,internal.approvals.sweep,{});
+ await ctx.scheduler.runAfter(0,internal.approvals.sweep,{force:true});
 }});
 export const worker=mutation({args:{token:v.string(),organizationId:v.id("organizations"),name:v.string(),hash:v.string()},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true);
@@ -98,7 +98,7 @@ export const claim=internalMutation({args:{hash:v.string(),lease:v.string()},han
  const job=await ctx.db.query("runtimeJobs").withIndex("by_org_status",q=>q.eq("organizationId",worker.organizationId).eq("status","queued")).first();if(!job)return null;
  const review=await ctx.db.get(job.reviewId),repo=await ctx.db.get(job.repositoryId),latest=await ctx.db.query("reviews").withIndex("by_pr",q=>q.eq("repositoryId",job.repositoryId).eq("prNumber",review?.prNumber??-1)).order("desc").first();
  if(!repo||!review||!repo.enabled&&!review.nativeP4||review.status!=="waiting_runtime"||latest?._id!==review._id||jobKey(job,await runtimePolicy(ctx,repo))!==job.policyKey){await completeJob(ctx,job,"cancelled","Review revision or trusted runtime policy changed");return null;}
- if(review.nativeP4){try{await p4FixAuthority(ctx,review);if(review.nativeP4.polling)await p4AutomaticAuthority(ctx,review.repositoryId,review.nativeP4.polling);}catch{await completeJob(ctx,job,"cancelled","P4 runtime baseline or authority changed");return null;}}
+ if(review.nativeP4){try{await p4FixMetadata(ctx,review);if(review.nativeP4.polling)await p4AutomaticAuthority(ctx,review.repositoryId,review.nativeP4.polling);}catch{await completeJob(ctx,job,"cancelled","P4 runtime baseline or authority changed");return null;}}
  // Generated tests run one after another, each within the approved timeout.
  await ctx.db.patch(job._id,{status:"running",workerId:worker._id,lease:a.lease,leaseExpiresAt:Date.now()+(job.policy.timeout*Math.max(1,job.tests?.length??1)+300)*1000,attempts:job.attempts+1,updatedAt:Date.now()});
  return {id:job._id,headSha:job.headSha,repository:repo.fullName,image:job.policy.image,command:job.kind==="tests"?job.policy.testCommand??"":job.policy.command,timeout:job.policy.timeout,...(job.kind==="tests"?{kind:"tests" as const,tests:job.tests??[]}:{})};
@@ -107,7 +107,7 @@ export const authenticatedJob=internalQuery({args:{hash:v.string(),id:v.id("runt
  const worker=await workerIdentity(ctx,a.hash),job=await ctx.db.get(a.id);
  if(!job||job.organizationId!==worker.organizationId||job.workerId!==worker._id||job.status!=="running"||job.lease!==a.lease||(job.leaseExpiresAt??0)<=Date.now())throw new Error("Runtime lease expired, replayed, or unauthorized");
  if(a.source){const repo=await ctx.db.get(job.repositoryId),review=await ctx.db.get(job.reviewId);if(!repo||!review||!repo.enabled&&!review.nativeP4||review.status!=="waiting_runtime"||jobKey(job,await runtimePolicy(ctx,repo))!==job.policyKey)throw new Error("Runtime source authorization or trusted policy changed");}
- if(a.source){const review=await ctx.db.get(job.reviewId);if(review?.nativeP4){await p4FixAuthority(ctx,review);if(review.nativeP4.polling)await p4AutomaticAuthority(ctx,review.repositoryId,review.nativeP4.polling);}}
+ if(a.source){const review=await ctx.db.get(job.reviewId);if(review?.nativeP4){await p4FixMetadata(ctx,review);if(review.nativeP4.polling)await p4AutomaticAuthority(ctx,review.repositoryId,review.nativeP4.polling);}}
  return job;
 }});
 export const heartbeat=internalMutation({args:{hash:v.string(),id:v.id("runtimeJobs"),lease:v.string()},handler:async(ctx,a)=>{
@@ -148,7 +148,7 @@ export const complete=internalMutation({args:{id:v.id("runtimeJobs"),hash:v.opti
  const repo=await ctx.db.get(job.repositoryId),policyMatches=repo&&runtimePolicyKey(await runtimePolicy(ctx,repo))===job.policyKey;
  let nativeAuthority=true;
  const review=await ctx.db.get(job.reviewId);
- if(review?.nativeP4){try{await p4FixAuthority(ctx,review);if(review.nativeP4.polling)await p4AutomaticAuthority(ctx,review.repositoryId,review.nativeP4.polling);}catch{nativeAuthority=false;}}
+ if(review?.nativeP4){try{await p4FixMetadata(ctx,review);if(review.nativeP4.polling)await p4AutomaticAuthority(ctx,review.repositoryId,review.nativeP4.polling);}catch{nativeAuthority=false;}}
  if(a.stale||!policyMatches||!nativeAuthority){await completeJob(ctx,job,"cancelled","Review revision or trusted runtime policy changed",sanitized);return;}
  await completeJob(ctx,job,evidence?.timedOut?"timed_out":evidence?.executionStarted&&evidence.exitCode===0?"passed":"failed",a.error,sanitized);
 }});

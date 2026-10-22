@@ -149,7 +149,7 @@ test('recovery restarts stuck or never-started provider events, closes old ones 
 test('device pairing is rate limited per caller, so one caller cannot block pairing for everyone',async()=>{
  process.env.SERVICE_SECRET='pair-service';
  const t=convexTest(schema,modules);
- const pair=(i:number,client:string)=>t.mutation(api.bridge.startPair,{secret:'pair-service',hash:i.toString(16).padStart(64,'0'),code:'abcdef123456',name:'Laptop',client});
+ const pair=(i:number,client:string)=>t.mutation(api.bridge.startPair,{secret:'pair-service',hash:i.toString(16).padStart(64,'0'),code:i.toString(16).padStart(12,'0'),name:'Laptop',client});
  for(let i=0;i<30;i++)await pair(i,'203.0.113.9');
  await expect(pair(30,'203.0.113.9')).rejects.toThrow('Rate limit');
  expect(await pair(31,'198.51.100.7')).toBeTruthy();

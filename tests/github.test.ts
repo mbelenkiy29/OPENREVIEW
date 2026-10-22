@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { generateKeyPair, exportPKCS8 } from "jose";
 import { createHmac } from "node:crypto";
 import { Github, verifyWebhook } from "../src/github";
+import { Gitea } from "../src/gitea";
 test("runtime archives use exact revisions, restrict redirects, and never forward installation credentials to codeload",async t=>{
  let malicious=false;
  t.mock.method(globalThis,"fetch",async(input:string|URL,options:RequestInit)=>{
@@ -110,4 +111,29 @@ test("carried findings retain Fix All without posting duplicate inline comments"
   await github.publish("owner/repo",1,sha,"No unresolved findings.",[],"clean-review","detailed",undefined,0);
   assert.ok(!posted.body.includes("[Fix All]"));
  }finally{if(previous===undefined)delete process.env.APP_URL;else process.env.APP_URL=previous;}
+});
+test("GitHub blob reads raw bytes only up to the 200 KB review limit; Gitea keeps base64 JSON",async t=>{
+ let pulled=0,cancelled=false,small=true;
+ t.mock.method(globalThis,"fetch",async(input:string,options:RequestInit)=>{
+  if(input.startsWith("https://gitea.example/"))return Response.json({content:Buffer.from("gitea file").toString("base64"),encoding:"base64",size:10});
+  assert.equal(input,"https://api.github.com/repos/owner/repo/git/blobs/"+"b".repeat(40));
+  assert.equal(new Headers(options.headers).get("accept"),"application/vnd.github.raw");
+  if(small)return new Response("small file");
+  return new Response(new ReadableStream({pull(c){pulled++;c.enqueue(new Uint8Array(100000));},cancel(){cancelled=true;}},{highWaterMark:0}));
+ });
+ const github=new Github("installation-fixture");
+ assert.equal((await github.blob("owner/repo","a.ts","b".repeat(40))).content,"small file");small=false;
+ const file=await github.blob("owner/repo","big.bin","b".repeat(40));
+ assert.deepEqual({content:file.content,over:(file.size??0)>200000},{content:"",over:true});
+ assert.ok(pulled<=4,"read "+pulled+" chunks");assert.equal(cancelled,true);
+ assert.equal((await new Gitea("https://gitea.example","fixture").blob("owner/repo","a.ts","b".repeat(40))).content,"gitea file");
+});
+test("GitHub rate limits reported as 403 are flagged as rate limited, other 403s are not",async t=>{
+ const { z } = await import("zod");
+ let limited=true;
+ t.mock.method(globalThis,"fetch",async()=>limited?Response.json({message:"API rate limit exceeded for installation."},{status:403,headers:{"x-ratelimit-remaining":"0"}}):Response.json({message:"Resource not accessible by integration"},{status:403}));
+ const error=async()=>new Github("fixture").request("/repos/a/b",z.unknown()).then(()=>assert.fail("expected an error"),(e:unknown)=>e as {status:number;rateLimited:boolean});
+ assert.deepEqual(await error().then(e=>[e.status,e.rateLimited]),[403,true]);
+ limited=false;
+ assert.deepEqual(await error().then(e=>[e.status,e.rateLimited]),[403,false]);
 });

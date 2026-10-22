@@ -103,7 +103,7 @@ export default defineSchema({
   integrationConnections:defineTable({organizationId:org,kind:v.union(v.literal("linear"),v.literal("atlassian"),v.literal("notion")),sites:v.optional(v.array(v.object({id:v.string(),name:v.string(),url:v.string(),scopes:v.array(v.string())}))),jiraProjectIds:v.optional(v.array(v.string())),confluenceSpaceIds:v.optional(v.array(v.string())),externalId:v.string(),name:v.string(),credentials:v.string(),expiresAt:v.number(),active:v.boolean(),generation:v.number(),teamIds:v.array(v.string()),projectIds:v.array(v.string()),repositoryIds:v.array(repo),refreshLease:v.optional(v.string()),refreshExpiresAt:v.optional(v.number()),error:v.optional(v.string()),createdAt:v.number()}).index("by_org",["organizationId"]).index("by_account",["organizationId","kind","externalId"]),
   integrationRevocations:defineTable({connectionId:v.id("integrationConnections"),organizationId:org,credentials:v.string(),attempts:v.number(),createdAt:v.number(),status:v.string(),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number())}).index("by_connection",["connectionId"]),
   approvalPolicies:defineTable({organizationId:org,teamId:v.optional(v.id("teams")),repositoryId:v.optional(repo),policy:approvalPolicyValidator,updatedAt:v.number()}).index("by_org",["organizationId"]),
-  approvalJobs:defineTable({organizationId:org,repositoryId:repo,reviewId:review,prNumber:v.number(),headSha:v.string(),policyKey:v.string(),status:v.string(),reasons:v.array(v.string()),providerReviewId:v.optional(v.union(v.number(),v.string())),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number()),createdAt:v.number(),updatedAt:v.number()}).index("by_review",["reviewId"]).index("by_repo_pr",["repositoryId","prNumber"]).index("by_status",["status"]).index("by_org_status",["organizationId","status"]),
+  approvalJobs:defineTable({organizationId:org,repositoryId:repo,reviewId:review,prNumber:v.number(),headSha:v.string(),policyKey:v.string(),status:v.string(),reasons:v.array(v.string()),providerReviewId:v.optional(v.union(v.number(),v.string())),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number()),createdAt:v.number(),updatedAt:v.number()}).index("by_review",["reviewId"]).index("by_repo_pr",["repositoryId","prNumber"]).index("by_repo_head",["repositoryId","headSha"]).index("by_status",["status"]).index("by_org_status",["organizationId","status"]),
   runtimePolicies:defineTable({organizationId:org,teamId:v.optional(v.id("teams")),repositoryId:v.optional(repo),policy:runtimePolicyValidator,updatedAt:v.number()}).index("by_org",["organizationId"]),
   runtimeWorkers:defineTable({organizationId:org,tokenHash:v.string(),name:v.string(),expiresAt:v.number(),revoked:v.boolean(),lastSeen:v.optional(v.number()),createdAt:v.number()}).index("by_hash",["tokenHash"]).index("by_org",["organizationId"]),
   runtimeJobs:defineTable({organizationId:org,repositoryId:repo,reviewId:review,headSha:v.string(),revisionKey:v.optional(v.string()),policy:runtimePolicyValidator,policyKey:v.string(),status:v.string(),error:v.optional(v.string()),sourceStorageId:v.optional(v.id("_storage")),workerId:v.optional(v.id("runtimeWorkers")),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number()),attempts:v.number(),evidence:v.optional(runtimeEvidenceValidator),
@@ -368,7 +368,8 @@ export default defineSchema({
     .index("by_github", ["githubId"])
     .index("by_org", ["organizationId"])
     .index("by_installation", ["installationId"])
-    .index("by_knowledge_status", ["knowledgeStatus"]),
+    .index("by_knowledge_status", ["knowledgeStatus"])
+    .index("by_conventions_synced", ["conventionsSyncedAt"]),
   repositorySettings: defineTable({
     repositoryId: repo,
     organizationId: org,
@@ -488,6 +489,7 @@ export default defineSchema({
     .index("by_org", ["organizationId"])
     .index("by_org_state", ["organizationId", "state"])
     .index("by_repo_state", ["repositoryId", "state", "number"])
+    .index("by_state_reactions", ["state", "reactionsSyncedAt"])
     .searchIndex("by_title",{searchField:"title",filterFields:["organizationId","state"]}),
   pullRequestCommits: defineTable({
     organizationId: org,
@@ -559,6 +561,7 @@ export default defineSchema({
     .index("by_head", ["repositoryId", "prNumber", "headSha"])
     .index("by_pr", ["repositoryId", "prNumber"])
     .index("by_status", ["status"])
+    .index("by_repo_status", ["repositoryId", "status"])
     .index("by_org_time", ["organizationId", "createdAt"]),
   reviewRuns: defineTable({
     organizationId: org,

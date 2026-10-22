@@ -12,7 +12,7 @@ import { v } from "convex/values";
 import { authorize, authorizeRepository, visibleRepositories } from "./auth";
 import type { Doc, Id } from "./_generated/dataModel";
 import { recordSignals } from "./commitSignals";
-import {p4FixAuthority} from "./p4FixAuthority";
+import {p4FixMetadata} from "./p4FixAuthority";
 import { eligibleFixFinding } from "../src/fix-prompt";
 import { effectiveSettings } from "./scopes";
 import { scheduleIndexIfIdle } from "./repositories";
@@ -24,7 +24,7 @@ import { redact } from "../src/redact";
 import { runtimeEvidenceSchema, approvalAssessmentSchema, reviewScoreSchema } from "../src/engine/types";
 import {p4AutomaticAuthority} from "./p4Polling";
 import {cancelReview,requireP4Worker} from "./reviewLifecycle";
-import {p4Baseline} from "./p4Index";
+import {p4BaselineMetadata} from "./p4Index";
 import {findingTags,priorityOf,findingCounts} from "../src/priority";
 
 const usageValidator = v.object({
@@ -323,7 +323,7 @@ export const save = internalMutation({
       throw new Error("Review cancelled");
     requireP4Worker(review,args.workerLease);
     if(review.nativeP4?.polling)await p4AutomaticAuthority(ctx,review.repositoryId,review.nativeP4.polling);
-    if(review.nativeP4)await p4Baseline(ctx,{repositoryId:review.repositoryId,requestedBy:review.nativeP4.requestedBy,baselineJobId:review.nativeP4.baselineJobId});
+    if(review.nativeP4)await p4BaselineMetadata(ctx,{repositoryId:review.repositoryId,requestedBy:review.nativeP4.requestedBy,baselineJobId:review.nativeP4.baselineJobId});
     if(review.resultStorageId)throw new Error("Review result already saved; create a new review instead");
     if(args.findings.some(f=>f.commitSha!==review.headSha)||new Set(args.findings.map(f=>f.fingerprint)).size!==args.findings.length)
       throw new Error("Finding snapshots must be unique and belong to the reviewed revision");
@@ -574,7 +574,7 @@ export const detail = query({
     const latestReadable=latest?await contextReadable(ctx,viewer._id,latest):false;
     const retry=review.retryScheduledId?await ctx.db.system.get(review.retryScheduledId):null;
     let fixReady=repo.enabled;
-    if(review.nativeP4){try{await p4FixAuthority(ctx,review);fixReady=true;}catch{fixReady=false;}}
+    if(review.nativeP4){try{await p4FixMetadata(ctx,review);fixReady=true;}catch{fixReady=false;}}
     const executionEvidence=review.runtimeEvidence?.headSha===review.headSha?review.runtimeEvidence:undefined;
     const findings=await Promise.all(snapshots.map(async s=>{
       await requireFindingReader(ctx,viewer._id,s.snapshot);

@@ -13,7 +13,9 @@ export const rollupDay = internalMutation({ args: { organizationId: v.id("organi
   const { start, end } = dayBounds(a.day);
   const reviews = await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", a.organizationId).gte("createdAt", start).lt("createdAt", end)).take(4000);
   const findings = await ctx.db.query("findings").withIndex("by_org_time", (q) => q.eq("organizationId", a.organizationId).gte("createdAt", start).lt("createdAt", end)).take(4000);
+  // shortcut: an org-day with over 4,000 reviews, findings or signals is undercounted (logged below); page this mutation if one ever does.
   const signals = await ctx.db.query("findingSignals").withIndex("by_org_time", (q) => q.eq("organizationId", a.organizationId).gte("createdAt", start).lt("createdAt", end)).take(4000);
+  if (reviews.length === 4000 || findings.length === 4000 || signals.length === 4000) console.warn(`analytics rollup capped at 4,000 rows for ${a.organizationId} ${a.day}`);
   const rows = new Map<string, { repositoryId: Id<"repositories">; author: string; reviews: number; completed: number; findings: number; high: number; addressed: number; useful: number; notUseful: number; commitAddressed: number; ignored: number }>();
   const row = (repositoryId: Id<"repositories">, author?: string) => { const k = `${repositoryId}|${author ?? ""}`; let r = rows.get(k); if (!r) rows.set(k, r = { repositoryId, author: author ?? "", reviews: 0, completed: 0, findings: 0, high: 0, addressed: 0, useful: 0, notUseful: 0, commitAddressed: 0, ignored: 0 }); return r; };
   for (const r of reviews) { const x = row(r.repositoryId, r.author); x.reviews++; if (r.status === "completed") x.completed++; }
@@ -32,9 +34,11 @@ export const rollupDay = internalMutation({ args: { organizationId: v.id("organi
   return rows.size;
 } });
 // Cron entry: recompute the last `days` days for every organization (one mutation per org-day).
-export const sweep = internalMutation({ args: { days: v.optional(v.number()) }, handler: async (ctx, a) => {
-  const days = Math.min(Math.max(a.days ?? 2, 1), 90), today = Date.now();
-  const orgs = (await ctx.db.query("organizations").take(5000)).map((o) => o._id);
-  for (const organizationId of orgs) for (let i = 0; i < days; i++) await ctx.scheduler.runAfter(0, internal.analyticsRollup.rollupDay, { organizationId, day: new Date(today - i * 86400000).toISOString().slice(0, 10) });
-  return orgs.length * days;
+// Pages organizations so each run schedules at most ~480 rollups (Convex allows 1,000 per mutation), then continues.
+export const sweep = internalMutation({ args: { days: v.optional(v.number()), cursor: v.optional(v.union(v.string(), v.null())), today: v.optional(v.number()) }, handler: async (ctx, a) => {
+  const days = Math.min(Math.max(a.days ?? 2, 1), 90), today = a.today ?? Date.now();
+  const page = await ctx.db.query("organizations").paginate({ numItems: Math.floor(480 / days), cursor: a.cursor ?? null });
+  for (const { _id: organizationId } of page.page) for (let i = 0; i < days; i++) await ctx.scheduler.runAfter(0, internal.analyticsRollup.rollupDay, { organizationId, day: new Date(today - i * 86400000).toISOString().slice(0, 10) });
+  if (!page.isDone) await ctx.scheduler.runAfter(0, internal.analyticsRollup.sweep, { days, cursor: page.continueCursor, today });
+  return page.page.length * days;
 } });

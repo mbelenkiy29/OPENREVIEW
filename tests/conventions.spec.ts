@@ -58,6 +58,18 @@ test('ingestion learns guarded, deduplicated convention suggestions from merged 
  }finally{vi.restoreAllMocks();vi.useRealTimers();}
 });
 
+test('sweep picks repositories least recently synced across all tenants, even after the 2,000th; ineligible ones advance',async()=>{
+ const {t,organizationId,repo}=await setup();
+ const base={organizationId,defaultBranch:'main',indexStatus:'idle',createdAt:Date.now()};
+ const ids=await t.run(async ctx=>{
+  for(let n=0;n<2000;n++)await ctx.db.insert('repositories',{...base,fullName:`other/r${n}`,installationId:97,enabled:true,conventionsSyncedAt:Date.now()-3600000});
+  return {disabled:await ctx.db.insert('repositories',{...base,fullName:'other/disabled',installationId:97,enabled:false}),late:await ctx.db.insert('repositories',{...base,fullName:'other/late',installationId:97,enabled:true})};
+ });
+ expect((await t.mutation(internal.conventions.due,{limit:10})).map(r=>r.repositoryId)).toEqual([repo._id,ids.late]);
+ expect((await t.run(ctx=>ctx.db.get(ids.disabled)))?.conventionsSyncedAt).toBeGreaterThan(0);
+ expect(await t.mutation(internal.conventions.due,{limit:10})).toEqual([]);
+});
+
 test('admins approve or reject suggestions (audited); viewers cannot; auto-approve applies only when opted in',async()=>{
  const {t,admin,viewer,repo}=await setup();
  const candidate={text:'Prefer integer cents for every monetary amount.',category:'correctness',frequency:2,evidence:[{url:'https://github.com/alice/conventions/pull/1#r1',author:'dev',excerpt:'cents please'}]};

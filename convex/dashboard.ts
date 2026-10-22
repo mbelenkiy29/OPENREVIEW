@@ -1,7 +1,7 @@
 import { recordFindingFeedback } from "./feedbackCore";
 import { query, mutation, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { authorize, authorizeRepository, visibleRepositories,repositoryAccess,audit } from "./auth";
+import { authorize, authorizeRepository, visibleRepositories,repositoryScope,audit } from "./auth";
 import { ruleApplies, validRepositoryPattern } from "../src/rule-scopes";
 import { repositorySourceUrl } from "../src/source-url";
 import {contextReadable,requireFindingReader} from "./repositoryContext";
@@ -62,8 +62,9 @@ export const overview = query({
           )
           .take(200),
       ]);
-    const permitted = await visibleRepositories(ctx, args.token, args.organizationId,args.teamId);
+    const {repos:permitted,writable}=await repositoryScope(ctx, args.token, args.organizationId,args.teamId);
     const allowed = new Set(permitted.map(r => String(r._id)));
+    const teamIds=new Set(permitted.map(r=>r.teamId).filter(Boolean).map(String));
     const readable=new Map<Id<"reviews">,Promise<boolean>>();
     const mayReadReview=(id:Id<"reviews">)=>{
       let result=readable.get(id);
@@ -76,14 +77,14 @@ export const overview = query({
       try{await requireFindingReader(ctx,user._id,f);return true;}catch{return false;}
     }));
     const usageAccess=await Promise.all(usage.map(async u=>allowed.has(u.repositoryId)&&(!u.reviewId||await mayReadReview(u.reviewId))));
-    const writable=await Promise.all(permitted.map(async r=>{try{await repositoryAccess(ctx,user._id,r._id,true);return r._id;}catch{return null;}}));
     return {
       repositories: await Promise.all(permitted.map(async r=>({...r,provider:await repositoryIdentity(ctx,r)}))),
-      writableRepositoryIds:writable.filter((id):id is NonNullable<typeof id>=>id!==null),
+      writableRepositoryIds:permitted.filter(writable).map(r=>r._id),
       reviews: reviews.filter((_,i)=>reviewAccess[i]),
       findings: findings.filter((_,i)=>findingAccess[i]),
       usage: usage.filter((_,i)=>usageAccess[i]),
-      rules: rules.filter(r => !r.repositoryId || allowed.has(r.repositoryId)),
+      // Same visibility as rulesPage: team rules only for readers of that team's repositories.
+      rules: rules.filter(r => r.repositoryId ? allowed.has(r.repositoryId) : !r.teamId || teamIds.has(String(r.teamId))),
       indexJobs: await Promise.all(
         permitted.map((r) =>
           ctx.db

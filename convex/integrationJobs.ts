@@ -63,30 +63,33 @@ export const revoke=internalAction({args:{id:v.id("integrationRevocations")},han
  try{await revokeLinear(linearCredentials.parse(JSON.parse(decryptCredential(r.credentials,r.organizationId+":linear"))));await ctx.runMutation(internal.integrations.revocationResult,{id:a.id,lease,success:true});}
  catch{await ctx.runMutation(internal.integrations.revocationResult,{id:a.id,lease,success:false});}
 }});
-export const requirements=internalAction({args:{repositoryId:v.id("repositories"),references:v.string()},handler:async(ctx,a):Promise<{files:SourceFile[];scopes:{id:Id<"integrationConnections">;generation:number}[];coverage:string[]}>=>{
- // Offline mode: no ticket or document lookups; say so once when the repository has connections.
- if(!egressAllowed("integrations")){const any=await ctx.runQuery(internal.integrations.forRepository,{repositoryId:a.repositoryId});return {files:[],scopes:[],coverage:any.length?["Offline mode (OPENREVIEW_OFFLINE=true): linked tickets and documents were not fetched."]:[]};}
+export const requirements=internalAction({args:{repositoryId:v.id("repositories"),references:v.string(),actor:v.optional(v.string()),authorExternalId:v.optional(v.string()),nativeActor:v.optional(v.object({id:v.id("p4Identities"),generation:v.number()})),nativeAuthor:v.optional(v.boolean())},handler:async(ctx,a):Promise<{files:SourceFile[];scopes:{id:Id<"integrationConnections">;generation:number}[];coverage:string[]}>=>{
+ // Offline mode, or an author who is not a linked member (e.g. a fork PR): workspace tokens must not pull private tickets into a posted review.
+ const blocked=!egressAllowed("integrations")?"Offline mode (OPENREVIEW_OFFLINE=true): linked tickets and documents were not fetched.":!a.actor||!await ctx.runQuery(internal.repositoryContext.authorMember,{repositoryId:a.repositoryId,actor:a.actor,authorExternalId:a.authorExternalId,nativeActor:a.nativeActor,nativeAuthor:a.nativeAuthor})?"Linked tickets and documents were not fetched: the PR author is not a linked workspace member with access to this repository.":null;
+ if(blocked){const any=await ctx.runQuery(internal.integrations.forRepository,{repositoryId:a.repositoryId});return {files:[],scopes:[],coverage:any.length?[blocked]:[]};}
  const connections=await ctx.runQuery(internal.integrations.forRepository,{repositoryId:a.repositoryId,kind:"linear"});
  const identifiers=[...new Set(a.references.match(/\b[A-Z0-9][A-Z0-9_]{0,49}-[1-9]\d{0,9}\b/g)??[])];
  const files:SourceFile[]=[],coverage:string[]=[],scopes=connections.map(c=>({id:c._id,generation:c.generation}));
 
  // ponytail: fetch at most ten explicitly referenced issues, 100KB total; surface the ceiling in review diagnostics.
  if(connections.length&&identifiers.length>10)coverage.push("Linear retrieval limited to the first 10 referenced issue identifiers.");
- let bytes=0;
- for(const c of connections)for(const identifier of identifiers.slice(0,10)){
+ // One 60s deadline across Linear, Atlassian and Notion; checked before each fetch (in-flight requests keep their own 30s timeout).
+ let bytes=0;const deadline=Date.now()+60_000;
+ for(const [c,identifier] of connections.flatMap(c=>identifiers.slice(0,10).map(id=>[c,id] as const))){
+  if(Date.now()>deadline){coverage.push("Requirements retrieval reached its 60-second deadline; remaining tickets and pages were not fetched.");break;}
   try{
    const {value:issue,connection}=await read(ctx,c._id,(linear,connection)=>linear.issue(identifier,{organizationId:connection.externalId,teamIds:connection.teamIds,projectIds:connection.projectIds}));
    if(connection.generation!==c.generation)throw new Error("Integration changed");
    const content=`# ${issue.identifier}: ${issue.title}\nSource: ${issue.url}\nUpdated: ${issue.updatedAt}\n\n${issue.description??""}`;
    const size=Buffer.byteLength(content,"utf8");
-   if(bytes+size>100000){coverage.push("Linear requirements context exceeded the 100KB limit.");continue;}
+   if(bytes+size>100000){coverage.push("Linear requirements context exceeded the 100KB limit.");break;}
    bytes+=size;files.push({path:`requirements/linear/${c._id}/${identifier}.md`,content,sha:issue.updatedAt,provenance:{repository:"Linear: "+connection.name,revision:issue.updatedAt,sourceUrl:issue.url}});
   }catch{coverage.push(`Linear issue ${identifier} was unavailable or outside the selected resources in connection ${c._id}; its requirements were not used.`);}
  }
  await ctx.runQuery(internal.integrations.validate,{repositoryId:a.repositoryId,scopes});
  if(connections.length&&!identifiers.length)coverage.push("No Linear issue identifiers were referenced in the PR title, description or branch; no requirements were fetched.");
- const atlassian=await ctx.runAction(internal.atlassianJobs.requirements,a);
- const notion=await ctx.runAction(internal.notionJobs.requirements,a);
+ const atlassian=await ctx.runAction(internal.atlassianJobs.requirements,{repositoryId:a.repositoryId,references:a.references,deadline});
+ const notion=await ctx.runAction(internal.notionJobs.requirements,{repositoryId:a.repositoryId,references:a.references,deadline});
  const combined=boundRequirementsContext([...files,...atlassian.files,...notion.files]);
  return {files:combined.files,scopes:[...scopes,...atlassian.scopes,...notion.scopes],coverage:[...new Set([...coverage,...atlassian.coverage,...notion.coverage,...combined.coverage])]};
 }});

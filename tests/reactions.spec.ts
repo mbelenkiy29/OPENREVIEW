@@ -51,17 +51,30 @@ test('sync polls GitHub for OpenReview finding comments only; sweep selects open
  vi.useFakeTimers();
  try{
   const {t,repo}=await setup();
-  expect(await t.query(internal.reactions.due,{limit:25})).toEqual([{repositoryId:repo._id,prNumber:3}]);
+  expect(await t.mutation(internal.reactions.due,{limit:25})).toEqual([{repositoryId:repo._id,prNumber:3}]);
   const scm=new Github('fixture');vi.spyOn(Github,'installation').mockResolvedValue(scm);
   const polled=vi.spyOn(scm,'reactions').mockResolvedValue([{commentId:'10',user:'carol',reaction:'+1',createdAt:Date.now()}]);
   expect(await t.action(internal.reactionJobs.sync,{repositoryId:repo._id,prNumber:3})).toEqual({added:1,removed:0});
   expect(polled.mock.calls[0][1].sort()).toEqual([10,11]);
-  expect(await t.query(internal.reactions.due,{limit:25})).toEqual([]);
+  expect(await t.mutation(internal.reactions.due,{limit:25})).toEqual([]);
   await t.run(async ctx=>{const pr=(await ctx.db.query('pullRequests').collect())[0];await ctx.db.patch(pr._id,{reactionsSyncedAt:Date.now()-2*3600000});});
-  expect(await t.query(internal.reactions.due,{limit:25})).toHaveLength(1);
+  expect(await t.mutation(internal.reactions.due,{limit:25})).toHaveLength(1);
   await t.run(async ctx=>{const pr=(await ctx.db.query('pullRequests').collect())[0];await ctx.db.patch(pr._id,{state:'closed'});});
-  expect(await t.query(internal.reactions.due,{limit:25})).toEqual([]);
+  expect(await t.mutation(internal.reactions.due,{limit:25})).toEqual([]);
  }finally{vi.restoreAllMocks();vi.useRealTimers();}
+});
+
+test('sweep still picks an old open PR behind 400+ newer completed reviews; unreviewed PRs advance the queue',async()=>{
+ const {t,organizationId,repo}=await setup();
+ await t.run(async ctx=>{
+  await ctx.db.insert('pullRequests',{organizationId,repositoryId:repo._id,number:2,title:'Unreviewed',author:'bob',url:'u',headSha:'h'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:Date.now()});
+  for(let n=100;n<501;n++){
+   await ctx.db.insert('reviews',{organizationId,repositoryId:repo._id,prNumber:n,headSha:'h'.repeat(40),status:'completed',mode:'standard',attempts:1,createdAt:Date.now(),updatedAt:Date.now()});
+   await ctx.db.insert('pullRequests',{organizationId,repositoryId:repo._id,number:n,title:'New',author:'bob',url:'u',headSha:'h'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:Date.now(),reactionsSyncedAt:Date.now()});
+  }
+ });
+ expect(await t.mutation(internal.reactions.due,{limit:50})).toEqual([{repositoryId:repo._id,prNumber:3}]);
+ expect((await t.run(ctx=>ctx.db.query('pullRequests').withIndex('by_repo_number',q=>q.eq('repositoryId',repo._id).eq('number',2)).unique()))?.reactionsSyncedAt).toBeGreaterThan(0);
 });
 
 test('GitLab emoji awards and revocations update reactions for finding notes only',async()=>{

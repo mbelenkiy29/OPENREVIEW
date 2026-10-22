@@ -54,7 +54,7 @@ const treeSchema = z.object({
   tree: z.array(z.object({ path: z.string(), type: z.string(), sha: z.string(), size: z.number().optional() })),
 });
 export class GithubApiError extends Error {
- constructor(message:string,readonly status:number,readonly planRestricted=false){super(message);}
+ constructor(message:string,readonly status:number,readonly planRestricted=false,readonly rateLimited=status===429){super(message);}
 }
 export class Github {
   readonly supportsApproval:boolean = true;
@@ -109,6 +109,12 @@ export class Github {
     schema: z.ZodType<T>,
     options: RequestInit = {},
   ): Promise<T> {
+    const response = await this.send(endpoint, options);
+    if (response.status === 204) return schema.parse(null);
+    return schema.parse(await response.json());
+  }
+  // Authenticated fetch with GitHub's retry and error handling; the caller reads the body.
+  protected async send(endpoint: string, options: RequestInit = {}): Promise<Response> {
     if (
       !endpoint.startsWith("/") ||
       endpoint.startsWith("//") ||
@@ -160,10 +166,11 @@ export class Github {
         throw new GithubApiError(
           `GitHub ${options.method ?? "GET"} ${endpoint.split("?")[0]}: HTTP ${response.status}`,
           response.status,response.status===403&&errorBody?.message==="Upgrade to GitHub Pro or make this repository public to enable this feature.",
+          // GitHub reports primary and secondary rate limits as 403 too.
+          response.status===429||response.status===403&&(response.headers.get("x-ratelimit-remaining")==="0"||/rate limit/i.test(String(errorBody?.message??""))),
         );
       }
-      if (response.status === 204) return schema.parse(null);
-      return schema.parse(await response.json());
+      return response;
     }
     throw new Error("GitHub retries exhausted");
   }
@@ -607,22 +614,29 @@ export class Github {
     path: string,
     sha: string,
   ): Promise<SourceFile> {
-    const blob = await this.request(
-      `/repos/${repository}/git/blobs/${sha}`,
-      z.object({
-        content: z.string(),
-        encoding: z.literal("base64"),
-        size: z.number(),
-      }),
-    );
-    if (blob.size > 200000) return {path,sha,size:blob.size,content:""};
-    return {
-      path,
-      sha,
-      content: Buffer.from(blob.content.replace(/\n/g, ""), "base64").toString(
-        "utf8",
-      ),
-    };
+    const endpoint = `/repos/${repository}/git/blobs/${sha}`;
+    // Gitea overrides request and has no raw blob media type, so it keeps the base64 JSON API.
+    if (this.request !== Github.prototype.request) {
+      const blob = await this.request(endpoint, z.object({ content: z.string(), encoding: z.literal("base64"), size: z.number() }));
+      if (blob.size > 200000) return {path,sha,size:blob.size,content:""};
+      return { path, sha, content: Buffer.from(blob.content.replace(/\n/g, ""), "base64").toString("utf8") };
+    }
+    const response = await this.send(endpoint, { headers: { accept: "application/vnd.github.raw" } });
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("GitHub source body missing");
+    // Raw bytes read only up to the 200 KB review limit, so a huge file is never downloaded in full.
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > 200000) return { path, sha, size: Number(response.headers.get("content-length")) || size, content: "" };
+        chunks.push(value);
+      }
+    } finally { await reader.cancel(); }
+    return { path, sha, content: Buffer.concat(chunks).toString("utf8") };
   }
   async publish(
     repository: string,

@@ -3,7 +3,7 @@ import {v} from 'convex/values';
 import type {Id} from './_generated/dataModel';
 import {authenticated,authorizeRepository,repositoryAccess,visibleRepositories,audit} from './auth';
 import {connectionDigest} from './indexAuthority';
-import {p4FixAuthority} from './p4FixAuthority';
+import {p4FixMetadata} from './p4FixAuthority';
 export const authorize=internalQuery({args:{token:v.string(),repositoryId:v.id('repositories')},handler:async(ctx,a)=>{
  const {repo,user}=await authorizeRepository(ctx,a.token,a.repositoryId,true);
  const connection=repo.connectionId?await ctx.db.get(repo.connectionId):null;
@@ -52,7 +52,7 @@ export async function p4QuestionAuthority(ctx:QueryCtx|MutationCtx,a:{reviewId:I
  if(!review?.nativeP4||review.repositoryId!==authority.repo._id||review.organizationId!==authority.repo.organizationId||review.status!=='completed')throw new Error('Completed native P4 review required for this personal project');
  const latest=await ctx.db.query('reviews').withIndex('by_pr',q=>q.eq('repositoryId',review.repositoryId).eq('prNumber',review.prNumber)).order('desc').first();
  if(latest?._id!==review._id)throw new Error('Native P4 review superseded');
- const baseline=await p4FixAuthority(ctx,review);
+ const baseline=await p4FixMetadata(ctx,review);
  return {...authority,review,baselineJob:baseline.job};
 }
 export const contextAuthority=internalQuery({args:{reviewId:v.id('reviews'),identityId:v.id('p4Identities'),generation:v.number()},handler:p4QuestionAuthority});

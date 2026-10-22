@@ -915,9 +915,9 @@ test("Linear retrieval preserves native provenance, refresh leases and rejects a
  expect(await t.mutation(internal.integrations.refreshed,{id,lease:"wrong",credentials:"wrong",expiresAt:Date.now()+86400000})).toBe(false);await t.mutation(internal.integrations.refreshFailed,{id,lease:"first"});
  const issue=vi.spyOn(Linear.prototype,"issue").mockResolvedValue({id:"native-issue",identifier:"ENG-42",title:"Return cents",description:"Amounts must be integer cents.",updatedAt:"2026-10-02T12:00:00.000Z",url:"https://linear.app/engineering/issue/ENG-42/return-cents",team:{id:"team-native"},project:null});
  try{
-  const result=await t.action(internal.integrationJobs.requirements,{repositoryId,references:"Fix ENG-42 (ENG-42)"});expect(issue).toHaveBeenCalledTimes(1);expect(issue).toHaveBeenCalledWith("ENG-42",{organizationId:"org-native",teamIds:["team-native"],projectIds:[]});expect(result.files[0].provenance).toMatchObject({revision:"2026-10-02T12:00:00.000Z",sourceUrl:"https://linear.app/engineering/issue/ENG-42/return-cents"});expect(result.scopes).toEqual([{id,generation:2}]);
+  const result=await t.action(internal.integrationJobs.requirements,{repositoryId,references:"Fix ENG-42 (ENG-42)",actor:"alice",authorExternalId:"1"});expect(issue).toHaveBeenCalledTimes(1);expect(issue).toHaveBeenCalledWith("ENG-42",{organizationId:"org-native",teamIds:["team-native"],projectIds:[]});expect(result.files[0].provenance).toMatchObject({revision:"2026-10-02T12:00:00.000Z",sourceUrl:"https://linear.app/engineering/issue/ENG-42/return-cents"});expect(result.scopes).toEqual([{id,generation:2}]);
   issue.mockImplementationOnce(async()=>{await t.mutation(internal.integrations.scope,{...scope,generation:2,teamIds:[]});throw new Error("changed");});
-  await expect(t.action(internal.integrationJobs.requirements,{repositoryId,references:"ENG-42"})).rejects.toThrow("scope changed");
+  await expect(t.action(internal.integrationJobs.requirements,{repositoryId,references:"ENG-42",actor:"alice",authorExternalId:"1"})).rejects.toThrow("scope changed");
  }finally{issue.mockRestore();}
 });
 test("Linear revocation recovers an interrupted action and erases credentials after bounded failures",async()=>{
@@ -2050,7 +2050,7 @@ test("Findings read models hide stale, resolved, low-confidence, disabled and vi
 });
 test("device pairing keeps a shared cap so spoofed client addresses cannot pair without limit",async()=>{
  vi.useFakeTimers();vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));try{
-  const t=convexTest(schema,modules),pair=(i:number)=>t.mutation(api.bridge.startPair,{secret:"integration-service-secret",hash:i.toString(16).padStart(64,"0"),code:"a".repeat(12),name:"Spoofed",client:`10.0.${i}`});
+  const t=convexTest(schema,modules),pair=(i:number)=>t.mutation(api.bridge.startPair,{secret:"integration-service-secret",hash:i.toString(16).padStart(64,"0"),code:i.toString(16).padStart(12,"0"),name:"Spoofed",client:`10.0.${i}`});
   for(let i=0;i<300;i++) await pair(i);
   await expect(pair(300)).rejects.toThrow(/Rate limit/);
  }finally{vi.useRealTimers();}

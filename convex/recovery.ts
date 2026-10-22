@@ -19,7 +19,8 @@ export const sweep = internalMutation({
   handler: async (ctx) => {
     for (const part of [internal.recovery.sweepCache, internal.recovery.sweepIndexJobs, internal.recovery.sweepReviews]) await ctx.scheduler.runAfter(0, part, {});
     const stale = Date.now() - 15 * 60000;
-    await ctx.runMutation(internal.p4Conversations.recover,{});
+    // Native conversation recovery runs in its own transaction so a large P4 backlog never stalls every tenant's sweep.
+    await ctx.scheduler.runAfter(0, internal.p4Conversations.recover, {});
     for (const knowledgeStatus of ["queued", "generating"]) for (const repo of await ctx.db.query("repositories").withIndex("by_knowledge_status", (q) => q.eq("knowledgeStatus", knowledgeStatus)).take(100))
       if (
         repo.indexStatus === "ready" &&

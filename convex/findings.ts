@@ -7,7 +7,7 @@ import type {Doc,Id} from "./_generated/dataModel";
 import type {QueryCtx} from "./_generated/server";
 import { effectiveSettings } from "./scopes";
 import { eligibleFixFinding } from "../src/fix-prompt";
-import { p4FixAuthority } from "./p4FixAuthority";
+import { p4FixMetadata } from "./p4FixAuthority";
 function fixEligibility(ctx:QueryCtx,token:string){
  const access=new Map<Id<"repositories">,Promise<{repo:Doc<"repositories">;minimumConfidence:number}|null>>();
  const latest=new Map<string,Promise<Doc<"reviews">|null>>();
@@ -23,7 +23,7 @@ function fixEligibility(ctx:QueryCtx,token:string){
   if(!eligibleFixFinding(finding,review,(await newest)?._id,writable.minimumConfidence))return false;
   if(!review.nativeP4)return writable.repo.enabled;
   let ready=native.get(review._id);
-  if(!ready){ready=p4FixAuthority(ctx,review).then(()=>true,()=>false);native.set(review._id,ready);}
+  if(!ready){ready=p4FixMetadata(ctx,review).then(()=>true,()=>false);native.set(review._id,ready);}
   return ready;
  };
 }
@@ -59,9 +59,8 @@ export const list = query({
     const allowed = new Set((await visibleRepositories(ctx,args.token,args.organizationId,args.teamId)).map(r=>String(r._id)));
     if(args.repositoryId&&!allowed.has(args.repositoryId))throw new Error("Repository not accessible in selected scope");
     if(!allowed.size)return {page:[],isDone:true,continueCursor:""};
-    const result = await ctx.db
-      .query("findings")
-      .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
+    // One repository reads its own index; otherwise rows read are capped so a rare filter returns a short page instead of scanning every finding.
+    const result = await (args.repositoryId?ctx.db.query("findings").withIndex("by_repo",q=>q.eq("repositoryId",args.repositoryId!)):ctx.db.query("findings").withIndex("by_org", (q) => q.eq("organizationId", args.organizationId)))
       .order("desc")
       .filter((q) =>
         q.and(
@@ -79,7 +78,7 @@ export const list = query({
           args.since ? q.gte(q.field("createdAt"), args.since) : true,
         ),
       )
-      .paginate({ numItems: 30, cursor: args.cursor ?? null });
+      .paginate({ numItems: 30, cursor: args.cursor ?? null, maximumRowsRead: 1000 });
     const parents=await Promise.all(result.page.map(r=>ctx.db.get(r.reviewId)));
     const permitted=await Promise.all(result.page.map(async (r,i)=>{const review=parents[i];try{await requireFindingReader(ctx,reader.user._id,r);return !review||await contextReadable(ctx,reader.user._id,review);}catch{return false;}}));
     const canFix=fixEligibility(ctx,args.token);

@@ -23,7 +23,7 @@ export const ingest = internalAction({ args: { repositoryId: v.id("repositories"
   return ctx.runMutation(internal.conventions.record, { repositoryId: repo._id, cursor: batch.cursor, candidates });
 } });
 export const sweep = internalAction({ args: {}, handler: async (ctx): Promise<number> => {
-  const due = await ctx.runQuery(internal.conventions.due, { limit: 10 });
+  const due = await ctx.runMutation(internal.conventions.due, { limit: 10 });
   for (const [i, repo] of due.entries()) await ctx.scheduler.runAfter(i * 30000, internal.conventionJobs.ingest, { repositoryId: repo.repositoryId });
   return due.length;
 } });

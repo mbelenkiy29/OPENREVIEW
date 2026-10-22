@@ -56,7 +56,7 @@ export const run=internalAction({args:{reviewId:v.id("reviews")},handler:async(c
   let result:ReviewResult&{repositoryContext?:RepositoryContext;integrationScopes?:{id:Id<"integrationConnections">;generation:number}[]};
   if(state.review.resultStorageId){const saved=await ctx.storage.get(state.review.resultStorageId);if(!saved||saved.size>2000000)throw new Error("P4 saved result unavailable");result=JSON.parse(await saved.text());if(result.metadata.headSha!==snapshot.revision)throw new Error("P4 saved result revision mismatch");}
   else{
-   const requirements=await ctx.runAction(internal.integrationJobs.requirements,{repositoryId:state.repo._id,references:prepared.input.title+"\n"+prepared.input.description});
+   const requirements=await ctx.runAction(internal.integrationJobs.requirements,{repositoryId:state.repo._id,references:prepared.input.title+"\n"+prepared.input.description,actor:snapshot.review.author,nativeAuthor:true,nativeActor:await ctx.runQuery(internal.p4Identities.find,{repositoryId:state.repo._id,username:snapshot.review.author}).then(l=>l?{id:l.identity._id,generation:l.identity.generation}:undefined)});
    const linked=await ctx.runQuery(internal.p4Identities.find,{repositoryId:state.repo._id,username:snapshot.review.author});
    const cross=await ctx.runAction(internal.repositoryContextJobs.retrieve,{repositoryId:state.repo._id,actor:snapshot.review.author,nativeAuthor:true,nativeActor:linked?{id:linked.identity._id,generation:linked.identity.generation}:undefined,identifiers:[...new Set(prepared.input.diff.flatMap(f=>f.patch.match(/[A-Za-z_]\w{3,}/g)??[]))].slice(0,30)});
    const context={repositoryId:state.repo._id,scopes:requirements.scopes,repositoryContext:cross.receipt??undefined};
