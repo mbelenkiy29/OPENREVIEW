@@ -13,6 +13,7 @@ export function inferenceBilling(ctx: ActionCtx): InferenceBilling {
       catch { throw new InferenceBudgetError("Inference budget unavailable, exhausted, or model pricing unsupported; no provider request was sent"); }
     },
     async settle(id, usage) { await ctx.runMutation(internal.inferenceBudget.settle, { id: id as Id<"inferenceReservations">, ...usage }); },
+    async release(id) { await ctx.runMutation(internal.inferenceBudget.release, { id: id as Id<"inferenceReservations"> }); },
   };
 }
 // The workspace's own key when it saved one: its provider bills it, so the operator's inference budget is

@@ -212,13 +212,16 @@ async function endSession(to: string): Promise<never> {
   const jar = await cookies(), token = jar.get("openreview_session")?.value;
   if (token) await backend().mutation(api.identity.signOut, { token }).catch(() => undefined);
   jar.delete("openreview_session");
+  jar.delete("openreview_github_setup");
   redirect(to);
 }
 export async function logout() { await endSession("/"); }
 export async function signOutEverywhere() {
   const { token } = await current();
   await backend().mutation(api.identity.signOutEverywhere, { token });
-  (await cookies()).delete("openreview_session");
+  const jar = await cookies();
+  jar.delete("openreview_session");
+  jar.delete("openreview_github_setup");
   redirect("/login?signedout=1");
 }
 export async function revokeSession(form: FormData) {

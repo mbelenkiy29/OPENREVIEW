@@ -19,9 +19,11 @@ async function device(ctx: MutationCtx, hash: string) {
   await ctx.db.patch(d._id,{lastSeen:Date.now()});
   return d;
 }
-export const startPair = mutation({args:{secret:v.string(),hash:v.string(),code:v.string(),name:v.string()},handler:async(ctx,a)=>{
-  service(a.secret); if(!/^[a-f0-9]{64}$/.test(a.hash)|| !/^[a-f0-9]{12}$/.test(a.code)||a.name.length>100) throw new Error("Invalid pairing");
-  await rateLimit(ctx,"bridge:pair",30);
+// Pairing needs no sign-in, so the limit is per caller (the web route passes the client address): one caller
+// sending random pairings can no longer use up a single limit shared by every workspace.
+export const startPair = mutation({args:{secret:v.string(),hash:v.string(),code:v.string(),name:v.string(),client:v.optional(v.string())},handler:async(ctx,a)=>{
+  service(a.secret); if(!/^[a-f0-9]{64}$/.test(a.hash)|| !/^[a-f0-9]{12}$/.test(a.code)||a.name.length>100||(a.client?.length??0)>100) throw new Error("Invalid pairing");
+  await rateLimit(ctx,`bridge:pair:${a.client??"unknown"}`,30);
   const existing=await ctx.db.query("bridgeDevices").withIndex("by_hash",q=>q.eq("tokenHash",a.hash)).unique();
   if(existing) throw new Error("Pairing already started");
   return ctx.db.insert("bridgeDevices",{tokenHash:a.hash,code:a.code,name:a.name,expiresAt:Date.now()+10*60000,revoked:false,createdAt:Date.now()});

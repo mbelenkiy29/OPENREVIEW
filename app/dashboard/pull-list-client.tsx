@@ -160,11 +160,11 @@ export function PullActions({ pullRequestId, head, state, draft }: { pullRequest
           <div className="menu">
             <label>Merge method<select name="method" defaultValue="squash"><option value="squash">Squash and merge</option><option value="merge">Create a merge commit</option><option value="rebase">Rebase and merge</option></select></label>
             <textarea name="body" rows={3} aria-label="Review comment" placeholder="Comment (required to request changes)" />
-            <button name="action" value="approve" data-key="a" disabled={pending}>Approve <kbd>A</kbd></button>
+            <button name="action" value="approve" data-key="a" disabled={pending} onClick={ask("Approve this pull request on GitHub as you?")}>Approve <kbd>A</kbd></button>
             <button name="action" value="request_changes" disabled={pending}>Request changes <kbd>X</kbd></button>
             <button name="action" value="comment" disabled={pending}>Comment</button>
-            <button name="action" value={draft ? "ready" : "draft"} data-key="d" disabled={pending}>{draft ? "Ready for review" : "Convert to draft"} <kbd>D</kbd></button>
-            <button name="action" value="update_branch" data-key="u" disabled={pending}>Update branch <kbd>U</kbd></button>
+            <button name="action" value={draft ? "ready" : "draft"} data-key="d" disabled={pending} onClick={ask(draft ? "Mark this pull request ready for review on GitHub?" : "Convert this pull request to a draft on GitHub?")}>{draft ? "Ready for review" : "Convert to draft"} <kbd>D</kbd></button>
+            <button name="action" value="update_branch" data-key="u" disabled={pending} onClick={ask("Update this branch with its base branch on GitHub?")}>Update branch <kbd>U</kbd></button>
             <button name="action" value="close" data-key="c" disabled={pending} onClick={ask("Close this pull request on GitHub?")}>Close pull request <kbd>C</kbd></button>
           </div>
         </details>

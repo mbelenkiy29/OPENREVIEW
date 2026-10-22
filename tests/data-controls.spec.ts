@@ -247,3 +247,27 @@ test("webhook pruning continues in further batches until the backlog is cleared"
   await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
   expect(await t.run(async (ctx) => (await ctx.db.query("webhookDeliveries").collect()).length)).toBe(0);
 });
+
+test("transcript retention reaches old threads and conversations behind hundreds of recent ones, and pages through workspaces", async () => {
+  const t = convexTest(schema, modules);
+  const day = 86_400_000, now = Date.now(), old = now - 30 * day;
+  const ids = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Busy", transcriptRetentionDays: 14, createdAt: now });
+    const [alice, bob] = [await ctx.db.insert("users", { login: "alice", avatar: "", createdAt: now }), await ctx.db.insert("users", { login: "bob", avatar: "", createdAt: now })];
+    const repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: "busy/app", defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: now });
+    // The old code read 500 threads in user order and 500 conversations in pull request order, so these were never reached.
+    for (let i = 0; i < 500; i++) await ctx.db.insert("chatThreads", { organizationId, userId: alice, title: "recent", repositoryIds: [], createdAt: now, updatedAt: now });
+    const oldThread = await ctx.db.insert("chatThreads", { organizationId, userId: bob, title: "old", repositoryIds: [], createdAt: old, updatedAt: old });
+    for (let i = 0; i < 500; i++) await ctx.db.insert("conversations", { organizationId, repositoryId, prNumber: 1, githubCommentId: i, author: "a", question: "q", status: "completed", createdAt: now });
+    const oldConversation = await ctx.db.insert("conversations", { organizationId, repositoryId, prNumber: 2, githubCommentId: 9999, author: "a", question: "q", status: "completed", createdAt: old });
+    return { organizationId, oldThread, oldConversation };
+  });
+  await t.mutation(internal.dataControls.retention, { organizationId: ids.organizationId });
+  expect(await t.run(async (ctx) => [await ctx.db.get(ids.oldThread), await ctx.db.get(ids.oldConversation)])).toEqual([null, null]);
+  expect((await t.run((ctx) => ctx.db.query("chatThreads").collect())).length).toBe(500);
+  // More than one page of workspaces: the sweep continues with a cursor instead of stopping at a fixed count.
+  await t.run(async (ctx) => { for (let i = 0; i < 600; i++) await ctx.db.insert("organizations", { name: `w${i}`, createdAt: now }); });
+  await t.mutation(internal.dataControls.retentionSweep, {});
+  const next = (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).filter((s) => s.name.includes("retentionSweep"));
+  expect(next).toHaveLength(1);expect((next[0].args[0] as { cursor?: string }).cursor).toBeTruthy();
+});

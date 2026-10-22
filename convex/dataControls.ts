@@ -186,40 +186,63 @@ export const saveSettings = mutation({ args: { token: v.string(), organizationId
   await audit(ctx, a.organizationId, user._id, "workspace.data_settings", `${a.dataSharing};reviews=${a.reviewRetentionDays ?? "unlimited"};transcripts=${a.transcriptRetentionDays ?? "unlimited"}`);
 } });
 
-// ---- Retention: daily sweep; each workspace is processed in bounded steps.
-async function removeReview(ctx: MutationCtx, review: Doc<"reviews">) {
-  for (const t of ["reviewFindings", "reviewRuns", "agentRuns", "modelCalls", "reviewComments", "featureTips", "fixRequests", "runtimeJobs", "approvalJobs"] as const)
-    for (const r of await byField(ctx, t, "by_review", "reviewId", review._id).take(1000)) await remove(ctx, t, r);
-  for (const f of await ctx.db.query("findings").withIndex("by_review", (q) => q.eq("reviewId", review._id)).take(1000)) {
-    for (const t of ["findingFeedback", "commentReactions", "findingSignals"] as const) for (const r of await byField(ctx, t, "by_finding", "findingId", f._id).take(1000)) await remove(ctx, t, r);
-    await remove(ctx, "findings", f as never);
+// ---- Retention: daily sweep; each workspace is processed in bounded steps that reschedule until done.
+// Removes a review's child rows a page at a time; the review itself goes only once nothing points at it.
+async function removeReview(ctx: MutationCtx, review: Doc<"reviews">): Promise<boolean> {
+  let complete = true;
+  for (const t of ["reviewFindings", "reviewRuns", "agentRuns", "modelCalls", "reviewComments", "featureTips", "fixRequests", "runtimeJobs", "approvalJobs"] as const) {
+    const rows = await byField(ctx, t, "by_review", "reviewId", review._id).take(500);
+    for (const r of rows) await remove(ctx, t, r);
+    if (rows.length === 500) complete = false;
   }
-  await remove(ctx, "reviews", review as never);
+  const findings = await ctx.db.query("findings").withIndex("by_review", (q) => q.eq("reviewId", review._id)).take(100);
+  for (const f of findings) {
+    let childrenGone = true;
+    for (const t of ["findingFeedback", "commentReactions", "findingSignals"] as const) {
+      const rows = await byField(ctx, t, "by_finding", "findingId", f._id).take(500);
+      for (const r of rows) await remove(ctx, t, r);
+      if (rows.length === 500) childrenGone = false;
+    }
+    if (childrenGone) await remove(ctx, "findings", f as never); else complete = false;
+  }
+  if (findings.length === 100) complete = false;
+  if (complete) await remove(ctx, "reviews", review as never);
+  return complete;
 }
-export const retentionSweep = internalMutation({ args: {}, handler: async (ctx) => {
-  let n = 0;
-  for (const org of await ctx.db.query("organizations").take(5000)) if (org.reviewRetentionDays || org.transcriptRetentionDays) { await ctx.scheduler.runAfter(n++ * 1000, internal.dataControls.retention, { organizationId: org._id }); }
+// Pages through every workspace (500 per run), spacing each workspace's retention a second apart.
+export const retentionSweep = internalMutation({ args: { cursor: v.optional(v.union(v.string(), v.null())), offset: v.optional(v.number()) }, handler: async (ctx, a) => {
+  const page = await ctx.db.query("organizations").paginate({ numItems: 500, cursor: a.cursor ?? null });
+  let n = a.offset ?? 0;
+  for (const org of page.page) if (org.reviewRetentionDays || org.transcriptRetentionDays) await ctx.scheduler.runAfter(n++ * 1000, internal.dataControls.retention, { organizationId: org._id });
+  if (!page.isDone) await ctx.scheduler.runAfter(0, internal.dataControls.retentionSweep, { cursor: page.continueCursor, offset: n });
   return n;
 } });
 export const retention = internalMutation({ args: { organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<{ reviews: number; transcripts: number; more: boolean }> => {
   const org = await ctx.db.get(a.organizationId);
   if (!org) return { reviews: 0, transcripts: 0, more: false };
-  let reviewsDeleted = 0, transcripts = 0;
+  let reviewsDeleted = 0, transcripts = 0, more = false;
   if (org.reviewRetentionDays) {
     const cutoff = Date.now() - org.reviewRetentionDays * 86_400_000;
-    for (const r of await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", org._id).lt("createdAt", cutoff)).take(20)) { await removeReview(ctx, r); reviewsDeleted++; }
+    const old = await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", org._id).lt("createdAt", cutoff)).take(20);
+    for (const r of old) { if (!await removeReview(ctx, r)) { more = true; break; } reviewsDeleted++; }
+    if (old.length === 20) more = true;
   }
   if (org.transcriptRetentionDays) {
     const cutoff = Date.now() - org.transcriptRetentionDays * 86_400_000;
-    for (const r of await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", org._id).lt("createdAt", cutoff)).take(500)) if (r.agentStateStorageId) { await ctx.storage.delete(r.agentStateStorageId).catch(() => undefined); await ctx.db.patch(r._id, { agentStateStorageId: undefined }); transcripts++; }
-    for (const thread of (await ctx.db.query("chatThreads").withIndex("by_org_user", (q) => q.eq("organizationId", org._id)).take(500)).filter((t) => t.updatedAt < cutoff).slice(0, 20)) {
-      for (const m of await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", thread._id)).take(1000)) await remove(ctx, "chatMessages", m as never);
-      await remove(ctx, "chatThreads", thread as never); transcripts++;
+    // Agent transcripts: reviews keep their row, so a time cursor on the workspace marks how far the clearing got.
+    const reviews = await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", org._id).gte("createdAt", org.transcriptsClearedBefore ?? 0).lt("createdAt", cutoff)).take(100);
+    for (const r of reviews) if (r.agentStateStorageId) { await ctx.storage.delete(r.agentStateStorageId).catch(() => undefined); await ctx.db.patch(r._id, { agentStateStorageId: undefined }); transcripts++; }
+    if (reviews.length) await ctx.db.patch(org._id, { transcriptsClearedBefore: reviews.at(-1)!.createdAt });
+    const threads = await ctx.db.query("chatThreads").withIndex("by_org_updated", (q) => q.eq("organizationId", org._id).lt("updatedAt", cutoff)).take(20);
+    for (const thread of threads) {
+      const messages = await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", thread._id)).take(500);
+      for (const m of messages) await remove(ctx, "chatMessages", m as never);
+      if (messages.length < 500) { await remove(ctx, "chatThreads", thread as never); transcripts++; }
     }
-    for (const repo of await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", org._id)).take(2000))
-      for (const c of (await ctx.db.query("conversations").withIndex("by_pr", (q) => q.eq("repositoryId", repo._id)).take(500)).filter((c) => (c.updatedAt ?? c.createdAt) < cutoff).slice(0, 50)) { await remove(ctx, "conversations", c as never); transcripts++; }
+    const conversations = await ctx.db.query("conversations").withIndex("by_org_created", (q) => q.eq("organizationId", org._id).lt("createdAt", cutoff)).take(50);
+    for (const c of conversations) { await remove(ctx, "conversations", c as never); transcripts++; }
+    if (reviews.length === 100 || threads.length === 20 || conversations.length === 50) more = true;
   }
-  const more = reviewsDeleted === 20 || transcripts >= 20;
   if (more) await ctx.scheduler.runAfter(0, internal.dataControls.retention, a);
   return { reviews: reviewsDeleted, transcripts, more };
 } });

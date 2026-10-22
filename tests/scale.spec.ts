@@ -1,7 +1,7 @@
 import {test,expect,vi} from 'vitest';
 import {convexTest} from 'convex-test';
 import schema from '../convex/schema';
-import {internal} from '../convex/_generated/api';
+import {api,internal} from '../convex/_generated/api';
 const modules=import.meta.glob('../convex/**/*.ts');
 // Above the 32,000 documents-scanned-per-transaction ceiling that the old whole-repository
 // `.collect()` in repositories.data would hit on every review and index batch.
@@ -96,4 +96,44 @@ test('a provider event finds its repository through the connection index, not by
  expect(await t.query(internal.providerConnections.repository,{connectionId,externalId:'missing'})).toBeNull();
  await t.run(ctx=>ctx.db.patch(connectionId,{active:false}));
  expect(await t.query(internal.providerConnections.repository,{connectionId,externalId:'42'})).toBeNull();
+});
+
+test('turning off a repository reads only its newest index job, however many old ones it has',async()=>{
+ const t=convexTest({schema,modules,transactionLimits:{documentsRead:50}});
+ const {repositoryId,running}=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Busy',createdAt:Date.now()});
+  const repositoryId=await ctx.db.insert('repositories',{organizationId,fullName:'fixture/busy',defaultBranch:'main',enabled:true,indexStatus:'indexing',createdAt:Date.now()});
+  for(let i=0;i<100;i++)await ctx.db.insert('indexJobs',{organizationId,repositoryId,sha:String(i).padStart(40,'0'),status:'completed',total:1,processed:1,changed:1,attempts:1,createdAt:i,updatedAt:i});
+  return {repositoryId,running:await ctx.db.insert('indexJobs',{organizationId,repositoryId,sha:'f'.repeat(40),status:'running',total:1,processed:0,changed:0,attempts:1,createdAt:Date.now(),updatedAt:Date.now()})};
+ });
+ const {disableRepository}=await import('../convex/repositories');
+ await t.run(async ctx=>disableRepository(ctx as never,(await ctx.db.get(repositoryId))!));
+ expect(await t.run(ctx=>ctx.db.get(running))).toMatchObject({status:'cancelled'});
+ expect(await t.run(ctx=>ctx.db.get(repositoryId))).toMatchObject({enabled:false,indexStatus:'cancelled'});
+});
+
+test('a failed webhook is retried for about half an hour; recovery restarts stuck or never-started deliveries and gives up after six attempts',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(Date.UTC(2026,9,14,12));
+ const t=convexTest(schema,modules);
+ const insert=(status:string,attempts:number,updatedAt=Date.now())=>t.run(async ctx=>ctx.db.insert('webhookDeliveries',{deliveryId:`d-${status}-${attempts}-${updatedAt}`,event:'pull_request',payloadStorageId:await ctx.storage.store(new Blob(['{}'])),status,attempts,createdAt:updatedAt,updatedAt}));
+ const retries=async(id:string)=>(await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).filter(s=>(s.args[0] as {deliveryId?:string}).deliveryId===id).map(s=>Math.round((s.scheduledTime-Date.now())/1000));
+ // The third failure used to be the last; now it waits 4.5 minutes and tries again.
+ const third=await insert('processing',3);await t.mutation(internal.webhooks.mark,{deliveryId:third,status:'failed',error:'GitHub 502'});
+ expect(await retries(third)).toEqual([270]);
+ const sixth=await insert('processing',6);await t.mutation(internal.webhooks.mark,{deliveryId:sixth,status:'failed',error:'GitHub 502'});
+ expect(await retries(sixth)).toEqual([]);
+ const old=Date.now()-20*60000,queued=await insert('queued',0,old),stuck=await insert('processing',2,old),exhausted=await insert('processing',6,old);
+ await t.mutation(internal.recovery.sweep,{});
+ expect(await retries(queued)).toEqual([0]);expect(await retries(stuck)).toEqual([0]);expect(await retries(exhausted)).toEqual([]);
+ expect(await t.run(ctx=>ctx.db.get(exhausted))).toMatchObject({status:'failed',error:'Webhook recovery attempts exhausted'});
+ vi.useRealTimers();
+});
+
+test('device pairing is rate limited per caller, so one caller cannot block pairing for everyone',async()=>{
+ process.env.SERVICE_SECRET='pair-service';
+ const t=convexTest(schema,modules);
+ const pair=(i:number,client:string)=>t.mutation(api.bridge.startPair,{secret:'pair-service',hash:i.toString(16).padStart(64,'0'),code:'abcdef123456',name:'Laptop',client});
+ for(let i=0;i<30;i++)await pair(i,'203.0.113.9');
+ await expect(pair(30,'203.0.113.9')).rejects.toThrow('Rate limit');
+ expect(await pair(31,'198.51.100.7')).toBeTruthy();
 });

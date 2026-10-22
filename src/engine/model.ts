@@ -190,6 +190,11 @@ export class HttpModel implements ModelProvider {
     try { await this.billing!.settle(reservation, receipt); }
     catch { console.error(JSON.stringify({ event: "model.billing_receipt_unavailable", task })); }
   }
+  private async release(reservation: string | null | undefined, task: string) {
+    if (!reservation) return;
+    try { await this.billing!.release(reservation); }
+    catch { console.error(JSON.stringify({ event: "model.billing_release_unavailable", task })); }
+  }
   private async backoff(response: Response, attempt: number) {
     await new Promise((r) =>
       setTimeout(
@@ -281,6 +286,7 @@ export class HttpModel implements ModelProvider {
         const reservation = await this.billing?.reserve({ provider: this.config.provider, model, baseUrl: root, inputTokenCeiling: Buffer.byteLength(JSON.stringify(body), "utf8") + 1024, outputTokenCeiling: maxTokens });
         const response = await this.post(url, body, anthropic, request.signal);
         if (!response.ok) {
+          if (response.status < 500) await this.release(reservation, request.task);
           // Some endpoints/models reject native schemas; fall back once to prompt-only JSON.
           if (response.status === 400 && jsonSchema && !fellBack) {
             fellBack = true;
@@ -374,6 +380,7 @@ export class HttpModel implements ModelProvider {
         const reservation = await this.billing?.reserve({ provider: this.config.provider, model, baseUrl: root, inputTokenCeiling: serializedBytes + 1024, outputTokenCeiling: maxTokens });
         const response = await this.post(url, body, anthropic, request.signal);
         if (!response.ok) {
+          if (response.status < 500) await this.release(reservation, request.task);
           if ((response.status === 429 || response.status >= 500) && attempt < 2) { await this.backoff(response, attempt); continue; }
           throw new Error(`Model ${request.task} failed with HTTP ${response.status}`);
         }

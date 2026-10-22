@@ -47,6 +47,8 @@ export const portal = action({ args: { token: v.string(), organizationId: v.id("
 export const syncSeats = internalAction({ args: { organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<string> => {
   const target = await ctx.runQuery(internal.billing.seatSyncTarget, a);
   if (!target || target.seats === target.billed) return "unchanged";
-  await stripe(`/v1/subscriptions/${target.subscriptionId}`, { items: [{ id: target.itemId, quantity: target.seats }], proration_behavior: "create_prorations" }, stripeKey(), fetch, `seats:${target.subscriptionId}:${target.seats}:${target.billed}`);
+  // No idempotency key: setting an exact quantity is already safe to repeat, and a key made of the seat counts
+  // repeats within Stripe's 24 hours (3→4→3→4), so Stripe would replay the old answer and skip the change.
+  await stripe(`/v1/subscriptions/${target.subscriptionId}`, { items: [{ id: target.itemId, quantity: target.seats }], proration_behavior: "create_prorations" }, stripeKey());
   return "updated";
 } });

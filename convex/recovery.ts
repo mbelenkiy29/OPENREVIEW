@@ -1,6 +1,7 @@
 import { internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import {indexWriteAllowed} from "./indexAuthority";
+import {maxWebhookAttempts} from "./webhooks";
 // Expired model answers are up to 200 KB each, so they are deleted in their own small batches: a big
 // backlog never pushes the recovery sweep past a transaction's read limit.
 export const sweepCache = internalMutation({
@@ -11,10 +12,12 @@ export const sweepCache = internalMutation({
     if (expired.length === 25) await ctx.scheduler.runAfter(0, internal.recovery.sweepCache, {});
   },
 });
+// Each heavy part runs in its own transaction, so one part's backlog (big index jobs, big reviews) can never push
+// the others past a transaction's read limit and stop all recovery.
 export const sweep = internalMutation({
   args: {},
   handler: async (ctx) => {
-    await ctx.scheduler.runAfter(0, internal.recovery.sweepCache, {});
+    for (const part of [internal.recovery.sweepCache, internal.recovery.sweepIndexJobs, internal.recovery.sweepReviews]) await ctx.scheduler.runAfter(0, part, {});
     const stale = Date.now() - 15 * 60000;
     await ctx.runMutation(internal.p4Conversations.recover,{});
     for (const knowledgeStatus of ["queued", "generating"]) for (const repo of await ctx.db.query("repositories").withIndex("by_knowledge_status", (q) => q.eq("knowledgeStatus", knowledgeStatus)).take(100))
@@ -58,6 +61,20 @@ export const sweep = internalMutation({
         parentCommentId: conversation.parentCommentId,
       });
     }
+    // A delivery whose action died is picked up again: stuck "processing", or "queued" and never started.
+    for (const status of ["processing", "queued"]) for (const delivery of await ctx.db
+      .query("webhookDeliveries")
+      .withIndex("by_status", (q) => q.eq("status", status))
+      .take(100))
+      if (delivery.updatedAt >= stale) continue;
+      else if (delivery.attempts < maxWebhookAttempts) await ctx.scheduler.runAfter(0, internal.webhookJobs.process, { deliveryId: delivery._id });
+      else await ctx.db.patch(delivery._id, { status: "failed", error: "Webhook recovery attempts exhausted", updatedAt: Date.now() });
+  },
+});
+export const sweepIndexJobs = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const stale = Date.now() - 15 * 60000;
     for (const job of await ctx.db
       .query("indexJobs")
       .withIndex("by_status", (q) => q.eq("status", "running"))
@@ -92,6 +109,12 @@ export const sweep = internalMutation({
         });
       }
     }
+  },
+});
+export const sweepReviews = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const stale = Date.now() - 15 * 60000;
     for (const stage of [
       "queued",
       "waiting_agent",
@@ -135,13 +158,5 @@ export const sweep = internalMutation({
           }
         }
     }
-    for (const delivery of await ctx.db
-      .query("webhookDeliveries")
-      .withIndex("by_status", (q) => q.eq("status", "processing"))
-      .take(100))
-      if (delivery.updatedAt < stale && delivery.attempts < 3)
-        await ctx.scheduler.runAfter(0, internal.webhookJobs.process, {
-          deliveryId: delivery._id,
-        });
   },
 });

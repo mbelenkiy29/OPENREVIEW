@@ -19,15 +19,15 @@ async function setup(){
 test("never-reviewed changes paginate and filter without scheduling a review; stale intake and review cannot replace current metadata",async()=>{
  const s=await setup();
  for(let number=1;number<=31;number++)await s.t.mutation(internal.pulls.observe,{...s.observation,number});
- const first=await s.t.query(api.pulls.list,{token:s.token,organizationId:s.organizationId,paginationOpts:{numItems:30,cursor:null}});
- expect(first.page).toHaveLength(30);expect(first.isDone).toBe(false);expect(first.page.every(p=>p.latest===null)).toBe(true);
- const second=await s.t.query(api.pulls.list,{token:s.token,organizationId:s.organizationId,paginationOpts:{numItems:30,cursor:first.continueCursor}});expect(second.page).toHaveLength(1);expect(second.isDone).toBe(true);
+ const first=await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,page:1,pageSize:30});
+ expect(first.page).toHaveLength(30);expect(first.total).toBe(31);expect(first.page.every(p=>p.latest===null)).toBe(true);
+ const second=await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,page:2,pageSize:30});expect(second.page).toHaveLength(1);
  await s.t.mutation(internal.pulls.observe,{...s.observation,title:"New revision",headSha:"c".repeat(40),revisionKey:"native-new",observedAt:300});
  await s.t.mutation(internal.pulls.observe,{...s.observation,state:"closed",observedAt:250});
  await s.t.mutation(internal.webhooks.lifecycle,{repositoryId:s.repo._id,prNumber:1,action:"closed",state:"closed",observedAt:250});
  const reviewId=await s.t.run(ctx=>ctx.db.insert("reviews",{organizationId:s.organizationId,repositoryId:s.repo._id,prNumber:1,headSha:s.observation.headSha,status:"ingesting",mode:"standard",attempts:1,createdAt:Date.now(),updatedAt:Date.now()}));
  await s.t.mutation(internal.reviews.recordPr,{reviewId,title:"Old title",author:"alice",url:s.observation.url,headSha:s.observation.headSha,baseSha:s.observation.baseSha,state:"closed",commits:[s.observation.headSha]});
- const filtered=await s.t.query(api.pulls.list,{token:s.token,organizationId:s.organizationId,search:"New revision",state:"open",author:"alice",paginationOpts:{numItems:30,cursor:null}});
+ const filtered=await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,search:"New revision",state:"open",author:"alice",page:1,pageSize:30});
  expect(filtered.page).toHaveLength(1);expect(filtered.page[0]).toMatchObject({headSha:"c".repeat(40),state:"open",title:"New revision",revisionKey:"native-new"});
  expect(await s.t.run(ctx=>ctx.db.query("reviews").collect())).toHaveLength(1);
 });
@@ -39,7 +39,7 @@ test("GitHub automatic-off intake uses native current metadata even for an obsol
  const deliveryId=await s.t.run(async ctx=>{const payloadStorageId=await ctx.storage.store(new Blob([JSON.stringify({action:"closed",installation:{id:9401},repository:{id:9410},pull_request:{number:1,draft:false,state:"closed",head:{sha:s.observation.headSha,ref:"feature"},base:{ref:"main"}}})]));return ctx.db.insert("webhookDeliveries",{deliveryId:"intake-stale-close",event:"pull_request",payloadStorageId,status:"queued",attempts:0,createdAt:Date.now(),updatedAt:Date.now()});});
  await s.t.action(internal.webhookJobs.process,{deliveryId});
  expect(await s.t.query(internal.webhooks.data,{deliveryId})).toMatchObject({status:"completed"});
- const rows=await s.t.query(api.pulls.list,{token:s.token,organizationId:s.organizationId,paginationOpts:{numItems:30,cursor:null}});
+ const rows=await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,page:1,pageSize:30});
  expect(rows.page[0]).toMatchObject({title:"Reopened manually",state:"open",headSha:"c".repeat(40),latest:null});
  expect(request).toHaveBeenCalledTimes(1);expect(await s.t.run(ctx=>ctx.db.query("reviews").collect())).toHaveLength(0);
 });

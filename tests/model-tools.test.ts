@@ -209,7 +209,7 @@ test("price table: verified built-ins, long-prompt tiers, cache-aware accounting
 
 test("budget receipts carry cache token counts so cached prompts settle at their real price", async t => {
   const receipts: unknown[] = [];
-  const billing: InferenceBilling = { async reserve(q) { assert.equal(q.outputTokenCeiling, 16000); return "r"; }, async settle(_id, u) { receipts.push(u); } };
+  const billing: InferenceBilling = { async reserve(q) { assert.equal(q.outputTokenCeiling, 16000); return "r"; }, async settle(_id, u) { receipts.push(u); }, async release() {} };
   t.mock.method(globalThis, "fetch", async () => Response.json({ content: [{ type: "text", text: "{\"answer\":\"ok\"}" }], usage: { input_tokens: 5, cache_read_input_tokens: 700, cache_creation_input_tokens: 30, output_tokens: 6 } }));
   await new HttpModel({ provider: "anthropic", apiKey: "k", model: "claude-sonnet-5-5" }, undefined, billing).generate({ task: "verify", system: "", input: {} }, z.object({ answer: z.string() }));
   assert.deepEqual(receipts, [{ inputTokens: 735, outputTokens: 6, cacheReadTokens: 700, cacheWriteTokens: 30 }]);

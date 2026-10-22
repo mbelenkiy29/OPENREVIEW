@@ -35,7 +35,7 @@ test('active budgets deny unknown model/provider/endpoint prices and preserve un
 });
 test('all inner and outer generation retries reserve before transmission and exhausted budget sends nothing',async()=>{
  const t=convexTest(schema,modules);await t.mutation(internal.inferenceBudget.initialize,{limitMicros:120000,baselineMicros:0,source:'retry fixture'});
- const billing={async reserve(q:typeof quote){try{return await t.mutation(internal.inferenceBudget.reserve,q);}catch{throw new InferenceBudgetError('cap exhausted');}},async settle(id:string,usage:{inputTokens:number;outputTokens:number}){await t.mutation(internal.inferenceBudget.settle,{id:id as Id<"inferenceReservations">,...usage});}};
+ const billing={async reserve(q:typeof quote){try{return await t.mutation(internal.inferenceBudget.reserve,q);}catch{throw new InferenceBudgetError('cap exhausted');}},async settle(id:string,usage:{inputTokens:number;outputTokens:number}){await t.mutation(internal.inferenceBudget.settle,{id:id as Id<"inferenceReservations">,...usage});},async release(id:string){await t.mutation(internal.inferenceBudget.release,{id:id as Id<'inferenceReservations'>});}};
  let sends=0;vi.spyOn(globalThis,'fetch').mockImplementation(async()=>{sends++;return Response.json({choices:[{message:{content:'{"answer":42}'}}]});});
  for(let worker=0;worker<3;worker++)await expect(new HttpModel({provider:'openai',apiKey:'fixture',model:'gpt-4.1'},undefined,billing).generate({task:'conversation',system:'fixture',input:{}},(await import('zod')).z.object({answer:(await import('zod')).z.string()}))).rejects.toBeInstanceOf(ModelFailure);
  expect(sends).toBe(2);const state=await t.query(internal.inferenceBudget.status,{});expect(state!.reservedMicros).toBeGreaterThan(96000);expect(state!.reservedMicros+state!.committedMicros).toBeLessThanOrEqual(120000);
@@ -51,4 +51,15 @@ test('cached Anthropic receipts reserve at the cache-write premium and settle ca
  await expect(t.mutation(internal.inferenceBudget.settle,{...receipt,cacheReadTokens:7000})).rejects.toThrow('differently');
  const next=await t.mutation(internal.inferenceBudget.reserve,sonnet);if(!next)throw Error();
  await expect(t.mutation(internal.inferenceBudget.settle,{id:next,inputTokens:10,outputTokens:1,cacheReadTokens:8,cacheWriteTokens:8})).rejects.toThrow('Invalid');
+});
+
+test('a call the provider refuses with a 4xx gives its reservation back; a 5xx keeps it',async()=>{
+ const t=convexTest(schema,modules);await t.mutation(internal.inferenceBudget.initialize,{limitMicros:1_000_000,baselineMicros:0,source:'release fixture'});
+ const billing={async reserve(q:typeof quote){return t.mutation(internal.inferenceBudget.reserve,q);},async settle(id:string,usage:{inputTokens:number;outputTokens:number}){await t.mutation(internal.inferenceBudget.settle,{id:id as Id<'inferenceReservations'>,...usage});},async release(id:string){await t.mutation(internal.inferenceBudget.release,{id:id as Id<'inferenceReservations'>});}};
+ const statuses=[429,503,200];vi.spyOn(globalThis,'fetch').mockImplementation(async()=>{const status=statuses.shift()!;return status===200?Response.json({choices:[{message:{content:'{"answer":"ok"}'}}],usage:{prompt_tokens:20,completion_tokens:10}}):new Response('busy',{status,headers:{'retry-after':'0'}});});
+ const z=(await import('zod')).z;
+ await new HttpModel({provider:'openai',apiKey:'fixture',model:'gpt-4.1'},undefined,billing).generate({task:'conversation',system:'fixture',input:{}},z.object({answer:z.string()}));
+ const rows=await t.run(ctx=>ctx.db.query('inferenceReservations').collect());
+ expect(rows.map(r=>r.status)).toEqual(['released','reserved','settled']);
+ expect((await t.query(internal.inferenceBudget.status,{}))?.reservedMicros).toBe(rows[1].reservedMicros);
 });

@@ -168,6 +168,8 @@ test('seats follow membership: viewers are free and changes resync the subscript
  expect(await t.action(internal.billingJobs.syncSeats,{organizationId:org})).toBe('updated');
  const update=calls.at(-1)!;
  expect(update.url).toBe('https://api.stripe.com/v1/subscriptions/sub_1');
+ // No idempotency key: a key made of the seat counts repeats (3→4→3→4) and Stripe would replay the old answer.
+ expect(update.key).toBeNull();
  expect(Object.fromEntries(new URLSearchParams(update.body))).toEqual({'items[0][id]':'si_1','items[0][quantity]':'3',proration_behavior:'create_prorations'});
  expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).activeSeats).toBe(3);
  await expect(t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org})).rejects.toThrow(/already has a subscription/);
@@ -204,4 +206,19 @@ test('a new workspace must choose a plan: nothing indexes, reviews or finishes s
  expect(await t.mutation(api.onboarding.advance,{token:alice.token,organizationId:fresh,step:'plan'})).toBe('connect');
  // Workspaces from before plans were required are untouched.
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:repo.organizationId})).toMatchObject({planRequired:false,planMissing:false});
+});
+
+test('a push cancels and refunds a review that never ran; a blocked push leaves the running review alone',async()=>{
+ process.env.BILLING_TRIAL_DAYS='60';
+ const {t,org,repo}=await setup();
+ const push=(pr:number,sha:string)=>t.mutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:pr,headSha:sha.repeat(40),trigger:'automatic'});
+ const used=async()=>(await t.run(ctx=>ctx.db.query('billingUsage').withIndex('by_org_period',q=>q.eq('organizationId',org)).collect()))[0]?.reviews;
+ const first=await push(1,'a');await push(1,'b');
+ expect((await reviewOf(t,first))?.status).toBe('cancelled');
+ expect(await used()).toBe(1);
+ const running=await push(2,'c');
+ expect(await used()).toBe(2);
+ const blocked=await push(2,'d');
+ expect((await reviewOf(t,blocked))?.status).toBe('failed');
+ expect((await reviewOf(t,running))?.status).toBe('queued');
 });

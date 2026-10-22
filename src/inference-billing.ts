@@ -6,6 +6,7 @@ export type InferenceReceipt = { inputTokens: number; outputTokens: number; cach
 export type InferenceBilling = {
   reserve(quote: InferenceQuote): Promise<string | null>;
   settle(id: string, usage: InferenceReceipt): Promise<void>;
+  release(id: string): Promise<void>;
 };
 export class InferenceBudgetError extends Error {}
 

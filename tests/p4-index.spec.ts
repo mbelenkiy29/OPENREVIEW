@@ -382,7 +382,7 @@ test('P4 automatic-off polling imports a pinned catalog row and updates revision
  vi.stubGlobal('fetch',async(input:unknown,init?:RequestInit)=>{const u=new URL(String(input));requests.push(u.pathname);if(u.pathname==='/api/v11/reviews')return Response.json({error:null,data:{reviews:u.searchParams.has('after')?[]:[{id:12,author:'alice',description:'Existing shelf',updated:1,pending:true,state:'needsReview',projects:{payments:['main']}}],lastSeen:u.searchParams.has('after')?null:12,totalCount:1}});return originalFetch(input as RequestInfo,init);});
  await t.mutation(api.p4Polling.configure,{token:args.token,repositoryId:args.repositoryId,enabled:true});const poll=await t.run(ctx=>ctx.db.query('p4Polls').unique()),identity={id:poll!._id,generation:poll!.generation};
  for(let i=0;i<3;i++)await t.action(internal.p4PollJobs.step,identity);
- const rows=await t.query(api.pulls.list,{token:args.token,organizationId:args.organizationId,repositoryId:args.repositoryId,paginationOpts:{numItems:30,cursor:null}});
+ const rows=await t.query(api.pulls.browse,{token:args.token,organizationId:args.organizationId,repositoryId:args.repositoryId,page:1,pageSize:30});
  expect(rows.page).toHaveLength(1);expect(rows.page[0]).toMatchObject({number:12,author:'alice',state:'open',latest:null,canRequest:true});expect(rows.page[0].headSha).toMatch(/^p4:12:1:44:/);
  vi.advanceTimersByTime(1);setShelfArchive(45);for(let i=0;i<3;i++)await t.action(internal.p4PollJobs.step,identity);
  expect((await t.run(ctx=>ctx.db.query('pullRequests').unique()))?.headSha).toMatch(/^p4:12:1:45:/);
@@ -399,7 +399,7 @@ test('catalog manual P4 requests pin displayed revisions, enforce native admin a
  const {P4CodeReview}=await import('../src/perforce'),snapshot=await new P4CodeReview('https://p4.example','bot','fixture-ticket').snapshot('payments',12);
  const rowId=await t.run(ctx=>ctx.db.insert('pullRequests',{organizationId:args.organizationId,repositoryId:args.repositoryId,number:12,title:'Unreviewed shelf',author:'alice',url:'https://p4.example/reviews/12',headSha:snapshot.revision,baseSha:index.revision,state:'open',updatedAt:Date.now()}));
  const request={token:args.token,repositoryId:args.repositoryId,prNumber:12,expectedRevision:snapshot.revision,expectedBaseRevision:index.revision};
- const rows=()=>t.query(api.pulls.list,{token:args.token,organizationId:args.organizationId,repositoryId:args.repositoryId,paginationOpts:{numItems:30,cursor:null}});
+ const rows=()=>t.query(api.pulls.browse,{token:args.token,organizationId:args.organizationId,repositoryId:args.repositoryId,page:1,pageSize:30});
  expect((await rows()).page[0].canRequest).toBe(true);
  await expect(t.action(api.pullReviewJobs.request,{...request,expectedRevision:'stale'})).rejects.toThrow('Revision changed');
  await expect(t.action(api.pullReviewJobs.request,{...request,expectedBaseRevision:'stale'})).rejects.toThrow('Revision changed');

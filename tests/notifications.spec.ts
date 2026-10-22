@@ -205,3 +205,20 @@ test('Slack install exchanges the code once, stores the bot token encrypted, and
  await t.mutation(api.notifications.disconnectSlack,{token:alice.token,organizationId:org});
  expect(await t.run(ctx=>ctx.db.get(id))).toMatchObject({active:false,credentials:''});
 });
+
+test('an email the provider rate-limits is retried with backoff; emails already sent are not sent again',async()=>{
+ const {t,alice,bob,org,reviewId}=await setup();
+ process.env.RESEND_API_KEY='re_fixture';process.env.EMAIL_FROM='OpenReview <noreply@example.com>';
+ await verify(t,org,alice.id,'alice@example.com',{reviewCompleted:'all',highSeverity:'off'});
+ await verify(t,org,bob.id,'bob@example.com',{reviewCompleted:'all',highSeverity:'off'});
+ const sent:string[]=[];let limited=true;
+ vi.spyOn(globalThis,'fetch').mockImplementation(async(_input:string|URL|Request,init?:RequestInit)=>{const to=(JSON.parse(String(init?.body)).to as string[])[0];if(to==='bob@example.com'&&limited){limited=false;return new Response('rate limited',{status:429});}sent.push(to);return Response.json({id:'email'});});
+ await t.mutation(internal.reviews.finished,{reviewId});
+ const first=await t.action(internal.notificationJobs.reviewCompleted,{reviewId});
+ expect(Object.values(first).sort()).toEqual(['failed','sent']);
+ const retry=(await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).filter(j=>j.name.includes('notificationJobs:reviewCompleted'));
+ expect(retry.map(j=>j.args[0]).filter(a=>(a as {attempt?:number}).attempt)).toEqual([{reviewId,attempt:1}]);
+ const second=await t.action(internal.notificationJobs.reviewCompleted,{reviewId,attempt:1});
+ expect(Object.values(second).sort()).toEqual(['duplicate','sent']);
+ expect(sent).toEqual(['alice@example.com','bob@example.com']);
+});

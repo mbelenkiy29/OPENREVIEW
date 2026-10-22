@@ -273,7 +273,7 @@ export default defineSchema({
   loginTokens: defineTable({ email: v.string(), tokenHash: v.string(), expiresAt: v.number(), usedAt: v.optional(v.number()), createdAt: v.number(), referralCode: v.optional(v.string()) }).index("by_token", ["tokenHash"]),
   // onboarding: guided setup progress for workspaces created with it (absent on older workspaces,
   // which are never sent to setup). reviewsPaused marks automatic reviews held off while indexing.
-  organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), defaultHandoff:v.optional(handoffValidator), defaultCloudAgent:v.optional(cloudAgentValidator), /* billing deployments: a new workspace must choose a plan (Stripe-confirmed) before setup, indexing or reviews; older workspaces have no flag */ planRequired:v.optional(v.boolean()), planSelectedAt:v.optional(v.number()), plan:v.optional(v.string()), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), createdAt: v.number() }),
+  organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), /* how far transcript retention has cleared reviews' agent state */ transcriptsClearedBefore: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), defaultHandoff:v.optional(handoffValidator), defaultCloudAgent:v.optional(cloudAgentValidator), /* billing deployments: a new workspace must choose a plan (Stripe-confirmed) before setup, indexing or reviews; older workspaces have no flag */ planRequired:v.optional(v.boolean()), planSelectedAt:v.optional(v.number()), plan:v.optional(v.string()), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), createdAt: v.number() }),
   // Workspace deletion receipts (M3): survive the purge; step + cursor make the purge resumable.
   workspaceDeletions: defineTable({ organizationId: org, name: v.string(), requestedBy: v.id("users"), requestedAt: v.number(), scheduledFor: v.number(), scheduledId: v.optional(v.id("_scheduled_functions")), status: v.string() /* scheduled | cancelled | purging | done */, step: v.number(), cursor: v.optional(v.string()), counts: v.record(v.string(), v.number()), startedAt: v.optional(v.number()), cancelledAt: v.optional(v.number()), completedAt: v.optional(v.number()) }).index("by_org", ["organizationId"]),
   // Daily analytics rollup per (repository, UTC day, PR author), recomputed from raw tables for
@@ -760,7 +760,7 @@ export default defineSchema({
     pullRequestId: v.optional(v.id("pullRequests")),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_org_user", ["organizationId", "userId", "updatedAt"]),
+  }).index("by_org_user", ["organizationId", "userId", "updatedAt"]).index("by_org_updated", ["organizationId", "updatedAt"]),
   // Assistant messages stream progress through `events` (persisted deltas read by the SSE route);
   // `content` and `citations` are written only after citation validation.
   chatMessages: defineTable({
@@ -954,6 +954,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_pr", ["repositoryId", "prNumber"])
+    .index("by_org_created", ["organizationId", "createdAt"])
     .index("by_comment", ["githubCommentId"])
     .index("by_repository_comment", ["repositoryId", "githubCommentId"])
     .index("by_native_review", ["nativeP4.reviewId"])

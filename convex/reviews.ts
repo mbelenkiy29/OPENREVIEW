@@ -89,6 +89,14 @@ export const enqueue = internalMutation({
     // a person who asked for a review gets the error.
     // shortcut: a deferred review is not counted against the next minute; count it there if bursts get abused.
     const deferMs = await rateLimit(ctx, `review:${repo.organizationId}`, 20).then(() => 0, (error) => { if (args.trigger === "manual") throw error; return 60000 - (Date.now() % 60000); });
+    const config = await effectiveSettings(ctx,repo);
+    // Cloud billing quota (no-op when BILLING_ENABLED is unset): a blocked review is recorded
+    // as failed with the billing reason instead of running, and leaves the running review alone.
+    const allowance = await reviewAllowance(ctx, repo.organizationId);
+    if (!allowance.allowed) {
+      if (args.trigger && args.trigger !== "manual") await ctx.scheduler.runAfter(0, internal.jobs.billingNotice, { repositoryId: repo._id, prNumber: args.prNumber });
+      return ctx.db.insert("reviews", { organizationId: repo.organizationId, repositoryId: repo._id, prNumber: args.prNumber, headSha: args.headSha, revisionKey: args.revisionKey, status: "failed", error: allowance.reason, mode: config.mode, ...(args.trigger ? { trigger: args.trigger } : {}), attempts: 0, createdAt: Date.now(), updatedAt: Date.now(), finishedAt: Date.now() });
+    }
     const pending = await ctx.db
       .query("reviews")
       .withIndex("by_pr", (q) =>
@@ -99,14 +107,6 @@ export const enqueue = internalMutation({
     for (const r of pending)
       if (!["completed", "failed", "cancelled"].includes(r.status))
         await cancelReview(ctx,r);
-    const config = await effectiveSettings(ctx,repo);
-    // Cloud billing quota (no-op when BILLING_ENABLED is unset): a blocked review is recorded
-    // as failed with the billing reason instead of running.
-    const allowance = await reviewAllowance(ctx, repo.organizationId);
-    if (!allowance.allowed) {
-      if (args.trigger && args.trigger !== "manual") await ctx.scheduler.runAfter(0, internal.jobs.billingNotice, { repositoryId: repo._id, prNumber: args.prNumber });
-      return ctx.db.insert("reviews", { organizationId: repo.organizationId, repositoryId: repo._id, prNumber: args.prNumber, headSha: args.headSha, revisionKey: args.revisionKey, status: "failed", error: allowance.reason, mode: config.mode, ...(args.trigger ? { trigger: args.trigger } : {}), attempts: 0, createdAt: Date.now(), updatedAt: Date.now(), finishedAt: Date.now() });
-    }
     const reviewId = await ctx.db.insert("reviews", {
       organizationId: repo.organizationId,
       repositoryId: repo._id,

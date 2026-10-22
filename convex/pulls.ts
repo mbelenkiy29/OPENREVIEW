@@ -1,21 +1,11 @@
 import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { paginationOptsValidator } from "convex/server";
 import {authenticated} from "./auth";
 import {contextReadable} from "./repositoryContext";
 import {p4BaselineMetadata} from "./p4Index";
 import {authorizeRepository,audit} from "./auth";
 import { repositoryAccess, visibleRepositories } from "./auth";
-export const list=query({args:{token:v.string(),organizationId:v.id("organizations"),teamId:v.optional(v.id("teams")),repositoryId:v.optional(v.id("repositories")),author:v.optional(v.string()),state:v.optional(v.string()),search:v.optional(v.string()),paginationOpts:paginationOptsValidator},handler:async(ctx,a)=>{
- const viewer=await authenticated(ctx,a.token);
- const repos=await visibleRepositories(ctx,a.token,a.organizationId,a.teamId),allowed=repos.map(r=>r._id).filter(id=>!a.repositoryId||id===a.repositoryId);
- if(a.repositoryId&&!repos.some(r=>r._id===a.repositoryId))throw new Error("Repository not accessible in selected scope");
- if(!allowed.length)return {page:[],isDone:true,continueCursor:""};
- const source=a.search?ctx.db.query("pullRequests").withSearchIndex("by_title",q=>q.search("title",a.search!).eq("organizationId",a.organizationId)):ctx.db.query("pullRequests").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).order("desc");
- const result=await source.filter(q=>q.and(q.or(...allowed.map(id=>q.eq(q.field("repositoryId"),id))),a.author?q.eq(q.field("author"),a.author):true,a.state?q.eq(q.field("state"),a.state):true)).paginate(a.paginationOpts);
- return {...result,page:await enrich(ctx,viewer._id,result.page)};
-}});
 type PullDoc=Doc<"pullRequests">;
 // Adds the latest readable review and whether the viewer can request one, per row.
 async function enrich(ctx:QueryCtx,viewerId:Id<"users">,rows:PullDoc[]){

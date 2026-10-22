@@ -34,8 +34,11 @@ export class Embeddings {
         signal: AbortSignal.timeout(60000),
       },
     );
-    if (!response.ok)
+    if (!response.ok) {
+      // A 4xx answer is not billed; give the reservation back.
+      if (reservation && response.status < 500) await this.billing!.release(reservation).catch(() => console.error(JSON.stringify({ event: "embedding.billing_release_unavailable" })));
       throw new Error(`Embedding provider HTTP ${response.status}`);
+    }
     const raw = await response.json();
     if (reservation && Number.isSafeInteger(raw.usage?.total_tokens)) {
       try { await this.billing!.settle(reservation, { inputTokens: raw.usage.total_tokens, outputTokens: 0 }); }

@@ -77,3 +77,14 @@ test("a refused or cancelled account link returns to the page it started from, n
   expect((await finishOAuth(new Request(`${base}/api/auth/callback?error=access_denied&state=${state}`), "github", async () => { throw new Error("unused"); })).headers.get("location")).toBe(`${base}/dashboard/settings/account`);
   expect(await users()).toBe(before);
 });
+
+test("a new sign-in drops the previous user's GitHub setup token; a GitHub sign-in sets its own afterwards", async () => {
+  await setup();
+  holder.jar.set("openreview_github_setup", "previous-users-token");
+  await finish(await begin(""));
+  expect(holder.jar.has("openreview_github_setup")).toBe(false);
+  holder.jar.set("openreview_github_setup", "previous-users-token");
+  const state = await begin("");
+  await finishOAuth(new Request(`${base}/api/auth/callback?code=c1&state=${state}`), "github", async () => ({ providerUserId: "7002", login: "newbie", avatar: "", emailVerified: false }), async () => { holder.jar.set("openreview_github_setup", "fresh-token"); });
+  expect(holder.jar.get("openreview_github_setup")).toBe("fresh-token");
+});

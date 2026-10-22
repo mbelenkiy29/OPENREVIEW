@@ -32,4 +32,13 @@ export const settle = internalMutation({ args: { id: v.id("inferenceReservations
   await ctx.db.patch(budget._id, { reservedMicros: budget.reservedMicros - reservation.reservedMicros, committedMicros: budget.committedMicros + amount });
   await ctx.db.patch(reservation._id, { status: "settled", inputTokens: a.inputTokens, outputTokens: a.outputTokens, ...(a.cacheReadTokens ? { cacheReadTokens: a.cacheReadTokens } : {}), ...(a.cacheWriteTokens ? { cacheWriteTokens: a.cacheWriteTokens } : {}), settledMicros: amount, settledAt: Date.now() });
 } });
+// The provider answered with a 4xx (refused, rate limited, bad request): it did not bill the call, so the
+// reservation is released. A call with no answer at all keeps its reservation (a missing receipt).
+export const release = internalMutation({ args: { id: v.id("inferenceReservations") }, handler: async (ctx, a) => {
+  const reservation = await ctx.db.get(a.id);
+  if (!reservation || reservation.status !== "reserved") return;
+  const budget = await ctx.db.get(reservation.budgetId); if (!budget) throw new Error("Inference budget missing");
+  await ctx.db.patch(budget._id, { reservedMicros: budget.reservedMicros - reservation.reservedMicros });
+  await ctx.db.patch(reservation._id, { status: "released", settledAt: Date.now() });
+} });
 export const status = internalQuery({ args: {}, handler: async ctx => ctx.db.query("inferenceBudgets").unique() });

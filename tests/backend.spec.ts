@@ -814,7 +814,7 @@ test("disabled repositories cancel indexing batches, late completion and recover
   await t.mutation(api.repositories.configure,{token:alice,repositoryId:repo._id,enabled:false});
   if(path==="batch")await t.action(internal.jobs.indexBatch,{jobId});
   else if(path==="completion")expect(await t.mutation(internal.repositories.finishIndex,{repositoryId:repo._id,jobId,sha:path,error:"Late failure"})).toBe(false);
-  else{await t.run(ctx=>ctx.db.patch(jobId,{attempts:3,updatedAt:Date.now()-16*60000}));await t.mutation(internal.recovery.sweep,{});}
+  else{await t.run(ctx=>ctx.db.patch(jobId,{attempts:3,updatedAt:Date.now()-16*60000}));await t.mutation(internal.recovery.sweepIndexJobs,{});}
   expect(await t.query(internal.repositories.indexJob,{jobId})).toMatchObject({status:"cancelled"});
   const saved=await t.run(ctx=>ctx.db.get(repo._id));expect(saved?.enabled).toBe(false);expect(saved?.indexStatus).toBe("cancelled");expect(saved?.error).toBeUndefined();
  }
@@ -1645,7 +1645,7 @@ test("selected teams scope analytics, PRs, findings and memory before pagination
  });
  const args={token:alice,organizationId,teamId};
  expect((await t.query(api.dashboard.overview,args)).repositories.map(r=>r._id)).toEqual([one._id]);
- expect((await t.query(api.pulls.list,{...args,paginationOpts:{numItems:30,cursor:null}})).page.map(p=>p.repositoryId)).toEqual([one._id]);
+ expect((await t.query(api.pulls.browse,{...args,page:1,pageSize:30})).page.map(p=>p.repositoryId)).toEqual([one._id]);
  expect((await t.query(api.findings.list,args)).page.map(f=>f.repositoryId)).toEqual([one._id]);
  expect((await t.query(api.settings.preferences,args)).map(p=>p.repositoryId)).toEqual([one._id]);
  expect(await t.query(api.analytics.report,{...args,since:now-1,until:now+1})).toMatchObject({totalReviews:1,totalPRs:1,findings:1});
@@ -1654,7 +1654,7 @@ test("selected teams scope analytics, PRs, findings and memory before pagination
  await expect(t.query(api.settings.preferences,{...args,repositoryId:two._id})).rejects.toThrow("not accessible");
  await expect(t.query(api.analytics.report,{...args,repositoryId:two._id,since:now-1,until:now+1})).rejects.toThrow("not accessible");
  await expect(t.query(api.findings.list,{...args,repositoryId:two._id})).rejects.toThrow("selected scope");
- await expect(t.query(api.pulls.list,{...args,repositoryId:two._id,paginationOpts:{numItems:30,cursor:null}})).rejects.toThrow("selected scope");
+ await expect(t.query(api.pulls.browse,{...args,repositoryId:two._id,page:1,pageSize:30})).rejects.toThrow("selected scope");
  await t.mutation(api.scopes.member,{token:alice,teamId,userId,role:"viewer",remove:true});await expect(t.query(api.dashboard.overview,{...args,token:bob})).rejects.toThrow("Team not accessible");
 });
 test("provider comment IDs cannot alias another repository's conversation or finding", async () => {
@@ -1817,7 +1817,7 @@ test("review retry state tracks the actual durable job, deduplicates failures an
  await t.mutation(internal.reviews.finished,{reviewId,error:"duplicate failure"});
  expect((await t.run(ctx=>ctx.db.get(reviewId)))!.retryScheduledId).toBe(queued!.retryScheduledId);
  await t.run(ctx=>ctx.db.patch(reviewId,{updatedAt:Date.now()-20*60000}));
- await t.mutation(internal.recovery.sweep,{});
+ await t.mutation(internal.recovery.sweepReviews,{});
  expect((await t.run(ctx=>ctx.db.get(reviewId)))!.retryScheduledId).toBe(queued!.retryScheduledId);
  expect(await t.mutation(internal.reviews.stage,{reviewId,status:"ingesting"})).toBe(true);
  const claimed=await t.run(ctx=>ctx.db.get(reviewId));expect(claimed).toMatchObject({status:"ingesting",attempts:2});expect(claimed!.retryScheduledId).toBeUndefined();expect(claimed!.error).toBeUndefined();
