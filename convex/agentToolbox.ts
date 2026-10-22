@@ -50,8 +50,9 @@ export function reviewAgentHooks(ctx: ActionCtx, reviewId: Id<"reviews">, stepSt
       const resumes = status?.agentResumes ?? 0;
       const stored = status?.agentStateStorageId && status.agentStateHead === status.headSha ? await ctx.storage.get(status.agentStateStorageId) : null;
       const parsed = stored && stored.size <= 8_000_000 ? agentStateSchema.safeParse(JSON.parse(await stored.text())) : null;
-      // The review row counts suspensions, so a state that restarted (or was lost) still hits the resume limit.
-      if (parsed?.success) return { ...(parsed.data as AgentState), resumes: Math.max(parsed.data.resumes, resumes) };
+      // The review row counts suspensions, so a state that restarted (or was lost) still hits the resume limit;
+      // the engine adds this resume itself, hence one less.
+      if (parsed?.success) return { ...(parsed.data as AgentState), resumes: Math.max(parsed.data.resumes, resumes - 1) };
       if (resumes >= maxAgentResumes) throw new Error(`Agentic review stopped: its saved investigation could not be restored after ${resumes} resumes`);
       return null;
     },

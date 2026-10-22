@@ -36,5 +36,6 @@ test('a review whose saved agent state cannot be loaded is failed after maxAgent
  const valid:AgentState={version:1,headSha:head,messages:[],reported:[],sources:[],toolCalls:0,tokens:0,elapsedMs:0,turns:0,resumes:0,done:false};
  const storageId=await t.run(c=>c.storage.store(new Blob([JSON.stringify(valid)])));
  await t.mutation(internal.reviews.saveAgentState,{reviewId,storageId,headSha:head});
- expect((await hooks.load!())?.resumes).toBe(maxAgentResumes);
+ // The engine adds the current resume itself, so a loadable state reports one less than the row count.
+ expect((await hooks.load!())?.resumes).toBe(maxAgentResumes-1);
 });

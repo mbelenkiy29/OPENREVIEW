@@ -262,8 +262,9 @@ export const retention = internalMutation({ args: { organizationId: v.id("organi
 // failed after retries, or abandoned). GitHub deliveries carry no workspace link and are deleted with their
 // payload files. Other providers' events keep their row, which dedupes redeliveries and lists the delivery,
 // and lose the body. Full batches continue right away, so a busy deployment never falls behind.
-export const pruneWebhookPayloads = internalMutation({ args: { cursor: v.optional(v.string()) }, handler: async (ctx, a): Promise<{ deliveries: number; events: number }> => {
-  const now = Date.now(), cutoff = now - 14 * 86_400_000;
+export const pruneWebhookPayloads = internalMutation({ args: { cursor: v.optional(v.string()), cutoff: v.optional(v.number()) }, handler: async (ctx, a): Promise<{ deliveries: number; events: number }> => {
+  // A continuation keeps the first run's cutoff: a paging cursor is only valid for the exact same index range.
+  const now = Date.now(), cutoff = a.cutoff ?? now - 14 * 86_400_000;
   const deliveries = await ctx.db.query("webhookDeliveries").withIndex("by_updated", (q) => q.lt("updatedAt", cutoff)).take(200);
   for (const d of deliveries) await remove(ctx, "webhookDeliveries", d as never);
   // Event bodies are inline (up to ~1 MB each), so events are read in byte-bounded pages (one .paginate() per function;
@@ -272,7 +273,7 @@ export const pruneWebhookPayloads = internalMutation({ args: { cursor: v.optiona
   const scanned = await ctx.db.query("providerEvents").withIndex("by_body_deleted", (q) => q.eq("bodyDeletedAt", undefined).lt("createdAt", cutoff)).paginate({ numItems: 200, cursor: a.cursor ?? null, maximumBytesRead: 2_000_000 });
   const events = scanned.page.filter((e) => (e.updatedAt ?? e.createdAt) < cutoff);
   for (const e of events) await ctx.db.patch(e._id, { body: "", bodyDeletedAt: now });
-  if (deliveries.length === 200 || !scanned.isDone) await ctx.scheduler.runAfter(0, internal.dataControls.pruneWebhookPayloads, scanned.isDone ? {} : { cursor: scanned.continueCursor });
+  if (deliveries.length === 200 || !scanned.isDone) await ctx.scheduler.runAfter(0, internal.dataControls.pruneWebhookPayloads, scanned.isDone ? {} : { cursor: scanned.continueCursor, cutoff });
   return { deliveries: deliveries.length, events: events.length };
 } });
 

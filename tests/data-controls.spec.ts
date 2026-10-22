@@ -372,6 +372,9 @@ test("webhook pruning reads byte-bounded pages, so large inline event bodies nev
     await ctx.db.insert("webhookDeliveries", { deliveryId: "old", event: "push", payloadStorageId: await ctx.storage.store(new Blob(["{}"])), status: "completed", attempts: 1, createdAt: old, updatedAt: old });
   });
   await t.mutation(internal.dataControls.pruneWebhookPayloads, {});
+  // The continuation reuses this run's cutoff: Convex rejects a cursor on a query whose range changed.
+  const next = (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).find((s) => s.name.includes("pruneWebhookPayloads"));
+  expect(next?.args[0]).toMatchObject({ cursor: expect.any(String), cutoff: now - 14 * day });
   await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
   const events = await t.run(async (ctx) => (await ctx.db.query("providerEvents").collect()).filter((e) => e.body !== "").map((e) => e.externalId));
   expect(events).toEqual(["retried"]);
