@@ -159,6 +159,11 @@ test('Slack events: signatures are required; mentions route to Q&A only in linke
  const answers=await scheduled('slackAnswer');
  expect(answers).toHaveLength(1);
  expect(answers[0].args[0]).toEqual({installationId,channelId:'C0SHOP0001',threadTs:'1700000000.000100',question:'where is the total computed?',repositoryIds:[shop._id]});
+ // Slack Connect: a member of another workspace in the shared channel gets nothing; our own members still do.
+ expect((await post('/slack/events',event({event_id:'Ev04'},{user_team:'T0CONTRACT'}))).status).toBe(200);
+ expect(await scheduled('slackAnswer')).toHaveLength(1);
+ await post('/slack/events',event({event_id:'Ev05'},{user_team:'T0ACME123'}));
+ expect(await scheduled('slackAnswer')).toHaveLength(2);
  // Slash command: ephemeral status for the channel.
  const form=new URLSearchParams({team_id:'T0ACME123',channel_id:'C0SHOP0001',command:'/openreview',text:'status'}).toString();
  const status=await (await t.fetch('/slack/commands',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded',...signed(form)},body:form})).json();

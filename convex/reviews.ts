@@ -17,6 +17,7 @@ import { eligibleFixFinding } from "../src/fix-prompt";
 import { effectiveSettings } from "./scopes";
 import { scheduleIndexIfIdle } from "./repositories";
 import { rateLimit } from "./rateLimit";
+import { queueReactions } from "./reactions";
 import {repositoryContextValidator,validateRepositoryContext,requireContextReader,contextReadable,requireFindingReader} from "./repositoryContext";
 import {validateIntegrationScopes} from "./integrations";
 import { runtimeEvidenceValidator, findingValidator } from "./schema";
@@ -536,6 +537,8 @@ export const finished = internalMutation({
         });
     }
     if(!args.error&&!review.nativeP4)await ctx.scheduler.runAfter(0,internal.approvals.request,{reviewId:review._id});
+    // GitHub has no reaction webhooks: queue this PR for the hourly reaction poll.
+    if(!args.error&&!review.nativeP4)await queueReactions(ctx,review.repositoryId,review.prNumber);
     if(!args.error&&await notificationsEnabled(ctx,review.organizationId))await ctx.scheduler.runAfter(0,internal.notificationJobs.reviewCompleted,{reviewId:review._id});
   },
 });

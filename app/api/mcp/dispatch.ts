@@ -1,5 +1,5 @@
 import type { ApiCall } from "../../../src/mcp-tools";
-import { mcpRequests } from "../../../src/api-auth";
+import { inProcessRequests, mcpRequests } from "../../../src/api-auth";
 import { GET as reviews, POST as requestReview } from "../reviews/route";
 import { GET as reviewStatus } from "../reviews/status/route";
 import { GET as unresolved } from "../findings/unresolved/route";
@@ -37,6 +37,7 @@ export function inProcessApi(origin: string, authorization: string, signal?: Abo
     const match = route[1].exec(url.pathname)!;
     const request = new Request(url, { method, headers: { authorization, "content-type": "application/json" }, ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }), signal });
     mcpRequests.add(request);
+    inProcessRequests.add(request);
     const response = await route[2](request, { params: Promise.resolve(route[3] ? { [route[3]]: decodeURIComponent(match[1]) } : {}) });
     return { status: response.status, body: await response.json().catch(() => null) };
   };

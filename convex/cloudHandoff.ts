@@ -21,7 +21,7 @@ async function eligible(ctx: MutationCtx, review: Doc<"reviews">, repo: Doc<"rep
   if (latest?._id !== review._id || review.status !== "completed") throw new Error("Hand off findings from the latest completed review");
   if (!repo.enabled) throw new Error("Repository disabled");
   const config = await effectiveSettings(ctx, repo);
-  const findings = (await ctx.db.query("findings").withIndex("by_pr", (q) => q.eq("repositoryId", repo._id).eq("prNumber", review.prNumber)).collect())
+  const findings = (await ctx.db.query("findings").withIndex("by_review", (q) => q.eq("reviewId", review._id)).collect())
     .filter((f) => eligibleFixFinding(f, review, latest._id, config.minimumConfidence) && (!findingIds || findingIds.includes(f._id)));
   if (!findings.length) throw new Error("No eligible unresolved findings at this revision");
   for (const finding of findings) await requireFindingReader(ctx, userId, finding);

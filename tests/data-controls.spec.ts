@@ -290,6 +290,19 @@ test("transcript retention reaches old threads and conversations behind hundreds
   expect(next).toHaveLength(1);expect((next[0].args[0] as { cursor?: string }).cursor).toBeTruthy();
 });
 
+test("conversation retention counts from the last reply, so an old thread replied to yesterday survives", async () => {
+  const t = convexTest(schema, modules);
+  const day = 86_400_000, now = Date.now();
+  const ids = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Threads", transcriptRetentionDays: 30, createdAt: now });
+    const repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: "threads/app", defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: now });
+    const row = (githubCommentId: number, createdAt: number, updatedAt: number) => ctx.db.insert("conversations", { organizationId, repositoryId, prNumber: 1, githubCommentId, author: "a", question: "q", status: "completed", createdAt, updatedAt });
+    return { organizationId, active: await row(1, now - 31 * day, now - day), idle: await row(2, now - 40 * day, now - 35 * day) };
+  });
+  await t.mutation(internal.dataControls.retention, { organizationId: ids.organizationId });
+  expect(await t.run(async (ctx) => [(await ctx.db.get(ids.active))?._id, await ctx.db.get(ids.idle)])).toEqual([ids.active, null]);
+});
+
 test("review retention deletes a review's children 500 at a time and the review only once none are left", async () => {
   const t = convexTest(schema, modules);
   const now = Date.now(), old = now - 60 * 86_400_000;

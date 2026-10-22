@@ -6,9 +6,8 @@ import { backend } from "../../../src/server";
 export async function GET(request: Request) {
   try {
     const { token, organizationId } = await apiIdentity(request);
-    return Response.json(
-      await backend().query(api.repositories.list, { token, organizationId }),
-    );
+    // Large dashboard-only fields stay out of the API response.
+    return Response.json((await backend().query(api.repositories.list, { token, organizationId })).map((r) => ({ ...r, configFile: undefined, branches: undefined, knowledgePaths: undefined })));
   } catch (error) { const denied = apiDenied(error); if (denied) return denied;
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }

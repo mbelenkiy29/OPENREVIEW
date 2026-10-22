@@ -323,3 +323,18 @@ test('bridge claim rechecks finding evidence access after its source team grant 
  await expect(s.t.mutation(internal.bridge.claim,{secret:'context-service',hash,requestId,current:{headSha:head,state:'open'}})).rejects.toThrow('Team access denied');
  expect(await s.t.run(ctx=>ctx.db.get(requestId))).toMatchObject({status:'pending'});
 });
+
+test('resolving a GitHub author uses indexes instead of scanning every workspace member',async()=>{
+ process.env.SERVICE_SECRET='context-service';
+ const t=convexTest({schema,modules,transactionLimits:{documentsRead:100}}),alice=await t.mutation(api.users.login,{secret:'context-service',githubId:5100,login:'alice',avatar:''});
+ const repositoryId=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Big',createdAt:0}),repo=(fullName:string)=>ctx.db.insert('repositories',{organizationId,fullName,defaultBranch:'main',enabled:true,indexStatus:'ready',indexedSha:'a'.repeat(40),createdAt:0});
+  for(let i=0;i<150;i++)await ctx.db.insert('organizationMembers',{organizationId,userId:await ctx.db.insert('users',{login:'member'+i,avatar:'',createdAt:0}),role:'member'});
+  await ctx.db.insert('organizationMembers',{organizationId,userId:alice,role:'member'});
+  const main=await repo('big/main');await ctx.db.insert('repositoryClusters',{organizationId,name:'Big',repositoryIds:[main,await repo('big/source')],createdAt:0});return main;
+ });
+ expect((await t.query(internal.repositoryContext.select,{repositoryId,actor:'mallory',authorExternalId:'6666'})).coverage.join()).toContain('not linked');
+ expect((await t.query(internal.repositoryContext.select,{repositoryId,actor:'alice',authorExternalId:'5100'})).sources).toHaveLength(1);
+ expect(await t.query(internal.repositoryContext.authorMember,{repositoryId,actor:'mallory',authorExternalId:'6666'})).toContain('not a linked workspace member');
+ expect(await t.query(internal.repositoryContext.authorMember,{repositoryId,actor:'alice',authorExternalId:'5100'})).toBeNull();
+});

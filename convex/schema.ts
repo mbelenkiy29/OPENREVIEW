@@ -467,6 +467,8 @@ export default defineSchema({
   }).index("by_repo",["repositoryId"]).index("by_status",["status"]),
   pullRequests: defineTable({
     reactionsSyncedAt: v.optional(v.number()),
+    // When the PR next needs a reaction sync: set when a review completes, cleared once its window ends.
+    reactionsDueAt: v.optional(v.number()),
     organizationId: org,
     repositoryId: repo,
     number: v.number(),
@@ -489,7 +491,7 @@ export default defineSchema({
     .index("by_org", ["organizationId"])
     .index("by_org_state", ["organizationId", "state"])
     .index("by_repo_state", ["repositoryId", "state", "number"])
-    .index("by_state_reactions", ["state", "reactionsSyncedAt"])
+    .index("by_reactions_due", ["reactionsDueAt"])
     .searchIndex("by_title",{searchField:"title",filterFields:["organizationId","state"]}),
   pullRequestCommits: defineTable({
     organizationId: org,
@@ -959,6 +961,7 @@ export default defineSchema({
   })
     .index("by_pr", ["repositoryId", "prNumber"])
     .index("by_org_created", ["organizationId", "createdAt"])
+    .index("by_org_updated", ["organizationId", "updatedAt"])
     .index("by_comment", ["githubCommentId"])
     .index("by_repository_comment", ["repositoryId", "githubCommentId"])
     .index("by_native_review", ["nativeP4.reviewId"])

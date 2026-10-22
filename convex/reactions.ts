@@ -1,6 +1,7 @@
 import { internalMutation, internalQuery, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { recordFindingFeedback } from "./feedbackCore";
 
 const reaction = v.union(v.literal("+1"), v.literal("-1"));
@@ -70,15 +71,29 @@ export const emoji = internalMutation({
     return true;
   },
 });
-// Open pull requests synced longest ago (never synced first: undefined sorts lowest) that have a recent
-// completed OpenReview review. Stamps each PR it examines so unreviewed PRs and failed syncs go to the back.
+// Queues a reviewed pull request for reaction polling; due() re-arms it hourly while it stays eligible.
+export async function queueReactions(ctx: MutationCtx, repositoryId: Id<"repositories">, prNumber: number) {
+  const pr = await ctx.db.query("pullRequests").withIndex("by_repo_number", (q) => q.eq("repositoryId", repositoryId).eq("number", prNumber)).unique();
+  if (pr) await ctx.db.patch(pr._id, { reactionsDueAt: Date.now() });
+}
+// Queued pull requests whose poll is due (only reviewed PRs are ever queued, so unreviewed catalog PRs cost nothing).
+// Open PRs with a completed OpenReview review in the last 7 days are returned and re-queued an hour out; others leave.
 export const due = internalMutation({ args: { limit: v.number() }, handler: async (ctx, a) => {
   const now = Date.now(), since = now - 7 * 86400000, out: { repositoryId: Id<"repositories">; prNumber: number }[] = [];
-  for (const pr of await ctx.db.query("pullRequests").withIndex("by_state_reactions", (q) => q.eq("state", "open")).take(300)) {
-    if ((pr.reactionsSyncedAt ?? 0) > now - 3600000 || out.length >= Math.min(50, a.limit)) break;
-    await ctx.db.patch(pr._id, { reactionsSyncedAt: now });
+  // gte(0) skips rows without reactionsDueAt, which sort below every number.
+  for (const pr of await ctx.db.query("pullRequests").withIndex("by_reactions_due", (q) => q.gte("reactionsDueAt", 0).lt("reactionsDueAt", now)).take(300)) {
+    if (out.length >= Math.min(50, a.limit)) break;
     const reviews = await ctx.db.query("reviews").withIndex("by_pr", (q) => q.eq("repositoryId", pr.repositoryId).eq("prNumber", pr.number)).order("desc").take(20);
-    if (reviews.some((r) => r.status === "completed" && !r.nativeP4 && r.createdAt >= since)) out.push({ repositoryId: pr.repositoryId, prNumber: pr.number });
+    const live = pr.state === "open" && reviews.some((r) => r.status === "completed" && !r.nativeP4 && r.createdAt >= since);
+    await ctx.db.patch(pr._id, { reactionsDueAt: live ? now + 3600000 : undefined });
+    if (live) out.push({ repositoryId: pr.repositoryId, prNumber: pr.number });
   }
   return out;
+} });
+// One-off: queues PRs reviewed in the last 7 days before reactionsDueAt existed (npx convex run reactions:backfill).
+export const backfill = internalMutation({ args: { cursor: v.optional(v.string()) }, handler: async (ctx, a) => {
+  const since = Date.now() - 7 * 86400000;
+  const page = await ctx.db.query("reviews").withIndex("by_status", (q) => q.eq("status", "completed")).order("desc").paginate({ cursor: a.cursor ?? null, numItems: 200 });
+  for (const r of page.page) if (!r.nativeP4 && r.createdAt >= since) await queueReactions(ctx, r.repositoryId, r.prNumber);
+  if (!page.isDone && page.page.every((r) => r.createdAt >= since)) await ctx.scheduler.runAfter(0, internal.reactions.backfill, { cursor: page.continueCursor });
 } });

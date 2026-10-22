@@ -22,8 +22,8 @@ async function setup(){
   await ctx.db.insert('reviewComments',{organizationId,reviewId,githubId:10,fingerprint:'fp1',createdAt:0});
   await ctx.db.insert('reviewComments',{organizationId,reviewId,githubId:11,fingerprint:'fp2',createdAt:0});
   await ctx.db.insert('reviewComments',{organizationId,reviewId,githubId:12,createdAt:0});
-  await ctx.db.insert('pullRequests',{organizationId,repositoryId:repo._id,number:3,title:'Totals',author:'bob',url:'https://github.com/alice/reactions/pull/3',headSha:'h'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:Date.now()} as never);
-  return {first,second};
+  await ctx.db.insert('pullRequests',{organizationId,repositoryId:repo._id,number:3,title:'Totals',author:'bob',url:'https://github.com/alice/reactions/pull/3',headSha:'h'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:Date.now(),reactionsDueAt:Date.now()-1} as never);
+  return {first,second,reviewId};
  });
  return {t,token,organizationId,repo,...ids};
 }
@@ -47,7 +47,7 @@ test('reactions mirror the provider state, dedupe, and become feedback once per 
  expect((await t.run(ctx=>ctx.db.query('pullRequests').collect()))[0].reactionsSyncedAt).toBeGreaterThan(0);
 });
 
-test('sync polls GitHub for OpenReview finding comments only; sweep selects open PRs not synced in the last hour',async()=>{
+test('sync polls GitHub for OpenReview finding comments only; a synced PR is re-queued an hour out and leaves when closed',async()=>{
  vi.useFakeTimers();
  try{
   const {t,repo}=await setup();
@@ -56,25 +56,60 @@ test('sync polls GitHub for OpenReview finding comments only; sweep selects open
   const polled=vi.spyOn(scm,'reactions').mockResolvedValue([{commentId:'10',user:'carol',reaction:'+1',createdAt:Date.now()}]);
   expect(await t.action(internal.reactionJobs.sync,{repositoryId:repo._id,prNumber:3})).toEqual({added:1,removed:0});
   expect(polled.mock.calls[0][1].sort()).toEqual([10,11]);
+  vi.advanceTimersByTime(3599000);
   expect(await t.mutation(internal.reactions.due,{limit:25})).toEqual([]);
-  await t.run(async ctx=>{const pr=(await ctx.db.query('pullRequests').collect())[0];await ctx.db.patch(pr._id,{reactionsSyncedAt:Date.now()-2*3600000});});
+  vi.advanceTimersByTime(2000);
   expect(await t.mutation(internal.reactions.due,{limit:25})).toHaveLength(1);
   await t.run(async ctx=>{const pr=(await ctx.db.query('pullRequests').collect())[0];await ctx.db.patch(pr._id,{state:'closed'});});
+  vi.advanceTimersByTime(3601000);
   expect(await t.mutation(internal.reactions.due,{limit:25})).toEqual([]);
+  expect((await t.run(ctx=>ctx.db.query('pullRequests').collect()))[0].reactionsDueAt).toBeUndefined();
  }finally{vi.restoreAllMocks();vi.useRealTimers();}
 });
 
-test('sweep still picks an old open PR behind 400+ newer completed reviews; unreviewed PRs advance the queue',async()=>{
+test('a reviewed PR behind 1,000 never-synced unreviewed open PRs is still picked; unreviewed PRs are never touched',async()=>{
  const {t,organizationId,repo}=await setup();
  await t.run(async ctx=>{
-  await ctx.db.insert('pullRequests',{organizationId,repositoryId:repo._id,number:2,title:'Unreviewed',author:'bob',url:'u',headSha:'h'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:Date.now()});
-  for(let n=100;n<501;n++){
-   await ctx.db.insert('reviews',{organizationId,repositoryId:repo._id,prNumber:n,headSha:'h'.repeat(40),status:'completed',mode:'standard',attempts:1,createdAt:Date.now(),updatedAt:Date.now()});
-   await ctx.db.insert('pullRequests',{organizationId,repositoryId:repo._id,number:n,title:'New',author:'bob',url:'u',headSha:'h'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:Date.now(),reactionsSyncedAt:Date.now()});
-  }
+  const pr=(await ctx.db.query('pullRequests').collect())[0];await ctx.db.patch(pr._id,{reactionsSyncedAt:Date.now()-2*3600000});
+  for(let n=100;n<1100;n++)await ctx.db.insert('pullRequests',{organizationId,repositoryId:repo._id,number:n,title:'Imported',author:'bob',url:'u',headSha:'h'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:Date.now()});
  });
  expect(await t.mutation(internal.reactions.due,{limit:50})).toEqual([{repositoryId:repo._id,prNumber:3}]);
- expect((await t.run(ctx=>ctx.db.query('pullRequests').withIndex('by_repo_number',q=>q.eq('repositoryId',repo._id).eq('number',2)).unique()))?.reactionsSyncedAt).toBeGreaterThan(0);
+ expect((await t.run(ctx=>ctx.db.query('pullRequests').withIndex('by_repo_number',q=>q.eq('repositoryId',repo._id).eq('number',100)).unique()))?.reactionsSyncedAt).toBeUndefined();
+});
+
+test('queued PRs without a completed review in the last 7 days leave the queue',async()=>{
+ const {t,organizationId,repo,reviewId}=await setup();
+ await t.run(async ctx=>{
+  await ctx.db.patch(reviewId,{createdAt:Date.now()-8*86400000});
+  await ctx.db.insert('pullRequests',{organizationId,repositoryId:repo._id,number:4,title:'Unreviewed',author:'bob',url:'u',headSha:'h'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:Date.now(),reactionsDueAt:Date.now()-1});
+ });
+ expect(await t.mutation(internal.reactions.due,{limit:50})).toEqual([]);
+ expect((await t.run(ctx=>ctx.db.query('pullRequests').collect())).map(pr=>pr.reactionsDueAt)).toEqual([undefined,undefined]);
+});
+
+test('a completed review queues its PR for reaction polling; a failed one does not',async()=>{
+ const {t,organizationId,repo,reviewId}=await setup();
+ const failed=await t.run(async ctx=>{
+  for(const pr of await ctx.db.query('pullRequests').collect())await ctx.db.patch(pr._id,{reactionsDueAt:undefined});
+  await ctx.db.insert('pullRequests',{organizationId,repositoryId:repo._id,number:5,title:'Failing',author:'bob',url:'u',headSha:'h'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:Date.now()});
+  return ctx.db.insert('reviews',{organizationId,repositoryId:repo._id,prNumber:5,headSha:'h'.repeat(40),status:'running',mode:'standard',attempts:3,createdAt:Date.now(),updatedAt:Date.now()});
+ });
+ await t.mutation(internal.reviews.finished,{reviewId});
+ await t.mutation(internal.reviews.finished,{reviewId:failed,error:'Model unavailable'});
+ const due=Object.fromEntries((await t.run(ctx=>ctx.db.query('pullRequests').collect())).map(pr=>[pr.number,pr.reactionsDueAt]));
+ expect(due[3]).toBeGreaterThan(0);expect(due[5]).toBeUndefined();
+});
+
+test('backfill queues PRs with a completed review in the last 7 days only',async()=>{
+ const {t,organizationId,repo}=await setup();
+ await t.run(async ctx=>{
+  for(const pr of await ctx.db.query('pullRequests').collect())await ctx.db.patch(pr._id,{reactionsDueAt:undefined});
+  await ctx.db.insert('pullRequests',{organizationId,repositoryId:repo._id,number:6,title:'Old',author:'bob',url:'u',headSha:'h'.repeat(40),baseSha:'b'.repeat(40),state:'open',updatedAt:Date.now()});
+  await ctx.db.insert('reviews',{organizationId,repositoryId:repo._id,prNumber:6,headSha:'h'.repeat(40),status:'completed',mode:'standard',attempts:1,createdAt:Date.now()-8*86400000,updatedAt:Date.now()});
+ });
+ await t.mutation(internal.reactions.backfill,{});
+ const due=Object.fromEntries((await t.run(ctx=>ctx.db.query('pullRequests').collect())).map(pr=>[pr.number,pr.reactionsDueAt]));
+ expect(due[3]).toBeGreaterThan(0);expect(due[6]).toBeUndefined();
 });
 
 test('GitLab emoji awards and revocations update reactions for finding notes only',async()=>{

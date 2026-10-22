@@ -13,9 +13,10 @@ export const report = query({
     const repos = await visibleRepositories(ctx,a.token,a.organizationId,a.teamId);
     const allowed = new Set(repos.map(r=>String(r._id)));
     if (a.repositoryId && !repos.some(r => r._id === a.repositoryId)) throw new Error("Repository not accessible");
-    // Newest-first capped reads stay under Convex's per-function read limit (16,384 documents), leaving room for access checks.
+    // Newest-first capped reads stay under Convex's per-function limits (16,384 documents, 8MB): findings (~3KB with evidence and fixes)
+    // and reviews (summaries, tours) are the heavy rows, leaving room for access checks.
     // shortcut: busy periods return partial totals with `capped: true`; serve them from analyticsDaily once rollup rows carry repository-context access.
-    const cap = { reviews: 1200, findings: 2500, usage: 8000, reactions: 1000 };
+    const cap = { reviews: 300, findings: 800, usage: 6000, reactions: 1000 }; // worst case about 3MB reviews + 2.4MB findings + 2MB usage
     const [reviews, findings, usage, reactionsRead] = await Promise.all([
       ctx.db.query("reviews").withIndex("by_org_time", q => q.eq("organizationId", a.organizationId).gte("createdAt", a.since).lte("createdAt", a.until)).order("desc").take(cap.reviews),
       ctx.db.query("findings").withIndex("by_org_time", q => q.eq("organizationId", a.organizationId).gte("createdAt", a.since).lte("createdAt", a.until)).order("desc").take(cap.findings),

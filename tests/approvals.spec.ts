@@ -334,3 +334,15 @@ test('forRevision reads only approval jobs for the matching head',async()=>{
  });
  await t.mutation(internal.approvals.forRevision,{repositoryId,headSha:head});
 });
+
+test('a GitHub check re-run on an approved head rechecks the approval without waiting for the sweep',async()=>{
+ const s=await setup();await s.t.mutation(api.approvals.save,{token:s.token,organizationId:s.organizationId,policy});
+ const id=(await s.t.mutation(internal.approvals.request,{reviewId:s.reviewId}))!;
+ await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(await s.t.run(ctx=>ctx.db.get(id))).toMatchObject({status:'approved'});
+ vi.advanceTimersByTime(600000);s.snapshot.checks=[{name:"regression",appId:42,status:"completed",conclusion:"failure"}];
+ const payloadStorageId=await s.t.run(ctx=>ctx.storage.store(new Blob([JSON.stringify({action:"completed",installation:{id:9301},repository:{id:9310},check_run:{head_sha:head}})])));
+ await s.t.mutation(internal.webhooks.receive,{deliveryId:"check-rerun",event:"check_run",payloadStorageId});
+ await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+ expect(s.dismiss).toHaveBeenCalledWith(s.repo.fullName,1,101);expect((await s.t.run(ctx=>ctx.db.get(id)))?.status).not.toBe('approved');
+});

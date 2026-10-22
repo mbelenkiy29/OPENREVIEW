@@ -9,9 +9,9 @@ const secret='analytics-scale-secret-at-least-32-characters',now=Date.UTC(2026,9
 beforeEach(()=>{vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date']});vi.setSystemTime(now);Object.assign(process.env,{SESSION_SECRET:secret,SERVICE_SECRET:'scale-service'});});
 afterEach(()=>{vi.useRealTimers();});
 
-// Convex's real per-function limits: 16,384 documents read, 1,000 functions scheduled (enforce a stricter 500).
+// Convex's real per-function limits: 16,384 documents and 8MB read, 1,000 functions scheduled (enforce a stricter 500).
 async function setup(){
- const t=convexTest({schema,modules,transactionLimits:{documentsRead:16384,functionsScheduled:500}});
+ const t=convexTest({schema,modules,transactionLimits:{documentsRead:16384,bytesRead:8*1024*1024,functionsScheduled:500}});
  const id=await t.mutation(api.users.login,{secret:'scale-service',githubId:7,login:'admin',avatar:''});
  const token=await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(id).setExpirationTime('1h').sign(new TextEncoder().encode(secret));
  const organizationId=await t.mutation(api.users.createOrganization,{token,name:'Busy'});
@@ -28,8 +28,17 @@ test('report stays under the read limit for a busy period and says the totals ar
  expect(report.capped).toBe(true);
  expect(report.totalReviews).toBe(2);
  expect(report.recent.map(r=>r.prNumber)).toEqual([2,1]);
- expect(report.tokens).toBe(16000);
+ expect(report.tokens).toBe(12000);
  expect((await t.query(api.analytics.report,{...period,until:now-10001})).capped).toBe(false);
+});
+
+test('report stays under the 8MB byte limit when reviews and findings carry full text',async()=>{
+ const {t,token,organizationId,repositoryId}=await setup();
+ const reviewIds=await t.run(async ctx=>{const ids:Id<'reviews'>[]=[];for(let i=0;i<600;i++)ids.push(await ctx.db.insert('reviews',{organizationId,repositoryId,prNumber:i,headSha:'a'.repeat(40),status:'completed',mode:'standard',attempts:1,summary:'s'.repeat(5000),createdAt:now-60000+i,updatedAt:now}));return ids;});
+ await t.run(async ctx=>{for(let i=0;i<1000;i++)await ctx.db.insert('findings',{organizationId,repositoryId,reviewId:reviewIds[599-(i%100)],prNumber:1,title:'t',description:'d'.repeat(1500),severity:'high',confidence:0.9,category:'correctness',filePath:'a.ts',startLine:1,endLine:1,commitSha:'a'.repeat(40),evidence:[{filePath:'a.ts',startLine:1,quote:'q'.repeat(500)}],impact:'i'.repeat(300),suggestedFix:'f'.repeat(700),symbol:'s',fingerprint:'fp'+i,agent:'correctness',status:'open',createdAt:now-50000+i,updatedAt:now});});
+ await t.run(async ctx=>{for(let i=0;i<8000;i++)await ctx.db.insert('usageEvents',{organizationId,repositoryId,reviewId:reviewIds[599],kind:'review',inputTokens:1,outputTokens:1,estimatedCost:0.01,durationMs:1,createdAt:now-40000+i});});
+ const report=await t.query(api.analytics.report,{token,organizationId,since:now-86400000,until:now});
+ expect([report.capped,report.totalReviews,report.findings]).toEqual([true,300,800]);
 });
 
 test('trends read the newest days first and flag a capped period',async()=>{

@@ -248,9 +248,12 @@ export const retention = internalMutation({ args: { organizationId: v.id("organi
       for (const m of messages) await remove(ctx, "chatMessages", m as never);
       if (messages.length < 500) { await remove(ctx, "chatThreads", thread as never); transcripts++; }
     }
-    const conversations = await ctx.db.query("conversations").withIndex("by_org_created", (q) => q.eq("organizationId", org._id).lt("createdAt", cutoff)).take(50);
-    for (const c of conversations) { await remove(ctx, "conversations", c as never); transcripts++; }
-    if (reviews.length === 100 || threads.length === 20 || conversations.length === 50) more = true;
+    // Conversations expire by last activity: a thread replied to yesterday survives; rows without updatedAt fall back to createdAt.
+    const idle = await ctx.db.query("conversations").withIndex("by_org_updated", (q) => q.eq("organizationId", org._id).gte("updatedAt", 0).lt("updatedAt", cutoff)).take(50);
+    const legacy = await ctx.db.query("conversations").withIndex("by_org_created", (q) => q.eq("organizationId", org._id).lt("createdAt", cutoff)).take(100);
+    const undated = legacy.filter((c) => c.updatedAt === undefined).slice(0, 50);
+    for (const c of [...idle, ...undated]) { await remove(ctx, "conversations", c as never); transcripts++; }
+    if (reviews.length === 100 || threads.length === 20 || idle.length === 50 || undated.length === 50) more = true;
   }
   if (more) await ctx.scheduler.runAfter(0, internal.dataControls.retention, a);
   return { reviews: reviewsDeleted, transcripts, more };

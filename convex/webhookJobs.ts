@@ -52,6 +52,9 @@ const payloadSchema = z.object({
     })
     .optional(),
   ref: z.string().optional(),
+  check_run: z.object({ head_sha: z.string(), app: z.object({ id: z.number() }).nullish() }).optional(),
+  check_suite: z.object({ head_sha: z.string() }).optional(),
+  sha: z.string().optional(),
   repositories: z
     .array(
       z.object({
@@ -150,6 +153,10 @@ export const process = internalAction({
           const { repo, settings } = data;
           if(payload.pull_request&&["pull_request","pull_request_review"].includes(delivery.event))
             await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:payload.pull_request.number});
+          // A check re-run on the same head sends no pull_request event; recheck approvals pinned to that head.
+          // OpenReview's own check runs are skipped: they never change the gates and would only cost GitHub reads.
+          const checkedSha=delivery.event==="check_run"?(payload.check_run?.app?.id===Number(globalThis.process.env.GITHUB_APP_ID)?undefined:payload.check_run?.head_sha):delivery.event==="check_suite"?payload.check_suite?.head_sha:delivery.event==="status"?payload.sha:undefined;
+          if(checkedSha)await ctx.runMutation(internal.approvals.forRevision,{repositoryId:repo._id,headSha:checkedSha});
           if (delivery.event === "pull_request" && payload.pull_request) {
             // Read current metadata rather than replaying a potentially stale webhook snapshot.
             // A metadata-only request must not require a complete reviewable diff.

@@ -8,7 +8,7 @@ OpenReview connects GitLab.com and authorized self-managed HTTPS instances throu
 2. For a self-managed instance, add its host (including a non-default port) to `SCM_ALLOWED_HOSTS` in both frontend and Convex environments. Preserve existing entries. HTTPS certificate verification remains enabled.
 3. In Settings → Code Providers, choose GitLab Cloud / self-managed, enter the instance URL, bot token and a random webhook secret, then connect. Credentials are encrypted with the operator's `CREDENTIAL_ENCRYPTION_KEY`.
 4. Select repositories, enable them, and inspect completed indexing, indexed revision, skipped files and failure/retry controls under Add/Remove Repos.
-5. Configure the displayed repository webhook URL in GitLab with the same secret token. Enable merge request, push and comment events, retaining SSL verification. Verify delivery before enabling automatic reviews. See [GitLab's project webhook API](https://docs.gitlab.com/api/project_webhooks/).
+5. Configure the displayed repository webhook URL in GitLab with the same secret token. Enable merge request, push, comment and pipeline events (pipeline events recheck automatic approvals when CI results change), retaining SSL verification. Verify delivery before enabling automatic reviews. See [GitLab's project webhook API](https://docs.gitlab.com/api/project_webhooks/).
 
 Automatic reviews honor effective Automatic review, draft, target-branch, ignored source-branch and Re-review settings. New code pushes are distinguished using GitLab's documented `object_attributes.oldrev`; approval events do not launch reviews. Push events index the default branch. See [GitLab's event payloads](https://docs.gitlab.com/user/project/integrations/webhook_events/).
 
