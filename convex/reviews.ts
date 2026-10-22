@@ -85,7 +85,10 @@ export const enqueue = internalMutation({
       previous.status !== "cancelled"
     )
       return previous._id;
-    await rateLimit(ctx, `review:${repo.organizationId}`, 20);
+    // A burst of webhook reviews waits for the next minute instead of failing its delivery for good;
+    // a person who asked for a review gets the error.
+    // shortcut: a deferred review is not counted against the next minute; count it there if bursts get abused.
+    const deferMs = await rateLimit(ctx, `review:${repo.organizationId}`, 20).then(() => 0, (error) => { if (args.trigger === "manual") throw error; return 60000 - (Date.now() % 60000); });
     const pending = await ctx.db
       .query("reviews")
       .withIndex("by_pr", (q) =>
@@ -121,7 +124,7 @@ export const enqueue = internalMutation({
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
-    await ctx.scheduler.runAfter(2000, internal.jobs.review, { reviewId });
+    await ctx.scheduler.runAfter(2000 + deferMs, internal.jobs.review, { reviewId });
     return reviewId;
   },
 });

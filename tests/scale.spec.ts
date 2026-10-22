@@ -1,4 +1,4 @@
-import {test,expect} from 'vitest';
+import {test,expect,vi} from 'vitest';
 import {convexTest} from 'convex-test';
 import schema from '../convex/schema';
 import {internal} from '../convex/_generated/api';
@@ -48,3 +48,52 @@ test('a repository above the old read ceiling is served by bounded, need-based r
  expect(await t.run(ctx=>ctx.db.get(jobId))).toMatchObject({status:'completed',processed:FILES-2});
  expect((await t.query(internal.repositories.filesByPath,{repositoryId,paths:['pkg00/src/file0.ts','pkg01/src/file1.ts']}))).toHaveLength(0);
 },120_000);
+
+test('the recovery sweep finds stuck knowledge past the first 1,000 repositories and clears expired cache in small batches',async()=>{
+ vi.useFakeTimers();
+ const t=convexTest(schema,modules);
+ const stuck=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Hosted',createdAt:Date.now()});
+  for(let i=0;i<1000;i++)await ctx.db.insert('repositories',{organizationId,fullName:`fixture/r${i}`,defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()});
+  for(let i=0;i<60;i++)await ctx.db.insert('modelCache',{organizationId,key:`k${i}`,result:'x',expiresAt:Date.now()-1});
+  return ctx.db.insert('repositories',{organizationId,fullName:'fixture/stuck',defaultBranch:'main',enabled:true,indexStatus:'ready',knowledgeStatus:'queued',knowledgeUpdatedAt:Date.now()-20*60000,createdAt:Date.now()});
+ });
+ await t.mutation(internal.recovery.sweep,{});
+ const scheduled=await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect());
+ expect(scheduled.some(s=>s.name.includes('knowledgeJobs')&&(s.args[0] as {repositoryId:string}).repositoryId===stuck)).toBe(true);
+ expect(scheduled.some(s=>s.name.includes('sweepCache'))).toBe(true);
+ await t.mutation(internal.recovery.sweepCache,{});
+ expect((await t.run(ctx=>ctx.db.query('modelCache').collect())).length).toBe(35);
+ expect((await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).filter(s=>s.name.includes('sweepCache')).length).toBe(2);
+ vi.useRealTimers();
+});
+
+test('a burst of more than 20 webhook reviews in a minute is deferred, not dropped; a manual request still gets the limit error',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(Date.UTC(2026,9,14,12,0,10));
+ const t=convexTest(schema,modules);
+ const repositoryId=await t.run(async ctx=>ctx.db.insert('repositories',{organizationId:await ctx.db.insert('organizations',{name:'Busy',createdAt:Date.now()}),fullName:'fixture/busy',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()}));
+ const enqueue=(pr:number,trigger:'automatic'|'manual')=>t.mutation(internal.reviews.enqueue,{repositoryId,prNumber:pr,headSha:String(pr).padStart(40,'a'),trigger});
+ for(let pr=1;pr<=20;pr++)await enqueue(pr,'automatic');
+ const deferred=await enqueue(21,'automatic');
+ expect((await t.run(ctx=>ctx.db.get(deferred!)))?.status).toBe('queued');
+ const job=(await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).find(s=>(s.args[0] as {reviewId?:string}).reviewId===deferred);
+ expect(job!.scheduledTime).toBe(Date.UTC(2026,9,14,12,1,0)+2000);
+ await expect(enqueue(22,'manual')).rejects.toThrow('Rate limit');
+ vi.useRealTimers();
+});
+
+test('a provider event finds its repository through the connection index, not by reading every repository',async()=>{
+ const t=convexTest(schema,modules);
+ const {connectionId,target}=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'GitLab shop',createdAt:Date.now()});
+  const connectionId=await ctx.db.insert('providerConnections',{organizationId,kind:'gitlab',instance:'https://gitlab.example',name:'GitLab',credentials:'x',webhookSecret:'',active:true,createdAt:Date.now()});
+  const other=await ctx.db.insert('providerConnections',{organizationId,kind:'gitlab',instance:'https://gitlab.other',name:'Other',credentials:'x',webhookSecret:'',active:true,createdAt:Date.now()});
+  for(let i=0;i<300;i++)await ctx.db.insert('repositories',{organizationId,connectionId,externalId:String(i),fullName:`group/r${i}`,defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()});
+  await ctx.db.insert('repositories',{organizationId,connectionId:other,externalId:'42',fullName:'other/r42',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()});
+  return {connectionId,target:(await ctx.db.query('repositories').withIndex('by_connection',q=>q.eq('connectionId',connectionId).eq('externalId','42')).first())!._id};
+ });
+ expect((await t.query(internal.providerConnections.repository,{connectionId,externalId:'42'}))?._id).toBe(target);
+ expect(await t.query(internal.providerConnections.repository,{connectionId,externalId:'missing'})).toBeNull();
+ await t.run(ctx=>ctx.db.patch(connectionId,{active:false}));
+ expect(await t.query(internal.providerConnections.repository,{connectionId,externalId:'42'})).toBeNull();
+});

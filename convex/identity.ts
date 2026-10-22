@@ -67,6 +67,8 @@ export const signIn = mutation({ args: { secret: v.string(), provider, providerU
     const existing = await ctx.db.query("identities").withIndex("by_provider_user", (q) => q.eq("provider", a.provider).eq("providerUserId", a.providerUserId)).unique();
     if (existing && existing.userId !== current._id) throw new Error("This account is already linked to another OpenReview user");
     if (!existing) { const email = a.email ? emailAddress.safeParse(a.email).data : undefined; await ctx.db.insert("identities", { userId: current._id, provider: a.provider, providerUserId: a.providerUserId, ...(email ? { email } : {}), emailVerified: Boolean(email && a.emailVerified), createdAt: Date.now(), lastLoginAt: Date.now() }); }
+    // A linked GitHub account becomes the login that GitHub-login invitations match.
+    if (a.provider === "github") await ctx.db.patch(current._id, { login: a.login });
     userId = current._id;
   } else {
     const resolved = await resolveIdentity(ctx, { provider: a.provider, providerUserId: a.providerUserId, login: a.login, avatar: a.avatar, email: a.email, emailVerified: a.emailVerified });

@@ -128,6 +128,13 @@ test('signed Stripe webhooks link the workspace, apply once, and ignore replays 
  // Cancellation falls back to the (expired) trial.
  await deliver(t,subscription('evt_cancel','customer.subscription.deleted','canceled',3,Math.floor(Date.now()/1000),org));
  expect((await reviewOf(t,await enqueue(t,repo._id,11)))?.error).toMatch(/free trial has ended/);
+ // A payment failure delivered after the cancellation does not bring back "past due" (and its grace days).
+ await deliver(t,{id:'evt_failed_late',type:'invoice.payment_failed',created:Math.floor(Date.now()/1000)-60,data:{object:{customer:'cus_1',subscription:'sub_1'}}});
+ expect((await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0]).toMatchObject({status:'canceled'});
+ // Nor does a failure older than the last subscription event on an active subscription.
+ await deliver(t,subscription('evt_back','customer.subscription.created','active',3,Math.floor(Date.now()/1000)+10,org));
+ await deliver(t,{id:'evt_failed_old',type:'invoice.payment_failed',created:Math.floor(Date.now()/1000),data:{object:{customer:'cus_1',subscription:'sub_1'}}});
+ expect((await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0]).toMatchObject({status:'active'});
 });
 
 test('seats follow membership: viewers are free and changes resync the subscription quantity',async()=>{

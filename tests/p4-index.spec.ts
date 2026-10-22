@@ -746,3 +746,16 @@ test("P4 approval inspection rejects viewers and rechecks connection credentials
  await expect(s.t.action(api.providerJobs.p4ApprovalInspection,args)).rejects.toThrow('Forbidden');
  }finally{vi.restoreAllMocks();vi.unstubAllGlobals();vi.useRealTimers();}
 });
+
+test('P4 reviews use the billing quota: a blocked review is recorded with the reason and never queued',async()=>{
+ vi.useFakeTimers();try{
+ const {t,args,repo,userId,connectionId}=await setup();
+ const index=await t.action(api.p4IndexJobs.upload,args);await t.action(internal.jobs.indexBatch,{jobId:index.jobId});await t.finishAllScheduledFunctions(vi.runAllTimers);
+ const prepared=await t.action(internal.p4ShelfJobs.prepare,{repositoryId:repo._id,requestedBy:userId,reviewId:12});
+ const {connectionDigest}=await import('../convex/indexAuthority');const connection=await t.run(ctx=>ctx.db.get(connectionId));
+ Object.assign(process.env,{BILLING_ENABLED:'true',BILLING_TRIAL_REVIEWS:'0'});
+ const reviewId=await t.mutation(internal.p4Reviews.enqueue,{repositoryId:repo._id,requestedBy:userId,nativeNumber:12,revision:prepared.revision,baseRevision:prepared.baseRevision,baselineJobId:prepared.baselineJobId,inputStorageId:prepared.storageId,connectionId,credentialDigest:await connectionDigest(connection!.credentials)});
+ expect(await t.run(ctx=>ctx.db.get(reviewId))).toMatchObject({status:'failed',error:expect.stringMatching(/^Billing: /)});
+ expect((await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).some(s=>(s.args[0] as {reviewId?:string}).reviewId===reviewId)).toBe(false);
+ }finally{delete process.env.BILLING_ENABLED;delete process.env.BILLING_TRIAL_REVIEWS;vi.useRealTimers();}
+});

@@ -154,3 +154,21 @@ test('magic links and email invitations are single use, expire, and never store 
  await expect(t.mutation(api.identity.acceptEmailInvitation,{token:fresh.token,tokenHash:third})).rejects.toThrow(/invalid or expired/);
  expect(JSON.stringify(await t.run(ctx=>ctx.db.query('emailInvitations').collect()))).not.toContain(invite);
 });
+
+test('a GitHub-login invitation is only shown to and accepted by a user who signed in with that GitHub account',async()=>{
+ const t=convexTest(schema,modules);
+ const owner=await signIn(t,{provider:'github',providerUserId:'501',login:'owner',emailVerified:false});
+ const organizationId=await t.mutation(api.users.createOrganization,{token:owner.token,name:'Acme'});
+ const invitationId=await t.mutation(api.users.invite,{token:owner.token,organizationId,githubLogin:'alice',role:'admin'});
+ // A Google account whose email starts with "alice" gets the login "alice", but it is not GitHub's alice.
+ const impostor=await signIn(t,{provider:'google',providerUserId:'g-1',login:'alice',email:'alice@attacker.example',emailVerified:true});
+ expect((await t.query(api.users.me,{token:impostor.token})).invitations).toEqual([]);
+ await expect(t.mutation(api.users.acceptInvitation,{token:impostor.token,invitationId})).rejects.toThrow('invalid');
+ // Linking a GitHub account replaces the login with the GitHub one.
+ await signIn(t,{provider:'github',providerUserId:'502',login:'mallory',emailVerified:false},impostor.token);
+ expect((await t.run(ctx=>ctx.db.get(impostor.userId as Id<'users'>)))?.login).toBe('mallory');
+ await expect(t.mutation(api.users.acceptInvitation,{token:impostor.token,invitationId})).rejects.toThrow('invalid');
+ const alice=await signIn(t,{provider:'github',providerUserId:'503',login:'alice',emailVerified:false});
+ expect((await t.query(api.users.me,{token:alice.token})).invitations.map(i=>i._id)).toEqual([invitationId]);
+ expect(await t.mutation(api.users.acceptInvitation,{token:alice.token,invitationId})).toBe(organizationId);
+});

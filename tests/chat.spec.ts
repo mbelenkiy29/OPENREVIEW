@@ -141,7 +141,10 @@ test('Chat with PR gives the agent the pull request review as context, only for 
  const requests=script(()=>++turn===1?[call('read_file',{repository:'acme/shop',path:'src/cart.ts'})]:turn===2?[answer({action:'approve',reason:'No blocking findings remain.'})]:null);
  await t.action(internal.chatJobs.answer,{messageId});
  expect(JSON.stringify(requests[0].messages[0])).toContain('Pull request (unverified context)');
- expect((await t.query(api.chat.thread,{token:alice.token,threadId})).messages.at(-1)).toMatchObject({status:'completed',proposal:{action:'approve',reason:'No blocking findings remain.'}});
+ expect((await t.query(api.chat.thread,{token:alice.token,threadId})).messages.at(-1)).toMatchObject({status:'completed',proposal:{action:'approve',reason:'No blocking findings remain.',head:'d'.repeat(40)}});
+ // A push after the answer does not move the suggestion to code the agent never saw.
+ await t.run(ctx=>ctx.db.patch(pr,{headSha:'e'.repeat(40)}));
+ expect((await t.query(api.chat.thread,{token:alice.token,threadId})).messages.at(-1)?.proposal?.head).toBe('d'.repeat(40));
  // Without a pull request the suggestion is dropped.
  const plain=await t.mutation(api.chat.ask,{token:alice.token,organizationId:org,repositoryIds:[shop._id],question:'Approve it?'});
  turn=0;

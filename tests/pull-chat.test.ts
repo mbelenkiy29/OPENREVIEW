@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pullChatReturn, runsWithoutAsking, withSelectedContext } from "../src/pull-chat";
+import { autoRuns, pullChatReturn, runsWithoutAsking, withSelectedContext } from "../src/pull-chat";
 
 test("chat permissions: ask waits, routine runs comments only, full runs everything, and allowed kinds stick", () => {
   assert.equal(runsWithoutAsking("ask", [], "comment"), false);
@@ -17,4 +17,14 @@ test("the chat form only returns to a pull request page, and selected context st
   assert.equal(withSelectedContext("Why?", ""), "Why?");
   assert.equal(withSelectedContext("Why?", "logger.info(request)"), "Why?\n\nSelected context:\nlogger.info(request)");
   assert.equal(withSelectedContext("Why?", "x".repeat(5000)).length, 4000);
+});
+
+test("raising the permission never runs an older, cancelled or pre-existing suggestion", () => {
+  const full = { mode: "full" as const, allowed: [], since: 1000 };
+  const merge = { action: "merge", createdAt: 2000, newest: true, cancelled: false };
+  assert.equal(autoRuns(full, merge), true);
+  assert.equal(autoRuns(full, { ...merge, newest: false }), false);
+  assert.equal(autoRuns(full, { ...merge, cancelled: true }), false);
+  assert.equal(autoRuns(full, { ...merge, createdAt: 500 }), false);
+  assert.equal(autoRuns({ ...full, mode: "ask" }, merge), false);
 });

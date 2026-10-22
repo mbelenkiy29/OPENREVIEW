@@ -1,20 +1,24 @@
 import { internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import {indexWriteAllowed} from "./indexAuthority";
+// Expired model answers are up to 200 KB each, so they are deleted in their own small batches: a big
+// backlog never pushes the recovery sweep past a transaction's read limit.
+export const sweepCache = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const expired = await ctx.db.query("modelCache").withIndex("by_expiry", (q) => q.lt("expiresAt", Date.now())).take(25);
+    for (const cached of expired) await ctx.db.delete(cached._id);
+    if (expired.length === 25) await ctx.scheduler.runAfter(0, internal.recovery.sweepCache, {});
+  },
+});
 export const sweep = internalMutation({
   args: {},
   handler: async (ctx) => {
-    for (const cached of await ctx.db
-      .query("modelCache")
-      .withIndex("by_expiry", (q) => q.lt("expiresAt", Date.now()))
-      .take(1000))
-      await ctx.db.delete(cached._id);
+    await ctx.scheduler.runAfter(0, internal.recovery.sweepCache, {});
     const stale = Date.now() - 15 * 60000;
     await ctx.runMutation(internal.p4Conversations.recover,{});
-    // ponytail: bounded recovery scan; add a status index when workspaces exceed 1,000 repositories.
-    for (const repo of await ctx.db.query("repositories").take(1000))
+    for (const knowledgeStatus of ["queued", "generating"]) for (const repo of await ctx.db.query("repositories").withIndex("by_knowledge_status", (q) => q.eq("knowledgeStatus", knowledgeStatus)).take(100))
       if (
-        ["queued", "generating"].includes(repo.knowledgeStatus ?? "") &&
         repo.indexStatus === "ready" &&
         (repo.knowledgeUpdatedAt ?? 0) < stale
       ) {

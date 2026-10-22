@@ -40,10 +40,14 @@ export const browse=query({args:{token:v.string(),organizationId:v.id("organizat
  const reviewFilters=Boolean(a.status||a.impact||a.scoreMin!==undefined||a.scoreMax!==undefined),limit=reviewFilters?500:1000;
  const empty={page:[],total:0,capped:false};
  if(!allowed.size)return empty;
- const source=a.search?ctx.db.query("pullRequests").withSearchIndex("by_title",q=>q.search("title",a.search!).eq("organizationId",a.organizationId)):a.repositoryId?ctx.db.query("pullRequests").withIndex("by_repo_number",q=>q.eq("repositoryId",a.repositoryId!)).order("desc"):ctx.db.query("pullRequests").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).order("desc");
+ // The state is read through an index, never filtered while scanning: a filter scan reads every merged
+ // change to find a few open ones. "Closed" means every change that is no longer open (Greptile's Closed
+ // list), so it reads closed and merged and merges the two lists newest first.
+ const read=(state?:string)=>a.search?ctx.db.query("pullRequests").withSearchIndex("by_title",q=>{const s=q.search("title",a.search!).eq("organizationId",a.organizationId);return state?s.eq("state",state):s;}):a.repositoryId?(state?ctx.db.query("pullRequests").withIndex("by_repo_state",q=>q.eq("repositoryId",a.repositoryId!).eq("state",state)):ctx.db.query("pullRequests").withIndex("by_repo_number",q=>q.eq("repositoryId",a.repositoryId!))).order("desc"):(state?ctx.db.query("pullRequests").withIndex("by_org_state",q=>q.eq("organizationId",a.organizationId).eq("state",state)):ctx.db.query("pullRequests").withIndex("by_org",q=>q.eq("organizationId",a.organizationId))).order("desc");
+ const lists=await Promise.all((a.state==="closed"?["closed","merged"]:[a.state]).map(state=>read(state).take(limit+1)));
+ const scanned=lists.length===1?lists[0]:lists.flat().sort((x,y)=>a.search?0:a.repositoryId?y.number-x.number:y._creationTime-x._creationTime).slice(0,limit+1);
  const author=a.author?.toLowerCase(),reviewer=a.reviewer?.toLowerCase();
- // "closed" means every change that is no longer open (Greptile's Closed list), merged included.
- const rows=(await source.filter(q=>a.state==="closed"?q.or(q.eq(q.field("state"),"closed"),q.eq(q.field("state"),"merged")):a.state?q.eq(q.field("state"),a.state):true).take(limit+1)).filter(pr=>allowed.has(pr.repositoryId)&&(!author||pr.author.toLowerCase()===author)&&(!reviewer||Boolean(pr.requestedReviewers?.some(r=>r.toLowerCase()===reviewer))));
+ const rows=scanned.filter(pr=>allowed.has(pr.repositoryId)&&(!author||pr.author.toLowerCase()===author)&&(!reviewer||Boolean(pr.requestedReviewers?.some(r=>r.toLowerCase()===reviewer))));
  let matched:PullDoc[]|Awaited<ReturnType<typeof enrich>>=rows.slice(0,limit);
  if(reviewFilters)matched=(await enrich(ctx,viewer._id,rows.slice(0,limit))).filter(pr=>{
   const r=pr.latest&&pr.latest.headSha===pr.headSha?pr.latest:null,score=r?.reviewScore?.value;

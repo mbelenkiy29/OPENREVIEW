@@ -367,7 +367,8 @@ export default defineSchema({
     .index("by_connection", ["connectionId", "externalId"])
     .index("by_github", ["githubId"])
     .index("by_org", ["organizationId"])
-    .index("by_installation", ["installationId"]),
+    .index("by_installation", ["installationId"])
+    .index("by_knowledge_status", ["knowledgeStatus"]),
   repositorySettings: defineTable({
     repositoryId: repo,
     organizationId: org,
@@ -485,7 +486,9 @@ export default defineSchema({
   })
     .index("by_repo_number", ["repositoryId", "number"])
     .index("by_org", ["organizationId"])
-    .searchIndex("by_title",{searchField:"title",filterFields:["organizationId"]}),
+    .index("by_org_state", ["organizationId", "state"])
+    .index("by_repo_state", ["repositoryId", "state", "number"])
+    .searchIndex("by_title",{searchField:"title",filterFields:["organizationId","state"]}),
   pullRequestCommits: defineTable({
     organizationId: org,
     pullRequestId: v.id("pullRequests"),
@@ -778,7 +781,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
     // A pull request action the agent suggested; it runs only when the developer approves it.
-    proposal: v.optional(v.object({ action: v.string(), reason: v.string(), body: v.optional(v.string()) })),
+    proposal: v.optional(v.object({ action: v.string(), reason: v.string(), body: v.optional(v.string()), head: v.optional(v.string()) })),
   }).index("by_thread", ["threadId"]), // ordered by insertion (_creationTime)
   learnedRules: defineTable({
     organizationId: org,

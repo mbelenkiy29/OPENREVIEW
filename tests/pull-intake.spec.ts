@@ -189,3 +189,21 @@ test("Reviewed marks are per developer and stop counting once the head moves",as
  expect(await s.t.query(api.fileReviews.list,{token:s.token,reviewId:next})).toEqual([]);
  await expect(s.t.mutation(api.fileReviews.mark,{token:s.token,reviewId,path:"",reviewed:true})).rejects.toThrow("Invalid path");
 });
+
+test("the Open tab reads open changes through the state index, not by scanning merged ones; Closed lists closed and merged newest first",async()=>{
+ // convex-test does not count rows a .filter() drops, so this checks the results; the indexes are in convex/schema.ts.
+ const s=await setup();
+ const base={organizationId:s.organizationId,repositoryId:s.repo._id,title:"Change",author:"alice",url:s.observation.url,headSha:s.observation.headSha,baseSha:s.observation.baseSha,updatedAt:1};
+ await s.t.run(async ctx=>{
+  await ctx.db.insert("pullRequests",{...base,number:1,state:"open"});
+  await ctx.db.insert("pullRequests",{...base,number:2,state:"closed"});
+  for(let number=3;number<4003;number++)await ctx.db.insert("pullRequests",{...base,number,state:"merged"});
+  await ctx.db.insert("pullRequests",{...base,number:4003,state:"open"});
+ });
+ const args={token:s.token,organizationId:s.organizationId,pageSize:10,page:1};
+ const open=await s.t.query(api.pulls.browse,{...args,state:"open"});
+ expect(open.page.map(p=>p.number)).toEqual([4003,1]);expect(open.total).toBe(2);
+ const closed=await s.t.query(api.pulls.browse,{...args,state:"closed"});
+ expect(closed.capped).toBe(true);expect(closed.page.map(p=>p.number)).toEqual([4002,4001,4000,3999,3998,3997,3996,3995,3994,3993]);
+ expect((await s.t.query(api.pulls.browse,{...args,repositoryId:s.repo._id,state:"open"})).page.map(p=>p.number)).toEqual([4003,1]);
+});

@@ -111,14 +111,15 @@ export const job = internalQuery({ args: { messageId: v.id("chatMessages") }, ha
   const question = earlier.filter((m) => m.role === "user").at(-1)?.content ?? "";
   // Chat with PR: the pull request's latest readable review and findings, when the thread has one.
   const thread = await ctx.db.get(message.threadId), pr = thread?.pullRequestId ? await ctx.db.get(thread.pullRequestId) : null;
-  let context: string | undefined;
+  let context: string | undefined, head: string | undefined;
   if (pr && pr.organizationId === message.organizationId && message.repositoryIds.includes(pr.repositoryId)) {
     const latest = await ctx.db.query("reviews").withIndex("by_pr", (q) => q.eq("repositoryId", pr.repositoryId).eq("prNumber", pr.number)).order("desc").first();
     const review = latest && await contextReadable(ctx, message.userId, latest) ? latest : null;
     const findings = review ? (await ctx.db.query("reviewFindings").withIndex("by_review", (q) => q.eq("reviewId", review._id)).take(30)).map((f) => f.snapshot) : [];
     context = pullChatContext(pr, review, findings);
+    head = pr.headSha;
   }
-  return { message, repositories, question, context, history: earlier.slice(0, -1).slice(-8).map((m) => ({ role: m.role === "user" ? "user" as const : "assistant" as const, content: m.content })) };
+  return { message, repositories, question, context, head, history: earlier.slice(0, -1).slice(-8).map((m) => ({ role: m.role === "user" ? "user" as const : "assistant" as const, content: m.content })) };
 } });
 export const start = internalMutation({ args: { messageId: v.id("chatMessages") }, handler: async (ctx, a) => {
   const m = await ctx.db.get(a.messageId);
@@ -131,7 +132,7 @@ export const event = internalMutation({ args: { messageId: v.id("chatMessages"),
   if (!m || m.status !== "running") return;
   await ctx.db.patch(m._id, { events: [...(m.events ?? []), { at: Date.now(), kind: a.kind.slice(0, 20), text: a.text.slice(0, 200) }].slice(-40), updatedAt: Date.now() });
 } });
-export const complete = internalMutation({ args: { messageId: v.id("chatMessages"), content: v.string(), citations: v.array(v.object({ repositoryId: v.id("repositories"), repository: v.string(), filePath: v.string(), startLine: v.number(), endLine: v.number(), quote: v.string(), revision: v.string(), url: v.optional(v.string()) })), limits: v.array(v.string()), inputTokens: v.number(), outputTokens: v.number(), estimatedCost: v.number(), proposal: v.optional(v.object({ action: v.string(), reason: v.string(), body: v.optional(v.string()) })) }, handler: async (ctx, a) => {
+export const complete = internalMutation({ args: { messageId: v.id("chatMessages"), content: v.string(), citations: v.array(v.object({ repositoryId: v.id("repositories"), repository: v.string(), filePath: v.string(), startLine: v.number(), endLine: v.number(), quote: v.string(), revision: v.string(), url: v.optional(v.string()) })), limits: v.array(v.string()), inputTokens: v.number(), outputTokens: v.number(), estimatedCost: v.number(), proposal: v.optional(v.object({ action: v.string(), reason: v.string(), body: v.optional(v.string()), head: v.optional(v.string()) })) }, handler: async (ctx, a) => {
   const m = await ctx.db.get(a.messageId);
   if (!m || m.status !== "running") return;
   if (a.citations.some((c) => !m.repositoryIds.includes(c.repositoryId))) throw new Error("Citation outside the selected repositories");

@@ -9,6 +9,7 @@ import {p4PollingReference} from "./schema";
 import {p4PollingAuthority,p4AutomaticAuthority} from "./p4Polling";
 import picomatch from "picomatch";
 import {rateLimit} from "./rateLimit";
+import {reviewAllowance} from "./billing";
 import {authorize} from "./auth";
 
 export const retryPublication=mutation({args:{token:v.string(),reviewId:v.id("reviews")},handler:async(ctx,a)=>{
@@ -39,9 +40,12 @@ export const enqueue=internalMutation({args:{repositoryId:v.id("repositories"),r
  if(previous?.nativeP4&&previous.headSha===a.revision&&previous.baseSha===a.baseRevision&&!a.force&&!["failed","cancelled"].includes(previous.status)){await ctx.storage.delete(a.inputStorageId);return previous._id;}
  if(a.polling&&previous&&!settings.rereview)throw new Error("P4 automatic re-review disabled");
  await rateLimit(ctx,`review:${baseline.repo.organizationId}`,20);
+ const now=Date.now(),record={organizationId:baseline.repo.organizationId,repositoryId:a.repositoryId,prNumber:a.nativeNumber,headSha:a.revision,revisionKey:a.revision,baseSha:a.baseRevision,mode:settings.mode,attempts:0,createdAt:now,updatedAt:now,nativeP4:{requestedBy:a.requestedBy,connectionId:a.connectionId,credentialDigest:a.credentialDigest,baselineJobId:a.baselineJobId,inputStorageId:a.inputStorageId,...(a.polling?{polling:a.polling}:{})}};
+ // The same billing quota as every other review; a blocked one is recorded with the reason and leaves the running review alone.
+ const allowance=await reviewAllowance(ctx,baseline.repo.organizationId);
+ if(!allowance.allowed)return ctx.db.insert("reviews",{...record,status:"failed",error:allowance.reason,finishedAt:now});
  for(const pending of await ctx.db.query("reviews").withIndex("by_pr",q=>q.eq("repositoryId",a.repositoryId).eq("prNumber",a.nativeNumber)).collect())if(!["completed","failed","cancelled"].includes(pending.status))await cancelReview(ctx,pending);
- const now=Date.now();
- const id=await ctx.db.insert("reviews",{organizationId:baseline.repo.organizationId,repositoryId:a.repositoryId,prNumber:a.nativeNumber,headSha:a.revision,revisionKey:a.revision,baseSha:a.baseRevision,status:"queued",mode:settings.mode,attempts:0,createdAt:now,updatedAt:now,nativeP4:{requestedBy:a.requestedBy,connectionId:a.connectionId,credentialDigest:a.credentialDigest,baselineJobId:a.baselineJobId,inputStorageId:a.inputStorageId,...(a.polling?{polling:a.polling}:{})}});
+ const id=await ctx.db.insert("reviews",{...record,status:"queued"});
  await ctx.scheduler.runAfter(0,internal.jobs.review,{reviewId:id});return id;
 }});
 export const claim=internalMutation({args:{reviewId:v.id("reviews"),leaseId:v.string()},handler:async(ctx,a):Promise<boolean>=>{

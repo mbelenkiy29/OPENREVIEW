@@ -1,4 +1,5 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { scheduleSeatSync } from "./billing";
 import { billingConfig } from "../src/billing";
 import { linkIdentity } from "./identity";
@@ -34,14 +35,11 @@ export const me = query({
         role: m.role,
       })),
     );
-    const invitations = await ctx.db
-      .query("invitations")
-      .withIndex("by_login", (q) =>
-        q.eq("githubLogin", user.login.toLowerCase()),
-      )
-      .collect();
     // The first verified sign-in email, for the feedback widget's profile (src/userjot.ts).
     const identities = await ctx.db.query("identities").withIndex("by_user", (q) => q.eq("userId", user._id)).take(20);
+    const invitations = await githubLinked(ctx, user)
+      ? await ctx.db.query("invitations").withIndex("by_login", (q) => q.eq("githubLogin", user.login.toLowerCase())).collect()
+      : [];
     return {
       user,
       email: identities.find((i) => i.emailVerified && i.email)?.email,
@@ -123,6 +121,11 @@ export const revokeInvitation = mutation({
     await audit(ctx,invitation.organizationId,user._id,"invitation.revoked",invitation._id);
   },
 });
+// Invitations name a GitHub login, and only a GitHub sign-in sets a user's login to one: a Google, email or
+// SSO account's login comes from its email or name, so it could match anyone's GitHub login.
+async function githubLinked(ctx: QueryCtx, user: Doc<"users">) {
+  return user.githubId !== undefined || Boolean(await ctx.db.query("identities").withIndex("by_user", (q) => q.eq("userId", user._id)).filter((q) => q.eq(q.field("provider"), "github")).first());
+}
 export const acceptInvitation = mutation({
   args: { token: v.string(), invitationId: v.id("invitations") },
   handler: async (ctx, args) => {
@@ -131,6 +134,7 @@ export const acceptInvitation = mutation({
     if (
       !invitation ||
       invitation.githubLogin !== user.login.toLowerCase() ||
+      !(await githubLinked(ctx, user)) ||
       invitation.expiresAt <= Date.now() ||
       !(await ctx.db.get(invitation.organizationId))
     )

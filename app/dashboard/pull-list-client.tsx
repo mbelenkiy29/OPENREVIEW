@@ -1,6 +1,6 @@
 "use client";
 import { useActionState, useEffect, useRef, useState } from "react";
-import { routineActions, runsWithoutAsking, type ChatPermission } from "../../src/pull-chat";
+import { autoRuns, routineActions, type ChatPermission } from "../../src/pull-chat";
 import { useRouter } from "next/navigation";
 import { bulkFixPrompt, bulkReview, markFileReviewed, pullAction } from "./actions";
 
@@ -200,33 +200,36 @@ export function ReviewedToggle({ reviewId, path, reviewed }: { reviewId: string;
 const proposalLabels: Record<string, string> = { approve: "Approve the pull request", request_changes: "Request changes", comment: "Post a comment", merge: "Merge (squash)", close: "Close the pull request", reopen: "Reopen the pull request", ready: "Mark ready for review", update_branch: "Update the branch" };
 // Per-chat permission state (Greptile's shield chip), kept in this browser only.
 const store = (key: string) => ({ get: () => { try { return localStorage.getItem(key); } catch { return null; } }, set: (value: string) => { try { localStorage.setItem(key, value); } catch { /* not remembered */ } } });
-const permissionOf = (threadId: string) => ({ mode: (store(`openreview:chat-perm:${threadId}`).get() ?? "ask") as ChatPermission, allowed: JSON.parse(store(`openreview:chat-allow:${threadId}`).get() ?? "[]") as string[] });
-// A pull request action the chat agent suggested. It waits for Approve unless this chat's permission
-// already allows it; a permission raised later runs suggestions that are still waiting.
-export function ProposedAction({ pullRequestId, head, proposal, threadId, messageId }: { pullRequestId: string; head: string; proposal: { action: string; reason: string; body?: string }; threadId: string; messageId: string }) {
+const permissionOf = (threadId: string) => ({ mode: (store(`openreview:chat-perm:${threadId}`).get() ?? "ask") as ChatPermission, allowed: JSON.parse(store(`openreview:chat-allow:${threadId}`).get() ?? "[]") as string[], since: Number(store(`openreview:chat-perm-at:${threadId}`).get() ?? Infinity) });
+const raised = (threadId: string) => { store(`openreview:chat-perm-at:${threadId}`).set(String(Date.now())); window.dispatchEvent(new Event("openreview:chat-permission")); };
+// A pull request action the chat agent suggested, pinned to the head it was suggested at. It waits for
+// Approve unless it is the newest suggestion and came after this chat's permission was raised to allow it.
+export function ProposedAction({ pullRequestId, proposal, threadId, messageId, createdAt, newest }: { pullRequestId: string; proposal: { action: string; reason: string; body?: string; head?: string }; threadId: string; messageId: string; createdAt: number; newest: boolean }) {
   const [result, action, pending] = useActionState(pullAction, {});
+  const cancel = store(`openreview:chat-cancel:${messageId}`);
   const [dismissed, setDismissed] = useState(false);
   const form = useRef<HTMLFormElement>(null), auto = useRef(false), ran = store(`openreview:chat-ran:${messageId}`);
   useEffect(() => {
-    const check = () => { const p = permissionOf(threadId); if (!store(`openreview:chat-ran:${messageId}`).get() && runsWithoutAsking(p.mode, p.allowed, proposal.action)) { auto.current = true; form.current?.requestSubmit(); } };
+    setDismissed(Boolean(store(`openreview:chat-cancel:${messageId}`).get()));
+    const check = () => { if (!store(`openreview:chat-ran:${messageId}`).get() && autoRuns(permissionOf(threadId), { action: proposal.action, createdAt, newest, cancelled: Boolean(store(`openreview:chat-cancel:${messageId}`).get()) })) { auto.current = true; form.current?.requestSubmit(); } };
     check();
     window.addEventListener("openreview:chat-permission", check);
     return () => window.removeEventListener("openreview:chat-permission", check);
-  }, [threadId, proposal.action, messageId]);
+  }, [threadId, proposal.action, messageId, createdAt, newest]);
   if (dismissed) return null;
   return (
     <form ref={form} className="proposal" action={action} onSubmit={(e) => { if (ran.get() || (!auto.current && !confirm(`${proposalLabels[proposal.action] ?? proposal.action} on GitHub as you?`))) { e.preventDefault(); return; } ran.set("1"); }}>
       <input type="hidden" name="pullRequestId" value={pullRequestId} />
       <input type="hidden" name="action" value={proposal.action} />
-      <input type="hidden" name="head" value={head} />
+      <input type="hidden" name="head" value={proposal.head ?? ""} />
       <input type="hidden" name="method" value="squash" />
       {proposal.body && <input type="hidden" name="body" value={proposal.body} />}
       <p><strong>Suggested action:</strong> {proposalLabels[proposal.action] ?? proposal.action} · <span className="muted">{proposal.reason}</span></p>
       {proposal.body && <blockquote>{proposal.body}</blockquote>}
       {!result.saved && !ran.get() && <span className="row">
         <button className="small primary" disabled={pending}>Approve</button>
-        {routineActions.includes(proposal.action) && <button type="button" className="small" disabled={pending} onClick={() => { const p = permissionOf(threadId); store(`openreview:chat-allow:${threadId}`).set(JSON.stringify([...new Set([...p.allowed, proposal.action])])); window.dispatchEvent(new Event("openreview:chat-permission")); }}>Allow for this chat</button>}
-        <button type="button" className="small" onClick={() => setDismissed(true)}>Cancel</button>
+        {routineActions.includes(proposal.action) && <button type="button" className="small" disabled={pending} onClick={() => { const p = permissionOf(threadId); store(`openreview:chat-allow:${threadId}`).set(JSON.stringify([...new Set([...p.allowed, proposal.action])])); raised(threadId); auto.current = true; form.current?.requestSubmit(); }}>Allow for this chat</button>}
+        <button type="button" className="small" onClick={() => { cancel.set("1"); setDismissed(true); }}>Cancel</button>
       </span>}
       {pending && <span role="status" className="muted">Running…</span>}
       {result.error && <span role="alert">{result.error}</span>}
@@ -241,7 +244,7 @@ export function ChatPermissionChip({ threadId }: { threadId: string }) {
   const [mode, setMode] = useState<ChatPermission>("ask");
   useEffect(() => setMode(permissionOf(threadId).mode), [threadId]);
   return <label className="permission-chip" title="Actions this chat may run without asking"><span aria-hidden>🛡</span><span className="sr-only">Chat permissions</span>
-    <select value={mode} onChange={(e) => { const next = e.currentTarget.value as ChatPermission; if (next === "full" && !confirm("Full access lets this chat run every suggested action, including merges and closing, without asking. Continue?")) return; setMode(next); store(`openreview:chat-perm:${threadId}`).set(next); window.dispatchEvent(new Event("openreview:chat-permission")); }}>
+    <select value={mode} onChange={(e) => { const next = e.currentTarget.value as ChatPermission; if (next === "full" && !confirm("Full access lets this chat run every suggested action, including merges and closing, without asking. Continue?")) return; setMode(next); store(`openreview:chat-perm:${threadId}`).set(next); raised(threadId); }}>
       {(Object.keys(permissionLabels) as ChatPermission[]).map((k) => <option key={k} value={k}>{permissionLabels[k]}</option>)}
     </select>
   </label>;

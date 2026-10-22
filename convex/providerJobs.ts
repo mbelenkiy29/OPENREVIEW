@@ -149,14 +149,14 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
    if(envelope.event.type!==event.eventType)throw new Error("Origin stored event type mismatch");
    if(["pull_request.review.submitted","pull_request.review.dismissed"].includes(envelope.event.type)){
     const payload=z.object({pullRequest:z.object({number:z.string().regex(/^\d+$/),repository:z.object({id:z.string()})}),review:z.object({id:z.string().min(1)})}).parse(envelope.event.payload);
-    const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===payload.pullRequest.repository.id);
+    const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:payload.pullRequest.repository.id});
     if(repo?.enabled){const number=Number(payload.pullRequest.number);if(!Number.isSafeInteger(number)||number<1)throw new Error("Unsupported Origin change number");await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:number});}
    }
    if(/^repository\.check_run\.(created|updated|completed)$/.test(envelope.event.type)){
     const repository=z.object({id:z.string()}),sha=z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
     const payload=z.object({repository,checkSuite:z.object({id:z.string().min(1),repository,sha}),checkRun:z.object({id:z.string().min(1),repository,sha,checkSuite:z.object({id:z.string().min(1)})})}).parse(envelope.event.payload);
     if(payload.repository.id!==payload.checkSuite.repository.id||payload.repository.id!==payload.checkRun.repository.id||payload.checkSuite.sha!==payload.checkRun.sha||payload.checkSuite.id!==payload.checkRun.checkSuite.id)throw new Error("Origin check event repository, suite or revision mismatch");
-    const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===payload.repository.id);
+    const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:payload.repository.id});
     if(repo?.enabled)await ctx.runMutation(internal.approvals.forRevision,{repositoryId:repo._id,headSha:payload.checkRun.sha});
    }
    if(envelope.event.type==="pull_request.comment.created"){
@@ -164,7 +164,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
      pullRequest:z.object({number:z.string().regex(/^\d+$/),repository:z.object({id:z.string()})}),
      comment:z.object({id:z.string(),body:z.string().max(16000),thread:z.object({id:z.string()}),author:z.object({user:z.object({id:z.string()}).optional()})}),
     }).parse(envelope.event.payload);
-    const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===p.pullRequest.repository.id),author=p.comment.author.user?.id,number=Number(p.pullRequest.number);
+    const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:p.pullRequest.repository.id}),author=p.comment.author.user?.id,number=Number(p.pullRequest.number);
     if(repo?.enabled&&author&&/@openreview\b/i.test(p.comment.body)){
      if(!Number.isSafeInteger(number)||number<1)throw new Error("Unsupported Origin change number");
      const client=await provider(ctx,repo);if(!(client instanceof Origin)||!await client.canReply(repo.fullName,author))throw new Error("Comment author requires Origin repository write access");
@@ -179,7 +179,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
    }
    if(envelope.event.type==="repository.pushed"||/^pull_request\.(created|published|reopened|closed|merged|metadata\.updated|head_ref\.pushed|base_ref\.updated|stack_parent\.updated)$/.test(envelope.event.type)){
     const payload=z.object({repository:z.object({id:z.string()}),pullRequest:z.object({number:z.string().regex(/^\d+$/)}).optional()}).parse(envelope.event.payload);
-    const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===payload.repository.id);
+    const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:payload.repository.id});
     if(repo?.enabled){
      if(envelope.event.type==="repository.pushed")await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
      if(payload.pullRequest){
@@ -195,7 +195,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
   }else if(c.kind==="bitbucket-cloud"){
    const payload=bitbucketEvent.parse(JSON.parse(event.body));
    if(payload.workspace.uuid!==c.namespaceId||payload.eventType!==event.eventType)throw new Error("Bitbucket event workspace or type mismatch");
-   const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId==="{"+payload.repository.uuid+"}");
+   const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:"{"+payload.repository.uuid+"}"});
    if(repo?.enabled){
     if(payload.eventType==="avi:bitbucket:push:repository"){
      if(payload.push?.ref===repo.defaultBranch&&!payload.push.closed&&payload.push.after)await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
@@ -231,7 +231,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
   }else if(c.kind==="bitbucket-dc"){
    const payload=z.object({eventKey:z.string(),repository:z.object({id:z.number()}).optional(),pullRequest:z.object({id:z.number().int().positive(),toRef:z.object({repository:z.object({id:z.number()})})}).optional(),actor:z.object({name:z.string()}).optional(),comment:z.object({id:z.number().int().positive(),text:z.string().max(16000),author:z.object({name:z.string(),active:z.boolean()})}).optional(),commentParentId:z.number().int().positive().optional()}).parse(JSON.parse(event.body));
    const externalId=payload.pullRequest?.toRef.repository.id??payload.repository?.id;
-   const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===String(externalId));
+   const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:String(externalId)});
    if(repo?.enabled){
     if(payload.eventKey==="repo:refs_changed")await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
     const number=payload.pullRequest?.id;
@@ -260,7 +260,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
    // Service hook payloads name the event in the body; follow-up commands are not supported yet.
    const payload=z.object({eventType:z.string(),resource:z.object({repository:z.object({id:z.string()}).optional(),pullRequestId:z.number().int().positive().optional(),refUpdates:z.array(z.object({name:z.string(),newObjectId:z.string()})).optional(),pullRequest:z.object({pullRequestId:z.number().int().positive(),repository:z.object({id:z.string()})}).optional()}).passthrough()}).parse(JSON.parse(event.body));
    const repositoryId=payload.resource.repository?.id??payload.resource.pullRequest?.repository.id;
-   const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===repositoryId);
+   const repo=repositoryId?await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:repositoryId}):null;
    if(repo?.enabled){
     if(payload.eventType==="git.push"&&payload.resource.refUpdates?.some(u=>u.name==="refs/heads/"+repo.defaultBranch))await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
     const number=payload.resource.pullRequestId;
@@ -277,7 +277,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
    const payload=z.object({installation:z.object({id:z.number().int().positive()}),repository:z.object({id:z.number()}).optional(),action:z.string().optional(),ref:z.string().optional(),pull_request:z.object({number:z.number().int().positive()}).optional(),issue:z.object({number:z.number().int().positive(),pull_request:z.unknown().optional()}).optional(),comment:z.object({id:z.number().int().positive(),body:z.string().max(16000),in_reply_to_id:z.number().int().positive().optional(),user:z.object({login:z.string(),type:z.string()})}).optional(),review:z.object({id:z.number().int().positive(),body:z.string().nullable(),user:z.object({login:z.string(),type:z.string()})}).optional()}).parse(JSON.parse(event.body));
    const configuration=z.object({installationId:z.number().int().positive()}).parse(JSON.parse(decryptCredential(c.credentials,c.organizationId+":"+c.kind)));
    if(payload.installation.id!==configuration.installationId)throw new Error("GitHub Enterprise installation mismatch");
-   const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===String(payload.repository?.id));
+   const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:String(payload.repository?.id)});
    if(repo?.enabled){
     if(event.eventType==="push"&&payload.ref==="refs/heads/"+repo.defaultBranch)await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
     const number=payload.pull_request?.number??(payload.issue?.pull_request?payload.issue.number:undefined);
@@ -301,7 +301,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
    }
   }else if(c.kind==="gitea"){
    const payload=z.object({repository:z.object({id:z.number()}),action:z.string().optional(),ref:z.string().optional(),pull_request:z.object({number:z.number().int().positive()}).nullish(),number:z.number().int().positive().optional(),issue:z.object({number:z.number().int().positive()}).optional(),is_pull:z.boolean().optional(),sender:z.object({login:z.string()}).optional(),review:z.object({content:z.string().max(16000),type:z.string()}).nullish(),comment:z.object({id:z.number().int().positive(),body:z.string().max(16000),user:z.object({login:z.string()})}).optional()}).parse(JSON.parse(event.body));
-   const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===String(payload.repository.id));
+   const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:String(payload.repository.id)});
    if(repo?.enabled){
     if(event.eventType==="push"&&payload.ref==="refs/heads/"+repo.defaultBranch)await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
     const number=payload.pull_request?.number??payload.number;
@@ -335,7 +335,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
    }
   }else{
   const payload=z.object({object_kind:z.string(),project:z.object({id:z.number()}),object_attributes:z.object({iid:z.number().optional()}).passthrough().optional()}).passthrough().parse(JSON.parse(event.body));
-  const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===String(payload.project.id));
+  const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:String(payload.project.id)});
   if(repo?.enabled){
    if(payload.object_kind==="push"&&payload.ref==="refs/heads/"+repo.defaultBranch)await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
    if(payload.object_kind==="note"){
@@ -376,5 +376,5 @@ export const rereview=action({args:{token:v.string(),repositoryId:v.id("reposito
  const pr=await (await provider(ctx,repo)).pullRequest(repo.fullName,a.prNumber);
  if(pr.state!=="open")throw new Error("Change is closed");
  if(a.expectedRevision!==undefined&&pr.head.sha!==a.expectedRevision||a.expectedRevisionKey!==undefined&&pr.revisionKey!==a.expectedRevisionKey)throw new Error('Revision changed; refresh the pull request list');
- return ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:a.prNumber,headSha:pr.head.sha,revisionKey:pr.revisionKey,force:a.force??true});
+ return ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:a.prNumber,headSha:pr.head.sha,revisionKey:pr.revisionKey,force:a.force??true,trigger:"manual"});
 }});

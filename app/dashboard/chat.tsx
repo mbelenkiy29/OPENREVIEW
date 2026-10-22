@@ -48,7 +48,8 @@ export async function ChatPanel({ token, organizationId, repositories, filters }
 
 type ChatThread = FunctionReturnType<typeof api.chat.thread>;
 // One conversation's messages: answers with citations, live progress, and any suggested PR action.
-export function ChatMessages({ messages, threadId, pull }: { messages: ChatThread["messages"]; threadId: string; pull: { _id: string; headSha: string } | null }) {
+export function ChatMessages({ messages, threadId, pull }: { messages: ChatThread["messages"]; threadId: string; pull: { _id: string } | null }) {
+  const newest = messages.findLast((m) => m.role === "assistant")?._id;
   return <section aria-label="Conversation">
         {messages.map((m) => <article key={m._id} className={`chat-message ${m.role}`}>
           <p className="muted">{m.role === "user" ? "You" : "OpenReview"} · {new Date(m.createdAt).toLocaleString()}{m.role === "assistant" && m.status !== "completed" && <> · <span className={`badge ${m.status}`}>{m.status}</span></>}</p>
@@ -59,7 +60,7 @@ export function ChatMessages({ messages, threadId, pull }: { messages: ChatThrea
               <span className="muted"> @ {c.revision.slice(0, 12)}</span>
               <pre>{c.quote}</pre>
             </li>)}</ol>}
-            {m.proposal && pull && <ProposedAction pullRequestId={pull._id} head={pull.headSha} proposal={m.proposal} threadId={threadId} messageId={m._id} />}
+            {m.proposal && pull && <ProposedAction pullRequestId={pull._id} proposal={m.proposal} threadId={threadId} messageId={m._id} createdAt={m.createdAt} newest={m._id === newest} />}
             {m.limits.map((l) => <p key={l} className="muted">{l}</p>)}
           </> : m.status === "failed" ? <p role="alert">{m.error ?? "The answer failed."} {m.limits.join(" ")}</p> : <ChatStream messageId={m._id} initial={m.events.map((e) => ({ kind: e.kind, text: e.text }))} />}
         </article>)}
