@@ -72,6 +72,8 @@ Set these on the **web app** (Vercel → Project → Settings → Environment Va
 | `NEXT_PUBLIC_OPENAI_ADS_PIXEL_ID` | The pixel ID (Ads Manager → Conversions → Data Source) | No (public by design) |
 | `NEXT_PUBLIC_REDDIT_PIXEL_ID` | The pixel ID, `a2_…` (Reddit Ads → Events Manager) | No (public by design) |
 
+**Ad pixels need PostHog:** set `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` too. Both ad pixels start from PostHog's consent banner, and their sign-ups ride the `signed_up` milestone, which is loaded and marked reported only with PostHog. With a pixel ID but no PostHog token, the pixel never starts.
+
 **Release builds:** with `SENTRY_AUTH_TOKEN` set, a build uploads source maps and deletes them from the output, so they are never served publicly. Errors are tagged with the Vercel environment (`production` or `preview`) and the commit.
 
 **Backend errors:** Convex functions are not covered by this setup. On a Convex Pro plan, turn on Sentry under Convex dashboard → Settings → Integrations → Exception Reporting with the same DSN. Otherwise, use the Convex dashboard's logs.
