@@ -40,8 +40,9 @@ export async function POST(request: Request) {
     return finish(result.status === "limited" ? "busy" : "sent", result.status);
   } catch (error) {
     // The visitor sees "couldn't send"; a cause that hits everyone (Resend key or quota, Convex down)
-    // must reach Sentry too, as one issue. `rid` finds the request's log lines.
-    Sentry.captureException(error, { level: "error", fingerprint: ["auth-email-send-failed"], extra: { rid } });
+    // must reach Sentry too, as one issue. `rid` finds the request's log lines; the auth_failure tag is what
+    // the "sign-in failures" Sentry alert matches.
+    Sentry.captureException(error, { level: "error", fingerprint: ["auth-email-send-failed"], tags: { auth_failure: "email-send" }, extra: { rid } });
     return finish("error", "error");
   }
 }
