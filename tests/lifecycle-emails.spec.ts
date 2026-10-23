@@ -4,6 +4,7 @@ import {SignJWT} from 'jose';
 import {createHash,randomBytes} from 'node:crypto';
 import schema from '../convex/schema';
 import {api,internal} from '../convex/_generated/api';
+import {brandedEmail} from '../src/email';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='lifecycle-session-secret-at-least-32-characters',svc='lifecycle-service';
 beforeEach(()=>{vi.useFakeTimers();Object.assign(process.env,{SESSION_SECRET:secret,SERVICE_SECRET:svc,APP_URL:'https://review.example.com',RESEND_API_KEY:'re_fixture',EMAIL_FROM:'OpenReview <noreply@example.com>'});});
@@ -19,14 +20,16 @@ const queued=(t:T)=>t.run(async ctx=>(await ctx.db.system.query('_scheduled_func
 
 test('sign-up sends one thank-you to a verified address and none to GitHub-only users',async()=>{
  const t=convexTest(schema,modules);
- const mails:{to:string;subject:string}[]=[];
- vi.spyOn(globalThis,'fetch').mockImplementation(async(_u:string|URL|Request,init?:RequestInit)=>{const b=JSON.parse(String(init?.body));mails.push({to:b.to[0],subject:b.subject});return Response.json({id:'m'+mails.length});});
+ const mails:{to:string;subject:string;html:string}[]=[];
+ vi.spyOn(globalThis,'fetch').mockImplementation(async(_u:string|URL|Request,init?:RequestInit)=>{const b=JSON.parse(String(init?.body));mails.push({to:b.to[0],subject:b.subject,html:b.html});return Response.json({id:'m'+mails.length});});
  const google={provider:'google' as const,providerUserId:'g1',login:'ann',email:'ann@example.com',emailVerified:true};
  await signIn(t,google);
  await signIn(t,google);
  await signIn(t,{provider:'github',providerUserId:'7',login:'octo',emailVerified:false});
  await t.finishAllScheduledFunctions(vi.runAllTimers);
- expect(mails).toEqual([{to:'ann@example.com',subject:'Thanks for signing up for OpenReview'}]);
+ expect(mails.map(({to,subject})=>({to,subject}))).toEqual([{to:'ann@example.com',subject:'Thanks for signing up for OpenReview'}]);
+ expect(mails[0].html).toContain('src="https://review.example.com/apple-icon.png"');
+ expect(mails[0].html).toContain('href="https://review.example.com/dashboard/onboarding"');
 });
 
 test('the first completed review in a workspace emails its owner once; later reviews do not',async()=>{
@@ -71,4 +74,12 @@ test('a milestone reached while email is off is recorded, so turning email on la
  await t.mutation(internal.reviews.finished,{reviewId:second});
  expect(await queued(t)).toEqual([{to:'quinn@example.com',kind:'welcome'}]);
  expect((await t.run(ctx=>ctx.db.get(org)))?.lifecycleEmails).toEqual(['first_review_completed']);
+});
+
+test('branded emails escape their content and carry the same message as plain text',()=>{
+ const e=brandedEmail('https://review.example.com',{subject:'<b>Hi</b> & "you"',paragraphs:['a < b'],action:{label:'Go',path:'/dashboard?x=1&y=2'}});
+ expect(e.html).not.toContain('<b>Hi');
+ expect(e.html).toContain('&lt;b&gt;Hi&lt;/b&gt; &amp; &quot;you&quot;');
+ expect(e.html).toContain('href="https://review.example.com/dashboard?x=1&amp;y=2"');
+ expect(e.text).toBe('a < b\n\nGo: https://review.example.com/dashboard?x=1&y=2');
 });
