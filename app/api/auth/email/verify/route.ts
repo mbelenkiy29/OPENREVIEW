@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cookies, headers } from "next/headers";
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { api } from "../../../../../convex/_generated/api";
 import { backend, origin } from "../../../../../src/server";
@@ -23,12 +23,7 @@ export async function POST(request: Request) {
   if (request.headers.get("origin") !== origin() || !valid(token)) return NextResponse.redirect(`${origin()}/login?error=signin`, 303);
   const session = newSession();
   const userId = await backend().mutation(api.identity.consumeLoginToken, { secret: process.env.SERVICE_SECRET ?? "", tokenHash: createHash("sha256").update(token).digest("hex"), sessionHash: session.hash, userAgent: (await headers()).get("user-agent")?.slice(0, 200) ?? undefined }).catch(() => null);
-  if (!userId) {
-    // Pressing the button again after it already signed this browser in goes on to the same page.
-    const current = (await cookies()).get("openreview_session")?.value;
-    if (current && await backend().query(api.identity.sessionValid, { token: current }).catch(() => false)) return NextResponse.redirect(origin() + safeNext(String(form?.get("next") ?? "")), 303);
-    return NextResponse.redirect(`${origin()}/login?error=link`, 303);
-  }
+  if (!userId) return NextResponse.redirect(`${origin()}/login?error=link`, 303);
   await startSession(userId, session.sid);
   return NextResponse.redirect(origin() + safeNext(String(form?.get("next") ?? "")), 303);
 }

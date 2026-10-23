@@ -36,7 +36,12 @@ test("milestones follow the workspace's progress, with the time each happened", 
   expect(events(all)).toEqual(["signed_up", "workspace_created", "repository_connected", "first_review_completed"]);
   expect(all.find((m) => m.event === "first_review_completed")?.at, "the oldest completed review").toBe(2_000);
   expect(all.every((m) => m.event === "signed_up" || m.workspaceId === organizationId)).toBe(true);
-  expect(events(await t.query(api.analyticsMilestones.pending, { token: member, organizationId })), "workspace milestones go to owners only, so each is sent once").toEqual(["signed_up"]);
+  expect(events(await t.query(api.analyticsMilestones.pending, { token: member, organizationId })), "members never send workspace milestones").toEqual(["signed_up"]);
+  // A second owner doesn't send them again: only the earliest owner reports the workspace's milestones.
+  const coOwnerId = await t.mutation(api.users.login, { secret: service, githubId: 4, login: "co-owner", avatar: "" });
+  await t.run((ctx) => ctx.db.insert("organizationMembers", { organizationId, userId: coOwnerId as Id<"users">, role: "owner" }));
+  expect(events(await t.query(api.analyticsMilestones.pending, { token: await jwt(coOwnerId), organizationId }))).toEqual(["signed_up"]);
+  expect(events(await t.query(api.analyticsMilestones.pending, { token: owner, organizationId }))).toHaveLength(4);
 });
 
 test("reported milestones are not sent again, and unknown keys are ignored", async () => {

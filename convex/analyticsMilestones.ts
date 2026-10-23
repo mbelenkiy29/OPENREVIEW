@@ -1,9 +1,9 @@
 // Product milestones for analytics: sign-up, workspace created, first repository connected and
 // first completed review. The browser sends them to PostHog with the time each happened, and only
 // after the visitor accepts analytics cookies; it then marks them reported so each goes out once.
-// Workspace milestones go to the workspace's owners only, so each is sent once per workspace, and
-// internal or test accounts (convex/conversions.ts isInternal) get none, so they never count as ad
-// conversions. The authoritative server-side record is convex/conversions.ts.
+// Workspace milestones go to one person, the workspace's earliest owner (normally who created it), so
+// each is sent once per workspace; internal or test accounts (convex/conversions.ts isInternal) get
+// none, so they never count as ad conversions. The authoritative server-side record is convex/conversions.ts.
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { authenticated } from "./auth";
@@ -12,14 +12,16 @@ import { internalAccount } from "./conversions";
 export type Milestone = { key: string; event: string; at: number; workspaceId?: string };
 const key = /^(signed_up|(workspace_created|repository_connected|first_review_completed):[a-z0-9]{1,64})$/;
 
-/** Milestones of the signed-in user, and of the given workspace when they own it, not yet reported. */
+/** Milestones of the signed-in user, and of the given workspace when they are its earliest owner, not yet reported. */
 export const pending = query({ args: { token: v.string(), organizationId: v.optional(v.id("organizations")) }, handler: async (ctx, a): Promise<Milestone[]> => {
   const user = await authenticated(ctx, a.token), reported = new Set(user.analyticsMilestones ?? []);
   if (await internalAccount(ctx, user)) return [];
   const found: Milestone[] = [{ key: "signed_up", event: "signed_up", at: user.createdAt }];
   const organizationId = a.organizationId;
   const member = organizationId && await ctx.db.query("organizationMembers").withIndex("by_org_user", (q) => q.eq("organizationId", organizationId).eq("userId", user._id)).unique();
-  const org = member && member.role === "owner" ? await ctx.db.get(member.organizationId) : null;
+  // Members come in the order they joined, so the first owner is the one who has been owner longest.
+  const reporter = member && member.role === "owner" ? (await ctx.db.query("organizationMembers").withIndex("by_org", (q) => q.eq("organizationId", member.organizationId)).take(500)).find((m) => m.role === "owner") : null;
+  const org = member && reporter?.userId === user._id ? await ctx.db.get(member.organizationId) : null;
   if (org) {
     const workspaceId = org._id as string;
     found.push({ key: `workspace_created:${workspaceId}`, event: "workspace_created", at: org.onboarding?.startedAt ?? org.createdAt, workspaceId });

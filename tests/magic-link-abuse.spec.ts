@@ -86,6 +86,17 @@ test("one mailbox gets one email a minute and three per 15 minutes, its Gmail va
   expect(await post("j.doe@gmail.com")).toBe("sent");
 });
 
+test("the one-minute cooldown counts from the last email, not the clock minute", async () => {
+  vi.setSystemTime(Date.UTC(2026, 9, 23, 12, 0, 59));
+  expect(await post("edge@example.com")).toBe("sent");
+  vi.setSystemTime(Date.UTC(2026, 9, 23, 12, 1, 0));
+  expect(await post("edge@example.com")).toBe("sent");
+  expect(mails, "one second later, in the next clock minute, still nothing is sent").toEqual(["edge@example.com"]);
+  vi.setSystemTime(Date.UTC(2026, 9, 23, 12, 2, 0));
+  expect(await post("edge@example.com")).toBe("sent");
+  expect(mails).toEqual(["edge@example.com", "edge@example.com"]);
+});
+
 test("one network gets ten sign-in emails per 10 minutes; others are unaffected, and an untrusted address is ignored", async () => {
   for (let i = 0; i < 10; i++) expect(await post(`user${i}@example.com`, { ip: "203.0.113.9" })).toBe("sent");
   expect(await post("user10@example.com", { ip: "203.0.113.9" })).toBe("busy");
@@ -102,7 +113,7 @@ test("the deployment-wide cap refuses everyone alike, warns at half, and a refus
   expect([await post("old@example.com"), await post("new@example.com"), await post("third@example.com")]).toEqual(["sent", "sent", "busy"]);
   expect(mails).toEqual(["old@example.com", "new@example.com"]);
   expect(holder.sentry).toHaveLength(2);
-  const third = `magic-link:to:${await limitKey(canonicalEmail("third@example.com"), svc)}:1m`;
+  const third = `magic-link:to:${await limitKey(canonicalEmail("third@example.com"), svc)}:last`;
   expect((await t().run((ctx) => ctx.db.query("rateLimits").collect())).map((r) => r.key), "the refused request's mailbox counter was rolled back").not.toContain(third);
 });
 

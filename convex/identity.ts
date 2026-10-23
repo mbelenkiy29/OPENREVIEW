@@ -4,7 +4,7 @@ import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authenticated, authenticatedSession, authorize, service } from "./auth";
-import { otherUserEmailLimit, rateLimit } from "./rateLimit";
+import { cooldown, otherUserEmailLimit, rateLimit } from "./rateLimit";
 import { scheduleSeatSync } from "./billing";
 import { recentSignIn, recordReferralSignup } from "./referralLedger";
 import { lifecycleEmail } from "./lifecycleEmails";
@@ -132,16 +132,17 @@ const envLimit = (value: string | undefined, fallback: number) => { const n = Nu
 export const magicLinkLimits = (env: Record<string, string | undefined> = process.env) => ({ hourly: envLimit(env.AUTH_EMAIL_HOURLY, 60), daily: envLimit(env.AUTH_EMAIL_DAILY, 300) });
 export const storeLoginToken = internalMutation({ args: { email: v.string(), tokenHash: v.string(), referralCode: v.optional(v.string()), ipHash: v.optional(v.string()), requestId: v.optional(v.string()) }, handler: async (ctx, a): Promise<{ nearCap: boolean }> => {
   if (!hex64.test(a.tokenHash) || (a.ipHash !== undefined && !hex64.test(a.ipHash))) throw new Error("Invalid token");
-  const limit = (code: "cooldown" | "limited", key: string, maximum: number, windowMs: number) => rateLimit(ctx, key, maximum, windowMs).catch(() => { throw new ConvexError({ code }); });
+  const refuse = (code: "cooldown" | "limited") => () => { throw new ConvexError({ code }); };
+  const limit = (key: string, maximum: number, windowMs: number) => rateLimit(ctx, key, maximum, windowMs).catch(refuse("limited"));
   const to = `magic-link:to:${await limitKey(canonicalEmail(a.email))}`, { hourly, daily } = magicLinkLimits();
-  await limit("cooldown", `${to}:1m`, 1, 60_000);
-  await limit("limited", `${to}:15m`, 3, 15 * 60_000);
-  await limit("limited", `${to}:1d`, 10, 86_400_000);
+  await cooldown(ctx, `${to}:last`, 60_000).catch(refuse("cooldown"));
+  await limit(`${to}:15m`, 3, 15 * 60_000);
+  await limit(`${to}:1d`, 10, 86_400_000);
   if (a.ipHash) {
-    await limit("limited", `magic-link:ip:${a.ipHash}:10m`, 10, 600_000);
-    await limit("limited", `magic-link:ip:${a.ipHash}:1d`, 50, 86_400_000);
+    await limit(`magic-link:ip:${a.ipHash}:10m`, 10, 600_000);
+    await limit(`magic-link:ip:${a.ipHash}:1d`, 50, 86_400_000);
   }
-  const hour = await limit("limited", "magic-link:global:1h", hourly, 3_600_000), day = await limit("limited", "magic-link:global:1d", daily, 86_400_000);
+  const hour = await limit("magic-link:global:1h", hourly, 3_600_000), day = await limit("magic-link:global:1d", daily, 86_400_000);
   const referralCode = referralConfig().enabled ? normalizeReferralCode(a.referralCode) : null;
   await ctx.db.insert("loginTokens", { email: a.email, tokenHash: a.tokenHash, expiresAt: Date.now() + 15 * 60000, createdAt: Date.now(), ...(referralCode ? { referralCode } : {}), ...(a.requestId ? { requestId: a.requestId } : {}) });
   return { nearCap: hour * 2 >= hourly || day * 2 >= daily };

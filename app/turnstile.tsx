@@ -3,7 +3,8 @@
 // the hidden cf-turnstile-response field itself and usually shows nothing ("interaction-only"). The
 // script is added from this bundle, which the page CSP's 'strict-dynamic' allows. When the check is
 // enforced, a submit waits for the token and then goes through, so an autofilled form sent at once
-// still carries one; if the script cannot load, the submit goes ahead and the server answers.
+// still carries one; if the script fails, stalls for 10 seconds or cannot render, the submit goes
+// ahead and the server answers.
 import { useEffect, useRef } from "react";
 
 type Turnstile = { render: (element: HTMLElement, options: Record<string, unknown>) => string; remove: (id: string) => void };
@@ -13,7 +14,8 @@ declare global {
 let loading: Promise<Turnstile | null> | undefined;
 const load = () => loading ??= new Promise((resolve) => {
   if (window.turnstile) return resolve(window.turnstile);
-  document.head.appendChild(Object.assign(document.createElement("script"), { src: "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", async: true, onload: () => resolve(window.turnstile ?? null), onerror: () => resolve(null) }));
+  const stalled = setTimeout(() => resolve(null), 10_000), done = (value: Turnstile | null) => { clearTimeout(stalled); resolve(value); };
+  document.head.appendChild(Object.assign(document.createElement("script"), { src: "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", async: true, onload: () => done(window.turnstile ?? null), onerror: () => done(null) }));
 });
 
 export function TurnstileField({ siteKey, action, enforce }: { siteKey: string; action: string; enforce: boolean }) {
@@ -28,12 +30,14 @@ export function TurnstileField({ siteKey, action, enforce }: { siteKey: string; 
     void load().then((turnstile) => {
       if (!active) return;
       if (!turnstile) { unavailable = true; return release(); }
-      id = turnstile.render(element, {
-        sitekey: siteKey, action, appearance: "interaction-only",
-        callback: (value: string) => { token = value; release(); },
-        "expired-callback": () => { token = ""; },
-        "error-callback": () => { unavailable = true; release(); },
-      });
+      try {
+        id = turnstile.render(element, {
+          sitekey: siteKey, action, appearance: "interaction-only",
+          callback: (value: string) => { token = value; release(); },
+          "expired-callback": () => { token = ""; },
+          "error-callback": () => { unavailable = true; release(); },
+        });
+      } catch { unavailable = true; release(); }
     });
     return () => { active = false; form.removeEventListener("submit", onSubmit); if (id) window.turnstile?.remove(id); };
   }, [siteKey, action, enforce]);

@@ -27,6 +27,15 @@ export async function rateLimit(
   return 1;
 }
 
+// At most one call per `ms`, measured from the last call let through rather than by clock window (so
+// 12:00:59 and 12:01:00 are not both allowed). Throws like rateLimit; its row keeps that time in `window`.
+export async function cooldown(ctx: MutationCtx, key: string, ms: number) {
+  const now = Date.now(), record = await ctx.db.query("rateLimits").withIndex("by_key", (q) => q.eq("key", key)).unique();
+  if (record && now - record.window < ms) throw new Error("Rate limit exceeded; retry after the cooldown");
+  if (record) await ctx.db.patch(record._id, { window: now, count: 1, expiresAt: now + ms });
+  else await ctx.db.insert("rateLimits", { key, window: now, count: 1, expiresAt: now + ms });
+}
+
 // Email a signed-in member can send to any address (workspace invitations, notification-address
 // checks) shares one deployment-wide daily ceiling, USER_EMAIL_DAILY (default 200). It is separate
 // from sign-in links (convex/identity.ts), so neither can use up the other's share of the quota.

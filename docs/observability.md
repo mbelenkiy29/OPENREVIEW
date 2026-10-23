@@ -21,7 +21,7 @@ The hosted site can report errors to [Sentry](https://sentry.io), product analyt
     - The browser sends each with the time it happened, and only after consent.
     - Each is then marked reported on the user, so it goes out once.
     - `repository_connected` uses the time the workspace's first enabled repository was added.
-    - Workspace milestones go to the workspace's owners only, so each workspace sends them once.
+    - Workspace milestones go to one person, the workspace's earliest owner (normally its creator), so each workspace sends them once.
     - Internal and test accounts get none (see **Sign-in funnel** below), so they never count as ad conversions.
 - Not collected:
   - Clicks and page text on signed-in pages (dashboard, invitations, fix links); those pages only send page views.
