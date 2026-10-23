@@ -544,7 +544,7 @@ export const finished = internalMutation({
     // GitHub has no reaction webhooks: queue this PR for the hourly reaction poll.
     if(!args.error&&!review.nativeP4)await queueReactions(ctx,review.repositoryId,review.prNumber);
     if(!args.error&&await notificationsEnabled(ctx,review.organizationId))await ctx.scheduler.runAfter(0,internal.notificationJobs.reviewCompleted,{reviewId:review._id});
-    if(!args.error&&(await ctx.db.query("reviews").withIndex("by_org_time",q=>q.eq("organizationId",review.organizationId)).filter(q=>q.eq(q.field("status"),"completed")).first())?._id===review._id)await lifecycleEmail(ctx,"first_review_completed",{organizationId:review.organizationId});
+    if(!args.error&&!await ctx.db.query("reviews").withIndex("by_org_time",q=>q.eq("organizationId",review.organizationId)).filter(q=>q.and(q.eq(q.field("status"),"completed"),q.neq(q.field("_id"),review._id))).first())await lifecycleEmail(ctx,"first_review_completed",{organizationId:review.organizationId});
   },
 });
 export const list = query({
