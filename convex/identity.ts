@@ -7,6 +7,7 @@ import { audit, authenticated, authenticatedSession, authorize, service } from "
 import { rateLimit } from "./rateLimit";
 import { scheduleSeatSync } from "./billing";
 import { recentSignIn, recordReferralSignup } from "./referralLedger";
+import { lifecycleEmail } from "./lifecycleEmails";
 import { emailAddress } from "../src/email";
 import { normalizeReferralCode, referralConfig } from "../src/referrals";
 
@@ -46,6 +47,7 @@ export async function resolveIdentity(ctx: MutationCtx, p: Profile): Promise<{ u
   const created = !userId;
   if (!userId) userId = await ctx.db.insert("users", { login: p.login.slice(0, 100), avatar: p.avatar, ...(p.provider === "github" ? { githubId: Number(p.providerUserId) } : {}), createdAt: now });
   await ctx.db.insert("identities", { userId, provider: p.provider, providerUserId: p.providerUserId, ...githubLogin(p), ...(email ? { email } : {}), emailVerified: Boolean(email && p.emailVerified), createdAt: now, lastLoginAt: now });
+  if (created) await lifecycleEmail(ctx, "welcome", { userId });
   return { userId, created };
 }
 async function startSession(ctx: MutationCtx, userId: Id<"users">, hash: string, providerName: string, userAgent?: string, signedInAt?: number) {

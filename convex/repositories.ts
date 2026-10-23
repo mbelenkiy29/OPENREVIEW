@@ -1,6 +1,7 @@
 import {beginCatalog} from "./pullCatalogs";
 import { autoEnableNewRepository } from "./repositoryOnboarding";
 import { choosePlanMessage, planMissing } from "./billing";
+import { lifecycleEmail } from "./lifecycleEmails";
 import {
   internalMutation,
   internalQuery,
@@ -36,6 +37,7 @@ export async function enableIndexing(ctx:MutationCtx,repo:Doc<"repositories">){
  const queued=repo.indexStatus==="queued"&&scheduled&&["pending","inProgress"].includes(scheduled.state.kind);
  const pending=(!repo.indexedSha||["failed","cancelled"].includes(repo.indexStatus))&&!queued&&repo.indexStatus!=="indexing";
  await ctx.db.patch(repo._id,{enabled:true,...(pending?{indexStatus:"queued",error:undefined}:{})});
+ if(!repo.enabled)await lifecycleEmail(ctx,"repository_connected",{organizationId:repo.organizationId});
  const catalog=await ctx.db.query("pullCatalogJobs").withIndex("by_repo",q=>q.eq("repositoryId",repo._id)).order("desc").first();
  if(!repo.enabled||!catalog)await beginCatalog(ctx,repo._id);
  if(pending){const indexScheduledId=await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});await ctx.db.patch(repo._id,{indexScheduledId});}

@@ -1,5 +1,6 @@
 import {executionExplanation} from "../src/execution-claims";
 import { notificationsEnabled } from "./notifications";
+import { lifecycleEmail } from "./lifecycleEmails";
 import { reviewAllowance } from "./billing";
 import {
   internalMutation,
@@ -543,6 +544,7 @@ export const finished = internalMutation({
     // GitHub has no reaction webhooks: queue this PR for the hourly reaction poll.
     if(!args.error&&!review.nativeP4)await queueReactions(ctx,review.repositoryId,review.prNumber);
     if(!args.error&&await notificationsEnabled(ctx,review.organizationId))await ctx.scheduler.runAfter(0,internal.notificationJobs.reviewCompleted,{reviewId:review._id});
+    if(!args.error)await lifecycleEmail(ctx,"first_review_completed",{organizationId:review.organizationId});
   },
 });
 export const list = query({

@@ -8,6 +8,7 @@ import { billingConfig, billingDecision, freeTakenReason, liveSubscription, next
 import { entitled, entitlements, planCatalog, planEntitlements, planForPrice, type Entitlement, type Plan } from "../src/plans";
 import { referralConfig } from "../src/referrals";
 import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus } from "./referralLedger";
+import { lifecycleEmail } from "./lifecycleEmails";
 
 // Billing state, the review gate and the workspace usage ledger. With BILLING_ENABLED unset every check allows.
 // The account row starts with the first review or checkout. Without a subscription a workspace is on
@@ -216,7 +217,7 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
     if (a.checkout.subscription && liveSubscription(account) && a.checkout.subscription !== account.subscriptionId) return other(account, a.checkout.subscription);
     await ctx.db.patch(account._id, { customerId: a.checkout.customer, ...(a.checkout.subscription ? { subscriptionId: a.checkout.subscription } : {}), updatedAt: Date.now() });
     // A completed subscription Checkout collected the card and created the subscription.
-    if (a.checkout.subscription) await recordPlanSelected(ctx, organizationId, "checkout");
+    if (a.checkout.subscription) { await recordPlanSelected(ctx, organizationId, "checkout"); await lifecycleEmail(ctx, "subscribed", { organizationId }); }
     return record("linked");
   }
   if (a.subscription) {

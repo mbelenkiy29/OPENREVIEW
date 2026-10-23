@@ -28,6 +28,8 @@ Set `RESEND_API_KEY` and `EMAIL_FROM` on Convex. Each member sets a notification
 
 Without email configuration, deliveries are recorded as skipped.
 
+With email configured, OpenReview also sends four one-time emails (`convex/lifecycleEmails.ts`): a thank-you on sign-up, and to workspace owners when the workspace connects its first repository, completes its first review and subscribes. The thank-you goes out once per user and the others once per workspace (only workspaces created after these emails shipped), and only to a verified address (a Google, GitLab, email-link or SSO sign-in, or a confirmed notification email), so GitHub-only users get none.
+
 ### Changelog emails
 
 Visitors to `/changelog` can get its new entries by email. Create a segment in Resend and set its ID as `RESEND_CHANGELOG_SEGMENT_ID` on both Next.js and Convex, next to `RESEND_API_KEY` and `EMAIL_FROM`.

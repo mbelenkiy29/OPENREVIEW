@@ -62,6 +62,7 @@ import type * as integrations from "../integrations.js";
 import type * as jobs from "../jobs.js";
 import type * as knowledge from "../knowledge.js";
 import type * as knowledgeJobs from "../knowledgeJobs.js";
+import type * as lifecycleEmails from "../lifecycleEmails.js";
 import type * as mcpApi from "../mcpApi.js";
 import type * as memory from "../memory.js";
 import type * as modelKeyJobs from "../modelKeyJobs.js";
@@ -194,6 +195,7 @@ declare const fullApi: ApiFromModules<{
   jobs: typeof jobs;
   knowledge: typeof knowledge;
   knowledgeJobs: typeof knowledgeJobs;
+  lifecycleEmails: typeof lifecycleEmails;
   mcpApi: typeof mcpApi;
   memory: typeof memory;
   modelKeyJobs: typeof modelKeyJobs;
