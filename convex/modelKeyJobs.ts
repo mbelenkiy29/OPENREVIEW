@@ -12,7 +12,7 @@ export const save = action({ args: { token: v.string(), organizationId: v.id("or
   const key = a.key.trim(), model = a.model?.trim() || undefined;
   if (!key || key.length > 500 || /\s/.test(key)) throw new Error("Enter a valid API key");
   if (model && (model.length > 200 || /\s/.test(model))) throw new Error("Enter a valid model name");
-  if (a.provider === "openrouter" && !model) throw new Error("OpenRouter needs a model, for example anthropic/claude-sonnet-5-5");
+  if (a.provider === "openrouter" && !model) throw new Error("OpenRouter needs a model, for example anthropic/claude-sonnet-5.5");
   assertEgress("workspace-model", "Workspace model keys");
   await ctx.runMutation(internal.modelKeys.checkRate, { organizationId: a.organizationId });
   await checkModelKey(a.provider, key, model);
