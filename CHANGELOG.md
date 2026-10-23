@@ -4,6 +4,14 @@
 
 ## October 2026
 
+### Dashboard navigation
+- Switching tabs no longer shows a loading screen. The header, tabs and sidebar stay in place, the tab you click is marked at once, and the page changes when it's ready.
+- Tabs have icons and an underline that slides to the current tab. On phones, the main tabs move to a bar at the bottom of the screen.
+- Findings moved to **Analytics → Bugs Caught**, next to **PR Reviews**. Old Findings links still work.
+- Review pages are split into **Overview**, **Findings**, **Code**, **History** and **Diagnostics** tabs.
+- **Settings → Code Review** lists the page's sections in the sidebar and marks the one you're reading.
+- Dashboard pages load faster: independent data now loads in parallel.
+
 ### Your own model key
 - Workspace owners and admins can run reviews, chat and fixes on their own Anthropic, OpenAI or OpenRouter key under Settings → API Keys. The key is checked, stored encrypted and never shown again, and the provider bills its usage.
 

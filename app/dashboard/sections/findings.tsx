@@ -75,7 +75,7 @@ export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
                 />
               </label>
               <button>Filter findings</button>
-              <Link href="/dashboard/findings">Reset filters</Link>
+              <Link href="/dashboard/analytics/findings">Reset filters</Link>
             </form>
             {!visibleFindings.length && (
               <Empty
@@ -181,7 +181,7 @@ export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
             {findingsPage && !findingsPage.isDone && (
               <Link
                 className="button"
-                href={`/dashboard/findings?${new URLSearchParams(Object.entries({ ...filters, cursor: findingsPage.continueCursor }).filter((entry): entry is [string, string] => typeof entry[1] === "string")).toString()}`}
+                href={`/dashboard/analytics/findings?${new URLSearchParams(Object.entries({ ...filters, cursor: findingsPage.continueCursor }).filter((entry): entry is [string, string] => typeof entry[1] === "string")).toString()}`}
               >
                 Next findings
               </Link>

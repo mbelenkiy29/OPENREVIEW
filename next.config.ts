@@ -16,8 +16,13 @@ const config: NextConfig = {
     // Sign-in results used to land on the home page; older links and bookmarks now go to the sign-in
     // page with their query string. Redirecting here, not in app/page.tsx, keeps the home page static.
     const signIn = ['error', 'email', 'signedout'].map((key) => ({ source: '/', has: [{ type: 'query' as const, key }], destination: '/login', permanent: false }));
-    // The roadmap is a view of the feedback board (app/feedback).
-    return [...signIn, { source: '/roadmap', destination: '/feedback/roadmap', permanent: false }];
+    // The roadmap is a view of the feedback board (app/feedback). Findings moved to Analytics → Bugs Caught;
+    // query strings (filters) carry over.
+    return [
+      ...signIn,
+      { source: '/roadmap', destination: '/feedback/roadmap', permanent: false },
+      { source: '/dashboard/pulls/findings', destination: '/dashboard/analytics/findings', permanent: false },
+    ];
   },
   async rewrites() {
     // OAuth discovery documents for the remote MCP endpoint (RFC 9728 and RFC 8414 well-known paths).

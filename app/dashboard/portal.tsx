@@ -1,35 +1,39 @@
 import {repositoryDisplay} from "../../src/provider-display";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { FunctionReturnType } from "convex/server";
 import type { Id, Doc } from "../../convex/_generated/dataModel";
 import { api } from "../../convex/_generated/api";
 import { backend } from "../../src/server";
-import { SettingsNavigation } from "./settings-navigation";
+import { Sidebar, type NavGroup } from "./sidebar";
+import { PrimaryTabs } from "./tabs";
+import { WorkspaceMenu } from "./workspace-menu";
 import { PortalDisclosure } from "./portal-disclosure";
 import { UserJotButton } from "../userjot";
 import { userJotConfig } from "../../src/userjot";
 import {ThemePicker} from "../theme";
+import { SignOutForm } from "../telemetry-identity";
 import { Mark } from "../ui/logo";
+import { Icon } from "../ui/icons";
 import {analyticsPeriod} from "../../src/analytics-period";
 import { BarList, LineChart } from "../ui/charts";
-import { setMinutesPerFinding } from "./actions";
+import { logout, setMinutesPerFinding } from "./actions";
 import { referralConfig } from "../../src/referrals";
 
 // Read per request: Referrals appears only while the referral program is on (unknown keys 404).
-const settingsGroups = () => [
-  { label: "Repositories", links: [["repositories", "Add/Remove Repos"], ["providers", "Code Providers"]] },
-  { label: "Agent Config", links: [["review", "Code Review"], ["agents", "Personal agents"], ["automation", "Runtime & Approval"]] },
-  { label: "Admin", links: [["teams", "Teams & Inheritance"], ["people", "People"], ["usage", "Usage"], ["billing", "Billing"], ["notifications", "Notifications"], ["data", "Data & deletion"]] },
-  { label: "Developer", links: [["keys", "API Keys"], ["audit", "Audit Log"]] },
-  { label: "Personal", links: [["account", "Account & sessions"], ...(referralConfig().enabled ? [["referrals", "Referrals"]] : [])] },
+const settingsGroups = (): NavGroup[] => [
+  { label: "Repositories", links: [["repositories", "Add/Remove Repos", "folders"], ["providers", "Code Providers", "plugs"]] },
+  { label: "Agent Config", links: [["review", "Code Review", "code"], ["agents", "Personal agents", "robot"], ["automation", "Runtime & Approval", "terminalWindow"]] },
+  { label: "Admin", links: [["teams", "Teams & Inheritance", "usersThree"], ["people", "People", "users"], ["usage", "Usage", "gauge"], ["billing", "Billing", "creditCard"], ["notifications", "Notifications", "bell"], ["data", "Data & deletion", "database"]] },
+  { label: "Developer", links: [["keys", "API Keys", "key"], ["audit", "Audit Log", "clipboardText"]] },
+  { label: "Personal", links: [["account", "Account & sessions", "userCircle"], ...(referralConfig().enabled ? [["referrals", "Referrals", "gift"] satisfies NavGroup["links"][number]] : [])] },
 ];
 export const settingsNavigation = () => settingsGroups().flatMap(group => group.links);
 
-export function PortalNav({ organization, login, route, section, team,scopeSelector,children }: { organization: string; login: string; route: string; section?: string; team?:string;scopeSelector:ReactNode;children: ReactNode }) {
-  const href=(path:string)=>path+(team!==undefined?"?team="+encodeURIComponent(team):"");
-  const feedback = Boolean(userJotConfig());
-  const secondary = route === "memory" ? [["rules", "Custom rules"], ["clusters", "Cross-repo context"], ["knowledge", "Knowledge Base"], ["preferences", "Learned preferences"], ["integrations", "Integrations"]] : route === "settings" ? settingsNavigation() : route === "pulls" ? [["", "All Pull Requests"], ["findings", "Findings"]] : [];
-  return <><div className="portal-top"><div className="portal-identity"><Link className="brand" href={href("/dashboard/analytics")}><Mark /> OpenReview</Link><PortalDisclosure className="scope-selector" label={organization}><div className="scope-menu">{scopeSelector}</div></PortalDisclosure><PortalDisclosure className="profile" label={`@${login}`}><div className="profile-menu"><ThemePicker/>{children}<Link href="/dashboard/onboarding">Workspace setup</Link><Link href="/dashboard/settings/agents">Personal settings</Link>{referralConfig().enabled && <Link href="/dashboard/settings/referrals">Refer someone</Link>}{feedback && <div className="profile-feedback"><UserJotButton className="link-button">Request a feature</UserJotButton><UserJotButton className="link-button">Report a bug</UserJotButton><Link href="/feedback/roadmap">Roadmap</Link></div>}</div></PortalDisclosure></div><nav className="primary-nav" aria-label="Main navigation">{[["analytics", "Analytics"], ["chat", "Chat"], ["memory", "Memory"], ["pulls", "Pull Requests"], ["settings", "Settings"]].map(([key,label]) => <Link key={key} href={href(`/dashboard/${key}`)} aria-current={route === key ? "page" : undefined}>{label}</Link>)}</nav></div>{secondary.length > 0 && <aside className="secondary-nav">{route === "settings" ? <SettingsNavigation groups={settingsGroups()} section={section} team={team} /> : <nav aria-label={`${route} navigation`}>{secondary.map(([key,label]) => <Link key={key} href={href(`/dashboard/${route}${key ? `/${key}` : ""}`)} aria-current={(section ?? (route === "memory" ? "rules" : "")) === key ? "page" : undefined}>{label}</Link>)}</nav>}</aside>}</>;
+// The app chrome, rendered once by the portal layout and kept mounted across navigations: identity row,
+// main tabs and the Memory/Settings sidebar.
+export function PortalNav({ login, role, organizationId, name, organizations, teams, savedTeam }: { login: string; role: string; organizationId: string; name: string; organizations: { _id: string; name: string }[]; teams: { _id: string; name: string }[]; savedTeam?: string }) {
+  const feedback = Boolean(userJotConfig()), referrals = referralConfig().enabled;
+  return <><div className="portal-top"><div className="portal-identity"><Link className="brand" href="/dashboard/analytics"><Mark /><span className="brand-name">OpenReview</span></Link><WorkspaceMenu organizationId={organizationId} name={name} role={role} organizations={organizations} teams={teams} savedTeam={savedTeam} /><div className="header-actions"><Link className="icon-button" href="/docs" title="Docs"><Icon name="question" /><span className="sr-only">Docs</span></Link>{referrals && <Link className="icon-button" href="/dashboard/settings/referrals" title="Refer someone"><Icon name="gift" /><span className="sr-only">Refer someone</span></Link>}<PortalDisclosure className="profile" label={<><Icon name="user" /><span className="sr-only">Account menu for @{login}</span></>}><div className="profile-menu"><p className="muted">Signed in as @{login}</p><ThemePicker/><SignOutForm action={logout} label="Sign out" /><Link href="/dashboard/onboarding">Workspace setup</Link><Link href="/dashboard/settings/agents">Personal settings</Link><Link href="/docs">Docs</Link>{referrals && <Link href="/dashboard/settings/referrals">Refer someone</Link>}{feedback && <div className="profile-feedback"><UserJotButton className="link-button">Request a feature</UserJotButton><UserJotButton className="link-button">Report a bug</UserJotButton><Link href="/feedback/roadmap">Roadmap</Link></div>}</div></PortalDisclosure></div></div><PrimaryTabs /></div><Sidebar settings={settingsGroups()} /></>;
 }
 export async function AnalyticsView({token,organizationId,repositories,filters}: {token:string;organizationId:Id<"organizations">;repositories:Doc<"repositories">[];filters:Record<string,string|undefined>}) {
   const now = new Date(), start = new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1)).toISOString().slice(0,10);
@@ -41,16 +45,18 @@ export async function AnalyticsView({token,organizationId,repositories,filters}:
   const problem=(message:string)=><>{form}<section role="alert"><h2>Analytics unavailable</h2><p>{message}</p><p>Correct the filters and choose Apply to retry.</p></section></>;
   if("error" in period)return problem(period.error);
   if(!accessible)return problem("Select a repository accessible in the current workspace and team.");
+  const scope={token,organizationId,...period,...(filters.repository?{repositoryId:filters.repository as Id<"repositories">}:{}),...(filters.author?{author:filters.author}:{}),...(filters.team?{teamId:filters.team as Id<"teams">}:{})};
+  // Same scope as the report: start the trends query now so both load together.
+  const trends=backend().query(api.analytics.trends,scope).catch(()=>null);
   let report;
-  try{report=await backend().query(api.analytics.report,{token,organizationId,...period,...(filters.repository?{repositoryId:filters.repository as Id<"repositories">}:{}),...(filters.author?{author:filters.author}:{}),...(filters.team?{teamId:filters.team as Id<"teams">}:{})});}
+  try{report=await backend().query(api.analytics.report,scope);}
   catch{return problem("Could not load the selected analytics. Choose a smaller period or check repository and team access, then retry.");}
-  return <>{form}<div className="metrics">{[["Total PRs",report.totalPRs],["Total Reviews",report.totalReviews],["Verified findings",report.findings],["Model cost",`$${report.cost.toFixed(2)}`]].map(([label,value])=><div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div><div className="analytics-grid"><section><h2>Review activity</h2><div className="activity-chart">{report.daily.map(d=><div key={d.date} title={`${d.date}: ${d.reviews} reviews`}><div style={{height:`${Math.max(2,d.reviews/Math.max(1,...report.daily.map(x=>x.reviews))*140)}px`}} /><small>{d.date.slice(5)}</small></div>)}</div>{!report.daily.length&&<p className="muted">No activity in this period.</p>}</section><section><h2>Findings by severity</h2>{Object.entries(report.severity).map(([severity,count])=><div className="stat-row" key={severity}><span className={`badge ${severity}`}>{severity}</span><strong>{count}</strong></div>)}</section><section><h2>Addressed rate</h2><strong className="big-stat">{report.addressedRate === null ? "—" : `${Math.round(report.addressedRate*100)}%`}</strong><p className="muted">Resolved findings / findings created in this period</p></section><section><h2>Comment usefulness</h2><strong className="big-stat">{report.usefulness===null?"Awaiting feedback":`${Math.round(report.usefulness*100)}%`}</strong><p className="muted">Positive / rated findings</p></section><section><h2>Comment reactions</h2><strong className="big-stat">👍 {report.reactions?.up ?? 0} · 👎 {report.reactions?.down ?? 0}</strong><p className="muted">Reactions on OpenReview finding comments (GitHub polled hourly and on close; GitLab via emoji webhooks)</p></section><section><h2>Average review duration</h2><strong className="big-stat">{report.averageDuration===null?"—":`${Math.round(report.averageDuration/1000)}s`}</strong></section><section><h2>Model usage</h2><strong className="big-stat">{report.tokens.toLocaleString()}</strong><p className="muted">Recorded tokens, including indexing and reviews</p></section></div><Trends token={token} organizationId={organizationId} period={period} filters={filters}/></>;
+  return <>{form}<div className="metrics">{[["Total PRs",report.totalPRs],["Total Reviews",report.totalReviews],["Verified findings",report.findings],["Model cost",`$${report.cost.toFixed(2)}`]].map(([label,value])=><div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div><div className="analytics-grid"><section><h2>Review activity</h2><div className="activity-chart">{report.daily.map(d=><div key={d.date} title={`${d.date}: ${d.reviews} reviews`}><div style={{height:`${Math.max(2,d.reviews/Math.max(1,...report.daily.map(x=>x.reviews))*140)}px`}} /><small>{d.date.slice(5)}</small></div>)}</div>{!report.daily.length&&<p className="muted">No activity in this period.</p>}</section><section><h2>Findings by severity</h2>{Object.entries(report.severity).map(([severity,count])=><div className="stat-row" key={severity}><span className={`badge ${severity}`}>{severity}</span><strong>{count}</strong></div>)}</section><section><h2>Addressed rate</h2><strong className="big-stat">{report.addressedRate === null ? "—" : `${Math.round(report.addressedRate*100)}%`}</strong><p className="muted">Resolved findings / findings created in this period</p></section><section><h2>Comment usefulness</h2><strong className="big-stat">{report.usefulness===null?"Awaiting feedback":`${Math.round(report.usefulness*100)}%`}</strong><p className="muted">Positive / rated findings</p></section><section><h2>Comment reactions</h2><strong className="big-stat">👍 {report.reactions?.up ?? 0} · 👎 {report.reactions?.down ?? 0}</strong><p className="muted">Reactions on OpenReview finding comments (GitHub polled hourly and on close; GitLab via emoji webhooks)</p></section><section><h2>Average review duration</h2><strong className="big-stat">{report.averageDuration===null?"—":`${Math.round(report.averageDuration/1000)}s`}</strong></section><section><h2>Model usage</h2><strong className="big-stat">{report.tokens.toLocaleString()}</strong><p className="muted">Recorded tokens, including indexing and reviews</p></section></div><Trends trends={trends} organizationId={organizationId}/></>;
 }
 // Trends from the daily analytics rollup: activity, addressed rate, time saved, top repositories and authors.
-async function Trends({token,organizationId,period,filters}:{token:string;organizationId:Id<"organizations">;period:{since:number;until:number};filters:Record<string,string|undefined>}) {
-  let t;
-  try{t=await backend().query(api.analytics.trends,{token,organizationId,...period,...(filters.repository?{repositoryId:filters.repository as Id<"repositories">}:{}),...(filters.author?{author:filters.author}:{}),...(filters.team?{teamId:filters.team as Id<"teams">}:{})});}
-  catch{return <section role="alert"><h2>Trends unavailable</h2><p>Daily trends could not be loaded for these filters.</p></section>;}
+async function Trends({trends,organizationId}:{trends:Promise<FunctionReturnType<typeof api.analytics.trends>|null>;organizationId:Id<"organizations">}) {
+  const t=await trends;
+  if(!t)return <section role="alert"><h2>Trends unavailable</h2><p>Daily trends could not be loaded for these filters.</p></section>;
   const labels=t.days.map(d=>d.day.slice(5));
   let cumulative=0,addressedSoFar=0;
   const rate=t.days.map(d=>{cumulative+=d.findings;addressedSoFar+=d.addressed;return cumulative?Math.round(addressedSoFar/cumulative*100):null;});

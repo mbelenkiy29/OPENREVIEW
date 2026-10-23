@@ -85,7 +85,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                   })()}
                 </details>
                 {semantic && <p className="muted" aria-label="Semantic retrieval status">{semantic.configured ? <>Semantic retrieval: <strong>on</strong> · {semantic.model} · {semantic.chunks}{semantic.more ? "+" : ""} chunks across {semantic.files} files{semantic.stale ? ` · ${semantic.stale} chunks from another model are replaced on the next re-index` : ""}{!semantic.chunks ? " · re-index to build chunk embeddings" : ""}</> : <>Semantic retrieval: <strong>off</strong>. Set <code>EMBEDDING_MODEL</code> (an OpenAI-compatible 1,536-dimension endpoint) in the backend environment and re-index; full-text and code-graph retrieval run either way.</>}</p>}
-                <form action={saveSettings}><fieldset className="form-grid" disabled={!isAdmin}><legend>Repository review settings</legend>
+                <form action={saveSettings}><fieldset id="review-general" className="form-grid" disabled={!isAdmin}><legend>Repository review settings</legend>
                   <input
                     type="hidden"
                     name="repositoryId"
@@ -211,7 +211,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                     <input type="hidden" name="fixConfigured" value="true" />
                     <label className="check"><input type="checkbox" name="fixPullRequests" defaultChecked={repoSettings.settings.fixPullRequests ?? false} /> Allow “@openreview fix this in a new PR” to open a fix pull request on a new branch (GitHub, needs the Contents: Read and write permission; the pull request’s own branch is never written)</label>
                   </fieldset>
-                  <fieldset className="wide">
+                  <fieldset id="review-budgets" className="wide">
                     <legend>Agent budgets</legend>
                     <label>Agentic engine turns<input type="number" name="agentTurns" min={0} max={1000} defaultValue={repoSettings.settings.agentTurns ?? 0} /></label>
                     <label>Agentic engine tool calls<input type="number" name="agentToolCalls" min={0} max={1000} defaultValue={repoSettings.settings.agentToolCalls ?? 0} /></label>
@@ -219,7 +219,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                     <label>Tool calls per hypothesis<input type="number" name="hypothesisToolCalls" min={0} max={1000} defaultValue={repoSettings.settings.hypothesisToolCalls ?? 0} /></label>
                     <p className="muted">0 uses the review tier&apos;s default. Values are clamped to the operator&apos;s hard caps (AGENT_MAX_TURNS, AGENT_MAX_TOOL_CALLS); token and time budgets stay per tier. The review page shows the budget a review used.</p>
                   </fieldset>
-                  <fieldset className="wide">
+                  <fieldset id="review-tier" className="wide">
                     <legend>Per-pull-request review tier</legend>
                     <label>Highest tier a request may use<select name="maxReviewTier" defaultValue={repoSettings.settings.maxReviewTier ?? "deep"}><option value="deep">deep (no cap)</option><option value="standard">standard</option><option value="fast">fast</option></select></label>
                     <p className="muted">People with write access can comment <code>@openreview review fast</code>, <code>standard</code> or <code>deep</code>, or add an <code>openreview:fast|standard|deep</code> label. A comment wins over a label, a label over the configured tier (which touched <code>.openreview/</code> folders can raise). This cap applies to all of them.</p>
@@ -229,7 +229,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                     <label>Review model for agent-authored pull requests<input name="aiAuthoredModel" maxLength={200} defaultValue={repoSettings.settings.aiAuthoredModel ?? ""} placeholder="Leave empty to use the usual model" /></label>
                     <p className="muted">Detection uses explicit signals only: a known agent bot author, a Co-Authored-By trailer naming a coding agent, an agent branch prefix (claude/, copilot/, cursor/, codex/, devin/, jules/) or a marker the agent adds to the description. The reason is shown on the review.</p>
                   </fieldset>
-                  <fieldset className="wide">
+                  <fieldset id="review-security" className="wide">
                     <legend>Security checks</legend>
                     <input type="hidden" name="securityScanConfigured" value="true" />
                     <label className="check"><input type="checkbox" name="securityScan" defaultChecked={repoSettings.settings.securityScan ?? true} /> Run deterministic security checks on added lines (secrets, SQL concatenation, disabled TLS verification, dynamic code evaluation, shell commands, unsafe deserialization) and look up changed dependency versions in OSV.dev (outbound requests can be turned off for the whole install with OSV_ENABLED=false)</label>
@@ -239,7 +239,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                     <input type="hidden" name="threadRepliesConfigured" value="true" />
                     <label className="check"><input type="checkbox" name="threadReplies" defaultChecked={repoSettings.settings.threadReplies ?? true} /> Answer replies to OpenReview’s inline findings without an @openreview mention (GitHub; people with write access; never bots; limited to 3 answers per thread and 10 per pull request each hour)</label>
                   </fieldset>
-                  <fieldset className="wide">
+                  <fieldset id="review-locks" className="wide">
                     <legend>Lock against the repository config file</legend>
                     <input type="hidden" name="lockedConfigured" value="true" />
                     {lockableKeys.map((key) => (
@@ -281,8 +281,8 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                       defaultValue={repoSettings.settings.model}
                     />
                   </label>
-                  <SummarySettings key={JSON.stringify([repoSettings.repo._id,repoSettings.settings.summarySections,repoSettings.settings.commentStyle])} initial={repoSettings.settings.summarySections} style={repoSettings.settings.commentStyle}/>
-                  <fieldset className="wide">
+                  <SummarySettings id="review-formatting" key={JSON.stringify([repoSettings.repo._id,repoSettings.settings.summarySections,repoSettings.settings.commentStyle])} initial={repoSettings.settings.summarySections} style={repoSettings.settings.commentStyle}/>
+                  <fieldset id="review-categories" className="wide">
                     <legend>Review categories</legend>
                     {[
                       "correctness",
@@ -321,7 +321,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                   <button className="primary">Save review settings</button>
                 </fieldset></form>
                 {!isAdmin&&<p>Workspace admin access is required to edit these settings.</p>}
-                <h2>Learned team conventions</h2>
+                <h2 id="review-conventions">Learned team conventions</h2>
                 {conventions.length === 0 ? <p className="muted">No conventions learned yet. OpenReview reads human review comments on merged pull requests daily and suggests recurring conventions here.</p> : <ul className="conventions" aria-label="Learned team conventions">{conventions.map((rule) => (
                   <li key={rule._id}><strong>{rule.text}</strong> <span className={`badge ${rule.status === "approved" ? "low" : rule.status === "rejected" ? "critical" : "medium"}`}>{rule.status}</span> · {rule.category} · seen {rule.frequency}×
                     <span className="muted"> · {rule.evidence.map((e, i) => <a key={e.url} href={e.url} rel="noreferrer">{i ? ", " : ""}@{e.author}</a>)}</span>

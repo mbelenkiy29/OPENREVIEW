@@ -43,6 +43,13 @@ try {
   // The landing demos are interactive: the hero window switches sections, chat answers a sample
   // question with citations, and the summary demo re-reviews a pushed fix.
   const hero = page.getByRole("figure", { name: /dashboard for a sample workspace/ });
+  // The review's tabs are ARIA tabs: the hero opens on the diff, and arrow keys move between tabs.
+  const reviewTabs = hero.getByRole("tablist", { name: "Review sections" });
+  assert.equal(await reviewTabs.getByRole("tab", { name: "Code" }).getAttribute("aria-selected"), "true", "The hero review does not open on its Code tab");
+  await reviewTabs.getByRole("tab", { name: "Overview" }).click();
+  await hero.getByRole("tabpanel", { name: "Overview" }).getByText("Needs changes", { exact: true }).waitFor();
+  await page.keyboard.press("ArrowRight");
+  assert.equal(await reviewTabs.getByRole("tab", { name: /^Findings/ }).getAttribute("aria-selected"), "true", "Arrow keys do not move between review tabs");
   await hero.getByRole("button", { name: "Analytics", exact: true }).click();
   await hero.getByLabel("Repository").selectOption("acme/api");
   await hero.getByText("$2.10").waitFor();
@@ -213,6 +220,32 @@ try {
     await page.waitForURL((u) => u.pathname.startsWith(href));
     await settled();
   };
+  // With analytics configured, the consent banner (bottom left) covers the lowest sidebar rows; a visitor
+  // answers it once, so the walk declines it first.
+  const consent = page.getByRole("region", { name: "Analytics cookie" });
+  if (await consent.count()) await consent.getByRole("button", { name: "Decline" }).click();
+  // The app chrome stays mounted while pages change: the Main navigation element must survive every
+  // click, the loading skeleton must never replace the page, and the tab bar must end under the tab.
+  await page.evaluate(() => {
+    const w = window as unknown as { __nav: Element | null; __flashed: boolean };
+    w.__nav = document.querySelector('nav[aria-label="Main navigation"]');
+    w.__flashed = false;
+    new MutationObserver(() => { if (document.querySelector('[aria-label="Loading dashboard"]')) w.__flashed = true; }).observe(document.body, { childList: true, subtree: true });
+  });
+  const stayed = async (label: string) => {
+    const { same, flashed } = await page.evaluate(() => {
+      const w = window as unknown as { __nav: Element | null; __flashed: boolean };
+      return { same: w.__nav !== null && w.__nav === document.querySelector('nav[aria-label="Main navigation"]'), flashed: w.__flashed };
+    });
+    assert.ok(same, `${label}: the main navigation was mounted again`);
+    assert.ok(!flashed, `${label}: the loading skeleton replaced the page`);
+    await page.waitForFunction(() => {
+      const nav = document.querySelector('nav[aria-label="Main navigation"]'), bar = nav?.querySelector(".tab-indicator"), tab = nav?.querySelector('[aria-current="page"]');
+      if (!bar || !tab) return false;
+      const a = bar.getBoundingClientRect(), b = tab.getBoundingClientRect();
+      return Math.abs(a.left - b.left) < 1 && Math.abs(a.width - b.width) < 1 && Math.abs(a.bottom - b.bottom) < 1;
+    });
+  };
   let dashboardPages = 0;
   for (const name of [
     "Analytics",
@@ -227,6 +260,21 @@ try {
         .getByRole("link", { name, exact: true }),
     );
     dashboardPages++;
+    await stayed(name);
+    if (name === "Analytics") {
+      // Analytics sub-tabs: PR Reviews and Bugs Caught (the Findings page), each at its own URL.
+      const views = page.getByRole("navigation", { name: "Analytics views" });
+      for (const [label, path] of [["Bugs Caught", "/dashboard/analytics/findings"], ["PR Reviews", "/dashboard/analytics"]]) {
+        const link = views.getByRole("link", { name: label, exact: true });
+        await link.click();
+        await page.waitForURL((u) => u.pathname === path);
+        await settled();
+        assert.equal(await link.getAttribute("aria-current"), "page", `${label} is not marked as the current view`);
+        if (label === "Bugs Caught") await page.getByRole("button", { name: "Filter findings" }).waitFor();
+        await stayed(label);
+        dashboardPages++;
+      }
+    }
     const secondary = page.locator("aside.secondary-nav nav").first();
     if (!(await secondary.count())) continue;
     for (const label of await secondary.getByRole("link").allTextContents()) {
@@ -237,8 +285,14 @@ try {
         "page",
         `${label} is not marked as the current page`,
       );
+      await stayed(label);
       dashboardPages++;
     }
+  }
+  // Findings moved to Analytics → Bugs Caught; old links still land there with their filters.
+  for (const old of ["/dashboard/pulls/findings", "/dashboard/findings"]) {
+    await page.goto(`${url}${old}?severity=high`);
+    await page.waitForURL((u) => u.pathname === "/dashboard/analytics/findings" && u.searchParams.get("severity") === "high");
   }
   const [repository] = await backend.query(api.repositories.list, {
     token,
@@ -257,6 +311,9 @@ try {
     ).settings.minimumConfidence,
     0.92,
   );
+  // Settings → Code Review lists the page's sections; a click scrolls to one and marks it.
+  await page.getByRole("navigation", { name: "settings navigation" }).getByRole("link", { name: "Security checks", exact: true }).click();
+  await page.waitForFunction(() => location.hash === "#review-security" && document.querySelector('a[href="#review-security"]')?.getAttribute("aria-current") === "location");
   await page.goto(`${url}/dashboard/rules`);
   // Admins see the rule assistant; without a model run it has no suggestions to approve.
   await page.getByRole("heading", { name: "Rule assistant" }).waitFor();
@@ -306,6 +363,10 @@ try {
     ),
     "Mobile page overflows horizontally",
   );
+  // Phones: the main tabs form a bottom bar, and "Pull Requests" keeps its name behind the short label.
+  const tabBar = await page.getByRole("navigation", { name: "Main navigation" }).boundingBox();
+  assert.ok(tabBar && Math.abs(tabBar.y + tabBar.height - 844) <= 1 && Math.abs(tabBar.width - 390) <= 1, `The phone tab bar is not at the bottom: ${JSON.stringify(tabBar)}`);
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Pull Requests", exact: true }).waitFor();
   // Dark theme at mobile and desktop widths: no overflow, no console errors.
   await page.emulateMedia({ colorScheme: "dark" });
   for (const path of ["/", "/dashboard", "/dashboard/chat", "/dashboard/settings/billing", "/docs/quickstart"]) {
@@ -320,7 +381,7 @@ try {
   await page.screenshot({ path: "output/playwright/dark-desktop.png", fullPage: true, caret: "initial" });
   assert.deepEqual(errors, [], `Browser errors: ${errors.join("; ")}`);
   console.log(
-    `Browser verification passed: landing (interactive demos), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px), repository selection, ${dashboardPages} dashboard pages (main and secondary navigation), persisted settings/rules, Memory page filters, Chat page, mobile layout and dark theme. GitHub OAuth and real indexing still require external credentials.`,
+    `Browser verification passed: landing (interactive demos), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px), repository selection, ${dashboardPages} dashboard pages (main tabs, Analytics sub-tabs and sidebars, with the app chrome kept mounted and no loading flash), review tabs, Findings redirects, Code Review section links, persisted settings/rules, Memory page filters, Chat page, mobile layout with the bottom tab bar, and dark theme. GitHub OAuth and real indexing still require external credentials.`,
   );
 } finally {
   await browser.close();

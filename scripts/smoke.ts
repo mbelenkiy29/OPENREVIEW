@@ -22,7 +22,7 @@ await backend.mutation(api.onboarding.select, { token, organizationId: org, repo
 await backend.mutation(api.onboarding.start, { token, organizationId: org, pauseReviews: true });
 // The plan step exists only when the backend bills workspaces; otherwise it redirects to "done".
 const billing = (await backend.query(api.billing.status, { token, organizationId: org })).enabled;
-const routes = [...["connect", "indexing", "summary", "comments", "triggers", "tools", "team", ...(billing ? ["plan"] : []), "done"].map((step) => `/dashboard/onboarding/${step}`), "/dashboard/analytics", "/dashboard/chat", "/dashboard/settings/repositories", "/dashboard/pulls", "/dashboard/pulls/findings", "/dashboard/memory/rules", "/dashboard/memory/knowledge", "/dashboard/memory/preferences", "/dashboard/memory/integrations", "/dashboard/memory/clusters", "/dashboard/settings/people", "/dashboard/settings/usage", "/dashboard/settings/review", "/dashboard/settings/keys", "/dashboard/settings/audit", "/dashboard/settings/account", "/dashboard/settings/referrals", "/dashboard/settings/billing", "/dashboard/settings/notifications", "/dashboard/settings/teams", "/dashboard/settings/agents", "/dashboard/settings/providers", "/dashboard/settings/automation", "/dashboard/settings/nope", "/invite?token=bad", "/r/AAAAAAAA", "/", "/docs/quickstart", "/privacy", "/terms", "/security"];
+const routes = [...["connect", "indexing", "summary", "comments", "triggers", "tools", "team", ...(billing ? ["plan"] : []), "done"].map((step) => `/dashboard/onboarding/${step}`), "/dashboard/analytics", "/dashboard/chat", "/dashboard/settings/repositories", "/dashboard/pulls", "/dashboard/analytics/findings", "/dashboard/pulls/findings", "/dashboard/memory/rules", "/dashboard/memory/knowledge", "/dashboard/memory/preferences", "/dashboard/memory/integrations", "/dashboard/memory/clusters", "/dashboard/settings/people", "/dashboard/settings/usage", "/dashboard/settings/review", "/dashboard/settings/keys", "/dashboard/settings/audit", "/dashboard/settings/account", "/dashboard/settings/referrals", "/dashboard/settings/billing", "/dashboard/settings/notifications", "/dashboard/settings/teams", "/dashboard/settings/agents", "/dashboard/settings/providers", "/dashboard/settings/automation", "/dashboard/settings/nope", "/invite?token=bad", "/r/AAAAAAAA", "/", "/docs/quickstart", "/privacy", "/terms", "/security"];
 let failures = 0;
 for (const route of routes) {
   const response = await fetch(base + route, { headers: { cookie: `openreview_session=${token}` }, redirect: "manual" });
@@ -32,7 +32,9 @@ for (const route of routes) {
   const headings = [...html.matchAll(/<h1[^>]*>([^<]{1,60})/g)].map((m) => m[1]).filter((h) => h !== "Loading…");
   const heading = headings.at(-1) ?? "(no heading)";
   const expected = route === "/dashboard/settings/nope" ? /Not found/ : null;
-  if (response.status >= 500 || broken || (expected && !expected.test(html))) failures++;
+  // Findings moved to Analytics → Bugs Caught; the old address redirects (next.config.ts).
+  const moved = route === "/dashboard/pulls/findings" && !(response.status === 307 && response.headers.get("location")?.endsWith("/dashboard/analytics/findings"));
+  if (response.status >= 500 || broken || moved || (expected && !expected.test(html))) failures++;
   console.log(`${String(response.status).padEnd(4)} ${route.padEnd(36)} ${broken ? "ERROR-MARKUP " : ""}${heading}`);
 }
 console.log(failures ? `FAILURES ${failures}` : "all routes rendered");

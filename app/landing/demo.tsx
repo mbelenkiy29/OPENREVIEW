@@ -5,6 +5,7 @@
 // sample data, and slow work (reviews, chat answers, agent hand-offs) is simulated with timers.
 // Markdown and the configuration previews are rendered on the server (replicas.tsx) and passed in.
 import { createElement, useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
+import Link from "next/link";
 import { DiffFiles, type DiffFile, type DiffFinding } from "../dashboard/diff-files";
 import { PortalDisclosure } from "../dashboard/portal-disclosure";
 import { ScrollTable } from "../dashboard/scroll-table";
@@ -12,6 +13,9 @@ import { priority, status } from "../dashboard/sections/shared";
 import { reviewVerdict, verdictLabels } from "../../src/verdict";
 import { LineChart } from "../ui/charts";
 import { Mark } from "../ui/logo";
+import { Icon, type IconName } from "../ui/icons";
+import { PanelTabs, useIndicator } from "../dashboard/tabs";
+import { priorityOf } from "../../src/priority";
 import { analyticsView, answerFor, revealWords, triggerFlags, triggerKey, wordCount } from "./demo-logic";
 import { agents, analytics, chat, diffFiles, diffFindings, findings, fixPrompt, fixPush, fixStatuses, history, indexed, memory, otherPulls, pull, score, sources, type Revision } from "./sample";
 
@@ -75,18 +79,23 @@ function Window({ title, label = `${title} demo`, caption, size, frame, children
 
 const tabs = ["Analytics", "Chat", "Memory", "Pull Requests", "Settings"] as const;
 type Tab = (typeof tabs)[number];
-type Nav = [label: string, current: boolean, open: () => void][];
+const tabIcons: Record<Tab, IconName> = { Analytics: "chartLine", Chat: "chatCircle", Memory: "brain", "Pull Requests": "gitPullRequest", Settings: "gear" };
+type Nav = [label: string, icon: IconName, current: boolean, open: () => void][];
 function Chrome({ active, onTab, secondary, children }: { active: Tab; onTab: (tab: Tab) => void; secondary?: Nav; children: ReactNode }) {
+  const { list, bar } = useIndicator<HTMLElement>(active);
   return <div className="shell">
     <div className="portal-top">
       <div className="portal-identity">
-        <span className="brand"><Mark /> OpenReview</span>
-        <PortalDisclosure className="scope-selector" label="Acme"><div className="scope-menu"><p className="muted">Acme is a sample workspace.</p><a href="/signup">Create your workspace →</a></div></PortalDisclosure>
-        <PortalDisclosure className="profile" label="@dana"><div className="profile-menu"><a href="/login">Sign in</a><a href="/signup">Create an account</a></div></PortalDisclosure>
+        <span className="brand"><Mark /><span className="brand-name">OpenReview</span></span>
+        <PortalDisclosure className="scope-selector" label={<><span className="scope-name">Acme</span><span className="badge">Admin</span><Icon name="caretUpDown" /></>}><div className="scope-menu"><p className="muted">Acme is a sample workspace.</p><a href="/signup">Create your workspace →</a></div></PortalDisclosure>
+        <div className="header-actions">
+          <Link className="icon-button" href="/docs" title="Docs"><Icon name="question" /><span className="sr-only">Docs</span></Link>
+          <PortalDisclosure className="profile" label={<><Icon name="user" /><span className="sr-only">Account menu for @dana</span></>}><div className="profile-menu"><a href="/login">Sign in</a><a href="/signup">Create an account</a></div></PortalDisclosure>
+        </div>
       </div>
-      <nav className="primary-nav" aria-label="Demo sections">{tabs.map((t) => <button key={t} type="button" aria-current={t === active ? "page" : undefined} onClick={() => onTab(t)}>{t}</button>)}</nav>
+      <nav ref={list} className="primary-nav" aria-label="Demo sections">{tabs.map((t) => <button key={t} type="button" data-key={t} aria-current={t === active ? "page" : undefined} onClick={() => onTab(t)}><Icon name={tabIcons[t]} />{t}</button>)}<span ref={bar} className="tab-indicator" aria-hidden="true" /></nav>
     </div>
-    {secondary && <div className="secondary-nav"><nav aria-label={`${active} pages`}>{secondary.map(([label, current, open]) => <button key={label} type="button" aria-current={current ? "page" : undefined} onClick={open}>{label}</button>)}</nav></div>}
+    {secondary && <div className="secondary-nav"><nav aria-label={`${active} pages`}>{secondary.map(([label, icon, current, open]) => <button key={label} type="button" aria-current={current ? "page" : undefined} onClick={open}><Icon name={icon} /><span>{label}</span></button>)}</nav></div>}
     <div className="content">{children}</div>
   </div>;
 }
@@ -98,7 +107,7 @@ const pulls: Pull[] = [
   { ...pull, state: "completed", files: diffFiles, found: diffFindings, score },
   ...otherPulls.map((p) => ({ ...p, state: p.status, files: p.files ?? [], found: [] })),
 ];
-type PullsView = "list" | "findings" | number;
+type PullsView = "list" | number;
 
 function PullTable({ open }: { open: (n: number) => void }) {
   return <section><ScrollTable label="Pull requests" className="table-scroll"><table><thead><tr><th>Pull request</th><th>Author</th><th>Latest review</th><th>Findings</th><th>Score</th></tr></thead><tbody>
@@ -111,21 +120,26 @@ function PullTable({ open }: { open: (n: number) => void }) {
 
 function PullDetail({ p }: { p: Pull }) {
   const verdict = p.score && reviewVerdict({ score: p.score.value, findings: p.found as unknown as Parameters<typeof reviewVerdict>[0]["findings"] });
+  const verified = p.number === pull.number ? findings : [];
+  const counts = (["critical", "high", "medium", "low"] as const).map((s) => [s, verified.filter((f) => f.severity === s).length] as const).filter(([, n]) => n > 0);
   return <>
     <div className="row"><H level={2}>{pull.repo} #{p.number}</H>{status(p.state)}</div>
     <p className="muted repository-identity">{pull.provider}</p>
     {p.reviewedAt && <p className="muted">Reviewed revision {p.head} · {p.reviewedAt}</p>}
     <p>{p.title} · @{p.author}</p>
     <p className="muted">{p.headBranch} → {pull.baseBranch}</p>
-    {p.steps ? <section><H level={2}>Review in progress</H><div className="chat-progress" role="status"><p className="muted">Working…</p><ol>{p.steps.map((s) => <li key={s}>{s}</li>)}</ol></div></section> : <>
-      <section className="review-diff">
+    {p.steps ? <section><H level={2}>Review in progress</H><div className="chat-progress" role="status"><p className="muted">Working…</p><ol>{p.steps.map((s) => <li key={s}>{s}</li>)}</ol></div></section> : <PanelTabs key={p.number} label="Review sections" initial="code" tabs={[
+      { id: "overview", label: "Overview", panel: <>
+        {verdict && <section><H level={2}>Verdict</H><p><strong>{verdictLabels[verdict]}</strong> · computed from the score, unresolved findings and review coverage</p></section>}
+        {p.score && <section><H level={2}>Confidence score</H><p><strong>{p.score.value}/5</strong> · confidence that the change is safe to merge</p><p>{p.score.reason}</p></section>}
+      </> },
+      { id: "findings", label: <>Findings{counts.map(([s, n]) => <span key={s} className={`badge ${s}`}>{priorityOf(s)} ×{n}</span>)}</>, panel: verified.length ? <section><H level={2}>Verified findings</H>{verified.map((f, i) => <VerifiedFinding key={f._id} f={f} open={i === 0} />)}</section> : <p className="muted">No verified findings in this review.</p> },
+      { id: "code", label: "Code", panel: <section className="review-diff">
         <H level={2}>Changes</H>
         <p className="muted">Exact base…head comparison at {p.head.slice(0, 12)} · {p.files.length} file{p.files.length === 1 ? "" : "s"}</p>
         <DiffFiles files={p.files} findings={p.found} />
-      </section>
-      {verdict && <section><H level={2}>Verdict</H><p><strong>{verdictLabels[verdict]}</strong> · computed from the score, unresolved findings and review coverage</p></section>}
-      {p.score && <section><H level={2}>Confidence score</H><p><strong>{p.score.value}/5</strong> · confidence that the change is safe to merge</p><p>{p.score.reason}</p></section>}
-    </>}
+      </section> },
+    ]} />}
   </>;
 }
 
@@ -351,19 +365,19 @@ export function AppDemo({ answers, previews }: { answers: ReactNode[]; previews:
   const open = (t: Tab) => { setTab(t); setVisited((v) => v.includes(t) ? v : [...v, t]); };
   const detail = typeof pullsView === "number" ? pulls.find((p) => p.number === pullsView) : undefined;
   const secondary: Partial<Record<Tab, Nav>> = {
-    "Pull Requests": [["All Pull Requests", pullsView !== "findings", () => setPulls("list")], ["Findings", pullsView === "findings", () => setPulls("findings")]],
-    Memory: [["Custom rules", memoryView === "rules", () => setMemory("rules")], ["Learned preferences", memoryView === "preferences", () => setMemory("preferences")]],
-    Settings: [["Review comments", settingsView === "comments", () => setSettings("comments")], ["Triggers", settingsView === "triggers", () => setSettings("triggers")]],
+    Memory: [["Custom rules", "listChecks", memoryView === "rules", () => setMemory("rules")], ["Learned preferences", "lightbulb", memoryView === "preferences", () => setMemory("preferences")]],
+    Settings: [["Review comments", "chatCircleText", settingsView === "comments", () => setSettings("comments")], ["Triggers", "slidersHorizontal", settingsView === "triggers", () => setSettings("triggers")]],
   };
   const panes: Record<Tab, ReactNode> = {
-    "Pull Requests": detail ? <PullDetail p={detail} /> : pullsView === "findings" ? findings.map((f) => <FindingCard key={f._id} f={f} />) : <PullTable open={setPulls} />,
+    "Pull Requests": detail ? <PullDetail p={detail} /> : <PullTable open={setPulls} />,
     Chat: <ChatPane answers={answers} />,
-    Analytics: <AnalyticsPane />,
+    // As in the app: Findings live under Analytics → Bugs Caught.
+    Analytics: <PanelTabs label="Analytics views" initial="reviews" tabs={[{ id: "reviews", label: <><Icon name="chartBar" />PR Reviews</>, panel: <AnalyticsPane /> }, { id: "bugs", label: <><Icon name="bug" />Bugs Caught</>, panel: findings.map((f) => <FindingCard key={f._id} f={f} />) }]} />,
     Memory: <MemoryPane view={memoryView} />,
     Settings: <SettingsPane view={settingsView} previews={previews} />,
   };
-  const title = tab === "Pull Requests" ? (detail ? `Pull Requests · ${pull.repo} #${detail.number}` : pullsView === "findings" ? "Pull Requests · Findings" : "Pull Requests") : tab;
-  return <Window title={title} label="Dashboard demo" size="tall" caption={`The OpenReview dashboard for a sample workspace, open at ${pull.repo} #${pull.number}: the reviewed diff with a P0 finding inline at the changed line, a "Needs changes" verdict and a confidence score of ${score.value} out of 5. Use the section buttons to open Analytics, Chat, Memory and Settings.`}>
+  const title = tab === "Pull Requests" ? (detail ? `Pull Requests · ${pull.repo} #${detail.number}` : "Pull Requests") : tab;
+  return <Window title={title} label="Dashboard demo" size="tall" caption={`The OpenReview dashboard for a sample workspace, open at ${pull.repo} #${pull.number} on its Code tab: the reviewed diff with a P0 finding inline at the changed line. The Overview tab holds the "Needs changes" verdict and a confidence score of ${score.value} out of 5. Use the section buttons to open Analytics, Chat, Memory and Settings.`}>
     <Chrome active={tab} onTab={open} secondary={secondary[tab]}>
       <PageHeader title={tab} />
       {tabs.filter((t) => visited.includes(t)).map((t) => <div key={t} className="demo-pane" hidden={t !== tab}>{panes[t]}</div>)}
@@ -421,7 +435,7 @@ export function ChatDemo({ answers }: { answers: ReactNode[] }) {
 }
 
 export function AgentDemo() {
-  return <Window title="Pull Requests · Findings" size="short" caption="A finding on the Findings page with controls to send it to Codex, Claude Code or Cursor Agent, copy a fix prompt, or open an agent with the prompt pre-filled.">
+  return <Window title="Analytics · Bugs Caught" size="short" caption="A finding under Analytics → Bugs Caught with controls to send it to Codex, Claude Code or Cursor Agent, copy a fix prompt, or open an agent with the prompt pre-filled.">
     <div className="replica-pane"><FindingCard f={findings[0]} full /></div>
   </Window>;
 }
