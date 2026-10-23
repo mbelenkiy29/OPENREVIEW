@@ -3942,18 +3942,32 @@ input.switch:checked::before {
     bottom: calc(68px + env(safe-area-inset-bottom));
   }
 }
-/* Narrow phones: each sidebar becomes a page menu above the content. */
+/* Narrow phones: each sidebar becomes a page menu above the content. The landing replica keeps its top
+   tabs and turns its short sidebar into a row of page buttons instead. */
 @media (max-width: 599px) {
-  .portal:has(> .secondary-nav) {
+  :is(.portal, .replica .shell):has(> .secondary-nav) {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto 1fr;
   }
-  .portal .secondary-nav {
+  :is(.portal, .replica) .secondary-nav,
+  .replica-screen.tall .secondary-nav {
     position: static;
     height: auto;
     padding: 12px 16px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+  .replica .secondary-nav nav {
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .replica .secondary-nav nav::-webkit-scrollbar {
+    display: none;
+  }
+  .replica .secondary-nav nav button {
+    width: auto;
+    flex: none;
   }
   .portal .secondary-nav > :not(.sidebar-select) {
     display: none;

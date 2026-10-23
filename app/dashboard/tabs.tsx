@@ -95,6 +95,18 @@ export function SubNav({ label, items, children }: { label: string; items: [path
   </>;
 }
 
+/** Keeps PanelTabs on the panel the URL names when Back, Forward or a link changes `?param=`; without
+ *  the parameter, on the server's `fallback` for that URL. Rendered only with a `param`, so static
+ *  pages (the landing replicas) never read search params. */
+function UrlTab({ param, ids, fallback, select }: { param: string; ids: string; fallback?: string; select: (id: string) => void }) {
+  const value = useSearchParams().get(param);
+  useEffect(() => {
+    const want = [value, fallback].find((id) => id && ids.split(" ").includes(id));
+    if (want) select(want);
+  }, [value, fallback, ids, select]);
+  return null;
+}
+
 /** ARIA tabs over panels that are all rendered and hidden until selected, so switching is instant. */
 export function PanelTabs({ label, tabs, initial, param }: {
   label: string;
@@ -139,6 +151,7 @@ export function PanelTabs({ label, tabs, initial, param }: {
     select(tabs[next].id, true);
   };
   return <div className="panel-tabs">
+    {param && <UrlTab param={param} ids={tabs.map((t) => t.id).join(" ")} fallback={initial} select={setSelected} />}
     <div ref={list} role="tablist" aria-label={label} className="tab-list" onKeyDown={keyDown}>
       {tabs.map((t) => <button key={t.id} type="button" role="tab" id={`${base}${t.id}-tab`} data-key={t.id} aria-selected={t.id === selected} aria-controls={`${base}${t.id}`} tabIndex={t.id === selected ? 0 : -1} onClick={() => select(t.id)}>{t.label}</button>)}
       <span ref={bar} className="tab-box" aria-hidden="true" />
