@@ -73,12 +73,13 @@ export const signIn = mutation({ args: { secret: v.string(), provider, providerU
   if (a.linkToken) {
     // Linking proves only the new provider account, not who is signed in, and that account can later sign in
     // fresh: while referral payouts are on it needs the same recent sign-in as payouts, and the new session
-    // keeps the old sign-in time.
+    // keeps the old sign-in time. The two refusals the visitor can act on are ConvexErrors, whose message reaches
+    // the web app in production too, so src/oauth-flow.ts can tell them from failures (which it reports to Sentry).
     const { user: current, session } = await authenticatedSession(ctx, a.linkToken);
-    if (referralConfig().payoutsEnabled && !recentSignIn(session)) throw new Error("Sign in again to link another account");
+    if (referralConfig().payoutsEnabled && !recentSignIn(session)) throw new ConvexError("Sign in again to link another account");
     signedInAt = session?.signedInAt ?? session?.createdAt ?? 0;
     const existing = await ctx.db.query("identities").withIndex("by_provider_user", (q) => q.eq("provider", a.provider).eq("providerUserId", a.providerUserId)).unique();
-    if (existing && existing.userId !== current._id) throw new Error("This account is already linked to another OpenReview user");
+    if (existing && existing.userId !== current._id) throw new ConvexError("This account is already linked to another OpenReview user");
     if (!existing) { const email = a.email ? emailAddress.safeParse(a.email).data : undefined; await ctx.db.insert("identities", { userId: current._id, provider: a.provider, providerUserId: a.providerUserId, ...githubLogin(a), ...(email ? { email } : {}), emailVerified: Boolean(email && a.emailVerified), createdAt: Date.now(), lastLoginAt: Date.now() }); }
     else await ctx.db.patch(existing._id, githubLogin(a));
     userId = current._id;

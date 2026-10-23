@@ -11,7 +11,7 @@ The hosted site can report errors to [Sentry](https://sentry.io), product analyt
     - `auth-email-send-failed`: a sign-in email couldn't be sent (Resend key or quota, Convex down); has the request's `rid`.
     - `auth-email-link-failed`: using a sign-in link failed in Convex.
     - `auth-oauth-failed`: a GitHub, Google or GitLab code exchange, profile read or account step failed, per provider and step.
-  - Not reported: expired or reused links and visits, a cancel at the provider, linking an account that belongs to someone else, and rate limits.
+  - Not reported: expired or reused links and visits, a cancel at the provider, linking an account that belongs to someone else or that needs a fresh sign-in, and our own sign-in email limits. A provider refusing sign-ins (its rate limit included) is reported, since nobody can sign in with it meanwhile.
   - 10% of page loads and requests as performance traces (`NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE`).
   - After sign-in, the internal user ID and workspace ID.
 - Not collected: cookies, request or response bodies, query strings, local variables, AI prompts or outputs, emails, or session replays. The SDK sends no IP address; to stop Sentry from recording the connecting IP too, turn on **Prevent Storing of IP Addresses** under Project Settings → Security & Privacy.

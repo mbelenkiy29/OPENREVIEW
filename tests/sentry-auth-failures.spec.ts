@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { ConvexError } from "convex/values";
+import { GithubApiError } from "../src/github";
 
 // Sign-in failures that every visitor would hit (a broken Resend key, Convex down, a provider
 // rejecting the code exchange) reach Sentry as one issue each; failures the visitor caused (an
@@ -81,10 +83,18 @@ test("OAuth: a failing code exchange or account step is reported per provider an
   ]);
 });
 
-test("OAuth: linking an account that belongs to someone else tells the visitor and is not reported", async () => {
+test("OAuth: linking an account that belongs to someone else tells the visitor and is not reported; Convex failing while linking is", async () => {
   holder.jar.set("openreview_session", "session-jwt");
-  holder.backend.mutation = fail("This account is already linked to another OpenReview user");
+  holder.backend.mutation = async () => { throw new ConvexError("This account is already linked to another OpenReview user"); };
   const response = await finish(`code=c1&state=${await begin("link=1&next=/settings")}`);
   expect(response.headers.get("location")).toBe(`${base}/settings`);
   expect(holder.reported).toEqual([]);
+  holder.backend.mutation = fail("Server Error");
+  await finish(`code=c1&state=${await begin("link=1&next=/settings")}`);
+  expect(holder.reported).toEqual([{ message: "Server Error", fingerprint: ["auth-oauth-failed", "github", "account"] }]);
+});
+
+test("OAuth: a provider refusing for its own rate limit is reported, since nobody can sign in meanwhile", async () => {
+  await finish(`code=c1&state=${await begin()}`, async () => { throw new GithubApiError("GitHub rate limit", 429); });
+  expect(holder.reported).toEqual([{ message: "GitHub rate limit", fingerprint: ["auth-oauth-failed", "github", "provider"] }]);
 });

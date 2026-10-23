@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import * as Sentry from "@sentry/nextjs";
 import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
+import { ConvexError } from "convex/values";
 import { z } from "zod";
 import { api } from "../convex/_generated/api";
 import { backend, cookieOptions, origin, seal, signSession, unseal } from "./server";
@@ -68,9 +69,10 @@ export async function finishOAuth(request: Request, provider: Provider, profile:
     return NextResponse.redirect(origin() + next);
   } catch (error) {
     console.error(JSON.stringify({ event: "auth.failed", provider, stage, error: error instanceof Error ? error.message.slice(0, 200) : "Authentication failed" }));
-    // Provider and account failures go to Sentry, one issue per provider and step. State failures don't, nor does
-    // linking an account that belongs to someone else (the visitor sees why).
-    if (stage === "provider" || (stage === "account" && !link)) Sentry.captureException(error, { level: "error", fingerprint: ["auth-oauth-failed", provider, stage], tags: { auth_provider: provider, auth_stage: stage } });
+    // Provider and account failures go to Sentry, one issue per provider and step. State failures don't, nor do the
+    // refusals the visitor can act on, which the backend throws as ConvexErrors (an account someone else holds,
+    // or linking that needs a fresh sign-in).
+    if (stage === "provider" || (stage === "account" && !(error instanceof ConvexError))) Sentry.captureException(error, { level: "error", fingerprint: ["auth-oauth-failed", provider, stage], tags: { auth_provider: provider, auth_stage: stage } });
     // A failed link returns to the page it started from: /login would offer a plain sign-in, which makes a separate account.
     if (link) { await notify("Couldn’t link that account. It may belong to another OpenReview user, or you need to sign out and back in first.", "error"); return NextResponse.redirect(origin() + next); }
     return NextResponse.redirect(`${origin()}/login${authQuery({ error: "signin", referral })}`);
