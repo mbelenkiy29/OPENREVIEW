@@ -31,6 +31,8 @@ export function SiteHeader({ home = false, current }: { home?: boolean; current?
       {home ? <Link href="/login">Sign in</Link> : <Link href="/dashboard">Dashboard</Link>}
       <Link className="button primary small" href="/signup">Get started</Link>
     </div>
+    {/* How far down the landing page the visitor is; app/landing/motion.tsx draws it. */}
+    {home && <span className="scroll-progress" aria-hidden="true" />}
   </header>;
 }
 

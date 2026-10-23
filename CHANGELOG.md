@@ -4,6 +4,15 @@
 
 ## October 2026
 
+### Landing page
+- The landing page now moves:
+  - The headline rises in as the page opens.
+  - Sections reveal as you scroll, and "How it works" plays as a pinned sequence.
+  - The terminal types its commands, and scrolling is smooth on desktop.
+- The header stays with you: it steps aside while you read down and returns when you scroll up, with a reading-progress line.
+- It loads more cleanly. The hero demo no longer appears half-built on slow connections, and the main text is readable from the first frame. The animation code loads only after the page is interactive.
+- If you prefer reduced motion, the page shows without animation or smooth scrolling.
+
 ### Memory
 - Custom rules is now a searchable table, laid out like Greptile's Memory tab:
   - Search by text, or filter with `status:active|disabled` and `repository:owner/name`.

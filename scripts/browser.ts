@@ -52,6 +52,34 @@ try {
   const summaryDemo = page.getByRole("figure", { name: /re-reviews a newly pushed fix/ });
   await summaryDemo.getByRole("button", { name: "Re-review current PR" }).click();
   await summaryDemo.getByText("0 findings · Score 5/5").first().waitFor();
+  // Landing motion (app/landing/motion.tsx), all on one running page so teardown is tested too: an
+  // in-page link glides to its section and scrolling reveals everything; turning on reduced motion
+  // mid-page removes the smoother, pin and hidden states without losing the reader's place; and a
+  // client-side link to the docs leaves no smoother or page height behind.
+  await page.goto(url);
+  await page.locator(".landing[data-motion='on']").waitFor({ state: "attached" });
+  await page.getByRole("navigation", { name: "Site" }).getByRole("link", { name: "How it works" }).click();
+  await page.waitForFunction(() => { const r = document.getElementById("how-heading")!.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
+  await page.mouse.move(600, 450);
+  for (let i = 0; i < 120 && await page.evaluate(() => scrollY + innerHeight < document.documentElement.scrollHeight - 2); i++) await page.mouse.wheel(0, 600);
+  await page.waitForFunction(() => [...document.querySelectorAll("[data-reveal], [data-stagger] > *")].every((e) => getComputedStyle(e).opacity === "1"));
+  const ctaTop = () => page.evaluate(() => document.getElementById("cta-heading")!.getBoundingClientRect().top);
+  await page.waitForTimeout(1500); // smoothing settles and the reader's place is noted
+  const place = await ctaTop();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.locator(".landing[data-motion='reduced']").waitFor({ state: "attached" });
+  assert.equal(await page.locator("#smooth-content").evaluate((e) => getComputedStyle(e).transform), "none", "Landing scrolls smoothly under reduced motion");
+  assert.equal(await page.locator(".pin-spacer").count(), 0, "Landing pins a section under reduced motion");
+  assert.equal(await page.evaluate(() => document.body.style.height), "", "Landing keeps the smoother's page height under reduced motion");
+  assert.equal(await page.locator(".hero h1 .line > span").first().evaluate((e) => getComputedStyle(e).animationName), "none", "Landing hero animates under reduced motion");
+  assert.ok(Math.abs(await ctaTop() - place) < 60, "Landing loses the reader's place when reduced motion turns on");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.locator(".landing[data-motion='on'].is-smooth").waitFor({ state: "attached" });
+  await page.getByRole("contentinfo").getByRole("link", { name: "Quickstart" }).click();
+  await page.getByRole("heading", { name: "Quickstart", level: 1 }).first().waitFor();
+  assert.equal(await page.evaluate(() => document.body.getAttribute("style") ?? ""), "", "Landing leaves smoother styles on the docs");
+  await page.mouse.wheel(0, 400);
+  await page.waitForFunction(() => scrollY > 0);
   for (const [path, heading] of [["/docs/quickstart", "Quickstart"], ["/docs/api", "Public API"], ["/docs/configuration", "Repository configuration as code"], ["/changelog", "Changelog"]]) {
     await page.goto(url + path);
     await page.getByRole("heading", { name: heading, level: 1 }).first().waitFor();
@@ -321,7 +349,7 @@ try {
   await page.screenshot({ path: "output/playwright/dark-desktop.png", fullPage: true, caret: "initial" });
   assert.deepEqual(errors, [], `Browser errors: ${errors.join("; ")}`);
   console.log(
-    `Browser verification passed: landing (interactive demos), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px), repository selection, ${dashboardPages} dashboard pages (main and secondary navigation), persisted settings/rules, Memory page filters, Chat page, mobile layout and dark theme. GitHub OAuth and real indexing still require external credentials.`,
+    `Browser verification passed: landing (interactive demos, motion and reduced motion), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px), repository selection, ${dashboardPages} dashboard pages (main and secondary navigation), persisted settings/rules, Memory page filters, Chat page, mobile layout and dark theme. GitHub OAuth and real indexing still require external credentials.`,
   );
 } finally {
   await browser.close();
