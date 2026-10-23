@@ -53,7 +53,7 @@ test("Codex plugin uses the Agent Plugins schema with OpenAI settings under exte
 
 test("skills are shared by both agents, use the documented frontmatter and encode the loop's safety rules", () => {
   const dirs = readdirSync(path.join(plugin, "skills")).sort();
-  assert.deepEqual(dirs, ["resolve-review-findings", "review-status"]);
+  assert.deepEqual(dirs, ["resolve-review-findings", "review-local-changes", "review-status"]);
   for (const dir of dirs) {
     const { fields, body } = frontmatter(path.join(plugin, "skills", dir, "SKILL.md"));
     assert.equal(fields.name, dir);

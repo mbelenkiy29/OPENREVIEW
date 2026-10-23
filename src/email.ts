@@ -10,13 +10,28 @@ export function emailConfigured() {
 // The web app shows email sign-in and email invitations when Convex can send mail; the Resend key
 // lives in Convex, so the web app needs EMAIL_SIGN_IN=true (or the same keys) to know.
 export const emailOnWeb = () => (process.env.EMAIL_SIGN_IN === "true" || emailConfigured()) && egressAllowed("email");
-export async function sendEmail(message: { to: string; subject: string; text: string }, fetchImpl: typeof fetch = fetch): Promise<{ id: string } | { skipped: string }> {
+const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+/** Subject, plain text and an HTML version in OpenReview's brand (brand/README.md): ink text on light ink,
+ *  the app icon, one ink button. Inline styles and tables only, since email clients ignore stylesheets. */
+export function brandedEmail(origin: string, e: { subject: string; paragraphs: string[]; action: { label: string; path: string } }) {
+  const url = `${origin}${e.action.path}`, font = "Inter,system-ui,-apple-system,'Segoe UI','Helvetica Neue',Arial,sans-serif";
+  const paragraphs = e.paragraphs.map((p) => `<p style="margin:0 0 16px;font-size:15px;line-height:24px;">${escapeHtml(p)}</p>`).join("");
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escapeHtml(e.subject)}</title></head><body style="margin:0;padding:0;background:#edecec;">`
+    + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#edecec;font-family:${font};color:#26251e;"><tr><td align="center" style="padding:32px 16px;">`
+    + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;"><tr><td style="padding:32px;">`
+    + `<p style="margin:0 0 28px;"><img src="${escapeHtml(origin)}/apple-icon.png" width="32" height="32" alt="" style="border-radius:7px;vertical-align:middle;border:0;"><span style="margin-left:10px;font-size:16px;font-weight:600;letter-spacing:-0.01em;vertical-align:middle;">OpenReview</span></p>`
+    + `<h1 style="margin:0 0 16px;font-size:22px;line-height:30px;font-weight:600;letter-spacing:-0.02em;">${escapeHtml(e.subject)}</h1>${paragraphs}`
+    + `<p style="margin:24px 0 0;"><a href="${escapeHtml(url)}" style="display:inline-block;background:#26251e;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 20px;border-radius:8px;">${escapeHtml(e.action.label)}</a></p>`
+    + `</td></tr></table><p style="margin:16px 0 0;font-size:12px;line-height:18px;color:#6f6d66;">OpenReview · <a href="${escapeHtml(origin)}" style="color:#6f6d66;">${escapeHtml(new URL(origin).host)}</a></p></td></tr></table></body></html>`;
+  return { subject: e.subject, text: `${e.paragraphs.join("\n\n")}\n\n${e.action.label}: ${url}`, html };
+}
+export async function sendEmail(message: { to: string; subject: string; text: string; html?: string }, fetchImpl: typeof fetch = fetch): Promise<{ id: string } | { skipped: string }> {
   if (!emailConfigured()) return { skipped: "Email delivery is not configured" };
   const to = emailAddress.parse(message.to);
   const response = await fetchImpl("https://api.resend.com/emails", {
     method: "POST",
     headers: { authorization: `Bearer ${process.env.RESEND_API_KEY}`, "content-type": "application/json" },
-    body: JSON.stringify({ from: process.env.EMAIL_FROM, to: [to], subject: message.subject.replace(/[\r\n]+/g, " ").slice(0, 200), text: message.text.slice(0, 50000) }),
+    body: JSON.stringify({ from: process.env.EMAIL_FROM, to: [to], subject: message.subject.replace(/[\r\n]+/g, " ").slice(0, 200), text: message.text.slice(0, 50000), ...(message.html ? { html: message.html } : {}) }),
     redirect: "error",
     signal: AbortSignal.timeout(15000),
   });

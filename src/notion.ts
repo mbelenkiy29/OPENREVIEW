@@ -91,8 +91,8 @@ export class Notion {
     const result = await this.request("/v1/search", z.object({ results: z.array(z.object({ object: z.string(), id: z.string(), url: z.string().optional(), properties: z.record(z.unknown()).optional() }).passthrough()).max(100) }), { filter: { property: "object", value: "page" }, page_size: 100 });
     return result.results.filter((r) => r.object === "page").map((r) => ({ id: r.id, url: r.url ?? "", title: Object.values(r.properties ?? {}).map((p) => (p as { type?: string; title?: unknown }).type === "title" ? text((p as { title?: unknown }).title) : "").join("").slice(0, 200) || "Untitled" }));
   }
-  // One page as plain text: up to 1,000 top-level blocks plus one nested level (50 parents), 100KB.
-  async page(id: string) {
+  // One page as plain text: up to 1,000 top-level blocks plus one nested level (50 parents), 100KB, stopping at `deadline`.
+  async page(id: string, deadline = Infinity) {
     z.string().uuid().parse(id);
     const page = await this.request(`/v1/pages/${id}`, pageSchema);
     if (page.archived || page.in_trash) throw new Error("Notion page is archived");
@@ -103,6 +103,7 @@ export class Notion {
     const children = async (parent: string, depth: number) => {
       let cursor: string | null = null;
       for (let pageNo = 0; pageNo < (depth ? 1 : 10) && !truncated; pageNo++) {
+        if (Date.now() > deadline) { truncated = true; return; }
         const result: z.infer<typeof blockPage> = await this.request(`/v1/blocks/${parent}/children?page_size=100${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ""}`, blockPage);
         for (const b of result.results) {
           push(blockLine(b, depth));

@@ -66,18 +66,33 @@ export async function organizationAccess(ctx:QueryCtx|MutationCtx,userId:Id<"use
     throw new Error("Forbidden");
   return { user, member };
 }
+// Constant-time: fixed-length SHA-256 digests compared with an XOR loop, as convex/http.ts does.
+export function secretMatches(expected: string | undefined, provided: string) {
+  if (!expected) return false;
+  const a = sessionHash(expected), b = sessionHash(provided);
+  let difference = 0;
+  for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return difference === 0;
+}
 export function service(secret: string) {
-  if (!process.env.SERVICE_SECRET || process.env.SERVICE_SECRET !== secret)
+  if (!secretMatches(process.env.SERVICE_SECRET, secret))
     throw new Error("Unauthorized service");
 }
 
 export async function visibleRepositories(ctx: QueryCtx | MutationCtx, token: string, organizationId: Id<"organizations">, teamId?: Id<"teams">) {
+  return (await repositoryScope(ctx, token, organizationId, teamId)).repos;
+}
+// Readable repositories plus repositoryAccess(write)'s answer for each, from one teamMembers lookup per
+// team rather than per repository (an "All repositories" install can bring thousands).
+export async function repositoryScope(ctx: QueryCtx | MutationCtx, token: string, organizationId: Id<"organizations">, teamId?: Id<"teams">) {
   const identity = await authorize(ctx, token, organizationId);
   if(teamId){const team=await ctx.db.get(teamId),member=await ctx.db.query("teamMembers").withIndex("by_team_user",q=>q.eq("teamId",teamId).eq("userId",identity.user._id)).unique();if(!team||team.organizationId!==organizationId||!member&&!["owner","admin"].includes(identity.member.role))throw new Error("Team not accessible");}
-  const repos = (await ctx.db.query("repositories").withIndex("by_org", q => q.eq("organizationId", organizationId)).collect()).filter(r=>!teamId||r.teamId===teamId);
-  if (["owner", "admin"].includes(identity.member.role)) return repos;
-  const allowed = await Promise.all(repos.map(async repo => !repo.teamId || Boolean(await ctx.db.query("teamMembers").withIndex("by_team_user", q => q.eq("teamId", repo.teamId!).eq("userId", identity.user._id)).unique())));
-  return repos.filter((_, i) => allowed[i]);
+  const all = (await ctx.db.query("repositories").withIndex("by_org", q => q.eq("organizationId", organizationId)).collect()).filter(r=>!teamId||r.teamId===teamId);
+  const admin = ["owner", "admin"].includes(identity.member.role);
+  const teams = new Map(admin ? [] : await Promise.all([...new Set(all.flatMap(r => r.teamId ? [r.teamId] : []))].map(async t => [t, await ctx.db.query("teamMembers").withIndex("by_team_user", q => q.eq("teamId", t).eq("userId", identity.user._id)).unique()] as const)));
+  const repos = admin ? all : all.filter(r => !r.teamId || teams.get(r.teamId));
+  const writable = (r: Doc<"repositories">) => identity.member.role !== "viewer" && (admin || !r.teamId || (teams.get(r.teamId)?.role ?? "viewer") !== "viewer");
+  return { ...identity, repos, writable };
 }
 export async function authorizeRepository(ctx: QueryCtx | MutationCtx, token: string, repositoryId: Id<"repositories">, write = false, admin = false) {
   const { user, session } = await authenticatedSession(ctx, token);

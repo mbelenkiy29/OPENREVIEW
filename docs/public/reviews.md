@@ -26,7 +26,7 @@ The first line of every summary is one of four verdicts. It is computed from rec
 
 The score is shown next to the verdict when the confidence-score summary section is enabled.
 
-The summary ends with a footer such as "Review 3 on this pull request · Comment `@openreview review` to re-run it.", followed by links to the dashboard. The number counts this pull request's published reviews and stays the same when a publication is retried. The command matches what each provider accepts: `@openreview review` on GitHub, GitHub Enterprise, GitLab, Gitea, Bitbucket and Origin, `@openreview review again` on Perforce, and the dashboard on Azure DevOps, which does not accept comment commands.
+The summary ends with a footer such as "Review 3 on this pull request · Comment `@openreview review` to re-run it.", followed by links to the dashboard. A comment that is only `@openreview` also re-runs the review. The number counts this pull request's published reviews and stays the same when a publication is retried. The command matches what each provider accepts: `@openreview review` on GitHub, GitHub Enterprise, GitLab, Gitea, Bitbucket and Origin, `@openreview review again` on Perforce, and the dashboard on Azure DevOps, which does not accept comment commands.
 
 ## Where the summary goes
 
@@ -68,7 +68,7 @@ On the hosted cloud, if the workspace's plan does not cover another review, Open
 Workspace owners and admins can run the workspace on their own Anthropic, OpenAI or OpenRouter account under Settings → API Keys → **Model provider key**. OpenReview checks the key with the provider before saving it, stores it encrypted, and never shows it again.
 
 - Reviews, chat, fixes, knowledge and rule suggestions for the workspace then use that key, and the provider bills the usage to your account.
-- Without a model, Anthropic keys use `claude-sonnet-5-5` (and `claude-haiku-5-5` for summaries), and OpenAI keys use `gpt-4.1`. OpenRouter needs a model, such as `anthropic/claude-sonnet-5-5`.
+- Without a model, Anthropic keys use `claude-sonnet-5-5` (and `claude-haiku-5-5` for summaries), and OpenAI keys use `gpt-4.1`. OpenRouter needs a model, such as `anthropic/claude-sonnet-5.5`.
 - Model choices in workspace, team and repository settings apply only to OpenReview's own model.
 - If the provider rejects the key or the account runs out of credit, reviews fail with the provider's error. They never fall back to OpenReview's model. Remove the key to switch back.
 
@@ -115,7 +115,7 @@ A change can break code it did not touch, such as a caller in another file that 
 
 ## Review tier per pull request
 
-The tier (fast, standard or deep) comes from, in order: an `@openreview review fast|standard|deep` comment for that run, an `openreview:fast|standard|deep` label on the pull request (several labels: the highest wins; a tier label also starts reviews of labelled pull requests even when automatic reviews are off), then the configured tier, which touched `.openreview/` folders can raise. Admins can cap the tier with **Highest tier a request may use** (`maxReviewTier`); the cap applies to every source. The review page shows the tier used and where it came from.
+The tier (fast, standard or deep) comes from, in order: an `@openreview review fast|standard|deep` comment for that run, an `openreview:fast|standard|deep` label on the pull request (several labels: the highest wins; a tier label also starts reviews of labelled pull requests even when automatic reviews are off), then the configured tier, which touched `.openreview/` folders can raise. A configured tier of `auto` picks one per pull request: deep for 1,000+ changed lines, or 200+ lines when a file touches security- or data-sensitive code (the same risk score that orders files in large reviews); fast for 50 or fewer lines of low-risk changes; standard otherwise. Generated, lock and docs files don't count toward size. Any explicit tier (comment, label or folder) replaces `auto`. Admins can cap the tier with **Highest tier a request may use** (`maxReviewTier`); the cap applies to every source. The review page shows the tier used and where it came from.
 
 ## Commands in pull requests
 

@@ -64,6 +64,7 @@ test("Helm chart: pinned backend, single writer, offline switch, and the instanc
   for (const key of webKeys) assert.match(key, /^[A-Z][A-Z0-9_]+$/);
   assert.match(values, /^ {2}values: \{\}/m, "no secret values ship in the chart");
   assert.match(web, /runAsNonRoot: true, runAsUser: 1001/);
+  assert.match(backend, /runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000/, "the backend pod runs as the image's ubuntu user");
   assert.match(await read(path.join(root, "Dockerfile")), /--uid 1001/, "the pod user matches the image user");
 });
 

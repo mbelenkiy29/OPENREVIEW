@@ -1,7 +1,8 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { scheduleSeatSync } from "./billing";
 import { billingConfig } from "../src/billing";
-import { linkIdentity } from "./identity";
+import { githubAccounts, linkIdentity } from "./identity";
 import { v } from "convex/values";
 import { authenticated, authorize, service, audit } from "./auth";
 import { rateLimit } from "./rateLimit";
@@ -20,6 +21,7 @@ export const login = mutation({
     return linkIdentity(ctx, { provider: "github", providerUserId: String(args.githubId), login: args.login, avatar: args.avatar, emailVerified: false });
   },
 });
+const githubLogins = async (ctx: QueryCtx, user: Doc<"users">) => new Set((await githubAccounts(ctx, user)).flatMap((g) => (g.login ? [g.login.toLowerCase()] : [])));
 export const me = query({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
@@ -34,12 +36,11 @@ export const me = query({
         role: m.role,
       })),
     );
-    const invitations = await ctx.db
+    // Invitations name a GitHub login, so only logins GitHub reported count (other sign-ins choose `login`).
+    const invitations = (await Promise.all([...await githubLogins(ctx, user)].map((login) => ctx.db
       .query("invitations")
-      .withIndex("by_login", (q) =>
-        q.eq("githubLogin", user.login.toLowerCase()),
-      )
-      .collect();
+      .withIndex("by_login", (q) => q.eq("githubLogin", login))
+      .collect()))).flat();
     // The first verified sign-in email, for the feedback widget's profile (src/userjot.ts).
     const identities = await ctx.db.query("identities").withIndex("by_user", (q) => q.eq("userId", user._id)).take(20);
     return {
@@ -63,6 +64,8 @@ export const createOrganization = mutation({
     const organizationId = await ctx.db.insert("organizations", {
       name: args.name.trim(),
       onboarding: { startedAt: Date.now() },
+      // Opts the workspace into one-time emails (convex/lifecycleEmails.ts); older workspaces have none.
+      lifecycleEmails: [],
       // On billing deployments a new workspace chooses a plan before anything else runs.
       ...(billingConfig().enabled ? { planRequired: true } : {}),
       createdAt: Date.now(),
@@ -130,7 +133,7 @@ export const acceptInvitation = mutation({
       invitation = await ctx.db.get(args.invitationId);
     if (
       !invitation ||
-      invitation.githubLogin !== user.login.toLowerCase() ||
+      !(await githubLogins(ctx, user)).has(invitation.githubLogin) ||
       invitation.expiresAt <= Date.now() ||
       !(await ctx.db.get(invitation.organizationId))
     )

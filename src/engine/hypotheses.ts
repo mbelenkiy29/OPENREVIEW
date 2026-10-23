@@ -36,7 +36,7 @@ export type HypothesesResult = { plan: Hypothesis[]; runs: HypothesisRun[]; cand
 
 export async function runHypotheses(args: {
   input: ReviewInput; payload: unknown; model: ModelProvider; tools: AgentToolbox; categories: readonly string[]; rules: Rule[];
-  signal?: AbortSignal; hooks?: Pick<AgentHooks, "checkpoint">; budget?: HypothesisBudget; now?: () => number;
+  signal?: AbortSignal; hooks?: Pick<AgentHooks, "checkpoint">; budget?: HypothesisBudget; now?: () => number; startedAt?: number;
 }): Promise<HypothesesResult> {
   const { input, model } = args;
   if (!model.runTools) throw new Error("The configured model provider does not support tool calling");
@@ -51,7 +51,8 @@ export async function runHypotheses(args: {
   const limits: string[] = planned.value.hypotheses.length > plan.length ? [`The hypothesis plan was capped at ${budget.hypotheses} for ${input.mode} reviews`] : [];
   // Shared accounting across parallel investigations: every turn's tokens count against one total.
   let spent = 0;
-  const deadline = now() + budget.total.wallMs;
+  // The whole review shares one 10-minute action: stop hypotheses 6 minutes after it started so an in-flight turn, verification and publishing still fit.
+  const deadline = Math.min(now() + budget.total.wallMs, (args.startedAt ?? Infinity) + 6 * 60_000);
   const exhausted = () => spent >= budget.total.tokens ? "total hypothesis token budget exhausted" : now() >= deadline ? "total hypothesis time budget exhausted" : undefined;
   const runTools = model.runTools.bind(model);
   const counted: ModelProvider = { generate: model.generate.bind(model), runTools: async (request) => { const turn = await runTools(request); spent += tokenCost(turn.usage); return turn; } };

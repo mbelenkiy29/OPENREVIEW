@@ -7,5 +7,7 @@ allowBuilds:
   unrs-resolver: true
 overrides:
   postcss: 8.5.28
+  # convex pins ws 8.21.0 exactly; 8.21.1 fixes CVE-2026-62389 (DoS).
+  ws: 8.21.1
 patchedDependencies:
   next@15.5.27: patches/next@15.5.27.patch

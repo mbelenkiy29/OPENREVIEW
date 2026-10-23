@@ -448,7 +448,7 @@ test("summary outcomes must match recorded execution rather than command startup
   assert.equal(reviewSummarySchema({...evidence,exitCode:1}).safeParse({summary:"The tests did not pass; test source adds a regression case."}).success,true);
 });
 
-test("comment style changes evidence formatting while preserving impact, remediation and identity", () => {
+test("comment style: detailed reads problem then impact then fix, concise keeps first sentences; both keep identity", () => {
   const finding = {
     ...candidate,
     agent: "security",
@@ -457,13 +457,12 @@ test("comment style changes evidence formatting while preserving impact, remedia
   };
   const detailed = findingComment(finding, "detailed"),
     concise = findingComment(finding, "concise");
-  assert.ok(detailed.includes("```"));
-  assert.ok(!concise.includes("```"));
+  assert.ok(detailed.includes(finding.description.trim() + " " + finding.impact), "impact follows the description in one paragraph");
+  assert.ok(!concise.includes(finding.impact));
   for (const body of [detailed, concise]) {
-    assert.ok(body.includes(finding.impact));
-    assert.ok(body.includes(finding.suggestedFix));
+    assert.ok(body.includes(finding.suggestedFix.split(/(?<=[.!?])\s/)[0]));
     assert.ok(body.includes(finding.fingerprint));
-    assert.ok(body.includes("Evidence:"));
+    assert.ok(!body.includes("Evidence:") && !body.includes("```"), "the comment sits on the cited lines, so evidence is not quoted again");
   }
 });
 
@@ -634,4 +633,18 @@ test('candidate and verifier prose cannot manufacture runtime outcomes; test sou
  }};
  const result=await reviewChange({...input,settings:{categories:['correctness']}},model);
  assert.equal(reviewerChecked,true);assert.equal(verifierChecked,true);assert.equal(result.findings.length,0);assert.match(result.metadata.suppressions?.[0].reason??'',/Static source/);assert.match(result.summary,/Not executed by OpenReview/);
+});
+
+test('a large pull request keeps the verifier within its decision cap and reports the overflow',async()=>{
+ const fixture=new FixtureModel(),lines=Array.from({length:240},(_,i)=>`const v${i+1} = ${i+1};`);let next=0,verified=0;
+ const model:ModelProvider={generate:async<T>(request:ModelRequest,schema:z.ZodType<T>)=>{
+  const usage={provider:'fixture',model:'fixture',task:request.task,inputTokens:0,outputTokens:0,latencyMs:0,estimatedCost:0,cached:false};
+  if(request.task.startsWith('review:'))return {value:schema.parse({findings:Array.from({length:30},()=>{const line=++next;return {...candidate,category:request.task.slice(7),confidence:.86+line/2000,filePath:'big.ts',startLine:line,endLine:line,symbol:'v'+line,evidence:[{filePath:'big.ts',startLine:line,quote:lines[line-1]}]};})}),usage};
+  if(request.task==='verify'){const list=(request.input as {candidates:Candidate[]}).candidates;verified=list.length;return {value:schema.parse({decisions:list.map((_,index)=>({index,publish:false,reason:'Static source shows no defect here.',confidence:1}))}),usage};}
+  if(request.task==='summary')return {value:schema.parse({summary:'No findings were published after conservative static verification.',reviewScore:{value:3,reason:'Static review found insufficient evidence to publish the candidate.'}}),usage};
+  return fixture.generate(request,schema);
+ }};
+ const result=await reviewChange({...input,files:[{path:'big.ts',sha:'3',content:lines.join('\n')}],diff:[{path:'big.ts',status:'added',patch:'@@ -0,0 +1,240 @@\n'+lines.map(l=>'+'+l).join('\n')}],settings:{categories:['correctness','security','data','compatibility','testing','performance','style','syntax']}},model);
+ const dropped=result.metadata.suppressions?.filter(s=>/Verifier capacity/.test(s.reason))??[];
+ assert.equal(next,240);assert.equal(verified,200);assert.equal(dropped.length,40);assert.match(result.summary,/40 lower-confidence candidates exceeded verifier capacity/);
 });

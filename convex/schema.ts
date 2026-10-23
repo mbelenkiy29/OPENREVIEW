@@ -98,12 +98,12 @@ export const findingValidator = v.object({
 });
 export default defineSchema({
   inferenceBudgets: defineTable({limitMicros:v.number(),baselineMicros:v.number(),source:v.string(),committedMicros:v.number(),reservedMicros:v.number(),createdAt:v.number()}),
-  inferenceReservations: defineTable({budgetId:v.id("inferenceBudgets"),provider:v.string(),model:v.string(),baseUrl:v.string(),inputTokenCeiling:v.number(),outputTokenCeiling:v.number(),inputPrice:v.number(),outputPrice:v.number(),cacheReadPrice:v.optional(v.number()),cacheWritePrice:v.optional(v.number()),reservedMicros:v.number(),status:v.string(),createdAt:v.number(),inputTokens:v.optional(v.number()),outputTokens:v.optional(v.number()),cacheReadTokens:v.optional(v.number()),cacheWriteTokens:v.optional(v.number()),settledMicros:v.optional(v.number()),settledAt:v.optional(v.number())}).index("by_budget",["budgetId"]),
+  inferenceReservations: defineTable({budgetId:v.optional(v.id("inferenceBudgets")),usageId:v.optional(v.id("billingUsage")),provider:v.string(),model:v.string(),baseUrl:v.string(),inputTokenCeiling:v.number(),outputTokenCeiling:v.number(),inputPrice:v.number(),outputPrice:v.number(),cacheReadPrice:v.optional(v.number()),cacheWritePrice:v.optional(v.number()),reservedMicros:v.number(),status:v.string(),createdAt:v.number(),inputTokens:v.optional(v.number()),outputTokens:v.optional(v.number()),cacheReadTokens:v.optional(v.number()),cacheWriteTokens:v.optional(v.number()),settledMicros:v.optional(v.number()),settledAt:v.optional(v.number())}).index("by_budget",["budgetId"]).index("by_status_created",["status","createdAt"]),
   reviewFindings: defineTable({reviewId:review,findingId:v.id("findings"),snapshot:findingValidator}).index("by_review",["reviewId"]),
   integrationConnections:defineTable({organizationId:org,kind:v.union(v.literal("linear"),v.literal("atlassian"),v.literal("notion")),sites:v.optional(v.array(v.object({id:v.string(),name:v.string(),url:v.string(),scopes:v.array(v.string())}))),jiraProjectIds:v.optional(v.array(v.string())),confluenceSpaceIds:v.optional(v.array(v.string())),externalId:v.string(),name:v.string(),credentials:v.string(),expiresAt:v.number(),active:v.boolean(),generation:v.number(),teamIds:v.array(v.string()),projectIds:v.array(v.string()),repositoryIds:v.array(repo),refreshLease:v.optional(v.string()),refreshExpiresAt:v.optional(v.number()),error:v.optional(v.string()),createdAt:v.number()}).index("by_org",["organizationId"]).index("by_account",["organizationId","kind","externalId"]),
   integrationRevocations:defineTable({connectionId:v.id("integrationConnections"),organizationId:org,credentials:v.string(),attempts:v.number(),createdAt:v.number(),status:v.string(),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number())}).index("by_connection",["connectionId"]),
   approvalPolicies:defineTable({organizationId:org,teamId:v.optional(v.id("teams")),repositoryId:v.optional(repo),policy:approvalPolicyValidator,updatedAt:v.number()}).index("by_org",["organizationId"]),
-  approvalJobs:defineTable({organizationId:org,repositoryId:repo,reviewId:review,prNumber:v.number(),headSha:v.string(),policyKey:v.string(),status:v.string(),reasons:v.array(v.string()),providerReviewId:v.optional(v.union(v.number(),v.string())),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number()),createdAt:v.number(),updatedAt:v.number()}).index("by_review",["reviewId"]).index("by_repo_pr",["repositoryId","prNumber"]).index("by_status",["status"]).index("by_org_status",["organizationId","status"]),
+  approvalJobs:defineTable({organizationId:org,repositoryId:repo,reviewId:review,prNumber:v.number(),headSha:v.string(),policyKey:v.string(),status:v.string(),reasons:v.array(v.string()),providerReviewId:v.optional(v.union(v.number(),v.string())),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number()),createdAt:v.number(),updatedAt:v.number()}).index("by_review",["reviewId"]).index("by_repo_pr",["repositoryId","prNumber"]).index("by_repo_head",["repositoryId","headSha"]).index("by_status",["status"]).index("by_org_status",["organizationId","status"]),
   runtimePolicies:defineTable({organizationId:org,teamId:v.optional(v.id("teams")),repositoryId:v.optional(repo),policy:runtimePolicyValidator,updatedAt:v.number()}).index("by_org",["organizationId"]),
   runtimeWorkers:defineTable({organizationId:org,tokenHash:v.string(),name:v.string(),expiresAt:v.number(),revoked:v.boolean(),lastSeen:v.optional(v.number()),createdAt:v.number()}).index("by_hash",["tokenHash"]).index("by_org",["organizationId"]),
   runtimeJobs:defineTable({organizationId:org,repositoryId:repo,reviewId:review,headSha:v.string(),revisionKey:v.optional(v.string()),policy:runtimePolicyValidator,policyKey:v.string(),status:v.string(),error:v.optional(v.string()),sourceStorageId:v.optional(v.id("_storage")),workerId:v.optional(v.id("runtimeWorkers")),lease:v.optional(v.string()),leaseExpiresAt:v.optional(v.number()),attempts:v.number(),evidence:v.optional(runtimeEvidenceValidator),
@@ -142,6 +142,8 @@ export default defineSchema({
     window: v.number(),
     count: v.number(),
   }).index("by_key", ["key"]),
+  // One row: the changelog entries the last email digest covered (src/changelog.ts feedDigest keys, space-separated).
+  changelogDigests: defineTable({ keys: v.string(), sentAt: v.number() }),
   modelCache: defineTable({
     organizationId: org,
     key: v.string(),
@@ -208,6 +210,8 @@ export default defineSchema({
     sessionsValidAfter: v.optional(v.number()),
     // Product milestones already sent to analytics (convex/analyticsMilestones.ts), so each is sent once.
     analyticsMilestones: v.optional(v.array(v.string())),
+    // One-time emails already sent to this user (convex/lifecycleEmails.ts); workspace ones are on the organization.
+    lifecycleEmails: v.optional(v.array(v.string())),
     createdAt: v.number(),
   }).index("by_github", ["githubId"]),
   // Sign-in identities: one row per provider account. Accounts link only through a verified
@@ -216,6 +220,7 @@ export default defineSchema({
     userId: v.id("users"),
     provider: v.string(), // github | gitlab | google | email | sso (providerUserId = <connectionId>:<subject>)
     providerUserId: v.string(),
+    login: v.optional(v.string()), // github only: the login GitHub reported at the last sign-in or link
     email: v.optional(v.string()),
     emailVerified: v.boolean(),
     createdAt: v.number(),
@@ -250,6 +255,8 @@ export default defineSchema({
     oidcIssuer: v.optional(v.string()),
     oidcClientId: v.optional(v.string()),
     oidcClientSecret: v.optional(v.string()),
+    // Set when the identity provider changed: sign-in waits until a domain is verified again (convex/sso.ts).
+    reverifyDomains: v.optional(v.boolean()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_org", ["organizationId"]),
@@ -273,7 +280,7 @@ export default defineSchema({
   loginTokens: defineTable({ email: v.string(), tokenHash: v.string(), expiresAt: v.number(), usedAt: v.optional(v.number()), createdAt: v.number(), referralCode: v.optional(v.string()) }).index("by_token", ["tokenHash"]),
   // onboarding: guided setup progress for workspaces created with it (absent on older workspaces,
   // which are never sent to setup). reviewsPaused marks automatic reviews held off while indexing.
-  organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), defaultHandoff:v.optional(handoffValidator), defaultCloudAgent:v.optional(cloudAgentValidator), /* billing deployments: a new workspace must choose a plan (Stripe-confirmed) before setup, indexing or reviews; older workspaces have no flag */ planRequired:v.optional(v.boolean()), planSelectedAt:v.optional(v.number()), plan:v.optional(v.string()), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), createdAt: v.number() }),
+  organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), /* how far transcript retention has cleared reviews' agent state */ transcriptsClearedBefore: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), defaultHandoff:v.optional(handoffValidator), defaultCloudAgent:v.optional(cloudAgentValidator), /* billing deployments: a new workspace must choose a plan (Stripe-confirmed) before setup, indexing or reviews; older workspaces have no flag */ planRequired:v.optional(v.boolean()), planSelectedAt:v.optional(v.number()), plan:v.optional(v.string()), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), lifecycleEmails: v.optional(v.array(v.string())) /* one-time emails sent, convex/lifecycleEmails.ts */, createdAt: v.number() }),
   // Workspace deletion receipts (M3): survive the purge; step + cursor make the purge resumable.
   workspaceDeletions: defineTable({ organizationId: org, name: v.string(), requestedBy: v.id("users"), requestedAt: v.number(), scheduledFor: v.number(), scheduledId: v.optional(v.id("_scheduled_functions")), status: v.string() /* scheduled | cancelled | purging | done */, step: v.number(), cursor: v.optional(v.string()), counts: v.record(v.string(), v.number()), startedAt: v.optional(v.number()), cancelledAt: v.optional(v.number()), completedAt: v.optional(v.number()) }).index("by_org", ["organizationId"]),
   // Daily analytics rollup per (repository, UTC day, PR author), recomputed from raw tables for
@@ -367,7 +374,9 @@ export default defineSchema({
     .index("by_connection", ["connectionId", "externalId"])
     .index("by_github", ["githubId"])
     .index("by_org", ["organizationId"])
-    .index("by_installation", ["installationId"]),
+    .index("by_installation", ["installationId"])
+    .index("by_knowledge_status", ["knowledgeStatus"])
+    .index("by_conventions_synced", ["conventionsSyncedAt"]),
   repositorySettings: defineTable({
     repositoryId: repo,
     organizationId: org,
@@ -439,6 +448,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_repo", ["repositoryId"])
+    .index("by_org", ["organizationId"])
     .index("by_status", ["status"]),
   indexSkippedFiles: defineTable({
     jobId: v.id("indexJobs"),
@@ -465,6 +475,8 @@ export default defineSchema({
   }).index("by_repo",["repositoryId"]).index("by_status",["status"]),
   pullRequests: defineTable({
     reactionsSyncedAt: v.optional(v.number()),
+    // When the PR next needs a reaction sync: set when a review completes, cleared once its window ends.
+    reactionsDueAt: v.optional(v.number()),
     organizationId: org,
     repositoryId: repo,
     number: v.number(),
@@ -477,10 +489,22 @@ export default defineSchema({
     updatedAt: v.number(),
     nativeObservedAt: v.optional(v.number()),
     revisionKey: v.optional(v.string()),
+    isDraft: v.optional(v.boolean()),
+    additions: v.optional(v.number()),
+    deletions: v.optional(v.number()),
+    changedFiles: v.optional(v.number()),
+    requestedReviewers: v.optional(v.array(v.string())),
+    // For Analytics merge time: first time OpenReview saw the PR, and when the merge webhook arrived.
+    openedAt: v.optional(v.number()),
+    mergedAt: v.optional(v.number()),
   })
     .index("by_repo_number", ["repositoryId", "number"])
     .index("by_org", ["organizationId"])
-    .searchIndex("by_title",{searchField:"title",filterFields:["organizationId"]}),
+    .index("by_org_state", ["organizationId", "state"])
+    .index("by_repo_state", ["repositoryId", "state", "number"])
+    .index("by_reactions_due", ["reactionsDueAt"])
+    .index("by_org_merged", ["organizationId", "mergedAt"])
+    .searchIndex("by_title",{searchField:"title",filterFields:["organizationId","state"]}),
   pullRequestCommits: defineTable({
     organizationId: org,
     pullRequestId: v.id("pullRequests"),
@@ -506,6 +530,10 @@ export default defineSchema({
     baseBranch: v.optional(v.string()),
     findingCount: v.optional(v.number()),
     findingSeverity: v.optional(v.string()),
+    // Per-priority counts (P0–P3) plus security, for the pull request list badges.
+    findingCounts: v.optional(v.record(v.string(), v.number())),
+    // On-demand guided tour of the change (Code tab), grouped by the model; paths are checked against the diff.
+    tour: v.optional(v.object({ steps: v.array(v.object({ title: v.string(), explanation: v.string(), files: v.array(v.string()) })), createdAt: v.number() })),
     models: v.optional(v.string()),
     runtimeEvidence: v.optional(runtimeEvidenceValidator),
     organizationId: org,
@@ -528,6 +556,8 @@ export default defineSchema({
     // Agentic tool-loop transcript/state, kept between execution steps and deleted when the review ends.
     agentStateStorageId: v.optional(v.id("_storage")),
     agentStateHead: v.optional(v.string()),
+    // Agent suspensions so far; bounds resumes even when the saved state cannot be loaded.
+    agentResumes: v.optional(v.number()),
     // GitHub check run created for this review's head (checks:write only).
     checkRunId: v.optional(v.number()),
     trigger: v.optional(v.string()),
@@ -547,6 +577,7 @@ export default defineSchema({
     .index("by_head", ["repositoryId", "prNumber", "headSha"])
     .index("by_pr", ["repositoryId", "prNumber"])
     .index("by_status", ["status"])
+    .index("by_repo_status", ["repositoryId", "status"])
     .index("by_org_time", ["organizationId", "createdAt"]),
   reviewRuns: defineTable({
     organizationId: org,
@@ -580,8 +611,10 @@ export default defineSchema({
     .index("by_repo", ["repositoryId"])
     .index("by_repo_path", ["repositoryId", "filePath"])
     .index("by_pr", ["repositoryId", "prNumber"])
+    .index("by_pr_status", ["repositoryId", "prNumber", "status"])
     .index("by_fingerprint", ["repositoryId", "prNumber", "fingerprint"])
-    .index("by_org_time", ["organizationId", "createdAt"]),
+    .index("by_org_time", ["organizationId", "createdAt"])
+    .index("by_org_rule", ["organizationId", "ruleId"]),
   // Team conventions learned from human review comments (review guidance only).
   // Cloud billing (BILLING_ENABLED=true only). One account per workspace; Stripe state is applied
   // from signed webhooks, newest event wins.
@@ -590,12 +623,18 @@ export default defineSchema({
     customerId: v.optional(v.string()),
     subscriptionId: v.optional(v.string()),
     subscriptionItemId: v.optional(v.string()),
+    // The subscription's paid plan (starter | pro) from its seat price; unset on a subscription means starter.
+    plan: v.optional(v.string()),
+    // A subscription from before plans existed: while it stays on Starter it keeps every entitlement.
+    legacy: v.optional(v.boolean()),
     status: v.string(), // trial | active | trialing | past_due | unpaid | canceled | incomplete | incomplete_expired | paused
     seats: v.number(),
     trialEndsAt: v.number(),
     currentPeriodEnd: v.optional(v.number()),
     pastDueSince: v.optional(v.number()),
     lastEventCreated: v.optional(v.number()),
+    // Monthly extra-usage cap in dollars, set by an admin; 0 or unset means no usage past the included amount.
+    spendCapUsd: v.optional(v.number()),
     updatedAt: v.number(),
   }).index("by_org", ["organizationId"]).index("by_customer", ["customerId"]),
   // Referral program (REFERRALS_ENABLED and BILLING_ENABLED only). One personal code per user. A
@@ -678,7 +717,12 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]).index("by_account", ["accountId"]),
-  billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number() }).index("by_org_period", ["organizationId", "period"]),
+  // Usage in micro-dollars of inference cost: settled, reserved by in-flight calls, and the part past the included usage.
+  billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number(), usedMicros: v.optional(v.number()), reservedMicros: v.optional(v.number()), overageMicros: v.optional(v.number()),
+    // Usage alert thresholds (percent of the included usage) already emailed this period.
+    alertsSent: v.optional(v.array(v.number())) }).index("by_org_period", ["organizationId", "period"]),
+  // Extra usage waiting to be reported to Stripe as meter events (identifier = this row id).
+  billingMeterEvents: defineTable({ organizationId: org, period: v.string(), micros: v.number(), status: v.string() /* pending | reported | skipped | failed */, attempts: v.number(), error: v.optional(v.string()), createdAt: v.number(), reportedAt: v.optional(v.number()) }).index("by_org_status", ["organizationId", "status"]),
   stripeEvents: defineTable({ eventId: v.string(), type: v.string(), outcome: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Slack app installs (one per Slack workspace); the bot token is encrypted with scope `<org>:slack`.
   slackInstallations: defineTable({
@@ -728,15 +772,27 @@ export default defineSchema({
   }).index("by_key", ["key"]),
   slackEventReceipts: defineTable({ eventId: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Codebase chat (web): threads are private to the member who started them.
+  // Per-developer "Reviewed" marks on changed files; a mark counts only for the head it was made at.
+  fileReviews: defineTable({
+    organizationId: org,
+    userId: v.id("users"),
+    repositoryId: repo,
+    prNumber: v.number(),
+    path: v.string(),
+    headSha: v.string(),
+    updatedAt: v.number(),
+  }).index("by_user_pr", ["userId", "repositoryId", "prNumber"]).index("by_org", ["organizationId"]),
   chatThreads: defineTable({
     organizationId: org,
     userId: v.id("users"),
     title: v.string(),
     repositoryIds: v.array(repo),
     origin: v.optional(v.string()), // web (default) | api
+    // "Chat with PR": the pull request whose review the agent is given as context.
+    pullRequestId: v.optional(v.id("pullRequests")),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_org_user", ["organizationId", "userId", "updatedAt"]),
+  }).index("by_org_user", ["organizationId", "userId", "updatedAt"]).index("by_org_updated", ["organizationId", "updatedAt"]),
   // Assistant messages stream progress through `events` (persisted deltas read by the SSE route);
   // `content` and `citations` are written only after citation validation.
   chatMessages: defineTable({
@@ -756,6 +812,8 @@ export default defineSchema({
     estimatedCost: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
+    // A pull request action the agent suggested; it runs only when the developer approves it.
+    proposal: v.optional(v.object({ action: v.string(), reason: v.string(), body: v.optional(v.string()), head: v.optional(v.string()) })),
   }).index("by_thread", ["threadId"]), // ordered by insertion (_creationTime)
   learnedRules: defineTable({
     organizationId: org,
@@ -928,6 +986,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_pr", ["repositoryId", "prNumber"])
+    .index("by_org_created", ["organizationId", "createdAt"])
+    .index("by_org_updated", ["organizationId", "updatedAt"])
     .index("by_comment", ["githubCommentId"])
     .index("by_repository_comment", ["repositoryId", "githubCommentId"])
     .index("by_native_review", ["nativeP4.reviewId"])
@@ -990,6 +1050,8 @@ export default defineSchema({
     revoked: v.boolean(),
     // read | write | admin; absent on keys created before scopes (they keep full access).
     scopes: v.optional(v.array(v.string())),
+    // Passes only the Perforce routes (app/api/p4/*), which work on every plan; creatable without api.access.
+    perforce: v.optional(v.boolean()),
   })
     .index("by_hash", ["hash"])
     .index("by_org", ["organizationId"]),
@@ -998,4 +1060,24 @@ export default defineSchema({
     expiresAt: v.number(),
     createdAt: v.number(),
   }).index("by_user", ["userId"]),
+  // Reviews of a developer's local commits sent by the CLI (convex/cliReviews.ts). The uploaded diff and
+  // files live in storage until the review ends; the row and its result are removed after a day.
+  cliReviews: defineTable({
+    organizationId: org,
+    repositoryId: repo,
+    userId: v.id("users"),
+    status: v.union(v.literal("queued"), v.literal("running"), v.literal("completed"), v.literal("failed")),
+    stage: v.optional(v.string()),
+    baseSha: v.string(),
+    headSha: v.string(),
+    title: v.string(),
+    mode: v.optional(v.string()),
+    security: v.boolean(),
+    instructions: v.optional(v.string()),
+    inputStorageId: v.optional(v.id("_storage")),
+    result: v.optional(v.string()),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_org", ["organizationId"]),
 });

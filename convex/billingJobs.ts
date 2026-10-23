@@ -1,19 +1,22 @@
 import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { StripeError, checkoutTrialEnd, stripe, stripeKey } from "../src/billing";
+import { StripeError, checkoutTrialEnd, liveSubscription, stripe, stripeKey } from "../src/billing";
+
+// Extra usage is metered in micro-dollars of inference cost; the markup lives in the Stripe price.
+const usagePrice = () => { const id = process.env.STRIPE_USAGE_PRICE_ID; return id && /^price_[A-Za-z0-9]+$/.test(id) ? id : undefined; };
 import { referralConfig } from "../src/referrals";
+import { priceFor } from "../src/plans";
 
 // Stripe Checkout / Customer Portal sessions for workspace admins, and seat-quantity sync.
 const appOrigin = () => new URL(process.env.APP_URL ?? "http://localhost:3000").origin;
 const returnPaths = { settings: "/dashboard/settings/billing", onboarding: "/dashboard/onboarding/plan" } as const;
 // Tags these sessions in the Stripe Dashboard so this flow can be compared with others.
 const integrationIdentifier = "openreview-starter-seats-qkvmhzrt";
-export const checkout = action({ args: { token: v.string(), organizationId: v.id("organizations"), returnTo: v.optional(v.union(v.literal("settings"), v.literal("onboarding"))) }, handler: async (ctx, a): Promise<string> => {
+export const checkout = action({ args: { token: v.string(), organizationId: v.id("organizations"), returnTo: v.optional(v.union(v.literal("settings"), v.literal("onboarding"))), plan: v.optional(v.union(v.literal("starter"), v.literal("pro"))) }, handler: async (ctx, a): Promise<string> => {
   const context = await ctx.runQuery(internal.billing.checkoutContext, { token: a.token, organizationId: a.organizationId });
-  if (context.subscriptionId && ["active", "trialing", "past_due"].includes(context.status)) throw new Error("This workspace already has a subscription; manage it in the billing portal");
-  const key = stripeKey(), price = process.env.STRIPE_SEAT_PRICE_ID;
-  if (!price || !/^price_[A-Za-z0-9]+$/.test(price)) throw new Error("Configure STRIPE_SEAT_PRICE_ID");
+  if (liveSubscription(context)) throw new Error("This workspace already has a subscription; manage it in the billing portal");
+  const key = stripeKey(), price = priceFor(a.plan ?? "starter");
   let customer = context.customerId;
   if (!customer) {
     customer = (await stripe<{ id: string }>("/v1/customers", { metadata: { organizationId: a.organizationId } }, key, fetch, `customer:${a.organizationId}`)).id;
@@ -26,7 +29,7 @@ export const checkout = action({ args: { token: v.string(), organizationId: v.id
   // A referred workspace that has not paid yet gets the referral coupon. Stripe takes either discounts or
   // allow_promotion_codes, so the coupon replaces promotion codes for that one session.
   const referral = referralConfig().enabled ? await ctx.runMutation(internal.referrals.prepareCheckout, { token: a.token, organizationId: a.organizationId }) : null;
-  const params = { mode: "subscription", customer, client_reference_id: a.organizationId, payment_method_collection: "always", integration_identifier: integrationIdentifier, allow_promotion_codes: true, line_items: [{ price, quantity: context.seats }], subscription_data: { metadata: { organizationId: a.organizationId, ...(referral ? { referralId: referral.referralId } : {}) }, ...(trialEnd ? { trial_end: trialEnd } : {}) }, success_url: `${back}?checkout=success`, cancel_url: `${back}?checkout=cancelled` };
+  const params = { mode: "subscription", customer, client_reference_id: a.organizationId, payment_method_collection: "always", integration_identifier: integrationIdentifier, allow_promotion_codes: true, line_items: [{ price, quantity: context.seats }, ...(usagePrice() ? [{ price: usagePrice() }] : [])], subscription_data: { metadata: { organizationId: a.organizationId, ...(referral ? { referralId: referral.referralId } : {}) }, ...(trialEnd ? { trial_end: trialEnd } : {}) }, success_url: `${back}?checkout=success`, cancel_url: `${back}?checkout=cancelled` };
   const create = (extra: Record<string, unknown> = {}) => stripe<{ url: string }>("/v1/checkout/sessions", { ...params, ...extra }, key);
   if (!referral) return (await create()).url;
   try { return (await create({ allow_promotion_codes: undefined, discounts: [{ coupon: referral.coupon }] })).url; }
@@ -44,9 +47,35 @@ export const portal = action({ args: { token: v.string(), organizationId: v.id("
   if (!context.customerId) throw new Error("Start a subscription first");
   return (await stripe<{ url: string }>("/v1/billing_portal/sessions", { customer: context.customerId, return_url: `${appOrigin()}/dashboard/settings/billing` }, stripeKey())).url;
 } });
+// Switches the seat price in place (the Customer Portal cannot update subscriptions with a metered item).
+// legacy is left alone, so a grandfathered Starter that comes back from Pro keeps its features.
+export const changePlan = action({ args: { token: v.string(), organizationId: v.id("organizations"), plan: v.union(v.literal("starter"), v.literal("pro")) }, handler: async (ctx, a): Promise<string> => {
+  const context = await ctx.runQuery(internal.billing.checkoutContext, { token: a.token, organizationId: a.organizationId });
+  if (!context.subscriptionId || !context.subscriptionItemId || !["active", "trialing", "past_due"].includes(context.status)) throw new Error("Start a subscription first");
+  if (context.plan === a.plan) throw new Error(`This workspace is already on ${a.plan === "pro" ? "Pro" : "Starter"}`);
+  await stripe(`/v1/subscriptions/${context.subscriptionId}`, { items: [{ id: context.subscriptionItemId, price: priceFor(a.plan) }], proration_behavior: "create_prorations" }, stripeKey(), fetch, `plan:${a.organizationId}:${a.plan}:${Math.floor(Date.now() / 60000)}`);
+  await ctx.runMutation(internal.billing.auditPlanChange, { organizationId: a.organizationId, userId: context.userId, plan: a.plan });
+  return "requested";
+} });
 export const syncSeats = internalAction({ args: { organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<string> => {
   const target = await ctx.runQuery(internal.billing.seatSyncTarget, a);
   if (!target || target.seats === target.billed) return "unchanged";
-  await stripe(`/v1/subscriptions/${target.subscriptionId}`, { items: [{ id: target.itemId, quantity: target.seats }], proration_behavior: "create_prorations" }, stripeKey(), fetch, `seats:${target.subscriptionId}:${target.seats}:${target.billed}`);
+  // No idempotency key: an absolute quantity is safe to repeat, and a key would replay an earlier identical change.
+  await stripe(`/v1/subscriptions/${target.subscriptionId}`, { items: [{ id: target.itemId, quantity: target.seats }], proration_behavior: "create_prorations" }, stripeKey());
   return "updated";
+} });
+// Extra usage → Stripe meter event (POST /v1/billing/meter_events). The row id is the event identifier,
+// so a retried report is not counted twice by Stripe.
+export const reportUsage = internalAction({ args: { id: v.id("billingMeterEvents") }, handler: async (ctx, a): Promise<string> => {
+  const event = await ctx.runQuery(internal.billing.meterEvent, a);
+  if (!event) return "done";
+  if (!event.customerId) { await ctx.runMutation(internal.billing.meterResult, { id: a.id, status: "skipped", error: "No Stripe customer" }); return "skipped"; }
+  try {
+    await stripe("/v1/billing/meter_events", { event_name: process.env.STRIPE_METER_EVENT || "openreview_usage_micros", identifier: a.id, timestamp: Math.floor(event.createdAt / 1000), payload: { stripe_customer_id: event.customerId, value: event.micros } }, stripeKey(), fetch, `meter:${a.id}`);
+    await ctx.runMutation(internal.billing.meterResult, { id: a.id, status: "reported" });
+    return "reported";
+  } catch (error) {
+    await ctx.runMutation(internal.billing.meterResult, { id: a.id, status: "retry", error: error instanceof Error ? error.message : "Stripe error" });
+    return "retry";
+  }
 } });

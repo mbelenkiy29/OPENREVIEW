@@ -120,7 +120,7 @@ pnpm dev
 
 Open http://localhost:3000. Local setup generates independent session, service, and webhook secrets and synchronizes them to the local backend without printing their values. `.env.local` and `.env.backend` are ignored by Git. For provider/GitHub settings, edit `.env.local`, then run `pnpm setup:local` again. Backend changes must be deployed with `pnpm backend` or `convex dev --once`.
 
-To test billing and referrals locally, point the [Stripe CLI](https://docs.stripe.com/stripe-cli) at a Stripe sandbox (`stripe switch`, never live mode), and run `stripe listen --print-secret` once for the webhook signing secret. Put the sandbox values from [docs/billing.md](docs/billing.md#setup-operator) in `.env.local`: `STRIPE_SECRET_KEY` (`rk_test_…`), `STRIPE_WEBHOOK_SECRET`, `STRIPE_SEAT_PRICE_ID` and `BILLING_ENABLED=true`, plus `REFERRALS_ENABLED=true` and `STRIPE_REFERRAL_COUPON_ID` for referrals. Then run `pnpm setup:local`, which copies the billing settings that have a value to the local backend. Keep `pnpm stripe:listen` running to forward sandbox webhooks to it. Claude Code copies `.env.local` into each new worktree (`.worktreeinclude`), so agents working there can use the same sandbox. Worktrees created earlier need a copy made by hand.
+To test billing and referrals locally, point the [Stripe CLI](https://docs.stripe.com/stripe-cli) at a Stripe sandbox (`stripe switch`, never live mode), and run `stripe listen --print-secret` once for the webhook signing secret. Put the sandbox values from [docs/billing.md](docs/billing.md#setup-operator) in `.env.local`: `STRIPE_SECRET_KEY` (`rk_test_…`), `STRIPE_WEBHOOK_SECRET`, `STRIPE_SEAT_PRICE_ID` and `BILLING_ENABLED=true`, plus `REFERRALS_ENABLED=true` and `STRIPE_REFERRAL_COUPON_ID` for referrals. Then run `pnpm setup:local`, which copies the billing settings that have a value to the local backend, replacing the ones it had, so a new sandbox key or webhook secret takes effect. Keep `pnpm stripe:listen` running to forward sandbox webhooks to the backend that `NEXT_PUBLIC_CONVEX_SITE_URL` in `.env.local` names. Claude Code copies `.env.local` into each new worktree (`.worktreeinclude`), so agents working there can use the same sandbox. In a worktree created earlier, copy only the `STRIPE_*`, `BILLING_*` and `REFERRAL*` lines into its `.env.local`, because the other lines name that worktree's own backend and secrets, then run `pnpm setup:local` there.
 
 ## GitHub App setup
 
@@ -144,6 +144,8 @@ Sign in → create workspace → install App → choose authorized repositories 
 Supported follow-ups from repository collaborators with write/admin/maintain permission: `@openreview explain this`, `@openreview suggest a fix`, `@openreview what code depends on this`, `@openreview review again`, and `@openreview review security`. `@openreview ignore this pattern` in a finding thread saves an inspectable repository preference. `@openreview fix this` in a finding thread replies with a committable suggestion, checked against the current head before it is published, plus the Fix with your agent link. `@openreview fix this in a new PR` also opens a fix pull request from a new `openreview/fix-*` branch targeting the pull request's branch. This only happens when a workspace admin has enabled Fix pull requests for the repository and the GitHub App has Contents: Read and write. The pull request's own branch is never written, and changes from forks are skipped. Dashboard feedback/settings can reset preferences.
 
 Follow-up answers retrieve current changed files and indexed dependencies/callers, then validate exact quoted source lines before publication. Source links pin the inspected revision. Historical reviews are unverified context; test source does not establish execution. Retrieval is bounded to 20 files and 40,000 characters, with generated/binary/secret files excluded. Invalid citations fail without posting and use the existing bounded recovery path. Model failures now record their usage as well as successful calls.
+
+Dashboard pull request actions (Merge, Approve, Request changes, Comment, Close/Reopen, Convert to draft/Ready for review, Update branch) on GitHub.com repositories are sent with the clicking developer's own GitHub user token, so GitHub enforces their permissions and branch protection and shows them as the actor. The token comes from the App's sign-in (a silent re-authorization when the 10-minute sign-in token has lapsed), is checked against the GitHub account linked to the OpenReview user, and is never stored. A user token can do only what both the user and the App may do: Merge and Update branch need the App's Contents **read/write**; the rest work with the required Pull requests **read/write**. Each action is recorded in the workspace audit log.
 
 Optional **Checks: Read and write** lets OpenReview create an "OpenReview" check run, which is `in_progress` while reviewing and then completed with a short summary and a dashboard link. The **GitHub check run** setting keeps the conclusion `neutral` by default, or fails the check when verified findings reach a chosen severity (and passes otherwise). Installations that only grant Checks: Read keep working and simply skip check runs. PR comments use Pull requests write; the Issues read permission is required for the [issue-comment webhook subscription](https://docs.github.com/en/webhooks/webhook-events-and-payloads#issue_comment). See the [comment endpoint permissions](https://docs.github.com/en/rest/issues/comments#create-an-issue-comment).
 
@@ -196,7 +198,7 @@ Notifications (Settings → Notifications, see [docs/notifications.md](docs/noti
 
 Requirements context from Notion: connect a Notion workspace in Memory → Integrations. When a pull request links Notion pages that were shared with OpenReview, their text is read as read-only requirements, alongside Linear issues, Jira issues and Confluence pages. See [docs/notion.md](docs/notion.md). The Confluence space and Jira project pickers group resources by site, can be filtered, and support select all/none per site. They also flag selections that are no longer authorized.
 
-Billing (cloud mode only, see [docs/billing.md](docs/billing.md)): when `BILLING_ENABLED=true`, a workspace gets a 14-day trial, then a Stripe per-seat subscription with a monthly review quota, grace for past-due payments, and Settings → Billing with Checkout and the Customer Portal. Self-hosted deployments leave it off and have no quotas.
+Billing (cloud mode only, see [docs/billing.md](docs/billing.md)): when `BILLING_ENABLED=true`, workspaces choose Free (a monthly usage allowance, no card), Starter or Pro (Stripe per-seat subscriptions with included usage and a trial; Pro adds deep reviews, generated tests and fix pull requests), with grace for past-due payments and Settings → Billing with Checkout and the Customer Portal. Self-hosted deployments leave it off and have no quotas.
 
 Error tracking and analytics (hosted deployments only, see [docs/observability.md](docs/observability.md)): Sentry for errors and PostHog for page views and signed-in usage, each off unless its public key is set at build time. No session replays, cookies, request bodies or secret URL parameters are sent, and signed-in pages send page views only.
 
@@ -207,7 +209,7 @@ Azure DevOps (see [docs/azure-devops.md](docs/azure-devops.md)): connect an orga
 Repository configuration as code: `.openreview.json`, `.openreview/config.json`, `.openreview/rules.md` and nested per-directory `.openreview.json` files are read from the pull request's base revision. They are applied after workspace, team and repository dashboard settings, except keys an administrator locks. Invalid files produce visible warnings without blocking the review. See [docs/repo-config.md](docs/repo-config.md).
 
 Triggers and filters (GitHub, configurable per workspace, team or repository):
-- With **Automatic reviews** off, reviews run only on `@openreview review` or a trigger label.
+- With **Automatic reviews** off, reviews run only on `@openreview review` (or a bare `@openreview`) or a trigger label.
 - **Trigger labels** start a review on `pull_request.labeled` and keep re-reviewing labelled pull requests.
 - **Excluded authors** are globs such as `dependabot[bot]` or `*-bot`.
 - Changed-file and changed-line limits skip oversized automatic reviews, with a visible reason; an explicit `@openreview review` overrides the limits.
@@ -245,18 +247,26 @@ Avoid printing secrets in logs, terminal transcripts, or CI output. Rotate sessi
 ## CLI
 
 ```sh
+npm install -g openreview-cli
+openreview login
+openreview review --agent
+```
+
+Signed in, `openreview review` runs on your workspace with its model, rules and plan, and the usage shows in the dashboard; `--local` (or signing out) reviews on your machine with your own model key. See [CLI](docs/public/cli.md). From this checkout:
+
+```sh
 pnpm cli --help
 pnpm cli review --base main
 pnpm cli review --json
 pnpm cli review --agent
 pnpm cli review --security --mode deep
 pnpm cli review --inline
-pnpm cli review --engine agentic --resume
+pnpm cli review --local --engine agentic --resume
 pnpm cli onboard --repositories all
 pnpm cli resolve --pr 42 --fix-agent claude
 ```
 
-To install the `openreview` command from this checkout, run `npm link` (Node.js 24). Then run `openreview review --agent` from your repository. Local review compares committed HEAD with the merge base; commit your working changes first. Configure model credentials through the environment or `.env.local` in that repository. Local indexing respects ignored paths and limits eligible source to 5,000 files / 20 MB; it does not execute repository code.
+To install the `openreview` command from this checkout, run `npm link` (Node.js 24); `pnpm build:cli` builds the `openreview-cli` npm package in `packages/cli`. Review compares committed HEAD with the merge base; commit your working changes first. Configure model credentials through the environment or `.env.local` in that repository. Local indexing respects ignored paths and limits eligible source to 5,000 files / 20 MB; it does not execute repository code.
 
 Optional `.openreview.json`:
 
@@ -264,7 +274,7 @@ Optional `.openreview.json`:
 {"rules":[{"id":"membership","instructions":"Every organization API must validate membership.","severity":"high","category":"security","globs":["src/api/**"],"enabled":true}]}
 ```
 
-Generate an API key in dashboard Settings, then `openreview login --url https://review.example.com --token <key>` and `openreview status`. CLI configuration is saved with owner-only filesystem permissions. Local review works independently of server login.
+`openreview login` signs in through the browser; for CI, generate an API key in dashboard Settings and run `openreview login --url https://review.example.com --token <key>`. `openreview status` shows the server and repositories. CLI configuration is saved with owner-only filesystem permissions. Local review works independently of server login.
 
 For local agent fixes, install the selected Codex, Claude Code, or Cursor Agent CLI and sign in to it. Pair and register the checkout:
 

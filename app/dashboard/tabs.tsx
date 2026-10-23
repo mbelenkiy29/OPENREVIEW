@@ -79,41 +79,34 @@ export function PrimaryTabs() {
 // Set by a sub-tab click so the next page's panel plays its entrance; never on a first load.
 let switched = false;
 
-/** Sub-tabs that are links (each its own URL). The box slides while the next page loads. */
-export function SubNav({ label, items, children }: { label: string; items: [path: string, label: string, icon: IconName][]; children: ReactNode }) {
-  const pathname = usePathname(), team = useTeamQuery(), [pending, go] = useNav();
-  const active = pending ?? pathname;
+/** Sub-tabs that are links: Analytics views (each its own page) and the review page's tabs (`?tab=`).
+ *  The box slides to the clicked tab at once and stays there while the next page loads. */
+export function SubNav({ label, items, active: current, children }: {
+  label: string;
+  items: [key: string, href: string, label: ReactNode, icon?: IconName][];
+  active: string;
+  /** The views' content; it fades in after a switch. */
+  children?: ReactNode;
+}) {
+  const team = useTeamQuery(), [pending, go] = useNav();
+  const active = pending ?? current;
   const { list, bar } = useIndicator<HTMLElement>(active);
   const [enter] = useState(() => switched);
   useEffect(() => { switched = false; }, []);
-  return <>
-    <nav ref={list} className="tab-list" aria-label={label}>
-      {items.map(([path, text, icon]) => <Link key={path} data-key={path} href={path + team} aria-current={active === path ? "page" : undefined} onNavigate={(event) => { event.preventDefault(); switched = true; go(path, path + team); }}><Icon name={icon} />{text}</Link>)}
-      <span ref={bar} className="tab-box" aria-hidden="true" />
-    </nav>
-    <div className={enter ? "tab-panel enter" : "tab-panel"}>{children}</div>
-  </>;
+  const to = (href: string) => href.includes("?") ? href : href + team;
+  const nav = <nav ref={list} className="tab-list" aria-label={label}>
+    {items.map(([key, href, text, icon]) => <Link key={key} data-key={key} href={to(href)} aria-current={active === key ? "page" : undefined} onNavigate={(event) => { event.preventDefault(); if (children !== undefined) switched = true; go(key, to(href)); }}>{icon && <Icon name={icon} />}{text}</Link>)}
+    <span ref={bar} className="tab-box" aria-hidden="true" />
+  </nav>;
+  return children === undefined ? nav : <>{nav}<div className={enter ? "tab-panel enter" : "tab-panel"}>{children}</div></>;
 }
 
-/** Keeps PanelTabs on the panel the URL names when Back, Forward or a link changes `?param=`; without
- *  the parameter, on the server's `fallback` for that URL. Rendered only with a `param`, so static
- *  pages (the landing replicas) never read search params. */
-function UrlTab({ param, ids, fallback, select }: { param: string; ids: string; fallback?: string; select: (id: string) => void }) {
-  const value = useSearchParams().get(param);
-  useEffect(() => {
-    const want = [value, fallback].find((id) => id && ids.split(" ").includes(id));
-    if (want) select(want);
-  }, [value, fallback, ids, select]);
-  return null;
-}
-
-/** ARIA tabs over panels that are all rendered and hidden until selected, so switching is instant. */
-export function PanelTabs({ label, tabs, initial, param }: {
+/** ARIA tabs over panels that are all rendered and hidden until selected, so switching is instant
+ *  (the landing replicas). */
+export function PanelTabs({ label, tabs, initial }: {
   label: string;
   tabs: { id: string; label: ReactNode; panel: ReactNode }[];
   initial?: string;
-  /** Query parameter that records the selected tab in the URL. */
-  param?: string;
 }) {
   const [selected, setSelected] = useState(() => tabs.some((t) => t.id === initial) ? initial! : tabs[0].id);
   const [moved, setMoved] = useState(false);
@@ -123,25 +116,7 @@ export function PanelTabs({ label, tabs, initial, param }: {
     setSelected(id);
     setMoved(true);
     if (focus) list.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(id)}"]`)?.focus();
-    if (!param) return;
-    const url = new URL(location.href);
-    url.searchParams.set(param, id);
-    url.hash = "";
-    history.replaceState(null, "", url);
   };
-  // A link to something inside a hidden panel (a finding, the diff) opens that panel first.
-  useEffect(() => {
-    const reveal = () => {
-      const target = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
-      const panel = target?.closest<HTMLElement>("[data-tab]");
-      if (!target || !panel || panel.parentElement !== list.current?.parentElement) return;
-      setSelected(panel.dataset.tab!);
-      requestAnimationFrame(() => target.scrollIntoView());
-    };
-    reveal();
-    addEventListener("hashchange", reveal);
-    return () => removeEventListener("hashchange", reveal);
-  }, [list]);
   const keyDown = (event: KeyboardEvent) => {
     const index = tabs.findIndex((t) => t.id === selected), last = tabs.length - 1;
     const moves: Record<string, number> = { ArrowRight: index === last ? 0 : index + 1, ArrowLeft: index === 0 ? last : index - 1, Home: 0, End: last };
@@ -151,11 +126,10 @@ export function PanelTabs({ label, tabs, initial, param }: {
     select(tabs[next].id, true);
   };
   return <div className="panel-tabs">
-    {param && <UrlTab param={param} ids={tabs.map((t) => t.id).join(" ")} fallback={initial} select={setSelected} />}
     <div ref={list} role="tablist" aria-label={label} className="tab-list" onKeyDown={keyDown}>
       {tabs.map((t) => <button key={t.id} type="button" role="tab" id={`${base}${t.id}-tab`} data-key={t.id} aria-selected={t.id === selected} aria-controls={`${base}${t.id}`} tabIndex={t.id === selected ? 0 : -1} onClick={() => select(t.id)}>{t.label}</button>)}
       <span ref={bar} className="tab-box" aria-hidden="true" />
     </div>
-    {tabs.map((t) => <div key={t.id} role="tabpanel" id={`${base}${t.id}`} aria-labelledby={`${base}${t.id}-tab`} tabIndex={0} hidden={t.id !== selected} data-tab={t.id} className={moved ? "tab-panel enter" : "tab-panel"}>{t.panel}</div>)}
+    {tabs.map((t) => <div key={t.id} role="tabpanel" id={`${base}${t.id}`} aria-labelledby={`${base}${t.id}-tab`} tabIndex={0} hidden={t.id !== selected} className={moved ? "tab-panel enter" : "tab-panel"}>{t.panel}</div>)}
   </div>;
 }

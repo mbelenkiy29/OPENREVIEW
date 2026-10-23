@@ -1,6 +1,6 @@
 # Native Origin catalog acceptance
 
-October 4, 2026 at 21:42 UTC, current hosted release `dpl_GqVdoJFqYHjVQe88bdfN9FRj9CKB`, production alias and Convex tidy-ocelot-457. This closes the scoped native Origin open-PR sync checkpoint; it does not establish every provider's complete workflow.
+October 4, 2026 at 21:42 UTC, current hosted release `<deployment-id>`, production alias and Convex `<prod-deployment>`. This closes the scoped native Origin open-PR sync checkpoint; it does not establish every provider's complete workflow.
 
 The official Origin CLI enumerated the disposable repository's one open PR. Native PR #1 remains at head `3d6c5e9292fd879098b205006d78f471c00605dd`, base `ea89f9a94db4cea48cbcf3d759bb44ea61e1f0eb`, version 1. The hosted row already existed from provider events; no catalog job had previously run.
 

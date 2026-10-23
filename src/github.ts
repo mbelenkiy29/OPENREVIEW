@@ -1,7 +1,7 @@
 import {changeMetadataSchema,catalogPageSize,numberedPage,validateChangePage,type ChangeMetadata,type ChangePage} from "./change-metadata";
-import { fixHandoffLink, safeFixBranch } from "./fix-command";
+import { fixAgentButtons, safeFixBranch } from "./fix-command";
 import {githubWebOrigin} from "./github-enterprise";
-import { reviewLinks, inlineFindings } from "./review-summary";
+import { reviewLinkItems, reviewLinks, inlineFindings } from "./review-summary";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { repositorySourceUrl } from "./source-url";
 import { importPKCS8, SignJWT } from "jose";
@@ -10,7 +10,7 @@ import type { ChangedFile, Finding, SourceFile } from "./engine/types";
 import {changedLines} from "./engine/diff";
 import {commentRange} from "./engine/patch-lines";
 import {findingComment} from "./review-summary";
-import {disclosureLayout,threadLinks,withDescriptionSummary,withoutDescriptionSummary} from "./summary-layout";
+import {compactLayout,disclosureLayout,threadLinks,withDescriptionSummary,withoutDescriptionSummary} from "./summary-layout";
 
 export function verifyWebhook(
   body: string,
@@ -45,7 +45,7 @@ const summaryPointer = "## OpenReview\n\nThe review summary for this pull reques
 // Where the review summary goes on GitHub: the pull request description (between hidden markers,
 // the author's text kept) or one issue comment (the default here; review settings choose). Both are
 // edited in place on every review.
-// fixLabel: the inline "Fix with …" link text, from the workspace's default fix agent.
+// fixLabel: the inline "Fix with …" link text on hosts with a single fix link (GitHub shows one per agent instead).
 export type PublishOptions = { placement?: "description" | "comment"; fixLabel?: string };
 // GitHub rejects pull request bodies longer than 65,536 characters; past that the comment is used.
 const descriptionLimit = 65000;
@@ -54,7 +54,7 @@ const treeSchema = z.object({
   tree: z.array(z.object({ path: z.string(), type: z.string(), sha: z.string(), size: z.number().optional() })),
 });
 export class GithubApiError extends Error {
- constructor(message:string,readonly status:number,readonly planRestricted=false){super(message);}
+ constructor(message:string,readonly status:number,readonly planRestricted=false,readonly rateLimited=status===429){super(message);}
 }
 export class Github {
   readonly supportsApproval:boolean = true;
@@ -109,6 +109,12 @@ export class Github {
     schema: z.ZodType<T>,
     options: RequestInit = {},
   ): Promise<T> {
+    const response = await this.send(endpoint, options);
+    if (response.status === 204) return schema.parse(null);
+    return schema.parse(await response.json());
+  }
+  // Authenticated fetch with GitHub's retry and error handling; the caller reads the body.
+  protected async send(endpoint: string, options: RequestInit = {}): Promise<Response> {
     if (
       !endpoint.startsWith("/") ||
       endpoint.startsWith("//") ||
@@ -160,10 +166,11 @@ export class Github {
         throw new GithubApiError(
           `GitHub ${options.method ?? "GET"} ${endpoint.split("?")[0]}: HTTP ${response.status}`,
           response.status,response.status===403&&errorBody?.message==="Upgrade to GitHub Pro or make this repository public to enable this feature.",
+          // GitHub reports primary and secondary rate limits as 403 too.
+          response.status===429||response.status===403&&(response.headers.get("x-ratelimit-remaining")==="0"||/rate limit/i.test(String(errorBody?.message??""))),
         );
       }
-      if (response.status === 204) return schema.parse(null);
-      return schema.parse(await response.json());
+      return response;
     }
     throw new Error("GitHub retries exhausted");
   }
@@ -254,6 +261,37 @@ export class Github {
     const review=await this.request(`/repos/${repository}/pulls/${number}/reviews`,z.object({id:z.number(),commit_id:z.string(),state:z.literal("APPROVED")}),{method:"POST",body:JSON.stringify({event:"APPROVE",commit_id:head,body:"OpenReview approved this exact revision after all configured approval gates passed. No merge was performed.\n\n"+marker})});
     if(review.commit_id!==head)throw new Error("Provider returned an approval for another revision");
     return {id:review.id,reused:false};
+  }
+  // CI on one revision for the dashboard: latest check runs plus the newest status per context.
+  // shortcut: first 100 of each; page further if a repository runs more checks than that per commit.
+  async checks(repository:string,sha:string){
+    if(!/^[a-f0-9]{40}$/.test(sha))throw new Error("Checks need an exact Git commit");
+    const prefix=`/repos/${repository}/commits/${sha}`;
+    const [runs,statuses]=await Promise.all([
+      this.request(prefix+"/check-runs?filter=latest&per_page=100",z.object({check_runs:z.array(z.object({name:z.string(),status:z.string(),conclusion:z.string().nullable(),html_url:z.string().nullable()}))})),
+      this.request(prefix+"/statuses?per_page=100",z.array(z.object({context:z.string(),state:z.string(),target_url:z.string().nullable(),description:z.string().nullable()}))),
+    ]);
+    const seen=new Set<string>();
+    return [
+      ...runs.check_runs.map(c=>({name:c.name,status:c.status,conclusion:c.conclusion,url:c.html_url??undefined,description:undefined as string|undefined})),
+      ...statuses.filter(s=>!seen.has(s.context)&&Boolean(seen.add(s.context))).map(s=>({name:s.context,status:s.state==="pending"?"in_progress":"completed",conclusion:s.state==="pending"?null:s.state,url:s.target_url??undefined,description:s.description??undefined})),
+    ];
+  }
+  // The pull request conversation for the dashboard: comments, reviews, and review threads with resolved state.
+  async discussion(repository:string,number:number){
+    const [owner,name]=repository.split("/"),author=z.object({login:z.string(),__typename:z.string()}).nullable();
+    const comment=z.object({databaseId:z.number().nullable(),author,body:z.string(),createdAt:z.string(),url:z.string()});
+    const data=await this.graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+      comments(last:100){nodes{databaseId author{login __typename} body createdAt url}}
+      reviews(last:100){nodes{databaseId author{login __typename} state body createdAt url}}
+      reviewThreads(last:100){nodes{id isResolved path line comments(first:50){nodes{databaseId author{login __typename} body createdAt url}}}}}}}`,{owner,name,number},
+      z.object({repository:z.object({pullRequest:z.object({comments:z.object({nodes:z.array(comment)}),reviews:z.object({nodes:z.array(comment.extend({state:z.string()}))}),reviewThreads:z.object({nodes:z.array(z.object({id:z.string(),isResolved:z.boolean(),path:z.string(),line:z.number().nullable(),comments:z.object({nodes:z.array(comment)})}))})})})}));
+    const pr=data.repository.pullRequest,who=(a:z.infer<typeof author>)=>({author:a?.login??"ghost",bot:a?.__typename==="Bot"});
+    return [
+      ...pr.comments.nodes.map(c=>({kind:"comment" as const,...who(c.author),body:c.body,createdAt:c.createdAt,url:c.url})),
+      ...pr.reviews.nodes.filter(r=>r.body.trim()||r.state!=="COMMENTED").map(r=>({kind:"review" as const,...who(r.author),state:r.state,body:r.body,createdAt:r.createdAt,url:r.url})),
+      ...pr.reviewThreads.nodes.filter(t=>t.comments.nodes.length).map(t=>({kind:"thread" as const,...who(t.comments.nodes[0].author),threadId:t.id,resolved:t.isResolved,path:t.path,line:t.line??undefined,createdAt:t.comments.nodes[0].createdAt,url:t.comments.nodes[0].url,replyTo:t.comments.nodes[0].databaseId??undefined,comments:t.comments.nodes.map(c=>({...who(c.author),body:c.body,createdAt:c.createdAt}))})),
+    ].sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
   }
   async dismissApproval(repository:string,number:number,id:number){
     const review=await this.request(`/repos/${repository}/pulls/${number}/reviews/${id}`,z.object({state:z.string()}));
@@ -576,22 +614,29 @@ export class Github {
     path: string,
     sha: string,
   ): Promise<SourceFile> {
-    const blob = await this.request(
-      `/repos/${repository}/git/blobs/${sha}`,
-      z.object({
-        content: z.string(),
-        encoding: z.literal("base64"),
-        size: z.number(),
-      }),
-    );
-    if (blob.size > 200000) return {path,sha,size:blob.size,content:""};
-    return {
-      path,
-      sha,
-      content: Buffer.from(blob.content.replace(/\n/g, ""), "base64").toString(
-        "utf8",
-      ),
-    };
+    const endpoint = `/repos/${repository}/git/blobs/${sha}`;
+    // Gitea overrides request and has no raw blob media type, so it keeps the base64 JSON API.
+    if (this.request !== Github.prototype.request) {
+      const blob = await this.request(endpoint, z.object({ content: z.string(), encoding: z.literal("base64"), size: z.number() }));
+      if (blob.size > 200000) return {path,sha,size:blob.size,content:""};
+      return { path, sha, content: Buffer.from(blob.content.replace(/\n/g, ""), "base64").toString("utf8") };
+    }
+    const response = await this.send(endpoint, { headers: { accept: "application/vnd.github.raw" } });
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("GitHub source body missing");
+    // Raw bytes read only up to the 200 KB review limit, so a huge file is never downloaded in full.
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > 200000) return { path, sha, size: Number(response.headers.get("content-length")) || size, content: "" };
+        chunks.push(value);
+      }
+    } finally { await reader.cancel(); }
+    return { path, sha, content: Buffer.concat(chunks).toString("utf8") };
   }
   async publish(
     repository: string,
@@ -640,7 +685,7 @@ export class Github {
           line: range.end,
           side: "RIGHT",
           ...(range.start < range.end ? { start_line: range.start, start_side: "RIGHT" } : {}),
-          body: findingComment(f, style, { syntax: "github", start: range.start, end: range.end }, { agentPrompt: true }) + fixHandoffLink(process.env.APP_URL, marker, f.fingerprint, options.fixLabel),
+          body: findingComment(f, style, { syntax: "github", start: range.start, end: range.end }, { agentPrompt: true }) + fixAgentButtons(process.env.APP_URL, marker, f.fingerprint),
         };
       });
       const result = await this.request(
@@ -662,8 +707,10 @@ export class Github {
     await current();
     const commit = `${githubWebOrigin(this.base)}/${repository.split("/").map(encodeURIComponent).join("/")}/commit/${sha}`;
     const threads = summary.includes("<!-- openreview-thread:") ? await this.findingThreads(repository, number, publisher) : new Map<string, string>();
-    const layout = threadLinks(disclosureLayout(summary), (fingerprint) => threads.get(fingerprint));
-    const body = `## OpenReview\n\n${layout}${reviewLinks(marker,unresolvedCount)}\n\n**Last reviewed commit:** [\`${sha.slice(0, 7)}\`](${commit})\n\n${summaryMarker}\n<!-- openreview:${marker} -->`;
+    const link = (fingerprint: string) => threads.get(fingerprint);
+    const body = (style === "compact"
+      ? threadLinks(compactLayout(summary, `[\`${sha.slice(0, 7)}\`](${commit})`, reviewLinks(marker,unresolvedCount)), link)
+      : threadLinks(disclosureLayout(summary, [`Last reviewed commit: [\`${sha.slice(0, 7)}\`](${commit})`, ...reviewLinkItems(marker, unresolvedCount, "View in OpenReview")]), link)) + `\n\n${summaryMarker}\n<!-- openreview:${marker} -->`;
     const note = (options.placement === "description" && await this.upsertDescriptionSummary(repository, number, body, publisher, description)) || await this.upsertSummary(repository, number, body, publisher, description);
     await current();
     return review ?? { id: note.id, reused: note.reused, comments: [] };

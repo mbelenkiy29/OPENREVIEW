@@ -10,11 +10,12 @@ export function priceFromLabel(label?: string) {
   return label?.match(/\$\s?(\d+(?:\.\d{1,2})?)/)?.[1];
 }
 
-export function homeStructuredData({ url, repository, billing, priceLabel }: { url: string; repository: string; billing: Pick<BillingConfig, "enabled" | "trialDays">; priceLabel?: string }) {
-  const price = priceFromLabel(priceLabel);
+export function homeStructuredData({ url, repository, billing, priceLabel, proPriceLabel }: { url: string; repository: string; billing: Pick<BillingConfig, "enabled">; priceLabel?: string; proPriceLabel?: string }) {
+  const seat = (name: string, label?: string) => { const price = priceFromLabel(label); return price ? [{ "@type": "Offer", name, price, priceCurrency: "USD", priceSpecification: { "@type": "UnitPriceSpecification", price, priceCurrency: "USD", unitText: "seat per month" } }] : []; };
   const offers = billing.enabled ? [
-    { "@type": "Offer", name: `Free trial (${billing.trialDays} days)`, price: "0", priceCurrency: "USD" },
-    ...(price ? [{ "@type": "Offer", name: "Starter", price, priceCurrency: "USD", priceSpecification: { "@type": "UnitPriceSpecification", price, priceCurrency: "USD", unitText: "seat per month" } }] : []),
+    { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD" },
+    ...seat("Starter", priceLabel),
+    ...seat("Pro", proPriceLabel),
   ] : [];
   return {
     "@context": "https://schema.org",

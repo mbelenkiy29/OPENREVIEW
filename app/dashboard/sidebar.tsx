@@ -8,7 +8,7 @@ import { useNav, useTeamQuery } from "./tabs";
 
 export type NavGroup = { label: string; links: [key: string, label: string, icon: IconName][] };
 
-const memoryGroups: NavGroup[] = [{ label: "Memory", links: [["rules", "Custom rules", "listChecks"], ["clusters", "Cross-repo context", "graph"], ["knowledge", "Knowledge Base", "bookOpen"], ["preferences", "Learned preferences", "lightbulb"], ["integrations", "Integrations", "puzzlePiece"]] }];
+const memoryGroups: NavGroup[] = [{ label: "Memory", links: [["rules", "Custom rules", "listChecks"], ["clusters", "Cross-repo context", "graph"], ["knowledge", "Knowledge Base", "bookOpen"], ["integrations", "Integrations", "puzzlePiece"], ["preferences", "Learned preferences", "lightbulb"]] }];
 
 // Sections of Settings → Code Review (app/dashboard/sections/settings-review.tsx), in page order.
 const reviewSections: [id: string, label: string, icon: IconName][] = [

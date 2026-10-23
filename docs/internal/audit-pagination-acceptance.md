@@ -4,7 +4,7 @@ October 4, 2026. The portal previously read only the newest 100 audit events. It
 
 The regression inserts 151 own-workspace events interleaved with foreign events, traverses six pages, verifies exact descending order and no duplicates, and denies unauthorized users, foreign workspace reads and a demoted viewer. Full verification: **171 Node + 141 Convex = 312 tests**, lint, typecheck and production build passed.
 
-Backend deployment is Convex `tidy-ocelot-457`. Vercel production release **dpl_9dfjSheqs8F8kX7uwwjpfgr2URx2** is READY and aliased to https://openreview-flame-two.vercel.app. Its hosted build passed.
+Backend deployment is Convex `<prod-deployment>`. Vercel production release **`<deployment-id>`** is READY and aliased to `<vercel-url>`. Its hosted build passed.
 
 Live backend traversal returns 227 real events over pages `[30,30,30,30,30,30,30,17]`, including 127 beyond the previous 100-event window. The first 100 exactly match the compatible query. All events belong to the selected workspace; no repeated IDs, fixture mutation or inference request occurred.
 

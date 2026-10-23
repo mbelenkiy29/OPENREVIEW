@@ -44,6 +44,8 @@ async function setup(t: T, released = true) {
     await ctx.db.insert("billingAccounts", { organizationId: bobCo, customerId: "cus_bob", subscriptionId: "sub_bob", status: "active", seats: 1, trialEndsAt: Date.now(), updatedAt: Date.now() });
     await ctx.db.insert("billingAccounts", { organizationId: aliceCo, customerId: "cus_alice", subscriptionId: "sub_alice", status: "active", seats: 1, trialEndsAt: Date.now(), updatedAt: Date.now() });
   });
+  // The accrual's look at in_1's payments (referralJobs.checkInvoiceCharges) finds none.
+  mockStripe({ "GET /v1/invoice_payments": () => list([]) });
   await deliver(t, invoicePaid("in_1"));
   await run(t);
   if (released) vi.setSystemTime(Date.now() + 30 * 86400000);
@@ -130,18 +132,28 @@ test("a refund still claws back after the referred workspace was deleted; with n
   expect(await commission(t)).toMatchObject({ reversed: 2000 });
 });
 
-test("a refund seen before its invoice's commission exists is looked at again", async () => {
+test("a refund or dispute handled before its invoice's commission exists is taken back once the commission accrues", async () => {
   const t = convexTest(schema, modules);
   await setup(t, false);
-  mockStripe({ "GET /v1/charges/ch_1": charge(12000), "GET /v1/invoice_payments": () => list([{ id: "inpay_2", invoice: "in_2" }]) });
-  expect(await t.action(internal.referralJobs.resolveChargeEvent, { chargeId: "ch_1", kind: "refund", customer: "cus_bob" })).toBe("retrying");
-  // invoice.paid for in_2 arrives late; the retry a minute later reverses its new commission.
+  // in_2 was refunded and in_3 disputed before Stripe redelivered their invoice.paid events (a webhook outage).
+  const paidBy: Record<string, string> = { in_2: "pi_2", in_3: "pi_3" }, charges: Record<string, { id: string; amount: number; amount_refunded: number; disputed: boolean }> = { pi_2: { id: "ch_2", amount: 12000, amount_refunded: 12000, disputed: false }, pi_3: { id: "ch_3", amount: 12000, amount_refunded: 0, disputed: true } };
+  const payment = (invoice: string) => ({ id: `inpay_${invoice}`, invoice, payment: { type: "payment_intent", payment_intent: paidBy[invoice] } });
+  const calls = mockStripe({
+    "GET /v1/invoice_payments": (call) => list(Object.keys(paidBy).filter((invoice) => call.query.get("invoice") === invoice || call.query.get("payment[payment_intent]") === paidBy[invoice]).map(payment)),
+    "GET /v1/charges": (call) => list([charges[call.query.get("payment_intent")!]]),
+    "GET /v1/charges/ch_2": () => Response.json({ ...charges.pi_2, customer: "cus_bob", payment_intent: "pi_2" }),
+    "GET /v1/charges/ch_3": () => Response.json({ ...charges.pi_3, customer: "cus_bob", payment_intent: "pi_3" }),
+    "GET /v1/disputes": () => list([{ id: "dp_3", charge: "ch_3", status: "needs_response", amount: 12000 }]),
+  });
+  expect(await t.action(internal.referralJobs.resolveChargeEvent, { chargeId: "ch_2", kind: "refund", customer: "cus_bob" })).toBe("no commission");
+  expect(await t.action(internal.referralJobs.resolveChargeEvent, { chargeId: "ch_3", kind: "dispute" })).toBe("no commission");
+  // Hours later, the invoices accrue; each commission's look at its invoice's payments finds the charge and takes it back.
+  vi.advanceTimersByTime(3 * 3600_000);
   await deliver(t, invoicePaid("in_2"));
+  await deliver(t, invoicePaid("in_3"));
   await run(t);
-  expect((await t.run((ctx) => ctx.db.query("referralCommissions").collect())).map((c) => [c.invoiceId, c.reversed])).toEqual([["in_1", 0], ["in_2", 2000]]);
-  // After the last retry it gives up.
-  mockStripe({ "GET /v1/charges/ch_1": charge(12000), "GET /v1/invoice_payments": () => list([{ id: "inpay_3", invoice: "in_3" }]) });
-  expect(await t.action(internal.referralJobs.resolveChargeEvent, { chargeId: "ch_1", kind: "refund", customer: "cus_bob", attempt: 4 })).toBe("no commission");
+  expect((await t.run((ctx) => ctx.db.query("referralCommissions").collect())).map((c) => [c.invoiceId, c.reversed])).toEqual([["in_1", 0], ["in_2", 2000], ["in_3", 2000]]);
+  expect(calls.filter((c) => c.query.has("invoice")).map((c) => c.query.toString())).toEqual(["invoice=in_2&status=paid&limit=100", "invoice=in_3&status=paid&limit=100"]);
 });
 
 test("a dispute without a payment intent resolves through the charge: open reverses, won restores", async () => {

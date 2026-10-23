@@ -1,6 +1,7 @@
 import {beginCatalog} from "./pullCatalogs";
 import { autoEnableNewRepository } from "./repositoryOnboarding";
 import { choosePlanMessage, planMissing } from "./billing";
+import { lifecycleEmail } from "./lifecycleEmails";
 import {
   internalMutation,
   internalQuery,
@@ -16,7 +17,7 @@ import {indexWriteAllowed,indexBatchMatches} from "./indexAuthority";
 import {adoptP4Baseline} from "./p4Polling";
 import {p4SubmittedRevision} from "../src/p4-revision";
 
-import { defaults,validSummarySections,validReviewEngine,validCheckFailureSeverity,validTriggerSettings,validPublicationSettings } from "../src/review-settings";
+import { defaults,validSummarySections,validReviewEngine,validCheckFailureSeverity,validTriggerSettings,validPublicationSettings,validModelSettings } from "../src/review-settings";
 import { applicableRules } from "../src/rule-scopes";
 import { categories } from "../src/engine/types";
 import { workspaceFixLabel } from "../src/fix-agents";
@@ -36,6 +37,7 @@ export async function enableIndexing(ctx:MutationCtx,repo:Doc<"repositories">){
  const queued=repo.indexStatus==="queued"&&scheduled&&["pending","inProgress"].includes(scheduled.state.kind);
  const pending=(!repo.indexedSha||["failed","cancelled"].includes(repo.indexStatus))&&!queued&&repo.indexStatus!=="indexing";
  await ctx.db.patch(repo._id,{enabled:true,...(pending?{indexStatus:"queued",error:undefined}:{})});
+ if(!repo.enabled)await lifecycleEmail(ctx,"repository_connected",{organizationId:repo.organizationId});
  const catalog=await ctx.db.query("pullCatalogJobs").withIndex("by_repo",q=>q.eq("repositoryId",repo._id)).order("desc").first();
  if(!repo.enabled||!catalog)await beginCatalog(ctx,repo._id);
  if(pending){const indexScheduledId=await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});await ctx.db.patch(repo._id,{indexScheduledId});}
@@ -43,7 +45,9 @@ export async function enableIndexing(ctx:MutationCtx,repo:Doc<"repositories">){
 export async function cancelRepositoryIndex(ctx:MutationCtx,repo:Doc<"repositories">){
  const scheduled=repo.indexScheduledId?await ctx.db.system.get(repo.indexScheduledId):null;
  if(scheduled?.state.kind==="pending")await ctx.scheduler.cancel(scheduled._id);
- for(const job of await ctx.db.query("indexJobs").withIndex("by_repo",q=>q.eq("repositoryId",repo._id)).collect())if(job.status==="running")await ctx.db.patch(job._id,{status:"cancelled",updatedAt:Date.now()});
+ // Only the newest job can be running: indexing() supersedes a running job before starting another.
+ const job=await ctx.db.query("indexJobs").withIndex("by_repo",q=>q.eq("repositoryId",repo._id)).order("desc").first();
+ if(job?.status==="running")await ctx.db.patch(job._id,{status:"cancelled",updatedAt:Date.now()});
  if(["queued","indexing"].includes(repo.indexStatus))await ctx.db.patch(repo._id,{indexStatus:"cancelled",pendingIndexSha:undefined,error:undefined});
 }
 export async function disableRepository(ctx:MutationCtx,repo:Doc<"repositories">){await ctx.db.patch(repo._id,{enabled:false});await cancelRepositoryIndex(ctx,repo);}
@@ -88,8 +92,8 @@ export const configure = mutation({
         s.minimumConfidence < 0.5 ||
         s.minimumConfidence > 1 ||
         !["critical", "high", "medium", "low"].includes(s.severityThreshold) ||
-        !["fast", "standard", "deep"].includes(s.mode) ||
-        !["concise", "detailed"].includes(s.commentStyle) ||
+        !["fast", "standard", "deep", "auto"].includes(s.mode) ||
+        !["concise", "detailed", "compact"].includes(s.commentStyle) ||
         !validSummarySections(s.summarySections) ||
         !validReviewEngine(s.reviewEngine) ||
         !validCheckFailureSeverity(s.checkFailureSeverity) ||
@@ -98,6 +102,7 @@ export const configure = mutation({
         s.categories.some((c) => !(categories as readonly string[]).includes(c))
       )
         throw new Error("Invalid review settings");
+      if (!validModelSettings(s)) throw new Error("Choose a model from this deployment's list");
       const existing = await ctx.db
         .query("repositorySettings")
         .withIndex("by_repo", (q) => q.eq("repositoryId", repo._id))
@@ -185,9 +190,12 @@ export const githubInstallations = query({
   },
 });
 // Which of these GitHub installations are linked here, linked to another workspace, or unlinked.
+// Web server only (service secret): it passes installation ids read with the user's own GitHub token, so a
+// workspace owner cannot probe arbitrary ids to learn which installations belong to other workspaces.
 export const installationOwnership = query({
-  args: { token: v.string(), organizationId: v.id("organizations"), installationIds: v.array(v.number()) },
+  args: { token: v.string(), secret: v.string(), organizationId: v.id("organizations"), installationIds: v.array(v.number()) },
   handler: async (ctx, a) => {
+    service(a.secret);
     await authorize(ctx, a.token, a.organizationId, true);
     const result: Record<string, "here" | "elsewhere" | "none"> = {};
     for (const id of a.installationIds.slice(0, 200)) {

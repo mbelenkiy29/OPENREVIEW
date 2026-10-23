@@ -45,7 +45,9 @@ export class Origin implements Scm {
   if(!endpoint.startsWith("/")||endpoint.startsWith("//")||endpoint.includes("://"))throw new Error("Invalid Origin API path");
   const response=await fetch(originApi+endpoint,{method:method??(body===undefined?"GET":"POST"),redirect:"error",headers:{authorization:"Bearer "+await this.accessToken(),"content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(60000)});
   if(!response.ok){if(response.status===401)this.token=undefined;throw new OriginApiError(response.status,endpoint);}
-  return schema.parse(await response.json());
+  // shortcut: 20MB, not Atlassian's 2MB, because recursive trees and base64 blobs are legitimately large; stream if memory bites.
+  const text=await response.text();if(Buffer.byteLength(text,"utf8")>20000000)throw new Error("Origin response exceeds 20MB retrieval limit");
+  return schema.parse(JSON.parse(text));
  }
  private async paginate<S extends z.ZodTypeAny>(endpoint:string,key:string,schema:S,pullNumber?:number):Promise<z.output<S>[]>{
   const all:z.output<S>[]=[];let cursor="";const seen=new Set<string>();

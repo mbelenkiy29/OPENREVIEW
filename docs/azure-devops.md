@@ -28,4 +28,5 @@ OpenReview reviews pull requests in Azure Repos (Azure DevOps Services) through 
 
 - Follow-up `@openreview` commands in comments are not yet supported on Azure DevOps.
 - Automatic approval is not available.
+- Linked tickets and documents (Linear, Jira, Confluence, Notion) are fetched only when the PR author is a verified workspace member, which is not possible yet for Azure DevOps, so Azure DevOps reviews skip ticket context.
 - Azure DevOps Server (on-premises) may work at its collection URL, but it has not been verified.

@@ -1,5 +1,6 @@
 "use node";
 import {budgetModel} from "./budgetModel";
+import { upgradeNote } from "../src/plans";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
@@ -26,6 +27,8 @@ async function fixAnswer(ctx:ActionCtx,p:{github:Scm;repo:Doc<"repositories">;fi
   if(!target)return "`@openreview fix this` works as a reply in an OpenReview finding thread. Reply to the finding comment you want fixed.";
   const handoff=fixHandoffUrl(process.env.APP_URL,target.reviewId,target.fingerprint);
   if(target.status!=="open")return fixReplyBody({title:target.title,problem:`this finding is marked ${target.status}`,handoff,revision:pr.head.sha});
+  // Line numbers are from the finding's commit; after a push they may point at unrelated code.
+  if(target.commitSha!==pr.head.sha)return fixReplyBody({title:target.title,problem:"this finding is from an older revision of the pull request; request a re-review with `@openreview review` and reply to the new finding",revision:pr.head.sha});
   const prepared=await prepareFix(ctx,{github,repo,pr,tree,target});
   const {suggestion,changed}=prepared;
   // GitHub replies inherit the thread's line range; GitLab counts lines from the note's line.
@@ -34,6 +37,7 @@ async function fixAnswer(ctx:ActionCtx,p:{github:Scm;repo:Doc<"repositories">;fi
   let pullRequest:{url:string;reused:boolean}|undefined,pullRequestNote:string|undefined;
   if(p.openPullRequest){
     if(!p.fixPullRequests)pullRequestNote="Fix pull requests are turned off for this repository; a workspace admin can allow them in repository settings.";
+    else if(!await ctx.runQuery(internal.billing.entitlement,{organizationId:repo.organizationId,key:"fix.pullRequests"}))pullRequestNote=upgradeNote["fix.pullRequests"];
     else{const opened=await openFix({github,repo,pr,target,prepared,author:p.author,prNumber:p.prNumber,requestedIn:`#${p.prNumber}`});pullRequest=opened.pullRequest;pullRequestNote=opened.note;}
   }
   return fixReplyBody({title:target.title,explanation:prepared.explanation,block,problem:prepared.problem,handoff,pullRequest,pullRequestNote,revision:pr.head.sha});
@@ -106,7 +110,7 @@ export const reply = internalAction({
       const sources: {path:string;content:string}[] = [];
       if (!body) {
       for(const file of pr.diff)paths.add(file.path);
-      const related=await ctx.runQuery(internal.context.related,{repositoryId:args.repositoryId,paths:[...paths],identifiers:[...new Set((args.question+"\n"+pr.diff.map(f=>f.patch).join("\n")).match(/[A-Za-z_]\w{3,}/g)??[])].slice(0,30)});
+      const related=await ctx.runQuery(internal.context.related,{repositoryId:args.repositoryId,paths:[...paths].slice(0,20),identifiers:[...new Set((args.question+"\n"+pr.diff.map(f=>f.patch).join("\n")).match(/[A-Za-z_]\w{3,}/g)??[])].slice(0,30)});
       for(const path of related.paths)paths.add(path);
       let remaining=40000;
       for (const path of [...paths].slice(0, 20)) {

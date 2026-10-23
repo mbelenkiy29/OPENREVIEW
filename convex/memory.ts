@@ -60,10 +60,9 @@ export const rules = query({
     const repos = await visibleRepositories(ctx, a.token, a.organizationId, a.teamId);
     if (a.repositoryId && !repos.some((r) => r._id === a.repositoryId)) throw new Error("Repository not accessible");
     const search = a.search?.trim().toLowerCase() ?? "";
-    const groups = await Promise.all(repos.filter((r) => !a.repositoryId || r._id === a.repositoryId).map(async (repo) =>
-      (await ctx.db.query("learnedRules").withIndex("by_repo_status", (q) => q.eq("repositoryId", repo._id)).take(500))
-        .filter((r) => (!a.status || r.status === a.status) && [r.text, r.category, r.status, r.scope ?? "repo", repo.fullName].join(" ").toLowerCase().includes(search))
-        .map((r) => ({ ...r, repositoryName: repo.fullName, hasTeam: !!repo.teamId }))));
-    return groups.flat().sort((x, y) => (x.status === "suggested" ? 0 : 1) - (y.status === "suggested" ? 0 : 1) || y.updatedAt - x.updatedAt).slice(0, 300);
+    const byId = new Map(repos.map((r) => [r._id, r]));
+    // One bounded workspace query, not take(500) per visible repository.
+    const records = await (a.repositoryId ? ctx.db.query("learnedRules").withIndex("by_repo_status", (q) => q.eq("repositoryId", a.repositoryId!)) : ctx.db.query("learnedRules").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId))).order("desc").take(2000);
+    return records.flatMap((r) => { const repo = byId.get(r.repositoryId); return repo && (!a.status || r.status === a.status) && [r.text, r.category, r.status, r.scope ?? "repo", repo.fullName].join(" ").toLowerCase().includes(search) ? [{ ...r, repositoryName: repo.fullName, hasTeam: !!repo.teamId }] : []; }).sort((x, y) => (x.status === "suggested" ? 0 : 1) - (y.status === "suggested" ? 0 : 1) || y.updatedAt - x.updatedAt).slice(0, 300);
   },
 });

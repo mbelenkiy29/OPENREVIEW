@@ -32,11 +32,8 @@ export async function POST(request: Request) {
       .parse(await request.json());
     if (args.runtimeEvidence)
       return Response.json({error:"Runtime evidence must be reported by a paired runtime worker, not supplied in a review request"},{status:400});
-    const repos = await backend().query(api.repositories.list, {
-      token,
-      organizationId,
-    });
-    if (!repos.some((r) => r._id === args.repositoryId))
+    // One repository lookup (access and workspace), not a scan of every repository.
+    if (!(await backend().query(api.repositories.status, { token, organizationId, repositoryId: args.repositoryId as Id<"repositories"> }).catch(() => null)))
       return Response.json(
         { error: "Repository not accessible to this API key" },
         { status: 403 },

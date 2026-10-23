@@ -19,7 +19,7 @@ export function WorkspaceMenu({ organizationId, name, role, organizations, teams
   const selected = teams.find((t) => t._id === (team ?? savedTeam));
   // A review page returns to the pull request list; the server accepts only known dashboard paths.
   const returnTo = pathname.startsWith("/dashboard/pulls/") ? "/dashboard/pulls" : pathname;
-  return <PortalDisclosure className="scope-selector" label={<><span className="scope-name">{name}{selected && " / " + selected.name}</span><span className="badge">{role[0].toUpperCase() + role.slice(1)}</span><Icon name="caretUpDown" /></>}>
+  return <PortalDisclosure className="scope-selector" label={<><span className="scope-name">{name}{selected && " / " + selected.name}</span><span className="role-badge">{role[0].toUpperCase() + role.slice(1)}</span><Icon name="caretUpDown" /></>}>
     <div className="scope-menu">
       <form action={switchWorkspace}><label className="sr-only" htmlFor="workspace">Workspace</label><select key={organizationId} id="workspace" name="organizationId" defaultValue={organizationId}>{organizations.map(o => <option key={o._id} value={o._id}>{o.name}</option>)}</select><button className="small">Switch workspace</button></form>
       <form action={switchTeam}><label htmlFor="scope-team">Team</label><select key={organizationId+":"+(selected?._id??"")} id="scope-team" name="teamId" defaultValue={selected?._id??""}><option value="">All accessible teams</option>{teams.map(t=><option key={t._id} value={t._id}>{t.name}</option>)}</select><input type="hidden" name="returnTo" value={returnTo}/><button className="small">Apply team</button></form>

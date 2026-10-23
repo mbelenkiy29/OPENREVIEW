@@ -7,6 +7,7 @@ import {findingComment,findingFingerprint} from "./github";
 import type {Scm,ScmChange,ScmApprovalSnapshot} from "./gitlab";
 import type {Finding,SourceFile} from "./engine/types";
 import {runtimeTar} from "./runtime-tar";
+import {retrying} from "./scm-transport";
 
 const commit=z.string().regex(/^[a-f0-9]{40}$/);
 const uuid=z.string().transform(s=>s.replace(/^\{(.+)\}$/,"$1")).pipe(z.string().uuid());
@@ -52,7 +53,7 @@ export class BitbucketCloud implements Scm {
   return url;
  }
  private async raw(endpoint:string,limit:number,body?:unknown,method?:"DELETE"){
-  const response=await fetch(this.url(endpoint),{method:method??(body===undefined?"GET":"POST"),body:body===undefined?undefined:JSON.stringify(body),headers:{authorization:"Bearer "+this.token,accept:"application/json, text/plain","content-type":"application/json"},redirect:"error",signal:AbortSignal.timeout(60000)});
+  const verb=method??(body===undefined?"GET":"POST"),response=await retrying(verb,()=>fetch(this.url(endpoint),{method:verb,body:body===undefined?undefined:JSON.stringify(body),headers:{authorization:"Bearer "+this.token,accept:"application/json, text/plain","content-type":"application/json"},redirect:"error",signal:AbortSignal.timeout(60000)}));
   if(!response.ok)throw new Error("Bitbucket Cloud source access unavailable ("+response.status+")");
   if(method==="DELETE"){if(response.status!==204)throw new Error("Bitbucket approval withdrawal response unavailable");return Buffer.alloc(0);}
   const reader=response.body?.getReader();if(!reader)throw new Error("Bitbucket response missing");

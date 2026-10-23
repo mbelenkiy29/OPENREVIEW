@@ -44,8 +44,8 @@ beforeEach(() => { process.env.SESSION_SECRET = "handoff-session-secret-at-least
 afterEach(() => { vi.restoreAllMocks(); delete process.env.APP_URL; });
 const sign = (id: string) => new SignJWT({}).setProtectedHeader({ alg: "HS256" }).setIssuer("openreview").setAudience("openreview").setSubject(id).setExpirationTime("1h").sign(new TextEncoder().encode(process.env.SESSION_SECRET));
 
-async function setup() {
-  const t = convexTest(schema, modules); holder.t = t;
+async function setup(documentsRead?: number) {
+  const t = convexTest({ schema, modules, ...(documentsRead ? { transactionLimits: { documentsRead } } : {}) }); holder.t = t;
   const userId = await t.mutation(api.users.login, { secret: "handoff-service", githubId: 81, login: "alice", avatar: "" });
   holder.session = await sign(userId);
   const organizationId = await t.mutation(api.users.createOrganization, { token: holder.session, name: "Fixes" });
@@ -160,4 +160,16 @@ test("the bridge never claims a cloud hand-off, and saved agent choices round-tr
   expect(personal.personalAgent).toBeUndefined();
   await t.mutation(api.bridge.savePersonal, { token: holder.session });
   expect(await t.run((ctx) => ctx.db.query("personalSettings").collect())).toHaveLength(0);
+});
+
+test("preparing a hand-off reads only this review's findings, not the pull request's whole history", async () => {
+  const { t, reviewId, organizationId, repo } = await setup(150);
+  await t.run(async (ctx) => {
+    // An earlier review's findings on the same pull request (its review row is gone; only the findings matter here).
+    const old = await ctx.db.insert("reviews", { organizationId, repositoryId: repo._id, prNumber: 3, headSha: "o".repeat(40), status: "completed", mode: "standard", attempts: 1, createdAt: 0, updatedAt: 0 });
+    for (let i = 0; i < 200; i++) await ctx.db.insert("findings", { organizationId, repositoryId: repo._id, reviewId: old, prNumber: 3, title: "Old " + i, description: "Old.", severity: "low", confidence: 0.9, category: "correctness", filePath: "src/a.ts", startLine: 1, endLine: 1, commitSha: "o".repeat(40), evidence: [], impact: "None.", suggestedFix: "None.", symbol: "a", fingerprint: "old" + i, agent: "correctness", status: "open", createdAt: 0, updatedAt: 0 });
+    await ctx.db.delete(old);
+  });
+  const requestId = await t.mutation(api.cloudHandoff.prepare, { token: holder.session, reviewId, agent: "cursor" });
+  expect((await t.run((ctx) => ctx.db.get(requestId)))?.findingIds).toHaveLength(2);
 });

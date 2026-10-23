@@ -4,12 +4,19 @@ import {internal} from './_generated/api';
 import type {Id} from './_generated/dataModel';
 import {authorize,authorizeRepository,audit,repositoryAccess} from './auth';
 import type {Doc} from './_generated/dataModel';
-import {p4Baseline} from './p4Index';
+import {p4BaselineMetadata} from './p4Index';
 import {connectionDigest} from './indexAuthority';
 import {cancelReview} from './reviewLifecycle';
 import {effectiveSettings} from './scopes';
 import {observePull} from './pulls';
 const identity={id:v.id('p4Polls'),generation:v.number()},worker={...identity,leaseId:v.string()};
+// Status ranges around cancelled < completed < failed read only non-terminal reviews, never a repo's finished history.
+const activeReviews=async(ctx:MutationCtx,repositoryId:Id<'repositories'>)=>(await Promise.all([
+ ctx.db.query('reviews').withIndex('by_repo_status',q=>q.eq('repositoryId',repositoryId).lt('status','cancelled')).collect(),
+ ctx.db.query('reviews').withIndex('by_repo_status',q=>q.eq('repositoryId',repositoryId).gt('status','cancelled').lt('status','completed')).collect(),
+ ctx.db.query('reviews').withIndex('by_repo_status',q=>q.eq('repositoryId',repositoryId).gt('status','completed').lt('status','failed')).collect(),
+ ctx.db.query('reviews').withIndex('by_repo_status',q=>q.eq('repositoryId',repositoryId).gt('status','failed')).collect(),
+])).flat();
 /** A completed authorized index replaces an enabled poll's baseline atomically. */
 export async function adoptP4Baseline(ctx:MutationCtx,job:Doc<'indexJobs'>){
  if(!job.nativeDepot||job.status!=='completed')return;
@@ -19,7 +26,7 @@ export async function adoptP4Baseline(ctx:MutationCtx,job:Doc<'indexJobs'>){
  if(poll.connectionId!==job.nativeDepot.connectionId||poll.credentialDigest!==job.nativeDepot.credentialDigest)return;
  try{await repositoryAccess(ctx,poll.requestedBy,job.repositoryId,true,true);}catch{return;}
  if(poll.scheduledId){const scheduled=await ctx.db.system.get(poll.scheduledId);if(scheduled?.state.kind==='pending')await ctx.scheduler.cancel(poll.scheduledId);}
- for(const review of await ctx.db.query('reviews').withIndex('by_repo',q=>q.eq('repositoryId',job.repositoryId)).collect())if(review.nativeP4?.polling?.id===poll._id&&!['completed','failed','cancelled'].includes(review.status))await cancelReview(ctx,review);
+ for(const review of await activeReviews(ctx,job.repositoryId))if(review.nativeP4?.polling?.id===poll._id)await cancelReview(ctx,review);
  const generation=poll.generation+1,now=Date.now();
  const scheduledId=await ctx.scheduler.runAfter(0,internal.p4PollJobs.step,{id:poll._id,generation});
  await ctx.db.patch(poll._id,{generation,baselineJobId:job._id,status:'queued',pending:[],position:0,pages:0,cursor:undefined,lease:undefined,attempts:0,error:undefined,scheduledId,nextAt:now,updatedAt:now});
@@ -27,7 +34,7 @@ export async function adoptP4Baseline(ctx:MutationCtx,job:Doc<'indexJobs'>){
 export async function p4PollingAuthority(ctx:QueryCtx|MutationCtx,id:Id<'p4Polls'>,generation:number,leaseId?:string){
  const poll=await ctx.db.get(id);
  if(!poll?.enabled||poll.generation!==generation||poll.status==='failed'||leaseId&&(!poll.lease||poll.lease.id!==leaseId||poll.lease.expiresAt<=Date.now()))throw new Error('P4 polling stopped, replaced or lease expired');
- const baseline=await p4Baseline(ctx,poll);
+ const baseline=await p4BaselineMetadata(ctx,poll);
  if(baseline.connection._id!==poll.connectionId||await connectionDigest(baseline.connection.credentials)!==poll.credentialDigest)throw new Error('P4 polling credentials changed; administrator must restart');
  return {poll,...baseline};
 }
@@ -42,9 +49,9 @@ export const configure=mutation({args:{token:v.string(),repositoryId:v.id('repos
  const old=await ctx.db.query('p4Polls').withIndex('by_repo',q=>q.eq('repositoryId',repo._id)).unique();
  if(old?.scheduledId){const scheduled=await ctx.db.system.get(old.scheduledId);if(scheduled?.state.kind==='pending')await ctx.scheduler.cancel(old.scheduledId);}
  // Poll generation revocation cancels its automatic runs, never manual requests.
- if(old)for(const review of await ctx.db.query('reviews').withIndex('by_repo',q=>q.eq('repositoryId',repo._id)).collect())if(review.nativeP4?.polling?.id===old._id&&!['completed','failed','cancelled'].includes(review.status))await cancelReview(ctx,review);
+ if(old)for(const review of await activeReviews(ctx,repo._id))if(review.nativeP4?.polling?.id===old._id)await cancelReview(ctx,review);
  if(!a.enabled){if(old)await ctx.db.patch(old._id,{enabled:false,status:'disabled',generation:old.generation+1,scheduledId:undefined,nextAt:undefined,lease:undefined,updatedAt:Date.now()});await audit(ctx,repo.organizationId,user._id,'p4.polling.disabled',repo._id);return;}
- const baseline=await p4Baseline(ctx,{repositoryId:repo._id,requestedBy:user._id});
+ const baseline=await p4BaselineMetadata(ctx,{repositoryId:repo._id,requestedBy:user._id});
  const now=Date.now(),generation=(old?.generation??0)+1;
  const value={organizationId:repo.organizationId,repositoryId:repo._id,requestedBy:user._id,connectionId:baseline.connection._id,credentialDigest:await connectionDigest(baseline.connection.credentials),baselineJobId:baseline.job._id,enabled:true,generation,status:'queued',pending:[],position:0,pages:0,scanned:0,skipped:0,diagnostics:[],attempts:0,updatedAt:now};
  const id=old?old._id:await ctx.db.insert('p4Polls',{...value,createdAt:now});

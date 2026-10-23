@@ -9,11 +9,8 @@ export async function GET(request: Request) {
     const repositoryId = url.searchParams.get("repositoryId");
     if (!repositoryId)
       return Response.json({ error: "repositoryId required" }, { status: 400 });
-    const repos = await backend().query(api.repositories.list, {
-      token,
-      organizationId,
-    });
-    if (!repos.some((r) => r._id === repositoryId))
+    // One repository lookup (access and workspace), not a scan of every repository.
+    if (!(await backend().query(api.repositories.status, { token, organizationId, repositoryId: repositoryId as Id<"repositories"> }).catch(() => null)))
       return Response.json({ error: "Forbidden" }, { status: 403 });
     const query = url.searchParams.get("query");
     if (query)
