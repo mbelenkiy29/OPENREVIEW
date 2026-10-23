@@ -58,7 +58,7 @@ test("a magic-link request stores the referral code on the login token and keeps
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ id: "email_1" }), { status: 200, headers: { "content-type": "application/json" } }));
   const form = new FormData();
   form.set("email", "new@example.com"); form.set("from", "signup"); form.set("referral", "abcd-2345");
-  const response = await requestMagicLink(new Request(`${base}/api/auth/email`, { method: "POST", body: form }));
+  const response = await requestMagicLink(new Request(`${base}/api/auth/email`, { method: "POST", headers: { origin: base }, body: form }));
   expect(response.headers.get("location")).toBe(`${base}/signup?email=sent&referral=ABCD2345`);
   expect((await t.run((ctx) => ctx.db.query("loginTokens").collect())).map((token) => token.referralCode)).toEqual(["ABCD2345"]);
 });

@@ -36,6 +36,7 @@ test("milestones follow the workspace's progress, with the time each happened", 
   expect(events(all)).toEqual(["signed_up", "workspace_created", "repository_connected", "first_review_completed"]);
   expect(all.find((m) => m.event === "first_review_completed")?.at, "the oldest completed review").toBe(2_000);
   expect(all.every((m) => m.event === "signed_up" || m.workspaceId === organizationId)).toBe(true);
+  expect(events(await t.query(api.analyticsMilestones.pending, { token: member, organizationId })), "workspace milestones go to owners only, so each is sent once").toEqual(["signed_up"]);
 });
 
 test("reported milestones are not sent again, and unknown keys are ignored", async () => {

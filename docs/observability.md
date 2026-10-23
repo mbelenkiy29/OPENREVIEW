@@ -21,6 +21,8 @@ The hosted site can report errors to [Sentry](https://sentry.io), product analyt
     - The browser sends each with the time it happened, and only after consent.
     - Each is then marked reported on the user, so it goes out once.
     - `repository_connected` uses the time the workspace's first enabled repository was added.
+    - Workspace milestones go to the workspace's owners only, so each workspace sends them once.
+    - Internal and test accounts get none (see **Sign-in funnel** below), so they never count as ad conversions.
 - Not collected:
   - Clicks and page text on signed-in pages (dashboard, invitations, fix links); those pages only send page views.
   - Session recordings, which are off.
@@ -56,6 +58,50 @@ The hosted site can report errors to [Sentry](https://sentry.io), product analyt
 - `/lantern` → PostHog.
 
 The filters live in `src/telemetry.ts` and are tested in `tests/telemetry.test.ts`.
+
+**Preview deployments:** neither ad pixel loads when `NEXT_PUBLIC_VERCEL_ENV` is `preview`, so test sign-ups there never count as conversions. Scope the pixel variables to Production in Vercel as well.
+
+## Sign-in funnel (server-side)
+
+The browser milestones above depend on consent and a dashboard visit. The server keeps its own record, written in the same transaction as each step and deduplicated by key (`convex/conversions.ts`, table `conversionEvents`):
+
+| Event | When |
+| --- | --- |
+| `signup_verified:<user>` | A completed sign-in creates the account: a used magic link (proves the inbox), a verified OAuth callback or an SSO assertion. `method` is the provider. |
+| `github_app_installed:<workspace>` | The workspace's first GitHub App installation. |
+| `first_repository_connected:<workspace>`, `first_review_completed:<workspace>`, `subscribed:<workspace>` | The once-per-workspace lifecycle moments. These exist only for workspaces created since lifecycle emails existed. |
+
+**Redundant steps:**
+- "Email verified" and "magic link completed" are the same step: using the link is the verification.
+- The first session starts in the transaction that creates the account.
+- Returning sign-ins are the `sessions` rows (provider and time) with no new `signup_verified`.
+
+**Internal and test accounts** are matched by `ANALYTICS_INTERNAL_EMAILS`, `ANALYTICS_INTERNAL_EMAIL_DOMAINS` and `ANALYTICS_INTERNAL_GITHUB_LOGINS` (Convex, comma-separated), `@resend.dev`, and the `.test`, `.example`, `.invalid` and `.localhost` TLDs. They are checked when read, so a changed list applies to existing accounts too.
+
+**Comparing sign-in emails with real accounts:**
+1. **Requests:** the web app logs one line per request to `/api/auth/email`:
+   `{"event":"auth.magic_link","rid","decision","email":"<hmac>","ip":"<hmac>","domain","turnstile":{"outcome","codes"},"ms"}`.
+   - `decision` is one of `sent`, `cooldown`, `limited`, `challenge_failed`, `origin_rejected`, `invalid` or `error`.
+   - Count lines by `decision` in Vercel's logs. Add a log drain if you need more history than the plan keeps.
+   - Convex logs `auth.magic_link_send` with the same `rid` and Resend's message id.
+   - The changelog form logs `changelog.subscribe` the same way.
+   - No line contains an address, an IP, a link or a token.
+2. **Funnel per day:** `npx convex run authFunnel:report '{"since":<ms>,"until":<ms>}' --prod` returns:
+   - links created and accepted by Resend;
+   - links used, split into new accounts and returning users;
+   - verified sign-ups by method, internal accounts left out;
+   - of those sign-ups, how many own a workspace that installed the GitHub App, connected a repository and finished a review.
+3. **Delivery:** use Resend's dashboard for delivery, bounce and complaint rates. Each magic link stores Resend's message id (`loginTokens.resendId`), and sends are tagged `category=magic_link`.
+
+**Retention and access:**
+
+| Data | Kept |
+| --- | --- |
+| Magic links | 30 days |
+| Rate-limit counters | until a day after their window |
+| `conversionEvents` | for the life of the account; a workspace's rows go with it |
+
+Everything is read through internal Convex functions (dashboard and CLI) and Vercel logs only.
 
 ## Setup (operator)
 

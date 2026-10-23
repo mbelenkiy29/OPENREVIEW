@@ -4,7 +4,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authorize, repositoryAccess } from "./auth";
-import { rateLimit } from "./rateLimit";
+import { otherUserEmailLimit, rateLimit } from "./rateLimit";
 import { emailAddress, emailConfigured } from "../src/email";
 import { billingConfig, billingDecision, usageAlertEmail } from "../src/billing";
 import { notificationEvents } from "../src/notifications";
@@ -80,7 +80,11 @@ export const savePreferences = mutation({ args: { token: v.string(), organizatio
 export const setEmail = mutation({ args: { token: v.string(), organizationId: v.id("organizations"), email: v.string() }, handler: async (ctx, a) => {
   const { user } = await authorize(ctx, a.token, a.organizationId);
   const email = emailAddress.parse(a.email);
+  // The verification email goes to any address the member types, so it is capped per day and, with
+  // invitations, deployment-wide (otherUserEmailLimit) as well as per minute.
   await rateLimit(ctx, `email-verify:${user._id}`, 3);
+  await rateLimit(ctx, `email-verify-day:${user._id}`, 10, 86_400_000);
+  await otherUserEmailLimit(ctx);
   const own = await ownPreferences(ctx, user._id, a.organizationId);
   const data = { email, emailVerifiedAt: undefined, verificationHash: undefined, verificationExpiresAt: undefined, updatedAt: Date.now() };
   const id = own ? own._id : await ctx.db.insert("notificationPreferences", { organizationId: a.organizationId, userId: user._id, ...preferenceDefaults, ...data });

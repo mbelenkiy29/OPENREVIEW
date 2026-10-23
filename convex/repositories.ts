@@ -2,6 +2,7 @@ import {beginCatalog} from "./pullCatalogs";
 import { autoEnableNewRepository } from "./repositoryOnboarding";
 import { choosePlanMessage, planMissing } from "./billing";
 import { lifecycleEmail } from "./lifecycleEmails";
+import { recordConversion } from "./conversions";
 import {
   internalMutation,
   internalQuery,
@@ -169,6 +170,8 @@ export const connect = mutation({
         createdAt: Date.now(),
       });
       await audit(ctx, args.organizationId, user._id, "github.installation_linked", `${args.installationId}:${args.account}`);
+      // "GitHub connected" in the funnel: the workspace's first installation only (convex/conversions.ts).
+      await recordConversion(ctx, "github_app_installed", args.organizationId, { organizationId: args.organizationId, userId: user._id });
     } else {
       // A verified callback for an installation GitHub had suspended or that was marked inactive.
       if (!existing.active) await audit(ctx, args.organizationId, user._id, "github.installation_reactivated", `${args.installationId}:${args.account}`);

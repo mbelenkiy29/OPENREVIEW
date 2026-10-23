@@ -1,8 +1,9 @@
 // OpenAI Ads measurement pixel (https://developers.openai.com/ads/measurement-pixel): tells Ads Manager
 // which visits and sign-ups came from our ads in ChatGPT. It sets cookies, so like PostHog it starts
 // only after the visitor accepts the analytics banner (src/analytics.ts starts it). Off unless the
-// pixel ID is set when the web app is built, so self-hosted installs send nothing.
-export const adsPixelId = process.env.NEXT_PUBLIC_OPENAI_ADS_PIXEL_ID || undefined;
+// pixel ID is set when the web app is built, so self-hosted installs send nothing, and off on Vercel
+// preview deployments, so test sign-ups there never count as conversions.
+export const adsPixelId = process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" ? undefined : process.env.NEXT_PUBLIC_OPENAI_ADS_PIXEL_ID || undefined;
 
 declare global {
   interface Window { oaiq?: (...args: unknown[]) => void }

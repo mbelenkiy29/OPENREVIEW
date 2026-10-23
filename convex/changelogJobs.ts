@@ -23,11 +23,11 @@ const resend = (path: string, method: string, body?: object) => fetch(`https://a
   signal: AbortSignal.timeout(15000),
 });
 
-export const subscribe = action({ args: { secret: v.string(), email: v.string() }, handler: async (ctx, a): Promise<"sent"> => {
+export const subscribe = action({ args: { secret: v.string(), email: v.string(), ipHash: v.optional(v.string()) }, handler: async (ctx, a): Promise<"sent"> => {
   service(a.secret);
   if (!segment()) throw new Error("Changelog email is not configured");
   const email = emailAddress.parse(a.email);
-  await ctx.runMutation(internal.changelog.limitSubscribe, { emailHash: createHash("sha256").update(email).digest("hex") });
+  await ctx.runMutation(internal.changelog.limitSubscribe, { emailHash: createHash("sha256").update(email).digest("hex"), ...(a.ipHash ? { ipHash: a.ipHash } : {}) });
   const token = await new EncryptJWT({ email }).setProtectedHeader({ alg: "dir", enc: "A256GCM" }).setAudience("changelog").setExpirationTime("1d").encrypt(linkKey());
   await sendEmail({ to: email, subject: "Confirm your OpenReview changelog emails", text: `Confirm to get what's new in OpenReview by email, at most once a week:\n${appOrigin()}/api/changelog/confirm?token=${token}\n\nThe link expires in 24 hours. If you did not ask for this, ignore this email.` });
   return "sent";

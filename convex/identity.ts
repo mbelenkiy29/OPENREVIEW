@@ -1,14 +1,16 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authenticated, authenticatedSession, authorize, service } from "./auth";
-import { rateLimit } from "./rateLimit";
+import { otherUserEmailLimit, rateLimit } from "./rateLimit";
 import { scheduleSeatSync } from "./billing";
 import { recentSignIn, recordReferralSignup } from "./referralLedger";
 import { lifecycleEmail } from "./lifecycleEmails";
-import { emailAddress } from "../src/email";
+import { recordConversion } from "./conversions";
+import { canonicalEmail, emailAddress } from "../src/email";
+import { limitKey } from "../src/limit-key";
 import { normalizeReferralCode, referralConfig } from "../src/referrals";
 
 // Identities, sessions, email invitations and magic links.
@@ -47,7 +49,11 @@ export async function resolveIdentity(ctx: MutationCtx, p: Profile): Promise<{ u
   const created = !userId;
   if (!userId) userId = await ctx.db.insert("users", { login: p.login.slice(0, 100), avatar: p.avatar, ...(p.provider === "github" ? { githubId: Number(p.providerUserId) } : {}), createdAt: now });
   await ctx.db.insert("identities", { userId, provider: p.provider, providerUserId: p.providerUserId, ...githubLogin(p), ...(email ? { email } : {}), emailVerified: Boolean(email && p.emailVerified), createdAt: now, lastLoginAt: now });
-  if (created) await lifecycleEmail(ctx, "welcome", { userId });
+  if (created) {
+    await lifecycleEmail(ctx, "welcome", { userId });
+    // Every caller has completed a sign-in by now, so a new user here is a verified sign-up.
+    await recordConversion(ctx, "signup_verified", userId, { userId, method: p.provider });
+  }
   return { userId, created };
 }
 async function startSession(ctx: MutationCtx, userId: Id<"users">, hash: string, providerName: string, userAgent?: string, signedInAt?: number) {
@@ -116,19 +122,41 @@ export async function revokeMemberAccess(ctx: MutationCtx, organizationId: Id<"o
 
 // Magic links (email sign-in): hashes only; single use; 15 minutes. A referral code rides on the token
 // and counts only if the link creates the user.
-export const storeLoginToken = internalMutation({ args: { email: v.string(), tokenHash: v.string(), referralCode: v.optional(v.string()) }, handler: async (ctx, a) => {
-  if (!hex64.test(a.tokenHash)) throw new Error("Invalid token");
-  await rateLimit(ctx, `magic-link:${a.email}`, 3, 600000);
+// Sending is limited per mailbox (canonicalEmail folds Gmail dots and +tags, so one inbox cannot be
+// flooded through its variants), per client network when the web app knows it (an HMAC from
+// src/client-ip.ts), and for the whole deployment (AUTH_EMAIL_HOURLY/AUTH_EMAIL_DAILY, below the Resend
+// quota). Every address meets the same limits, so a refusal never says whether an account exists. A
+// refusal throws ConvexError({code}): "cooldown" (asked within the last minute; the page still says
+// "sent") or "limited"; the throw rolls back every counter this call raised.
+const envLimit = (value: string | undefined, fallback: number) => { const n = Number(value); return Number.isInteger(n) && n > 0 ? n : fallback; };
+export const magicLinkLimits = (env: Record<string, string | undefined> = process.env) => ({ hourly: envLimit(env.AUTH_EMAIL_HOURLY, 60), daily: envLimit(env.AUTH_EMAIL_DAILY, 300) });
+export const storeLoginToken = internalMutation({ args: { email: v.string(), tokenHash: v.string(), referralCode: v.optional(v.string()), ipHash: v.optional(v.string()), requestId: v.optional(v.string()) }, handler: async (ctx, a): Promise<{ nearCap: boolean }> => {
+  if (!hex64.test(a.tokenHash) || (a.ipHash !== undefined && !hex64.test(a.ipHash))) throw new Error("Invalid token");
+  const limit = (code: "cooldown" | "limited", key: string, maximum: number, windowMs: number) => rateLimit(ctx, key, maximum, windowMs).catch(() => { throw new ConvexError({ code }); });
+  const to = `magic-link:to:${await limitKey(canonicalEmail(a.email))}`, { hourly, daily } = magicLinkLimits();
+  await limit("cooldown", `${to}:1m`, 1, 60_000);
+  await limit("limited", `${to}:15m`, 3, 15 * 60_000);
+  await limit("limited", `${to}:1d`, 10, 86_400_000);
+  if (a.ipHash) {
+    await limit("limited", `magic-link:ip:${a.ipHash}:10m`, 10, 600_000);
+    await limit("limited", `magic-link:ip:${a.ipHash}:1d`, 50, 86_400_000);
+  }
+  const hour = await limit("limited", "magic-link:global:1h", hourly, 3_600_000), day = await limit("limited", "magic-link:global:1d", daily, 86_400_000);
   const referralCode = referralConfig().enabled ? normalizeReferralCode(a.referralCode) : null;
-  await ctx.db.insert("loginTokens", { email: a.email, tokenHash: a.tokenHash, expiresAt: Date.now() + 15 * 60000, createdAt: Date.now(), ...(referralCode ? { referralCode } : {}) });
+  await ctx.db.insert("loginTokens", { email: a.email, tokenHash: a.tokenHash, expiresAt: Date.now() + 15 * 60000, createdAt: Date.now(), ...(referralCode ? { referralCode } : {}), ...(a.requestId ? { requestId: a.requestId } : {}) });
+  return { nearCap: hour * 2 >= hourly || day * 2 >= daily };
+} });
+export const recordSend = internalMutation({ args: { tokenHash: v.string(), resendId: v.string() }, handler: async (ctx, a) => {
+  const token = await ctx.db.query("loginTokens").withIndex("by_token", (q) => q.eq("tokenHash", a.tokenHash)).unique();
+  if (token) await ctx.db.patch(token._id, { resendId: a.resendId.slice(0, 100) });
 } });
 export const consumeLoginToken = mutation({ args: { secret: v.string(), tokenHash: v.string(), sessionHash: v.string(), userAgent: v.optional(v.string()) }, handler: async (ctx, a): Promise<Id<"users"> | null> => {
   service(a.secret);
   if (!hex64.test(a.tokenHash)) return null;
   const token = await ctx.db.query("loginTokens").withIndex("by_token", (q) => q.eq("tokenHash", a.tokenHash)).unique();
   if (!token || token.usedAt || token.expiresAt <= Date.now()) return null;
-  await ctx.db.patch(token._id, { usedAt: Date.now() });
   const { userId, created } = await resolveIdentity(ctx, { provider: "email", providerUserId: token.email, login: token.email.split("@")[0], avatar: "", email: token.email, emailVerified: true });
+  await ctx.db.patch(token._id, { usedAt: Date.now(), createdUser: created });
   if (created) await recordReferralSignup(ctx, userId, token.referralCode);
   await startSession(ctx, userId, a.sessionHash, "email", a.userAgent);
   return userId;
@@ -139,7 +167,10 @@ export const createEmailInvitation = internalMutation({ args: { token: v.string(
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
   const email = emailAddress.parse(a.email);
   if (!hex64.test(a.tokenHash)) throw new Error("Invalid token");
+  // Per workspace, and per inviter across workspaces (anyone can create a few an hour), and deployment-wide.
   await rateLimit(ctx, `email-invite:${a.organizationId}`, 20, 3600000);
+  await rateLimit(ctx, `email-invite-user:${user._id}`, 30, 86_400_000);
+  await otherUserEmailLimit(ctx);
   const id = await ctx.db.insert("emailInvitations", { organizationId: a.organizationId, email, role: a.role, tokenHash: a.tokenHash, invitedBy: user._id, expiresAt: Date.now() + 7 * 86400000, createdAt: Date.now() });
   await audit(ctx, a.organizationId, user._id, "invitation.email_created", id);
   return { id, workspace: (await ctx.db.get(a.organizationId))?.name ?? "an OpenReview workspace", inviter: user.login, email };
