@@ -38,6 +38,10 @@ OpenReview is also open-source software. If you run it on your own infrastructur
 
 Our hosting providers keep server logs that include IP addresses.
 
+To stop automated abuse of the sign-in and changelog email forms, we count requests per email address and per network. The counters hold only keyed hashes, never the address or the IP itself, and are deleted within two days. Sign-in links are deleted after 30 days.
+
+When the email forms use a bot check, Cloudflare receives your IP address and browser signals to run it.
+
 **Error reports and analytics.** We use Sentry to learn about errors and PostHog to understand how the site is used.
 - **Sentry receives:** error reports with technical details, and performance timings for a sample of page loads.
 - **PostHog receives:**
@@ -117,6 +121,7 @@ We share information only as needed to run the service, with:
 | Sentry | Error reports and performance monitoring |
 | PostHog | Product analytics |
 | UserJot | Feedback boards, roadmap and the feedback widget |
+| Cloudflare (Turnstile) | The bot check on the sign-in and changelog email forms |
 | Linear, Atlassian, Notion, Slack | Only when your workspace connects them |
 | An email delivery provider | Only when email sign-in or email notifications are turned on, or you subscribe to changelog emails |
 

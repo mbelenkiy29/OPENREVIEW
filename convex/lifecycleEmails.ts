@@ -4,6 +4,7 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { brandedEmail, emailConfigured, sendEmail } from "../src/email";
 import { verifiedEmail } from "./referralLedger";
+import { recordConversion } from "./conversions";
 
 // One-time emails: a thank-you on sign-up, then a workspace's first repository, first review and
 // subscription (workspace emails go to its owners at the time). Only verified addresses get them, so
@@ -32,6 +33,8 @@ export async function lifecycleEmail(ctx: MutationCtx, k: Kind, to: { userId: Id
     const org = await ctx.db.get(to.organizationId);
     if (!org?.lifecycleEmails || org.lifecycleEmails.includes(k)) return;
     await ctx.db.patch(org._id, { lifecycleEmails: [...(org.lifecycleEmails ?? []), k] });
+    // The same once-per-workspace moments are funnel milestones (convex/conversions.ts).
+    if (k !== "welcome") await recordConversion(ctx, k === "repository_connected" ? "first_repository_connected" : k, org._id, { organizationId: org._id });
     userIds = (await ctx.db.query("organizationMembers").withIndex("by_org", (q) => q.eq("organizationId", org._id)).collect()).filter((m) => m.role === "owner").map((m) => m.userId);
   }
   // Milestones are recorded even with email off, so turning it on later never sends a stale "first".

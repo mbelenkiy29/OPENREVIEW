@@ -46,6 +46,24 @@ Use an explicit cloud deployment reference for every migration command, for exam
 
 The local coding agent still runs on the paired user's machine. Docker runtime validation requires its [separately deployed worker](runtime-worker.md); Vercel and Convex do not provide a Docker daemon.
 
+### Sign-in email abuse protection
+
+Turn this on before the emailed sign-in link gets traffic. Details and defaults are in [identity.md](identity.md#abuse-protection-for-emailed-links).
+
+1. **Cloudflare Turnstile.** Create a widget in Managed mode for `openreview.tech`, then set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` on the web app (Production).
+   - Start with `TURNSTILE_MODE=monitor`.
+   - After a few days of `auth.magic_link` log lines with few `challenge_failed` among real users, remove it (enforce is the default).
+   - `TURNSTILE_MODE=off` is the kill switch.
+2. **Caps.** Set `AUTH_EMAIL_HOURLY`, `AUTH_EMAIL_DAILY` and `USER_EMAIL_DAILY` on Convex so that together they stay below the Resend plan's daily quota.
+3. **Internal accounts.** Set `ANALYTICS_INTERNAL_EMAIL_DOMAINS`, `ANALYTICS_INTERNAL_EMAILS` or `ANALYTICS_INTERNAL_GITHUB_LOGINS` on Convex.
+4. **Old counters.** After the deploy, run `npx convex run authHygiene:dropUnexpiringCounters --prod` once.
+5. **Vercel Firewall (optional).** Add a rate-limit rule as an outer layer before functions run: per IP, about 20 a minute on `POST /api/auth/email`, `POST /api/changelog/subscribe` and `/sso/start`.
+6. **Self-hosted.** Set `CLIENT_IP_SOURCE` to your proxy's header:
+   - nginx: `header:x-real-ip` with `proxy_set_header X-Real-IP $remote_addr`.
+   - AWS ALB: `xff-rightmost`.
+
+   The bridge pairing route (`app/api/bridge/[action]/route.ts`) still reads `x-real-ip` or the first `x-forwarded-for` itself, bounded by its global cap.
+
 See [Convex's Vercel deployment guide](https://docs.convex.dev/production/hosting/vercel), [Convex limits](https://docs.convex.dev/production/state/limits), and [Vercel Hobby eligibility](https://vercel.com/docs/plans/hobby).
 
 ## Docker deployment
