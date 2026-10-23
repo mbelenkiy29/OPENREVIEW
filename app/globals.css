@@ -463,6 +463,16 @@ form:not(.toolbar):not(.form-grid):not(.feedback):not(.sign-in-form) {
   width: 16px;
   height: 16px;
 }
+/* Stroke icons drawn inline (Memory rules table, Teams). */
+.tab-icon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .scope-selector {
   position: relative;
   min-width: 0;
@@ -500,7 +510,7 @@ form:not(.toolbar):not(.form-grid):not(.feedback):not(.sign-in-form) {
   gap: 8px;
   margin-left: auto;
 }
-.icon-button,
+.header-button,
 .profile > summary {
   display: grid;
   place-items: center;
@@ -511,7 +521,7 @@ form:not(.toolbar):not(.form-grid):not(.feedback):not(.sign-in-form) {
   color: var(--muted);
   transition: color 200ms ease-out, background-color 200ms ease-out;
 }
-.icon-button:hover,
+.header-button:hover,
 .profile > summary:hover,
 .profile[open] > summary {
   background: var(--surface-2);

@@ -89,7 +89,7 @@ function Chrome({ active, onTab, secondary, children }: { active: Tab; onTab: (t
         <span className="brand"><Mark /><span className="brand-name">OpenReview</span></span>
         <PortalDisclosure className="scope-selector" label={<><span className="scope-name">Acme</span><span className="role-badge">Admin</span><Icon name="caretUpDown" /></>}><div className="scope-menu"><p className="muted">Acme is a sample workspace.</p><a href="/signup">Create your workspace →</a></div></PortalDisclosure>
         <div className="header-actions">
-          <Link className="icon-button" href="/docs" title="Docs"><Icon name="question" /><span className="sr-only">Docs</span></Link>
+          <Link className="header-button" href="/docs" title="Docs"><Icon name="question" /><span className="sr-only">Docs</span></Link>
           <PortalDisclosure className="profile" label={<><Icon name="user" /><span className="sr-only">Account menu for @dana</span></>}><div className="profile-menu"><a href="/login">Sign in</a><a href="/signup">Create an account</a></div></PortalDisclosure>
         </div>
       </div>
