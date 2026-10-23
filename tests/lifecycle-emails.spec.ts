@@ -44,16 +44,15 @@ test('the first completed review in a workspace emails its owner once; later rev
  expect((await t.run(ctx=>ctx.db.get(org)))?.lifecycleEmails).toEqual(['first_review_completed']);
 });
 
-test('a workspace that completed a review before these emails existed gets no first-review email',async()=>{
+test('workspaces created before these emails existed get none, even with their history purged',async()=>{
  const t=convexTest(schema,modules);
  const owner=await signIn(t,{provider:'google',providerUserId:'g3',login:'pia',email:'pia@example.com',emailVerified:true});
  const org=await t.mutation(api.users.createOrganization,{token:owner.token,name:'Acme'});
- // An older review still running while a newer one already completed, before deploy.
- const older=await t.run(async ctx=>{
+ const review=await t.run(async ctx=>{
+  await ctx.db.patch(org,{lifecycleEmails:undefined});
   const repositoryId=await ctx.db.insert('repositories',{organizationId:org,githubId:1,fullName:'acme/shop',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:0});
-  await ctx.db.insert('reviews',{organizationId:org,repositoryId,prNumber:2,headSha:'f'.repeat(40),status:'completed',mode:'standard',attempts:1,createdAt:2,updatedAt:2});
   return ctx.db.insert('reviews',{organizationId:org,repositoryId,prNumber:1,headSha:'f'.repeat(40),status:'running',mode:'standard',attempts:1,createdAt:1,updatedAt:1});
  });
- await t.mutation(internal.reviews.finished,{reviewId:older});
+ await t.mutation(internal.reviews.finished,{reviewId:review});
  expect(await queued(t)).toEqual([{to:'pia@example.com',kind:'welcome'}]);
 });

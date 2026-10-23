@@ -64,6 +64,8 @@ export const createOrganization = mutation({
     const organizationId = await ctx.db.insert("organizations", {
       name: args.name.trim(),
       onboarding: { startedAt: Date.now() },
+      // Opts the workspace into one-time emails (convex/lifecycleEmails.ts); older workspaces have none.
+      lifecycleEmails: [],
       // On billing deployments a new workspace chooses a plan before anything else runs.
       ...(billingConfig().enabled ? { planRequired: true } : {}),
       createdAt: Date.now(),

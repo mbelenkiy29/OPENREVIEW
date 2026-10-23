@@ -28,8 +28,10 @@ export async function lifecycleEmail(ctx: MutationCtx, k: Kind, to: { userId: Id
     await ctx.db.patch(user._id, { lifecycleEmails: [...(user.lifecycleEmails ?? []), k] });
     userIds = [user._id];
   } else {
+    // Only workspaces created with the list get these: older ones' history (reviews, repositories) can be
+    // purged by retention, so "first" can't be told from what remains.
     const org = await ctx.db.get(to.organizationId);
-    if (!org || org.lifecycleEmails?.includes(k)) return;
+    if (!org?.lifecycleEmails || org.lifecycleEmails.includes(k)) return;
     await ctx.db.patch(org._id, { lifecycleEmails: [...(org.lifecycleEmails ?? []), k] });
     userIds = (await ctx.db.query("organizationMembers").withIndex("by_org", (q) => q.eq("organizationId", org._id)).collect()).filter((m) => m.role === "owner").map((m) => m.userId);
   }
