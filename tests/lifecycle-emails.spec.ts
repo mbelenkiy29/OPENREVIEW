@@ -56,3 +56,19 @@ test('workspaces created before these emails existed get none, even with their h
  await t.mutation(internal.reviews.finished,{reviewId:review});
  expect(await queued(t)).toEqual([{to:'pia@example.com',kind:'welcome'}]);
 });
+
+test('a milestone reached while email is off is recorded, so turning email on later sends no stale first',async()=>{
+ const t=convexTest(schema,modules);
+ const owner=await signIn(t,{provider:'google',providerUserId:'g4',login:'quinn',email:'quinn@example.com',emailVerified:true});
+ const org=await t.mutation(api.users.createOrganization,{token:owner.token,name:'Acme'});
+ const [first,second]=await t.run(async ctx=>{
+  const repositoryId=await ctx.db.insert('repositories',{organizationId:org,githubId:1,fullName:'acme/shop',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:0});
+  return Promise.all([1,2].map(n=>ctx.db.insert('reviews',{organizationId:org,repositoryId,prNumber:n,headSha:'f'.repeat(40),status:'running',mode:'standard',attempts:1,createdAt:n,updatedAt:n})));
+ });
+ delete process.env.RESEND_API_KEY;
+ await t.mutation(internal.reviews.finished,{reviewId:first});
+ process.env.RESEND_API_KEY='re_fixture';
+ await t.mutation(internal.reviews.finished,{reviewId:second});
+ expect(await queued(t)).toEqual([{to:'quinn@example.com',kind:'welcome'}]);
+ expect((await t.run(ctx=>ctx.db.get(org)))?.lifecycleEmails).toEqual(['first_review_completed']);
+});

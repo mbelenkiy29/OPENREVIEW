@@ -20,7 +20,6 @@ type Kind = keyof typeof emails;
 const kind = v.union(...(Object.keys(emails) as Kind[]).map((k) => v.literal(k)));
 
 export async function lifecycleEmail(ctx: MutationCtx, k: Kind, to: { userId: Id<"users"> } | { organizationId: Id<"organizations"> }) {
-  if (!emailConfigured()) return;
   let userIds: Id<"users">[];
   if ("userId" in to) {
     const user = await ctx.db.get(to.userId);
@@ -35,6 +34,8 @@ export async function lifecycleEmail(ctx: MutationCtx, k: Kind, to: { userId: Id
     await ctx.db.patch(org._id, { lifecycleEmails: [...(org.lifecycleEmails ?? []), k] });
     userIds = (await ctx.db.query("organizationMembers").withIndex("by_org", (q) => q.eq("organizationId", org._id)).collect()).filter((m) => m.role === "owner").map((m) => m.userId);
   }
+  // Milestones are recorded even with email off, so turning it on later never sends a stale "first".
+  if (!emailConfigured()) return;
   for (const userId of userIds) {
     const address = await verifiedEmail(ctx, userId);
     if (address) await ctx.scheduler.runAfter(0, internal.lifecycleEmails.send, { to: address, kind: k });
