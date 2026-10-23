@@ -17,6 +17,7 @@ import { BitbucketCloud } from "../src/bitbucket-cloud";
 import { bitbucketEvent } from "../src/bitbucket-events";
 import { Gitlab } from "../src/gitlab";
 import { Gitea } from "../src/gitea";
+import { wantsReview } from "../src/review-tier";
 import { scmNetwork } from "../src/scm-transport";
 import { P4CodeReview,p4Credential,type P4Project,type P4Review,type P4ApprovalInspection } from "../src/perforce";
 import picomatch from "picomatch";
@@ -170,7 +171,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
      if(!Number.isSafeInteger(number)||number<1)throw new Error("Unsupported Origin change number");
      const client=await provider(ctx,repo);if(!(client instanceof Origin)||!await client.canReply(repo.fullName,author))throw new Error("Comment author requires Origin repository write access");
      const question=await client.followUp(repo.fullName,number,p.comment.id,author,p.comment.body);if(!question)throw new Error("Origin comment is not an OpenReview question");
-     if(/@openreview\s+review(?:\s+again|\s+security)?\b/i.test(p.comment.body)){
+     if(wantsReview(p.comment.body)){
       const pr=await client.pullRequest(repo.fullName,number);
       if(pr.state==="open")await ctx.runMutation(internal.conversations.requestReview,{repositoryId:repo._id,prNumber:number,commentId:p.comment.id,author:author,question:p.comment.body,headSha:pr.head.sha,revisionKey:pr.revisionKey,...(/review\s+security/i.test(p.comment.body)?{category:"security"}:{})});
      }else{
@@ -212,7 +213,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
        const question=await client.followUp(repo.fullName,number,payload.comment!.id,payload.actor.uuid!);
        if(question){
         if(!await client.canReply(repo.fullName,question.author))throw new Error("Comment author requires Bitbucket repository write access");
-        if(/@openreview\s+review(?:\s+again|\s+security)?\b/i.test(question.question)){
+        if(wantsReview(question.question)){
          const pr=await client.pullRequest(repo.fullName,number);
          if(pr.state==="open")await ctx.runMutation(internal.conversations.requestReview,{repositoryId:repo._id,prNumber:number,commentId:question.commentId,author:question.author,question:question.question,headSha:pr.head.sha,revisionKey:pr.revisionKey,...(/review\s+security/i.test(question.question)?{category:"security"}:{})});
         }else await ctx.scheduler.runAfter(0,internal.conversationJobs.reply,{repositoryId:repo._id,prNumber:number,...question});
@@ -243,7 +244,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
      if(payload.eventKey==="pr:comment:added"&&payload.comment?.author.active&&payload.actor?.name===payload.comment.author.name&&/@openreview\b/i.test(payload.comment.text)){
       const author=payload.comment.author.name;
       if(!await client.canReply(repo.fullName,author))throw new Error("Comment author requires Bitbucket repository write access");
-      if(/@openreview\s+review(?:\s+again|\s+security)?\b/i.test(payload.comment.text)){
+      if(wantsReview(payload.comment.text)){
        const pr=await client.pullRequest(repo.fullName,number);
        if(pr.state==="open")await ctx.runMutation(internal.conversations.requestReview,{repositoryId:repo._id,prNumber:number,commentId:payload.comment.id,author:author,question:payload.comment.text,headSha:pr.head.sha,revisionKey:pr.revisionKey,...(/review\s+security/i.test(payload.comment.text)?{category:"security"}:{})});
       }else await ctx.scheduler.runAfter(0,internal.conversationJobs.reply,{repositoryId:repo._id,prNumber:number,commentId:payload.comment.id,author,question:payload.comment.text,inline:payload.commentParentId!==undefined,parentCommentId:payload.commentParentId});
@@ -297,7 +298,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
     if(number&&["issue_comment","pull_request_review_comment","pull_request_review"].includes(event.eventType??"")&&["created","submitted"].includes(payload.action??"")&&comment?.user.type==="User"&&/@openreview\b/i.test(comment.body)){
      const client=await provider(ctx,repo);
      if(!client.canReply||!await client.canReply(repo.fullName,comment.user.login))throw new Error("Comment author requires GitHub Enterprise repository write access");
-     if(/@openreview\s+review(?:\s+again|\s+security)?\b/i.test(comment.body)){
+     if(wantsReview(comment.body)){
       const pr=await client.pullRequest(repo.fullName,number);
       if(pr.state==="open")await ctx.runMutation(internal.conversations.requestReview,{repositoryId:repo._id,prNumber:number,commentId:comment.id,author:comment.user.login,question:comment.body,headSha:pr.head.sha,revisionKey:pr.revisionKey,...(/review\s+security/i.test(comment.body)?{category:"security"}:{})});
      }else await ctx.scheduler.runAfter(0,internal.conversationJobs.reply,{repositoryId:repo._id,prNumber:number,commentId:comment.id,author:comment.user.login,question:comment.body,inline:event.eventType==="pull_request_review_comment",parentCommentId:comment.in_reply_to_id});
@@ -330,7 +331,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
      const authorized=await client.canReply(repo.fullName,author);if(!authorized&&timelineComment)throw new Error("Comment author requires Gitea repository write access");
      const questions=authorized?await client.followUps(repo.fullName,prNumber,author,timelineComment?{commentId:payload.comment!.id,body:payload.comment!.body}:{reviewContent:payload.review!.content,state:reviewType==="pull_request_review_approved"?"APPROVED":reviewType==="pull_request_review_rejected"?"REQUEST_CHANGES":"COMMENT"}):[];
      for(const question of questions){
-      if(/@openreview\s+review(?:\s+again|\s+security)?\b/i.test(question.body)){
+      if(wantsReview(question.body)){
        const pr=await client.pullRequest(repo.fullName,prNumber);
        if(pr.state==="open")await ctx.runMutation(internal.conversations.requestReview,{repositoryId:repo._id,prNumber,commentId:question.commentId,author,question:question.body,headSha:pr.head.sha,...(/review\s+security/i.test(question.body)?{category:"security"}:{})});
       }else await ctx.scheduler.runAfter(0,internal.conversationJobs.reply,{repositoryId:repo._id,prNumber,commentId:question.commentId,author,question:question.body,inline:question.inline,parentCommentId:question.parentCommentId});
@@ -348,7 +349,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
     if(n.action==="create"&&n.noteable_type==="MergeRequest"&&!n.system&&!n.internal&&p.merge_request?.target_project_id===payload.project.id&&n.author_id===p.user.id&&/@openreview\b/i.test(n.note)){
      const client=await provider(ctx,repo);if(!(client instanceof Gitlab)||!await client.canReply(repo.fullName,p.user.username))throw new Error("Comment author requires GitLab repository write access");
      const number=p.merge_request.iid,parentCommentId=await client.discussionParent(repo.fullName,number,n.id,p.user.username,n.note);
-     if(/@openreview\s+review(?:\s+again|\s+security)?\b/i.test(n.note)){
+     if(wantsReview(n.note)){
       const pr=await client.pullRequest(repo.fullName,number);
       if(pr.state==="open")await ctx.runMutation(internal.conversations.requestReview,{repositoryId:repo._id,prNumber:number,commentId:n.id,author:p.user.username,question:n.note,headSha:pr.head.sha,revisionKey:pr.revisionKey,...(/review\s+security/i.test(n.note)?{category:"security"}:{})});
      }else await ctx.scheduler.runAfter(0,internal.conversationJobs.reply,{repositoryId:repo._id,prNumber:number,commentId:n.id,author:p.user.username,question:n.note,inline:true,parentCommentId});

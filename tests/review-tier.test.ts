@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { autoTier, isTierLabel, labelTier, resolveTier, reviewCommand } from "../src/review-tier";
+import { autoTier, isTierLabel, labelTier, resolveTier, reviewCommand, wantsReview } from "../src/review-tier";
 import { defaults } from "../src/review-settings";
 import { applyRepoConfig } from "../src/repo-config";
 
@@ -59,4 +59,9 @@ test("precedence: comment over label over configured tier; the admin cap applies
   assert.deepEqual(resolveTier({ configured: "deep", requested: { mode: "deep", source: "label" }, cap: "fast" }).mode, "fast");
   assert.equal(resolveTier({ configured: "fast", cap: "standard" }).capped, false);
   assert.equal(defaults.maxReviewTier, "deep", "no cap by default");
+});
+
+test("a bare mention asks for a review; a mention with a question does not", () => {
+  for (const body of ["@openreview", " @OpenReview! ", "@openreview review", "@openreview review deep", "thanks @openreview review again"]) assert.equal(wantsReview(body), true, body);
+  for (const body of ["@openreview why is this cached?", "@openreview fix this", "@openreviewer", "cc @openreview, see above"]) assert.equal(wantsReview(body), false, body);
 });

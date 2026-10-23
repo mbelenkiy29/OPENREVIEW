@@ -55,6 +55,7 @@
 - Workspace owners and admins can run reviews, chat and fixes on their own Anthropic, OpenAI or OpenRouter key under Settings → API Keys. The key is checked, stored encrypted and never shown again, and the provider bills its usage.
 
 ### Pull request reviews
+- A comment that is only `@openreview` now starts a review, as `@openreview review` does. Before, it was answered as an empty question.
 - Draft pull requests (when draft reviews are off) and pull requests over your file or line limit now show as **skipped** rather than cancelled, with the reason in the review's timeline. A skipped draft is still reviewed once it is marked ready for review, and `openreview review status` exits 5 for skipped reviews, as it does for cancelled ones.
 - Reviews catch boundaries that contradict their own documentation, such as a comment saying "$50.00 or more" over code that compares `> 50`.
 - Findings are no longer dropped when the model attaches a made-up rule ID. Only custom-rule findings need a real rule.

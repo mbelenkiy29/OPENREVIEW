@@ -26,7 +26,7 @@ The first line of every summary is one of four verdicts. It is computed from rec
 
 The score is shown next to the verdict when the confidence-score summary section is enabled.
 
-The summary ends with a footer such as "Review 3 on this pull request · Comment `@openreview review` to re-run it.", followed by links to the dashboard. The number counts this pull request's published reviews and stays the same when a publication is retried. The command matches what each provider accepts: `@openreview review` on GitHub, GitHub Enterprise, GitLab, Gitea, Bitbucket and Origin, `@openreview review again` on Perforce, and the dashboard on Azure DevOps, which does not accept comment commands.
+The summary ends with a footer such as "Review 3 on this pull request · Comment `@openreview review` to re-run it.", followed by links to the dashboard. A comment that is only `@openreview` also re-runs the review. The number counts this pull request's published reviews and stays the same when a publication is retried. The command matches what each provider accepts: `@openreview review` on GitHub, GitHub Enterprise, GitLab, Gitea, Bitbucket and Origin, `@openreview review again` on Perforce, and the dashboard on Azure DevOps, which does not accept comment commands.
 
 ## Where the summary goes
 

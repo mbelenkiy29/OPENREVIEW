@@ -209,7 +209,7 @@ Azure DevOps (see [docs/azure-devops.md](docs/azure-devops.md)): connect an orga
 Repository configuration as code: `.openreview.json`, `.openreview/config.json`, `.openreview/rules.md` and nested per-directory `.openreview.json` files are read from the pull request's base revision. They are applied after workspace, team and repository dashboard settings, except keys an administrator locks. Invalid files produce visible warnings without blocking the review. See [docs/repo-config.md](docs/repo-config.md).
 
 Triggers and filters (GitHub, configurable per workspace, team or repository):
-- With **Automatic reviews** off, reviews run only on `@openreview review` or a trigger label.
+- With **Automatic reviews** off, reviews run only on `@openreview review` (or a bare `@openreview`) or a trigger label.
 - **Trigger labels** start a review on `pull_request.labeled` and keep re-reviewing labelled pull requests.
 - **Excluded authors** are globs such as `dependabot[bot]` or `*-bot`.
 - Changed-file and changed-line limits skip oversized automatic reviews, with a visible reason; an explicit `@openreview review` overrides the limits.
