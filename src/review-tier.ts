@@ -17,6 +17,8 @@ export function autoTier(diff: readonly ChangedFile[]): Tier {
   return risk < 20 && lines <= 50 ? "fast" : "standard";
 }
 export const reviewCommandPattern = /@openreview\s+review(?:\s+(again|security|fast|standard|deep))?\b/i;
+// A bare mention asks for a review, as a bare @greptileai does, not an empty question.
+export const wantsReview = (body: string) => reviewCommandPattern.test(body) || /^\s*@openreview[\s.!?]*$/i.test(body);
 export function reviewCommand(body: string): { category?: "security"; mode?: Tier } | null {
   const m = reviewCommandPattern.exec(body);
   if (!m) return null;

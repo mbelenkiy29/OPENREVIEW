@@ -7,7 +7,7 @@ import { z } from "zod";
 import { Github } from "../src/github";
 import { pullRequestTrigger } from "../src/triggers";
 import { isAgentHandoff, wantsAnswer } from "../src/thread-replies";
-import { labelTier, tiers } from "../src/review-tier";
+import { labelTier, tiers, wantsReview } from "../src/review-tier";
 
 const payloadSchema = z.object({
   action: z.string().optional(),
@@ -251,7 +251,7 @@ export const process = internalAction({
                     await ctx.scheduler.runAfter(0, internal.conversationJobs.reply, { repositoryId: repo._id, prNumber: number, commentId: comment.id, author: comment.user.login, question: comment.body, inline: true, parentCommentId: comment.in_reply_to_id });
                   }
                 } else if (
-                  /@openreview\s+review(?:\s+again|\s+security)?\b/i.test(
+                  wantsReview(
                     comment.body,
                   )
                 ) {
