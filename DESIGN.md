@@ -143,6 +143,7 @@ The landing page's motion lives in `app/landing/motion.tsx`, with its styles at 
 - **Anchors.** In-page links glide to their section below the header and move focus there.
 - **Nothing flashes.** No CSS hides content before JavaScript runs. An effect only puts content in its starting state while that content is still below the fold, so nothing the visitor has seen disappears. Sections further down are set up one per idle moment, so setup never blocks the main thread for long.
 - **Still reachable.** Reveals fade with opacity, never `visibility`, so content waiting below the fold stays in the accessibility tree and the tab order. Focusing it scrolls it into view, which reveals it. Scrolling done by the browser itself (find in page, `scrollIntoView`) is handed to the smoother, so nothing jumps back on the next click.
+- **Keeps your place.** Resizing past the desktop width, or turning reduced motion on or off, rebuilds the motion. The block the reader was looking at goes back to where it was.
 - **Timing.** Eases are expo-out (`--ease-out` in CSS). Reveals take 0.8–1.1 s, with 0.07–0.09 s between items.
 - **Reduced motion.** None of it runs, and the page as rendered is every effect's final state.
 - **Adding content.** Give new content one of the `data-*` hooks rather than new code. Keep fixed-position UI outside `#smooth-wrapper`: it is transformed while smooth scrolling runs.

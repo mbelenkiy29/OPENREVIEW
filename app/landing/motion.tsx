@@ -44,8 +44,9 @@ function rise(items: Element[]) {
 
 /** Builds every effect for the current media conditions and returns what undoes the non-GSAP parts.
  *  What the first screen needs is set up at once; each section further down is set up in its own
- *  idle moment, so the work never holds the main thread for long. */
-function choreograph(root: HTMLElement, desktop: boolean, context: gsap.Context) {
+ *  idle moment, so the work never holds the main thread for long. `settled` is called whenever
+ *  smoothed scrolling comes to rest. */
+function choreograph(root: HTMLElement, desktop: boolean, context: gsap.Context, settled: () => void) {
   const all = <T extends Element = HTMLElement>(selector: string) => [...root.querySelectorAll<T>(selector)];
   const header = root.querySelector<HTMLElement>(":scope > .site-header");
   const cleanup: (() => void)[] = [];
@@ -60,6 +61,7 @@ function choreograph(root: HTMLElement, desktop: boolean, context: gsap.Context)
       // Keyboard focus that lands off-screen is brought into view, except for an anchor target,
       // which the click handler below scrolls to smoothly.
       onFocusIn: (_self, event) => event.target !== anchoring,
+      onStop: settled,
     });
     // Find in page, scrollIntoView and test drivers scroll the nearest scrollable box, which is the
     // smoother's fixed wrapper, and the smoother resets it on the next focus, so a click right after
@@ -237,12 +239,36 @@ function choreograph(root: HTMLElement, desktop: boolean, context: gsap.Context)
   return () => cleanup.forEach((undo) => undo());
 }
 
+/** The block the reader is looking at: the first one still showing below the header, and where it is. */
+function readingPlace(root: HTMLElement) {
+  const line = Math.max(0, root.querySelector(":scope > .site-header")?.getBoundingClientRect().bottom ?? 0);
+  for (const el of root.querySelectorAll("main > * > :not(.pin-spacer), main > * > .pin-spacer > *, .site-footer")) {
+    const box = el.getBoundingClientRect();
+    if (box.bottom > line) return { el, top: box.top };
+  }
+}
+
 export default function LandingMotion() {
   useGSAP(() => {
     const root = document.querySelector<HTMLElement>(".landing");
     if (!root) return;
     ScrollTrigger.config({ ignoreMobileResize: true });
     let media: gsap.MatchMedia | undefined, live = true;
+    // A change of conditions (a window resized past the desktop width, reduced motion switched on or
+    // off) rebuilds everything, and ScrollTrigger's refresh scrolls to the top while it measures. The
+    // reader's place is noted whenever scrolling settles (native scrolling a moment after its last
+    // event, smoothed scrolling when the smoother stops) and put back once the rebuild is done.
+    let place: ReturnType<typeof readingPlace>, settle = 0;
+    const remember = () => { place = readingPlace(root); };
+    const settled = () => { window.clearTimeout(settle); settle = window.setTimeout(remember, 200); };
+    const restore = () => requestAnimationFrame(() => {
+      if (!place?.el.isConnected) return;
+      const by = place.el.getBoundingClientRect().top - place.top, smoother = ScrollSmoother.get();
+      if (smoother) smoother.scrollTop(smoother.scrollTop() + by);
+      else window.scrollBy(0, by);
+    });
+    window.addEventListener("scroll", settled, { passive: true });
+    ScrollTrigger.addEventListener("matchMedia", restore);
     // Fonts decide where heading lines break, so the splits wait for them. Content below the fold is
     // still below it then; whatever the visitor reached first is simply left as rendered.
     void document.fonts.ready.then(() => {
@@ -253,10 +279,17 @@ export default function LandingMotion() {
         const { desktop, motion } = context.conditions as { desktop: boolean; motion: boolean };
         // Tells browser checks (scripts/browser.ts) that motion has started, or chose not to.
         root.dataset.motion = motion ? "on" : "reduced";
-        return motion ? choreograph(root, desktop, context) : undefined;
+        return motion ? choreograph(root, desktop, context, remember) : undefined;
       }, root);
     });
-    return () => { live = false; media?.revert(); delete root.dataset.motion; };
+    return () => {
+      live = false;
+      window.removeEventListener("scroll", settled);
+      window.clearTimeout(settle);
+      ScrollTrigger.removeEventListener("matchMedia", restore);
+      media?.revert();
+      delete root.dataset.motion;
+    };
   });
   return null;
 }
