@@ -208,6 +208,8 @@ export default defineSchema({
     sessionsValidAfter: v.optional(v.number()),
     // Product milestones already sent to analytics (convex/analyticsMilestones.ts), so each is sent once.
     analyticsMilestones: v.optional(v.array(v.string())),
+    // One-time emails already sent (convex/lifecycleEmails.ts).
+    lifecycleEmails: v.optional(v.array(v.string())),
     createdAt: v.number(),
   }).index("by_github", ["githubId"]),
   // Sign-in identities: one row per provider account. Accounts link only through a verified

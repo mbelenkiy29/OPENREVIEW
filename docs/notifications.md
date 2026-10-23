@@ -28,6 +28,8 @@ Set `RESEND_API_KEY` and `EMAIL_FROM` on Convex. Each member sets a notification
 
 Without email configuration, deliveries are recorded as skipped.
 
+With email configured, OpenReview also sends four one-time emails (`convex/lifecycleEmails.ts`): a thank-you on sign-up, and to workspace owners when the workspace connects its first repository, completes its first review and subscribes. Each goes to a user at most once, and only to a verified address (a Google, GitLab, email-link or SSO sign-in, or a confirmed notification email), so GitHub-only users get none.
+
 ## Delivery guarantees
 
 Each (event, review, target) is delivered at most once; a failed delivery is retried when the job runs again. A repository the member can no longer access is never emailed about.

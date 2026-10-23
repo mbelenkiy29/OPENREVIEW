@@ -7,6 +7,7 @@ import { authorize } from "./auth";
 import { billingConfig, billingDecision, periodKey, seatCount, trialEndsFrom } from "../src/billing";
 import { referralConfig } from "../src/referrals";
 import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus } from "./referralLedger";
+import { lifecycleEmail } from "./lifecycleEmails";
 
 // Billing state and the review quota gate. With BILLING_ENABLED unset every check allows.
 // The account row (and with it the trial clock) starts with the first review or checkout, so
@@ -95,7 +96,7 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
     if (account.customerId && account.customerId !== a.checkout.customer) return record("customer mismatch");
     await ctx.db.patch(account._id, { customerId: a.checkout.customer, ...(a.checkout.subscription ? { subscriptionId: a.checkout.subscription } : {}), updatedAt: Date.now() });
     // A completed subscription Checkout collected the card and created the subscription.
-    if (a.checkout.subscription) await recordPlanSelected(ctx, organizationId, "checkout");
+    if (a.checkout.subscription) { await recordPlanSelected(ctx, organizationId, "checkout"); await lifecycleEmail(ctx, "subscribed", { organizationId }); }
     return record("linked");
   }
   if (a.subscription) {

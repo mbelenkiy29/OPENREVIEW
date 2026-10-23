@@ -1,5 +1,6 @@
 import {executionExplanation} from "../src/execution-claims";
 import { notificationsEnabled } from "./notifications";
+import { lifecycleEmail } from "./lifecycleEmails";
 import { reviewAllowance } from "./billing";
 import {
   internalMutation,
@@ -530,6 +531,7 @@ export const finished = internalMutation({
     }
     if(!args.error&&!review.nativeP4)await ctx.scheduler.runAfter(0,internal.approvals.request,{reviewId:review._id});
     if(!args.error&&await notificationsEnabled(ctx,review.organizationId))await ctx.scheduler.runAfter(0,internal.notificationJobs.reviewCompleted,{reviewId:review._id});
+    if(!args.error&&(await ctx.db.query("reviews").withIndex("by_org_time",q=>q.eq("organizationId",review.organizationId)).filter(q=>q.eq(q.field("status"),"completed")).first())?._id===review._id)await lifecycleEmail(ctx,"first_review_completed",{organizationId:review.organizationId});
   },
 });
 export const list = query({
