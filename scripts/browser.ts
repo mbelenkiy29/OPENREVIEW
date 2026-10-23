@@ -52,6 +52,22 @@ try {
   const summaryDemo = page.getByRole("figure", { name: /re-reviews a newly pushed fix/ });
   await summaryDemo.getByRole("button", { name: "Re-review current PR" }).click();
   await summaryDemo.getByText("0 findings · Score 5/5").first().waitFor();
+  // Landing motion (app/landing/motion.tsx): an in-page link glides to its section, scrolling to the
+  // end reveals everything, and reduced motion leaves the page as rendered, without smooth scrolling.
+  await page.goto(url);
+  await page.locator(".landing[data-motion='on']").waitFor({ state: "attached" });
+  await page.getByRole("navigation", { name: "Site" }).getByRole("link", { name: "How it works" }).click();
+  await page.waitForFunction(() => { const r = document.getElementById("how-heading")!.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
+  await page.mouse.move(600, 450);
+  for (let i = 0; i < 120 && await page.evaluate(() => scrollY + innerHeight < document.documentElement.scrollHeight - 2); i++) await page.mouse.wheel(0, 600);
+  await page.waitForFunction(() => [...document.querySelectorAll("[data-reveal], [data-stagger] > *")].every((e) => getComputedStyle(e).opacity === "1"));
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto(url);
+  await page.locator(".landing[data-motion='reduced']").waitFor({ state: "attached" });
+  assert.equal(await page.locator("#smooth-content").evaluate((e) => getComputedStyle(e).transform), "none", "Landing scrolls smoothly under reduced motion");
+  assert.equal(await page.locator(".pin-spacer").count(), 0, "Landing pins a section under reduced motion");
+  assert.equal(await page.locator(".hero h1 .line > span").first().evaluate((e) => getComputedStyle(e).animationName), "none", "Landing hero animates under reduced motion");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   for (const [path, heading] of [["/docs/quickstart", "Quickstart"], ["/docs/api", "Public API"], ["/docs/configuration", "Repository configuration as code"], ["/changelog", "Changelog"]]) {
     await page.goto(url + path);
     await page.getByRole("heading", { name: heading, level: 1 }).first().waitFor();
@@ -321,7 +337,7 @@ try {
   await page.screenshot({ path: "output/playwright/dark-desktop.png", fullPage: true, caret: "initial" });
   assert.deepEqual(errors, [], `Browser errors: ${errors.join("; ")}`);
   console.log(
-    `Browser verification passed: landing (interactive demos), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px), repository selection, ${dashboardPages} dashboard pages (main and secondary navigation), persisted settings/rules, Memory page filters, Chat page, mobile layout and dark theme. GitHub OAuth and real indexing still require external credentials.`,
+    `Browser verification passed: landing (interactive demos, motion and reduced motion), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px), repository selection, ${dashboardPages} dashboard pages (main and secondary navigation), persisted settings/rules, Memory page filters, Chat page, mobile layout and dark theme. GitHub OAuth and real indexing still require external credentials.`,
   );
 } finally {
   await browser.close();

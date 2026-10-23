@@ -41,6 +41,7 @@
   --shadow-elevated: 0 28px 70px rgba(0, 0, 0, 0.14), 0 14px 32px rgba(0, 0, 0, 0.1), 0 0 0 1px var(--line);
   --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06), 0 0 0 1px var(--line);
   --header-h: 93px;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -3442,6 +3443,7 @@ form.catalog-review {
   border-radius: 0;
 }
 .landing main > section > h2,
+.how-inner > h2,
 .feature-copy > h2 {
   font-size: 36px;
   line-height: 1.15;
@@ -3693,7 +3695,8 @@ form.catalog-review {
   line-height: 1.85;
   max-height: none;
 }
-.terminal pre span {
+/* The prompt, not the command: copying a selection leaves the "$ " behind. */
+.terminal pre code > span:first-child {
   color: var(--muted);
   user-select: none;
 }
@@ -3761,6 +3764,175 @@ form.catalog-review {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* Landing motion (app/landing/motion.tsx; DESIGN.md, "Landing motion"). The hero's entrance is CSS so
+   it plays on first paint without waiting for JavaScript; the scroll choreography is GSAP. The page as
+   rendered here is the final state of every effect. */
+.landing {
+  overflow-x: clip; /* windows sliding in from the side never widen the page */
+}
+.landing > .site-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--bg);
+  box-shadow: inset 0 -1px 0 transparent;
+  transition: box-shadow 0.2s;
+}
+.landing > .site-header.is-scrolled {
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+/* While ScrollSmoother runs (desktop), the content is a fixed layer moved by transforms, so the header
+   is fixed above it and the content keeps the header's 52px. */
+.landing.is-smooth > .site-header {
+  position: fixed;
+  inset: 0 0 auto;
+  height: 52px;
+}
+.landing.is-smooth #smooth-content {
+  padding-top: 52px;
+}
+.scroll-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 2px;
+  background: var(--text);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  pointer-events: none;
+}
+.landing main > section[id] {
+  scroll-margin-top: 76px;
+}
+/* Anchor targets take focus like a native jump; the section itself shows no ring. */
+.landing main > section[tabindex="-1"]:focus {
+  outline: none;
+}
+.hero h1 .line {
+  display: block;
+  overflow: clip;
+  padding-bottom: 0.12em;
+  margin-bottom: -0.12em;
+}
+.hero h1 .line > span {
+  display: block;
+}
+/* SplitText masks: room for descenders without changing the layout. */
+.split-line-mask {
+  padding-bottom: 0.12em;
+  margin-bottom: -0.12em;
+}
+/* Pinned on desktop, so it is the inner block that moves into ScrollTrigger's pin spacer and the
+   section keeps its place among main's children. */
+.how-inner {
+  display: grid;
+  gap: 28px;
+}
+.steps-rail {
+  position: relative;
+}
+.steps-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--text);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  pointer-events: none;
+}
+.terminal pre {
+  position: relative;
+}
+.terminal .cmd {
+  display: inline-block;
+  vertical-align: top;
+}
+.terminal .caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1ch;
+  height: 1.25em;
+  margin-top: 0.3em;
+  background: var(--text);
+  visibility: hidden;
+  pointer-events: none;
+}
+.terminal.is-typed .caret {
+  animation: caret-blink 1.1s steps(1) infinite;
+}
+.cta-dot {
+  display: inline-block;
+  color: var(--ember);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hero h1 .line > span {
+    animation: rise-in 1.1s var(--ease-out) both;
+  }
+  .hero h1 .line + .line > span {
+    animation-delay: 0.09s;
+  }
+  .hero > :not(h1) {
+    animation: fade-up 0.9s var(--ease-out) both;
+  }
+  /* The lede starts readable: it is the first screen's main text, painted on the first frame. */
+  .hero > .lede {
+    animation-name: lift-in;
+    animation-delay: 0.12s;
+  }
+  .hero > .hero-actions {
+    animation-delay: 0.3s;
+  }
+  .hero > .hero-note {
+    animation-delay: 0.36s;
+  }
+  .hero > .hero-links {
+    animation-delay: 0.42s;
+  }
+  /* The demo window streams in last; staying hidden until then keeps a half-built window off screen. */
+  .hero-stage {
+    animation: stage-in 1.2s var(--ease-out) 0.38s both;
+  }
+}
+/* The hero window's resting size before it settles on scroll (motion.tsx, same conditions). */
+@media (min-width: 1024px) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .hero-stage .replica {
+    transform: scale(0.94);
+    transform-origin: 50% 0;
+  }
+}
+@keyframes rise-in {
+  from {
+    transform: translateY(110%);
+  }
+}
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+@keyframes lift-in {
+  from {
+    opacity: 0.4;
+    transform: translateY(14px);
+  }
+}
+@keyframes stage-in {
+  from {
+    opacity: 0;
+    transform: translateY(48px);
+  }
+}
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
 }
 
 /* Landing replicas: real dashboard markup inside a window frame, interactive with sample data. */
@@ -5033,6 +5205,9 @@ input.switch:checked::before {
   }
   .site-nav a {
     white-space: nowrap;
+  }  /* The landing header wraps to two rows here. */
+  .landing main > section[id] {
+    scroll-margin-top: 112px;
   }
 }
 @media (max-width: 760px) {
@@ -5093,6 +5268,7 @@ input.switch:checked::before {
     padding: 56px 0;
   }
   .landing main > section > h2,
+  .how-inner > h2,
   .feature-copy > h2 {
     font-size: 28px;
   }

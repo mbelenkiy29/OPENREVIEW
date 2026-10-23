@@ -17,7 +17,10 @@ existing classes and tokens; avoid inline colours.
 - **Monospace for machine text.** File paths, SHAs, timestamps, metric labels, badges and code are set in JetBrains Mono.
 - **Square-ish corners.** Use 4px on controls, cards and tiles, and 8px on popovers and windows. No pills.
 - **No gradients, glows, pure white or pure black.**
-- **Motion explains state.** Entrances are short (240–320 ms). Loops are kept for waiting states, such as a provider that isn't connected yet or files that are still indexing. Every illustration is complete without motion, so `prefers-reduced-motion` stops the animation and leaves the final state.
+- **Motion explains state; on the landing page it also tells the story.**
+  - In the app, entrances are short (240–320 ms), and loops are kept for waiting states, such as a provider that isn't connected yet or files that are still indexing.
+  - The landing page is choreographed: content eases in over about a second as it scrolls into view, and one section plays as a pinned sequence. See [Landing motion](#landing-motion).
+  - Everywhere, motion moves only transforms and opacity, and every screen is complete without it: `prefers-reduced-motion` stops the animation and leaves the final state.
 
 ## Tokens
 
@@ -116,6 +119,34 @@ All of these are global classes in `app/globals.css`.
   - When a dashboard screen changes, update the matching replica in the same change.
 - **Docs and changelog** use a compact left navigation and a 768px reading column. Subheads are set in EB Garamond.
 
+### Landing motion
+
+The landing page's motion lives in `app/landing/motion.tsx`, with its styles at the end of the landing block in `app/globals.css`. It uses GSAP with ScrollTrigger, ScrollSmoother and SplitText. `app/landing/motion-loader.tsx` loads it as a separate chunk after hydration, so it never delays the first paint.
+
+- **Hero entrance (CSS).** It plays on the first frame without waiting for JavaScript:
+  - The headline lines rise through masks.
+  - The lede lifts in already readable, so the first screen's main text is painted on the first frame.
+  - The actions and links fade up.
+  - The demo window rises last, which also keeps a half-streamed window off screen on slow connections.
+- **Desktop pointers only** (at least 1024px wide, with a fine pointer). Touch screens keep native scrolling.
+  - Smooth scrolling: ScrollSmoother over `#smooth-wrapper > #smooth-content`.
+  - Light parallax on elements with `data-speed`.
+  - The hero window settles from 94% to full size as it scrolls into place.
+  - "How it works" pins while a 2px ink track draws across the four steps, and each step comes up as the track reaches it.
+  - Primary calls to action lean up to 6px toward the pointer.
+- **Every width:**
+  - `data-split` headings reveal line by line, `data-reveal` items rise in, and `data-stagger` lists bring their children in turn.
+  - Feature windows slide in from their own side while the copy cascades in beside them.
+  - The terminal types its commands, with a blinking caret once it is done.
+  - The closing line rises a character at a time, then its full stop lands as the ember dot.
+- **Header.** It is sticky on the landing page, and fixed above the smoothed content while smooth scrolling runs. It hides while reading down and comes back on the way up or when focused. Once the page moves it gains its hairline and draws reading progress as a 2px ink line.
+- **Anchors.** In-page links glide to their section below the header and move focus there.
+- **Nothing flashes.** No CSS hides content before JavaScript runs. An effect only puts content in its starting state while that content is still below the fold, so nothing the visitor has seen disappears. Sections further down are set up one per idle moment, so setup never blocks the main thread for long.
+- **Still reachable.** Reveals fade with opacity, never `visibility`, so content waiting below the fold stays in the accessibility tree and the tab order. Focusing it scrolls it into view, which reveals it. Scrolling done by the browser itself (find in page, `scrollIntoView`) is handed to the smoother, so nothing jumps back on the next click.
+- **Timing.** Eases are expo-out (`--ease-out` in CSS). Reveals take 0.8–1.1 s, with 0.07–0.09 s between items.
+- **Reduced motion.** None of it runs, and the page as rendered is every effect's final state.
+- **Adding content.** Give new content one of the `data-*` hooks rather than new code. Keep fixed-position UI outside `#smooth-wrapper`: it is transformed while smooth scrolling runs.
+
 ## Accessibility
 
 - Text colours meet WCAG AA against the surfaces they sit on. `--text-ter` is never used for meaningful text.
@@ -124,7 +155,7 @@ All of these are global classes in `app/globals.css`.
 - Links inside running text on public pages are underlined, so they don't rely on colour alone.
 - Status is never shown by colour alone: badges always carry their text.
 - Layouts hold at 390px without horizontal page scroll in both themes. Wide tables and diffs scroll inside their own containers. `pnpm test:e2e` checks this.
-- `prefers-reduced-motion` turns off transitions, the skeleton pulse and every guided-setup animation.
+- `prefers-reduced-motion` turns off transitions, the skeleton pulse, every guided-setup animation and all landing motion, including smooth scrolling.
 
 ## Adding UI
 
