@@ -72,7 +72,7 @@ export async function finishOAuth(request: Request, provider: Provider, profile:
     // Provider and account failures go to Sentry, one issue per provider and step. State failures don't, nor do the
     // refusals the visitor can act on, which the backend throws as ConvexErrors (an account someone else holds,
     // or linking that needs a fresh sign-in).
-    if (stage === "provider" || (stage === "account" && !(error instanceof ConvexError))) Sentry.captureException(error, { level: "error", fingerprint: ["auth-oauth-failed", provider, stage], tags: { auth_provider: provider, auth_stage: stage } });
+    if (stage === "provider" || (stage === "account" && !(error instanceof ConvexError))) Sentry.captureException(error, { level: "error", fingerprint: ["auth-oauth-failed", provider, stage], tags: { auth_failure: "oauth", auth_provider: provider, auth_stage: stage } });
     // A failed link returns to the page it started from: /login would offer a plain sign-in, which makes a separate account.
     if (link) { await notify("Couldn’t link that account. It may belong to another OpenReview user, or you need to sign out and back in first.", "error"); return NextResponse.redirect(origin() + next); }
     return NextResponse.redirect(`${origin()}/login${authQuery({ error: "signin", referral })}`);

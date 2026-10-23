@@ -6,10 +6,10 @@ import { GithubApiError } from "../src/github";
 // rejecting the code exchange) reach Sentry as one issue each; failures the visitor caused (an
 // expired visit, a cancel at the provider, a reused link, linking someone else's account) do not.
 // The backend is faked: each test sets what its calls return or throw.
-const holder = vi.hoisted(() => ({ jar: new Map<string, string>(), reported: [] as { message: string; fingerprint?: string[] }[], backend: {} as Record<"query" | "mutation" | "action", (ref: unknown, args: unknown) => Promise<unknown>> }));
+const holder = vi.hoisted(() => ({ jar: new Map<string, string>(), reported: [] as { message: string; fingerprint?: string[]; tag?: string }[], backend: {} as Record<"query" | "mutation" | "action", (ref: unknown, args: unknown) => Promise<unknown>> }));
 vi.mock("server-only", () => ({}));
 vi.mock("@sentry/nextjs", () => ({
-  captureException: (error: unknown, hint?: { fingerprint?: string[] }) => { holder.reported.push({ message: error instanceof Error ? error.message : String(error), fingerprint: hint?.fingerprint }); },
+  captureException: (error: unknown, hint?: { fingerprint?: string[]; tags?: Record<string, string> }) => { holder.reported.push({ message: error instanceof Error ? error.message : String(error), fingerprint: hint?.fingerprint, tag: hint?.tags?.auth_failure }); },
   captureMessage: () => {},
 }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => holder.jar.has(name) ? { value: holder.jar.get(name) } : undefined, set: (name: string, value: string) => { holder.jar.set(name, value); }, delete: (name: string) => { holder.jar.delete(name); } }), headers: async () => new Headers({ "user-agent": "vitest" }) }));
@@ -52,7 +52,7 @@ test("a sign-in email that cannot be sent is reported once per cause, never a li
   expect(holder.reported).toEqual([]);
   holder.backend.action = fail("Email provider returned HTTP 403");
   expect(await askForLink()).toBe("error");
-  expect(holder.reported).toEqual([{ message: "Email provider returned HTTP 403", fingerprint: ["auth-email-send-failed"] }]);
+  expect(holder.reported).toEqual([{ message: "Email provider returned HTTP 403", fingerprint: ["auth-email-send-failed"], tag: "email-send" }]);
 });
 
 test("using a sign-in link reports Convex failing, not an expired or used link", async () => {
@@ -61,7 +61,7 @@ test("using a sign-in link reports Convex failing, not an expired or used link",
   expect(holder.reported).toEqual([]);
   holder.backend.mutation = fail("Server Error");
   expect(await useLink()).toBe(`${base}/login?error=link`);
-  expect(holder.reported).toEqual([{ message: "Server Error", fingerprint: ["auth-email-link-failed"] }]);
+  expect(holder.reported).toEqual([{ message: "Server Error", fingerprint: ["auth-email-link-failed"], tag: "email-link" }]);
 });
 
 test("OAuth: expired visits, replays and cancels at the provider are not reported", async () => {
@@ -78,8 +78,8 @@ test("OAuth: a failing code exchange or account step is reported per provider an
   holder.backend.mutation = fail("Server Error");
   await finish(`code=c1&state=${await begin()}`);
   expect(holder.reported).toEqual([
-    { message: "GitHub OAuth exchange failed", fingerprint: ["auth-oauth-failed", "github", "provider"] },
-    { message: "Server Error", fingerprint: ["auth-oauth-failed", "github", "account"] },
+    { message: "GitHub OAuth exchange failed", fingerprint: ["auth-oauth-failed", "github", "provider"], tag: "oauth" },
+    { message: "Server Error", fingerprint: ["auth-oauth-failed", "github", "account"], tag: "oauth" },
   ]);
 });
 
@@ -91,10 +91,10 @@ test("OAuth: linking an account that belongs to someone else tells the visitor a
   expect(holder.reported).toEqual([]);
   holder.backend.mutation = fail("Server Error");
   await finish(`code=c1&state=${await begin("link=1&next=/settings")}`);
-  expect(holder.reported).toEqual([{ message: "Server Error", fingerprint: ["auth-oauth-failed", "github", "account"] }]);
+  expect(holder.reported).toEqual([{ message: "Server Error", fingerprint: ["auth-oauth-failed", "github", "account"], tag: "oauth" }]);
 });
 
 test("OAuth: a provider refusing for its own rate limit is reported, since nobody can sign in meanwhile", async () => {
   await finish(`code=c1&state=${await begin()}`, async () => { throw new GithubApiError("GitHub rate limit", 429); });
-  expect(holder.reported).toEqual([{ message: "GitHub rate limit", fingerprint: ["auth-oauth-failed", "github", "provider"] }]);
+  expect(holder.reported).toEqual([{ message: "GitHub rate limit", fingerprint: ["auth-oauth-failed", "github", "provider"], tag: "oauth" }]);
 });
