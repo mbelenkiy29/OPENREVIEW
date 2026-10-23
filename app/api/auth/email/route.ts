@@ -38,5 +38,10 @@ export async function POST(request: Request) {
     const result = await backend().action(api.identityJobs.requestMagicLink, { secret: process.env.SERVICE_SECRET ?? "", email: address.data, next, requestId: rid, ...(ipHash ? { ipHash } : {}), ...(referralCode ? { referralCode } : {}) });
     if (result.status === "sent" && result.nearCap) Sentry.captureMessage("Sign-in emails passed half of the deployment-wide cap (AUTH_EMAIL_HOURLY/AUTH_EMAIL_DAILY)", { level: "warning", fingerprint: ["auth-email-near-cap"] });
     return finish(result.status === "limited" ? "busy" : "sent", result.status);
-  } catch { return finish("error", "error"); }
+  } catch (error) {
+    // The visitor sees "couldn't send"; a cause that hits everyone (Resend key or quota, Convex down)
+    // must reach Sentry too, as one issue. `rid` finds the request's log lines.
+    Sentry.captureException(error, { level: "error", fingerprint: ["auth-email-send-failed"], extra: { rid } });
+    return finish("error", "error");
+  }
 }
