@@ -48,7 +48,9 @@ export const browse=query({args:{token:v.string(),organizationId:v.id("organizat
   return a.scoreMax===undefined||score!==undefined&&score<=a.scoreMax;
  });
  const page=matched.slice((a.page-1)*a.pageSize,a.page*a.pageSize);
- return {page:reviewFilters?page as Awaited<ReturnType<typeof enrich>>:await enrich(ctx,viewer._id,page as PullDoc[]),total:matched.length,capped:scanned.length>limit};
+ const shown=reviewFilters?page as Awaited<ReturnType<typeof enrich>>:await enrich(ctx,viewer._id,page as PullDoc[]);
+ // The list's "# Reviews" column, counted only for the rows on this page (as pulls.get does).
+ return {page:await Promise.all(shown.map(async pr=>({...pr,reviewCount:(await ctx.db.query("reviews").withIndex("by_pr",q=>q.eq("repositoryId",pr.repositoryId).eq("prNumber",pr.number)).take(100)).length}))),total:matched.length,capped:scanned.length>limit};
 }});
 
 export const observationFields={

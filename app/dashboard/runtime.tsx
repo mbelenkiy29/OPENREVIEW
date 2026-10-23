@@ -5,9 +5,21 @@ import { RuntimePolicyForm,RuntimeWorkerForm } from "./runtime-form";
 import { revokeRuntimeWorker } from "./actions";
 import {ApprovalPolicyForm} from "./approval-form";
 import {Live} from "./live";
+import {Icon} from "../ui/icons";
+import {SettingsHeading} from "./settings-ui";
 export async function RuntimeSettings({token,organizationId}:{token:string;organizationId:Id<"organizations">}){
  const [settings,scopes,approvals]=await Promise.all([backend().query(api.runtime.settings,{token,organizationId}),backend().query(api.scopes.list,{token,organizationId}),backend().query(api.approvals.settings,{token,organizationId})]);
- return <><section><h2>Automatic approval</h2><p>Disabled by default. Settings are controlled by workspace admins and inherited by teams and repositories.</p><ApprovalPolicyForm organizationId={organizationId} policies={approvals.policies} teams={scopes.teams} repositories={scopes.repositories.filter(r=>approvals.repositoryIds.includes(r._id))}/></section><section><h2>Runtime validation</h2><p>Disabled by default. Approve the image and command at organization, team, or repository scope before enabling it. Source and logs are pinned to the reviewed revision.</p><RuntimePolicyForm organizationId={organizationId} policies={settings.policies} teams={scopes.teams} repositories={scopes.repositories}/></section><section><h2>Runtime workers</h2><RuntimeWorkerForm organizationId={organizationId}/>{settings.workers.map(w=><article key={w._id}><strong>{w.name}</strong><p>{w.revoked?"Revoked":w.expiresAt<Date.now()?"Expired":(w.lastSeen??0)>Date.now()-120000?"Connected":"Disconnected"} · Expires {new Date(w.expiresAt).toLocaleString()}</p>{!w.revoked&&<form action={revokeRuntimeWorker}><input type="hidden" name="workerId" value={w._id}/><button>Revoke worker</button></form>}</article>)}</section></>;
+ const status=(w:(typeof settings.workers)[number])=>w.revoked?"Revoked":w.expiresAt<Date.now()?"Expired":(w.lastSeen??0)>Date.now()-120000?"Connected":"Disconnected";
+ return <div className="review-settings">
+  <div className="settings-group"><SettingsHeading icon="checkCircle" title="Automatic Approval" sub="Disabled by default. Settings are controlled by workspace admins and inherited by teams and repositories."/><ApprovalPolicyForm organizationId={organizationId} policies={approvals.policies} teams={scopes.teams} repositories={scopes.repositories.filter(r=>approvals.repositoryIds.includes(r._id))}/></div>
+  <div className="settings-group"><SettingsHeading icon="terminalWindow" title="Runtime Validation" sub="Disabled by default. Approve the image and command at organization, team, or repository scope before enabling it. Source and logs are pinned to the reviewed revision."/><RuntimePolicyForm organizationId={organizationId} policies={settings.policies} teams={scopes.teams} repositories={scopes.repositories}/></div>
+  <div className="settings-group"><SettingsHeading icon="desktop" title="Runtime Workers" sub="Revocable credentials for the isolated machines that run approved jobs."/><RuntimeWorkerForm organizationId={organizationId}/>
+   <div className="table-box workers-table"><table><thead><tr><th>Worker</th><th>Status</th><th>Expires</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
+    {settings.workers.map(w=><tr key={w._id}><td><strong>{w.name}</strong></td><td><span className={"status-chip"+(status(w)==="Connected"?" completed":status(w)==="Disconnected"?"":" failed")}><Icon name={status(w)==="Connected"?"check":status(w)==="Disconnected"?"clock":"x"}/>{status(w)}</span></td><td>{new Date(w.expiresAt).toLocaleString()}</td><td>{!w.revoked&&<form action={revokeRuntimeWorker}><input type="hidden" name="workerId" value={w._id}/><button className="danger small">Revoke worker</button></form>}</td></tr>)}
+    {!settings.workers.length&&<tr><td colSpan={4} className="workers-empty">No runtime workers yet.</td></tr>}
+   </tbody></table></div>
+  </div>
+ </div>;
 }
 export async function RuntimeReview({token,reviewId,evidence}:{token:string;reviewId:Id<"reviews">;evidence?:Doc<"reviews">["runtimeEvidence"]}){
  const jobs=await backend().query(api.runtime.review,{token,reviewId});

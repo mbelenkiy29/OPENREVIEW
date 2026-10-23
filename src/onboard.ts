@@ -64,7 +64,7 @@ export async function onboard(api: OnboardApi, io: OnboardIO, files: RuleFileSys
   // 2. Provider install link (printed only).
   summary.installUrl = info.installUrl;
   say(`Install the GitHub App on the repositories you want reviewed: ${info.installUrl}`);
-  say("(Other providers are connected under Settings → Providers in the dashboard.)");
+  say("(Other providers are connected under Code Providers in the dashboard.)");
 
   // 3. Repositories.
   const repositories = repositoryList.parse(await api.get("/api/repositories"));

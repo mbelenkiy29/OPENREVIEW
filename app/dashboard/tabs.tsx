@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useLayoutEffect, useOptimistic, useRef, useState, useTransition, type KeyboardEvent, type ReactNode } from "react";
 import { Icon, type IconName } from "../ui/icons";
+import { tabs } from "./routes";
 
 // Dashboard tabs. A click marks its tab as current at once and navigates inside a transition, so the
 // old page stays on screen until the new one is ready: no loading skeleton, and the indicator slides.
@@ -50,30 +51,34 @@ function place(list: HTMLElement | null, bar: HTMLElement | null, key: string | 
   if (tab.offsetLeft < list.scrollLeft || tab.offsetLeft + tab.offsetWidth > list.scrollLeft + list.clientWidth) list.scrollLeft = tab.offsetLeft - 16;
 }
 
-const mainTabs: [key: string, label: string, icon: IconName, path: string][] = [
-  ["analytics", "Analytics", "chartLine", "/dashboard/analytics"],
-  ["chat", "Chat", "chatCircle", "/dashboard/chat"],
-  ["memory", "Memory", "brain", "/dashboard/memory"],
-  ["pulls", "Pull Requests", "gitPullRequest", "/dashboard/pulls"],
-  // Straight to the first page: /dashboard/settings would redirect there.
-  ["settings", "Settings", "gear", "/dashboard/settings/repositories"],
-];
+// Remembered so Personal Settings' Back returns to the page it was opened from.
+let lastPage = "/dashboard/analytics";
 
+/** Greptile's eight tabs (routes.ts). Personal Settings replaces them with its own header. */
 export function PrimaryTabs() {
   const pathname = usePathname(), team = useTeamQuery(), [pending, go] = useNav();
-  const active = pending ?? pathname.split("/")[2];
-  const { list, bar } = useIndicator<HTMLElement>(active);
+  const tab = pathname.split("/")[2];
+  useEffect(() => { if (tab !== "account") lastPage = pathname + location.search; }, [pathname, tab]);
+  const active = pending ?? tab;
+  const { list, bar } = useIndicator<HTMLElement>(tabs.some(([key]) => key === active) ? active : undefined);
+  if (tab === "account") return null;
   return <nav ref={list} className="primary-nav" aria-label="Main navigation">
-    {mainTabs.map(([key, label, icon, path]) => {
-      const href = path + team;
-      return <Link key={key} data-key={key} href={href} aria-current={active === key ? "page" : undefined} onNavigate={(event) => { event.preventDefault(); go(key, href); }}>
-        <Icon name={icon} />
-        {/* Phones show "PRs"; the full label stays the accessible name. */}
-        {key === "pulls" ? <><span className="tab-long">{label}</span><span className="tab-short" aria-hidden="true">PRs</span></> : label}
-      </Link>;
+    {tabs.map(([key, label]) => {
+      const href = `/dashboard/${key}${team}`;
+      return <Link key={key} data-key={key} href={href} aria-current={active === key ? "page" : undefined} onNavigate={(event) => { event.preventDefault(); go(key, href); }}>{label}</Link>;
     })}
     <span ref={bar} className="tab-indicator" aria-hidden="true" />
   </nav>;
+}
+
+/** The identity row's left side: the brand and organization menu, or Personal Settings' ‹ Back. */
+export function IdentityLeft({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  if (pathname.split("/")[2] !== "account") return children;
+  return <div className="personal-bar">
+    <Link className="back-link" href={lastPage}><Icon name="caretLeft" />Back</Link>
+    <span className="crumb">Personal Settings</span>
+  </div>;
 }
 
 // Set by a sub-tab click so the next page's panel plays its entrance; never on a first load.

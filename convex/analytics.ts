@@ -71,13 +71,14 @@ export const report = query({
     const merged = (await ctx.db.query("pullRequests").withIndex("by_org_merged", (q) => q.eq("organizationId", a.organizationId).gte("mergedAt", a.since).lte("mergedAt", a.until)).take(cap.merged))
       .filter((p) => p.openedAt !== undefined && p.mergedAt! >= p.openedAt && allowed.has(p.repositoryId) && (!a.repositoryId || p.repositoryId === a.repositoryId) && (!a.author || p.author === a.author.replace(/^@/, "")));
     const mean = (xs: number[]) => xs.reduce((n, x) => n + x, 0) / xs.length;
+    const median = (xs: number[]) => { const s = [...xs].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
     const group = (key: (p: (typeof merged)[number]) => string) => { const m = new Map<string, number[]>(); for (const p of merged) { const k = key(p); m.set(k, [...(m.get(k) ?? []), p.mergedAt! - p.openedAt!]); } return [...m]; };
     const spans = merged.map((p) => p.mergedAt! - p.openedAt!).sort((x, y) => x - y);
     const mergeTime = {
       count: spans.length,
       meanMs: spans.length ? mean(spans) : null,
-      medianMs: spans.length ? (spans.length % 2 ? spans[(spans.length - 1) / 2] : (spans[spans.length / 2 - 1] + spans[spans.length / 2]) / 2) : null,
-      daily: group((p) => new Date(p.mergedAt!).toISOString().slice(0, 10)).map(([date, xs]) => ({ date, meanMs: mean(xs), count: xs.length })).sort((p, q) => p.date.localeCompare(q.date)),
+      medianMs: spans.length ? median(spans) : null,
+      daily: group((p) => new Date(p.mergedAt!).toISOString().slice(0, 10)).map(([date, xs]) => ({ date, meanMs: mean(xs), medianMs: median(xs), count: xs.length })).sort((p, q) => p.date.localeCompare(q.date)),
       byRepository: group((p) => String(p.repositoryId)).map(([id, xs]) => ({ repository: names.get(id) ?? "Unknown repository", meanMs: mean(xs), count: xs.length })).sort((p, q) => q.meanMs - p.meanMs).slice(0, 10),
     };
     return { capped: capped || merged.length === cap.merged, reactions, topComments, contributors, mergeTime, bugRepositories: new Set(bugs.map((f) => f.repositoryId)).size, totalReviews: selected.length, completed: completed.length, totalPRs: new Set(selected.map(r => `${r.repositoryId}:${r.prNumber}`)).size, findings: bugs.length, severity: Object.fromEntries(["critical", "high", "medium", "low"].map(s => [s, bugs.filter(f => f.severity === s).length])), addressedRate: bugs.length ? bugs.filter(f => f.status === "resolved").length / bugs.length : null, usefulness: rated.length ? rated.filter(f => f.lastFeedback === "useful").length / rated.length : null, cost: costs.reduce((n, u) => n + u.estimatedCost, 0), tokens: costs.reduce((n, u) => n + u.inputTokens + u.outputTokens, 0), averageDuration: completed.length ? completed.reduce((n,r) => n + ((r.finishedAt ?? r.updatedAt) - r.createdAt), 0) / completed.length : null, daily: Object.entries(daily).sort(([a],[b]) => a.localeCompare(b)).map(([date, values]) => ({ date, ...values })), recent: selected.sort((a,b) => b.createdAt - a.createdAt).slice(0,10) };

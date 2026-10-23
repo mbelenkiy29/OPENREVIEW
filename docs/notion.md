@@ -11,7 +11,7 @@ OpenReview can use Notion pages as read-only requirements context when a pull re
 
 ## Connecting (workspace admin)
 
-1. Open **Memory → Integrations → Connect Notion workspace**. Notion's page picker decides which pages OpenReview can read; you can change it later in Notion from a page's **Connections** menu.
+1. Open **Integrations → Connect Notion workspace**. Notion's page picker decides which pages OpenReview can read; you can change it later in Notion from a page's **Connections** menu.
 2. Select the repositories allowed to use those pages. The settings page lists the shared pages it can see.
 
 ## What gets fetched

@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     connection = await backend().action(api.integrationJobs.connect, {token:identity.token, secret:process.env.SERVICE_SECRET??"", organizationId:saved.organizationId as Id<"organizations">, code, verifier:saved.verifier, redirectUri:origin()+"/api/integrations/linear/callback", jti:"linear:"+saved.state, expiresAt:saved.expiresAt});
   } catch {
     // OAuth responses may contain credentials or private provider data; never echo them.
-    return NextResponse.redirect(origin()+"/dashboard/memory/integrations?error=linear-connect");
+    return NextResponse.redirect(origin()+"/dashboard/integrations?error=linear-connect");
   }
-  return NextResponse.redirect(origin()+"/dashboard/memory/integrations?integration="+connection);
+  return NextResponse.redirect(origin()+"/dashboard/integrations?integration="+connection);
 }

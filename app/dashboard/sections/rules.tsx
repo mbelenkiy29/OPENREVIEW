@@ -1,149 +1,163 @@
 import { repositoryDisplay } from "../../../src/provider-display";
 import Link from "next/link";
 import { decideRuleSuggestion, requestRuleAssistant, saveRule } from "../actions";
-import { Empty } from "./shared";
-import type { ReactNode } from "react";
+import { AddContext, ContextTable, ScopeEditor, TypeChip, type ContextRow } from "../context-client";
+import { PortalDisclosure } from "../portal-disclosure";
+import { Dialog, DialogClose } from "../../ui/dialog";
+import { Icon, type IconName } from "../../ui/icons";
+import { ago, when } from "./shared";
 import type { DashboardContext } from "../load";
 
 type Rule = DashboardContext["visibleRules"][number];
-const pct = (n: number, d: number) => d ? `${Math.round((n / d) * 100)}%` : "—";
-const units: [Intl.RelativeTimeFormatUnit, number][] = [["year", 31536e6], ["month", 2592e6], ["day", 864e5], ["hour", 36e5], ["minute", 6e4]];
-const ago = (t: number) => { const ms = Date.now() - t, [unit, size] = units.find(([, s]) => ms >= s) ?? ["minute", 6e4]; return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(-Math.round(ms / size), unit); };
-const icon = (d: ReactNode) => <svg className="tab-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{d}</svg>;
+type Scoped = { repositoryId?: string; teamId?: string; repositoryPattern?: string };
+const pct = (n: number, d: number) => d ? `${Math.round((n / d) * 100)}%` : "0%";
+const providerIcon = (kind?: string): IconName => kind?.startsWith("github") ? "githubLogo" : kind === "gitlab" ? "gitlabLogo" : "gitBranch";
+const scopeValue = (r: Scoped) => r.repositoryId ? "repo:" + r.repositoryId : r.teamId ? "team:" + r.teamId : r.repositoryPattern ? "pattern" : "";
 
-// Laid out like Greptile's Memory → Custom rules: a search box, an Add button, a table of rules with usage, and a
-// per-rule analytics panel (?rule=). Adding and editing happen in a dialog (?add=1, ?edit=<id>).
+// Greptile's Custom Context: search + Add Context, a rules table (bulk Delete / Deactivate, rows that expand),
+// a Details drawer docked right (?rule=, edit mode ?edit=, delete confirm ?remove=) and the Add Context
+// stepper (?add=1). Rule-assistant suggestions lead the first page as rows an admin approves.
 export function RulesSection({ ctx }: { ctx: DashboardContext }) {
-  const { data, filters, isAdmin, organization, repoName, requestedRepository, rulesPage, ruleAssistant, ruleUsage, scopes, selectedTeam, visibleRules } = ctx;
+  const { data, filters, isAdmin, organization, requestedRepository, rulesPage, ruleAssistant, ruleUsage, scopes, selectedTeam, visibleRules } = ctx;
   const keep = { ...(filters.q ? { q: filters.q } : {}), ...(requestedRepository ? { repository: requestedRepository } : {}), ...(selectedTeam ? { team: selectedTeam._id } : {}) };
-  const href = (extra: Record<string, string> = {}, cursor = filters.cursor) => `/dashboard/memory/rules?${new URLSearchParams({ ...keep, ...(cursor ? { cursor } : {}), ...extra })}`;
-  const scopeLabel = (r: { repositoryId?: string; teamId?: string; repositoryPattern?: string }) => r.repositoryId ? repoName(r.repositoryId) : r.repositoryPattern ? r.repositoryPattern : r.teamId ? `Team: ${scopes.teams.find((t) => t._id === r.teamId)?.name ?? "team"}` : "Workspace";
+  const href = (extra: Record<string, string> = {}, cursor = filters.cursor) => `/dashboard/context?${new URLSearchParams({ ...keep, ...(cursor ? { cursor } : {}), ...extra })}`;
+  const scopeOf = (r: Scoped): { icon: IconName; label: string; title?: string } => {
+    if (r.repositoryId) { const repo = data.repositories.find((x) => x._id === r.repositoryId); return { icon: providerIcon(repo?.provider?.kind), label: repo?.fullName ?? r.repositoryId, title: repositoryDisplay(repo) }; }
+    if (r.repositoryPattern) return { icon: "folders", label: r.repositoryPattern, title: "Repositories matching " + r.repositoryPattern };
+    if (r.teamId) return { icon: "usersThree", label: scopes.teams.find((t) => t._id === r.teamId)?.name ?? "Team", title: "Team" };
+    return { icon: "buildings", label: organization.name ?? "Workspace", title: "Entire workspace" };
+  };
+  const scopeCell = (r: Scoped) => { const s = scopeOf(r); return <span className="scope-cell" title={s.title}><Icon name={s.icon} /><span>{s.label}</span></span>; };
   const open = visibleRules.find((r) => r._id === filters.rule), editing = isAdmin ? visibleRules.find((r) => r._id === filters.edit) : undefined, removing = isAdmin ? visibleRules.find((r) => r._id === filters.remove) : undefined;
+  const drawer = open ?? editing ?? removing;
   // Suggested rows lead the unfiltered first page only.
   const suggestions = filters.q || filters.cursor ? [] : ruleAssistant?.suggestions ?? [];
+  const busy = Boolean(ruleAssistant?.runs.some((r) => r.status === "pending")), last = ruleAssistant?.runs[0];
+  const teams = scopes.teams.map((t) => ({ id: t._id, label: t.name })), repositories = data.repositories.map((r) => ({ id: r._id, label: repositoryDisplay(r), name: r.fullName }));
+  const rows: ContextRow[] = [
+    ...suggestions.map((s): ContextRow => ({ id: s._id, name: `${assistantKinds[s.kind] ?? s.kind}: ${s.title}`, cells: [scopeCell(s), <TypeChip key="t" type={s.kind === "import" ? "file" : "rule"} />, "—", <span key="u" title={when(s.createdAt)}>{ago(s.createdAt)}</span>, <span key="s" className="mono-status">Suggested</span>], detail: <SuggestionReview s={s} /> })),
+    ...visibleRules.map((r): ContextRow => {
+      const uses = r.stats.capped ? `${r.stats.uses}+` : String(r.stats.uses), updated = r.updatedAt ?? r.createdAt;
+      return {
+        id: r._id, name: r.title, href: href({ rule: r._id }), badge: r.globs.length ? `${r.globs.length} ${r.globs.length === 1 ? "pattern" : "patterns"}` : undefined, selectable: isAdmin, enabled: r.enabled, current: drawer?._id === r._id,
+        cells: [scopeCell(r), <TypeChip key="t" type="rule" />, `${uses} ${uses === "1" ? "use" : "uses"}`, <span key="u" title={when(updated)}>{ago(updated)}</span>, <span key="s" className="mono-status">{r.enabled ? "Active" : "Inactive"}</span>],
+        detail: <div className="ctx-expansion"><p className="pre">{r.instructions}</p><div className="chip-box inline"><span className="mono-chip">severity: {r.severity}</span>{(r.globs.length ? r.globs : ["all files"]).map((g) => <span key={g} className="mono-chip">{g}</span>)}</div></div>,
+      };
+    }),
+  ];
   return (
-    <>
-      <div className="memory-toolbar">
-        <form method="get" action="/dashboard/memory/rules" role="search">
+    <div className={drawer ? "ctx-page with-drawer" : "ctx-page"}>
+      <div className="toolbar-row ctx-toolbar">
+        <form method="get" action="/dashboard/context" role="search" className="search-field stack">
           {selectedTeam && <input type="hidden" name="team" value={selectedTeam._id} />}
           {requestedRepository && <input type="hidden" name="repository" value={requestedRepository} />}
-          <label><span className="sr-only">Search rules</span><input type="search" name="q" list="rule-filters" defaultValue={filters.q} placeholder="Search rules or filter with repository: status:" maxLength={200} /></label>
+          <Icon name="magnifyingGlass" />
+          <label className="sr-only" htmlFor="context-search">Search context</label>
+          <input id="context-search" type="search" name="q" list="rule-filters" defaultValue={filters.q} placeholder="Search context or click to add filters" maxLength={200} />
           <datalist id="rule-filters"><option value="status:active" /><option value="status:disabled" />{data.repositories.slice(0, 20).map((r) => <option key={r._id} value={`repository:${r.fullName}`} />)}</datalist>
         </form>
-        {isAdmin && <Link className="button primary" href={href({ add: "1" })}>+ Add rule</Link>}
-      </div>
-      {requestedRepository && <p className="muted">Showing rules that apply to {repoName(requestedRepository)}, including inherited workspace, team and pattern rules.</p>}
-      {!visibleRules.length && !suggestions.length ? (
-        filters.q || filters.cursor ? <p className="memory-empty">No rules match this search.</p> : <Empty title="Your codebase, your conventions" text="Add specific rules such as requiring organization membership validation in API endpoints." />
-      ) : (
-        <div className={open ? "memory-split" : undefined}>
-          <div className="memory-table-wrap">
-            <table className="memory-table">
-              <thead><tr><th scope="col">Description</th><th scope="col" className="type-col">Type</th>{!open && <><th scope="col" className="usage-col">Usage</th><th scope="col" className="usage-col">Addressed rate</th></>}<th scope="col">Actions</th></tr></thead>
-              <tbody>
-                {suggestions.map((s) => <SuggestionRow key={s._id} s={s} scope={scopeLabel(s)} wide={!open} />)}
-                {visibleRules.map((r) => {
-                  const uses = r.stats.capped ? `${r.stats.uses}+` : String(r.stats.uses);
-                  return (
-                    <tr key={r._id} aria-current={open?._id === r._id ? "true" : undefined}>
-                      <td>
-                        <Link className="row-title" href={href({ rule: r._id })}>{r.title}</Link>
-                        <p className="row-meta">{scopeLabel(r)} · {ago(r.createdAt)} · {r.enabled ? "Active" : "Disabled"}<span className={open ? undefined : "meta-stats"}> · {uses} uses · {pct(r.stats.addressed, r.stats.uses)} addressed</span></p>
-                      </td>
-                      <td className="type-col"><span className="type-chip">{icon(<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />)}Rule</span></td>
-                      {!open && <><td className="usage-col">{uses}</td><td className="usage-col">{pct(r.stats.addressed, r.stats.uses)}</td></>}
-                      <td>
-                        <div className="row-actions">
-                          <Link className="icon-button" href={href({ rule: r._id })} aria-label={`Analytics for ${r.title}`} title="Analytics">{icon(<path d="M3 3v18h18M8 17v-5M13 17V8M18 17v-9" />)}</Link>
-                          {isAdmin && <Link className="icon-button" href={href({ edit: r._id })} aria-label={`Edit ${r.title}`} title="Edit">{icon(<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />)}</Link>}
-                          {isAdmin && <Link className="icon-button" href={href({ remove: r._id })} aria-label={`Delete ${r.title}`} title="Delete">{icon(<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />)}</Link>}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {rulesPage && (filters.cursor || !rulesPage.isDone) && <nav className="memory-pager" aria-label="Rules pagination">
-              {filters.cursor ? <Link href={href({}, "")}>Newest</Link> : <span />}
-              {!rulesPage.isDone && <Link href={href({}, rulesPage.continueCursor)}>Older</Link>}
-            </nav>}
-          </div>
-          {open && <RulePanel rule={open} scope={scopeLabel(open)} usage={ruleUsage} close={href()} edit={isAdmin ? href({ edit: open._id }) : undefined} admin={isAdmin} organizationId={organization._id} repoName={repoName} />}
-        </div>
-      )}
-      {filters.rule && !open && <p className="muted">That rule isn’t on this page. <Link href={href()}>Back to rules</Link></p>}
-      {removing && (
-        <div className="memory-dialog" role="alertdialog" aria-modal="true" aria-labelledby="rule-remove-title">
-          <div className="memory-dialog-card">
-            <header><h2 id="rule-remove-title">Delete rule?</h2><Link className="icon-button" href={href()} aria-label="Close">×</Link></header>
-            <p>“{removing.title}” stops applying to reviews. This can’t be undone; disable it instead to keep it.</p>
-            <div className="dialog-actions"><Link className="button" href={href()}>Cancel</Link><RuleForm rule={removing} organizationId={organization._id} returnTo={href()} remove /></div>
-          </div>
-        </div>
-      )}
-      {isAdmin && (filters.add || editing) && (
-        <div className="memory-dialog" role="dialog" aria-modal="true" aria-labelledby="rule-dialog-title">
-          <div className="memory-dialog-card">
-            <header><h2 id="rule-dialog-title">{editing ? "Edit rule" : "Add rule"}</h2><Link className="icon-button" href={href()} aria-label="Close">×</Link></header>
-            <p className="muted">Define a custom rule for OpenReview to apply in reviews.</p>
-            <form action={saveRule} className="memory-steps">
+        {isAdmin && ruleAssistant && <PortalDisclosure className="ctx-menu" label={<><Icon name="magicWand" />Assistant<Icon name="caretDown" /></>}>
+          <div className="menu">
+            <p className="menu-label">Rule assistant</p>
+            <form action={requestRuleAssistant} className="stack">
               <input type="hidden" name="organizationId" value={organization._id} />
               <input type="hidden" name="returnTo" value={href()} />
-              {editing && <><input type="hidden" name="id" value={editing._id} /><input type="hidden" name="enabled" value={String(editing.enabled)} /><input type="hidden" name="category" value={editing.category} /></>}
-              <fieldset><legend><span className="step-number">1</span> Describe your rule</legend>
-                <label>Title<input name="title" required maxLength={120} defaultValue={editing?.title} /></label>
-                <label>Instructions<textarea name="instructions" rows={4} required defaultValue={editing?.instructions} placeholder={"What: Use logging instead of printing log messages\nWhy: We can't filter printed messages\nGood: logger.error(\"message\")"} /></label>
-                <label>Severity<select name="severity" defaultValue={editing?.severity ?? "medium"}>{["critical", "high", "medium", "low"].map((v) => <option key={v}>{v}</option>)}</select></label>
-              </fieldset>
-              <fieldset><legend><span className="step-number">2</span> Scope: where should this rule apply?</legend>
-                <RuleScopeFields teams={scopes.teams} repositories={data.repositories} scope={editing ? scopeValue(editing) : requestedRepository ? "repo:" + requestedRepository : ""} pattern={editing?.repositoryPattern} />
-                <label>File pattern<input name="globs" defaultValue={editing?.globs.join(",")} placeholder="e.g. src/**/*.tsx (comma separated; empty = all files)" /></label>
-              </fieldset>
-              <div className="dialog-actions"><Link className="button" href={href()}>Cancel</Link><button className="primary">{editing ? "Save rule" : "Create rule"}</button></div>
+              <button className="menu-item" name="kind" value="refine" disabled={busy}><Icon name="listChecks" /><span>Review existing rules</span></button>
+              <button className="menu-item" name="kind" value="suggest" disabled={busy}><Icon name="lightbulb" /><span>Suggest rules from findings</span></button>
             </form>
-            {!editing && <DraftWithAI ctx={ctx} returnTo={href()} />}
+            <hr />
+            <p className="menu-note">Results appear in the table as suggestions to approve.{last && <> Last run: {runKinds[last.kind] ?? last.kind} · {last.status === "pending" ? "working…" : last.status === "failed" ? last.error ?? "failed" : `${last.suggestions ?? 0} suggestion${last.suggestions === 1 ? "" : "s"}`}{(last.rejected ?? []).map((x, i) => <span key={i}> · discarded “{x.title}” ({x.reason})</span>)}</>}</p>
           </div>
-        </div>
-      )}
-    </>
+        </PortalDisclosure>}
+        {isAdmin && <AddContext organizationId={organization._id} returnTo={href()} open={Boolean(filters.add)} teams={teams} repositories={repositories} initialScope={requestedRepository ? "repo:" + requestedRepository : ""} busy={busy} />}
+      </div>
+      {busy && <p className="ctx-note" role="status"><Icon name="circleNotch" />The rule assistant is working. Refresh in a moment to review its suggestions.</p>}
+      {last?.status === "failed" && !busy && <p className="ctx-note error" role="status">The last rule assistant run failed: {last.error ?? "unknown error"}</p>}
+      {requestedRepository && <p className="ctx-note">Showing rules that apply to {ctx.repoName(requestedRepository)}, including inherited workspace, team and pattern rules.</p>}
+      <ContextTable label="Custom rules" columns={["Rules", "Scope", "Type", "Usage", "Last updated", "Status"]} rows={rows} bulk={isAdmin ? { organizationId: organization._id } : undefined}
+        empty={filters.q || filters.cursor ? "No rules match this search." : <div className="empty-state"><strong>Your codebase, your conventions</strong><p>Add specific rules such as requiring organization membership validation in API endpoints.</p></div>} />
+      {rulesPage && (filters.cursor || !rulesPage.isDone) && <div className="pagination">
+        <span>{visibleRules.length} {visibleRules.length === 1 ? "rule" : "rules"} on this page</span>
+        <nav aria-label="Rules pagination">{filters.cursor && <Link href={href({}, "")}>Newest</Link>}{!rulesPage.isDone && <Link href={href({}, rulesPage.continueCursor)}>Older<Icon name="caretRight" /></Link>}</nav>
+      </div>}
+      {filters.rule && !open && <p className="ctx-note">That rule isn’t on this page. <Link href={href()}>Back to rules</Link></p>}
+      {drawer && <RuleDrawer rule={drawer} edit={Boolean(editing || removing)} removing={Boolean(removing)} usage={ctx.ruleUsage} href={href} scope={scopeOf(drawer)} admin={isAdmin} organizationId={organization._id} teams={teams} repositories={repositories} repoName={ctx.repoName} usageLoaded={Boolean(open) && ruleUsage !== undefined} />}
+    </div>
   );
 }
 
-// The analytics side panel for one rule, like Greptile's: overview, performance tiles and recent usage.
-function RulePanel({ rule, scope, usage, close, edit, admin, organizationId, repoName }: { rule: Rule; scope: string; usage: DashboardContext["ruleUsage"]; close: string; edit?: string; admin: boolean; organizationId: string; repoName: (id: string) => string }) {
-  const s = rule.stats, rated = s.useful + s.notUseful;
+// Greptile's Details drawer: read-only grey fields with Edit, or an edit form with delete / Cancel / Save;
+// then Snapshot Analytics (2×2 tiles) and Recent Usage.
+function RuleDrawer({ rule: r, edit, removing, usage, href, scope, admin, organizationId, teams, repositories, repoName, usageLoaded }: {
+  rule: Rule; edit: boolean; removing: boolean; usage: DashboardContext["ruleUsage"]; href: (extra?: Record<string, string>) => string; scope: { icon: IconName; label: string; title?: string };
+  admin: boolean; organizationId: string; teams: { id: string; label: string }[]; repositories: { id: string; label: string; name: string }[]; repoName: (id: string) => string; usageLoaded: boolean;
+}) {
+  const s = r.stats, rated = s.useful + s.notUseful, view = href({ rule: r._id });
+  const globs = r.globs.length ? r.globs : ["auto"];
   return (
-    <aside className="memory-panel" aria-labelledby="rule-panel-title">
-      <header><h2 id="rule-panel-title">Analytics</h2><Link className="icon-button" href={close} aria-label="Close analytics">×</Link></header>
-      <section>
-        <div className="panel-heading"><h3>Overview</h3>{edit && <Link className="button small" href={edit}>Edit</Link>}</div>
-        <p className="panel-title">{rule.title}</p>
-        <p className="panel-body">{rule.instructions}</p>
-        <dl className="panel-facts"><dt>Type</dt><dd>Rule</dd><dt>Scope</dt><dd>{scope}</dd><dt>Severity</dt><dd>{rule.severity}</dd><dt>Files</dt><dd>{rule.globs.length ? rule.globs.join(", ") : "All files"}</dd><dt>Status</dt><dd>{rule.enabled ? "Active" : "Disabled"}</dd></dl>
-        {admin && <RuleForm rule={rule} organizationId={organizationId} returnTo={close + (close.includes("?") ? "&" : "?") + "rule=" + rule._id} toggle />}
-      </section>
-      <section>
-        <h3>Performance</h3>
-        <div className="panel-tiles">
-          <div><span>Acceptance rate</span><strong>{pct(s.addressed, s.uses)}</strong></div>
-          <div><span>Uses this month</span><strong>{s.usesThisMonth}</strong></div>
-          <div><span>Upvote ratio</span><strong className="good">{pct(s.useful, rated)}</strong></div>
-          <div><span>Downvote ratio</span><strong className="bad">{pct(s.notUseful, rated)}</strong></div>
+    <aside className="drawer ctx-drawer" aria-labelledby="rule-drawer-title">
+      <header className="drawer-header">
+        <h2 id="rule-drawer-title">Details</h2>
+        {edit ? <>
+          <Dialog trigger={<Icon name="trash" />} triggerLabel={`Delete ${r.title}`} triggerClassName="danger icon-only" title="Delete rule?" size="confirm" open={removing}>
+            <div className="modal-body"><p>“{r.title}” stops applying to reviews. This can’t be undone; deactivate it instead to keep it.</p></div>
+            <div className="modal-footer"><DialogClose>Cancel</DialogClose><RuleForm rule={r} organizationId={organizationId} returnTo={href()} remove /></div>
+          </Dialog>
+          <Link className="button" href={view} scroll={false}>Cancel</Link>
+          <button className="primary" form="rule-edit-form">Save</button>
+        </> : admin && <Link className="button primary" href={href({ rule: r._id, edit: r._id })} scroll={false}>Edit</Link>}
+        <Link className="button ghost icon-only" href={href()} scroll={false} aria-label="Close details"><Icon name="x" /></Link>
+      </header>
+      {edit ? (
+        <form id="rule-edit-form" action={saveRule} className="drawer-block ctx-fields stack">
+          <input type="hidden" name="organizationId" value={organizationId} />
+          <input type="hidden" name="returnTo" value={view} />
+          <input type="hidden" name="id" value={r._id} />
+          <input type="hidden" name="category" value={r.category} />
+          <label>Title<input name="title" required maxLength={120} defaultValue={r.title} /></label>
+          <div className="field-inline"><span className="field-label">Type</span><TypeChip type="rule" label /></div>
+          <label>Description<textarea name="instructions" rows={6} required maxLength={10000} defaultValue={r.instructions} /></label>
+          <div className="field-inline"><label htmlFor="rule-edit-severity">Severity</label><select id="rule-edit-severity" name="severity" defaultValue={r.severity}>{["critical", "high", "medium", "low"].map((v) => <option key={v}>{v}</option>)}</select></div>
+          <div className="field"><span className="field-label">Scope</span><ScopeEditor id="rule-edit" initial={{ scope: scopeValue(r), pattern: r.repositoryPattern ?? "", globs: r.globs }} teams={teams} repositories={repositories} /></div>
+          <div className="field-inline"><label htmlFor="rule-edit-enabled">Status</label><span className="switch-label"><input id="rule-edit-enabled" type="checkbox" className="toggle" name="enabled" value="true" defaultChecked={r.enabled} />Active</span><input type="hidden" name="enabled" value="false" /></div>
+        </form>
+      ) : (
+        <div className="drawer-block ctx-fields">
+          <div className="field"><span className="field-label">Title</span><div className="ro-field">{r.title}</div></div>
+          <div className="field-inline"><span className="field-label">Type</span><TypeChip type="rule" label /></div>
+          <div className="field"><span className="field-label">Description</span><div className="ro-field ro-area">{r.instructions}</div></div>
+          <div className="field-inline"><span className="field-label">Severity</span><span className="badge tag">{r.severity}</span></div>
+          <div className="field">
+            <div className="field-inline"><span className="field-label">Scope</span><span className="badge tag">1 scope</span></div>
+            <div className="scope-grid">
+              <div className="field"><span className="field-sub">Repository</span><div className="ro-field" title={scope.title}><span className="value-chip">{scope.icon === "buildings" ? "all" : scope.label}</span></div></div>
+              <div className="field"><span className="field-sub">File pattern</span><div className="ro-field">{globs.map((g) => <span key={g} className="value-chip">{g}</span>)}</div></div>
+            </div>
+          </div>
+          <div className="field-inline"><span className="field-label">Status</span>{admin ? <RuleForm rule={r} organizationId={organizationId} returnTo={view} toggle /> : <span className="switch-label"><input type="checkbox" className="toggle" role="switch" checked={r.enabled} disabled readOnly aria-label="Status" />{r.enabled ? "Active" : "Inactive"}</span>}</div>
         </div>
-      </section>
-      <section>
-        <h3>Recent usage</h3>
-        {usage.length ? <ul className="panel-usage">{usage.map((f) => <li key={f._id}><Link href={`/dashboard/pulls/${f.reviewId}`}>{f.title}</Link><span className="row-meta">{repoName(f.repositoryId)} #{f.prNumber} · {ago(f.createdAt)} · {f.status}</span></li>)}</ul> : <p className="memory-empty">No recent usage available</p>}
-      </section>
+      )}
+      <div className="drawer-block">
+        <h3>Snapshot Analytics</h3>
+        <div className="stat-tiles">
+          <div><span><Icon name="chartLine" />Acceptance rate</span><strong className="good">{pct(s.addressed, s.uses)}</strong></div>
+          <div><span><Icon name="clock" />Uses this month</span><strong>{s.usesThisMonth}</strong></div>
+          <div><span><Icon name="thumbsUp" />Upvote ratio</span><strong className="good">{pct(s.useful, rated)}</strong></div>
+          <div><span><Icon name="thumbsDown" />Downvote ratio</span><strong className="bad">{pct(s.notUseful, rated)}</strong></div>
+        </div>
+      </div>
+      <div className="drawer-block">
+        <h3>Recent Usage</h3>
+        {usageLoaded && usage.length ? <ul className="usage-list">{usage.map((f) => <li key={f._id}><Link href={`/dashboard/pulls/${f.reviewId}`}>{f.title}</Link><span>{repoName(f.repositoryId)} #{f.prNumber} · {ago(f.createdAt)} · {f.status}</span></li>)}</ul> : <p className="usage-empty">No recent usage available</p>}
+      </div>
     </aside>
   );
 }
 
-// The hidden-field forms behind Delete and Enable/Disable: saveRule needs the whole rule.
+// The hidden-field forms behind Delete and the Status switch: saveRule needs the whole rule.
 function RuleForm({ rule: r, organizationId, returnTo, remove, toggle }: { rule: Rule; organizationId: string; returnTo: string; remove?: boolean; toggle?: boolean }) {
   return (
-    <form action={saveRule}>
+    <form action={saveRule} className={toggle ? "switch-label" : undefined}>
       <input type="hidden" name="organizationId" value={organizationId} />
       <input type="hidden" name="returnTo" value={returnTo} />
       <input type="hidden" name="id" value={r._id} />
@@ -155,95 +169,36 @@ function RuleForm({ rule: r, organizationId, returnTo, remove, toggle }: { rule:
       <input type="hidden" name="globs" value={r.globs.join(",")} />
       <input type="hidden" name="category" value={r.category} />
       <input type="hidden" name="enabled" value={String(toggle ? !r.enabled : r.enabled)} />
-      {toggle && <button className="small">{r.enabled ? "Disable rule" : "Enable rule"}</button>}
-      {remove && <><input type="hidden" name="remove" value="true" /><button className="danger">Delete rule</button></>}
+      {toggle && <><button className="switch" role="switch" aria-checked={r.enabled} aria-label={r.enabled ? "Deactivate rule" : "Activate rule"} />{r.enabled ? "Active" : "Inactive"}</>}
+      {remove && <><input type="hidden" name="remove" value="true" /><button className="danger solid">Delete rule</button></>}
     </form>
   );
 }
 
-const scopeValue = (r: { repositoryId?: string; teamId?: string; repositoryPattern?: string }) => r.repositoryId ? "repo:" + r.repositoryId : r.teamId ? "team:" + r.teamId : r.repositoryPattern ? "pattern" : "";
-// Scope picker: workspace, a team, a repository-name pattern or one repository. A more specific rule
-// with the same title replaces a broader one for the repositories it covers.
-function RuleScopeFields({ teams, repositories, scope, pattern }: { teams: { _id: string; name: string }[]; repositories: (NonNullable<Parameters<typeof repositoryDisplay>[0]> & { _id: string })[]; scope: string; pattern?: string }) {
-  return <>
-    <label>
-      Scope
-      <select name="scope" defaultValue={scope}>
-        <option value="">Entire workspace</option>
-        {teams.map((t) => <option key={t._id} value={"team:" + t._id}>Team: {t.name}</option>)}
-        <option value="pattern">Repositories matching a pattern</option>
-        {repositories.map((r) => <option key={r._id} value={"repo:" + r._id}>{repositoryDisplay(r)}</option>)}
-      </select>
-    </label>
-    <label>
-      Repository pattern (for pattern scope)
-      <input name="repositoryPattern" defaultValue={pattern ?? ""} placeholder="acme/*-service" maxLength={200} />
-    </label>
-  </>;
-}
-
 const assistantKinds: Record<string, string> = { draft: "Drafted rule", refine: "Tighter wording", suggest: "Suggested rule", flag: "Rule overlap", import: "Imported rule", context: "Suggested from an MCP client" };
 const runKinds: Record<string, string> = { draft: "Draft", refine: "Review of existing rules", suggest: "Suggestions from fixed findings and conventions", import: "Import from AI rule files", context: "Suggestion from an MCP client" };
-// "Draft with AI" in the Add dialog: the rule assistant. Every result is a suggestion an admin approves
-// (optionally after editing) or dismisses from the Suggested rows in the table.
-function DraftWithAI({ ctx, returnTo }: { ctx: DashboardContext; returnTo: string }) {
-  const { ruleAssistant, organization, scopes, data } = ctx;
-  if (!ruleAssistant) return null;
-  const busy = ruleAssistant.runs.some((r) => r.status === "pending"), last = ruleAssistant.runs[0];
-  return (
-    <section className="draft-ai" aria-labelledby="draft-ai">
-      <h3 id="draft-ai">Draft with AI</h3>
-      <p className="muted">Describe the rule, or let the assistant review existing rules or suggest rules from findings your team fixed. Results appear as Suggested rows for an admin to approve.</p>
-      <form action={requestRuleAssistant} className="memory-steps">
-        <input type="hidden" name="organizationId" value={organization._id} />
-        <input type="hidden" name="returnTo" value={returnTo} />
-        <input type="hidden" name="kind" value="draft" />
-        <label>Describe the rule<textarea name="description" rows={2} required minLength={10} maxLength={2000} placeholder="Payment code keeps amounts in integer cents, never floating-point dollars." /></label>
-        <RuleScopeFields teams={scopes.teams} repositories={data.repositories} scope={ctx.requestedRepository ? "repo:" + ctx.requestedRepository : ""} />
-        <button disabled={busy}>Draft rule</button>
-      </form>
-      <form action={requestRuleAssistant} className="row">
-        <input type="hidden" name="organizationId" value={organization._id} />
-        <input type="hidden" name="returnTo" value={returnTo} />
-        <button className="small" name="kind" value="refine" disabled={busy}>Review existing rules</button>
-        <button className="small" name="kind" value="suggest" disabled={busy}>Suggest rules from findings</button>
-      </form>
-      {last && <p className="muted">Last run: {runKinds[last.kind] ?? last.kind} · {last.status === "pending" ? "working…" : last.status === "failed" ? last.error ?? "failed" : `${last.suggestions ?? 0} suggestion${last.suggestions === 1 ? "" : "s"}`}{(last.rejected ?? []).map((x, i) => <span key={i}> · discarded “{x.title}” ({x.reason})</span>)}</p>}
-    </section>
-  );
-}
 
+// A rule-assistant suggestion, expanded inline: why it was suggested, the editable rule, Approve / Dismiss.
 type Suggestion = NonNullable<DashboardContext["ruleAssistant"]>["suggestions"][number];
-function SuggestionRow({ s, scope, wide }: { s: Suggestion; scope: string; wide: boolean }) {
+function SuggestionReview({ s }: { s: Suggestion }) {
   return (
-    <tr className="suggested-row">
-      <td colSpan={wide ? 4 : 2}>
-        <span className="row-title">{assistantKinds[s.kind] ?? s.kind}: {s.title}</span>
-        <p className="row-meta">{s.kind !== "flag" ? `${scope} · ${s.severity} · ` : ""}Suggested</p>
-        <details>
-          <summary>Review suggestion</summary>
-          {s.kind === "refine" && s.base && <p className="muted">Currently: <strong>{s.base.title}</strong>: {s.base.instructions}</p>}
-          <p>{s.rationale}</p>
-          {s.issues.length > 0 && <ul>{s.issues.map((i, n) => <li key={n}><span className="badge">{i.kind}</span> {i.detail}</li>)}</ul>}
-          <p className="muted">Based on: {s.sources.map((x, n) => <span key={n}>{n ? "; " : ""}{x.kind === "description" ? "your description" : x.kind === "rule" ? `rule “${x.label}”` : x.kind === "file" ? <code>{x.label}</code> : `“${x.label}”`}{x.detail ? ` (${x.detail})` : ""}</span>)}</p>
-          <form action={decideRuleSuggestion} className="memory-steps" id={`suggestion-${s._id}`}>
-            <input type="hidden" name="suggestionId" value={s._id} />
-            {s.kind !== "flag" && (
-              <>
-                <label>Title<input name="title" required defaultValue={s.title} maxLength={120} /></label>
-                <label>Instructions<textarea name="instructions" required defaultValue={s.instructions} rows={3} /></label>
-                <label>Severity<select name="severity" defaultValue={s.severity}>{["critical", "high", "medium", "low"].map((v) => <option key={v}>{v}</option>)}</select></label>
-              </>
-            )}
-          </form>
-        </details>
-      </td>
-      <td>
-        <div className="row-actions">
-          <button className="primary small" form={`suggestion-${s._id}`} name="decision" value="approved">{s.kind === "flag" ? "Disable newer" : s.kind === "refine" ? "Apply" : "Approve"}</button>
-          <button className="small" form={`suggestion-${s._id}`} name="decision" value="rejected" formNoValidate>Dismiss</button>
+    <div className="ctx-expansion">
+      {s.kind === "refine" && s.base && <p className="muted">Currently: <strong>{s.base.title}</strong>: {s.base.instructions}</p>}
+      <p>{s.rationale}</p>
+      {s.issues.length > 0 && <ul>{s.issues.map((i, n) => <li key={n}><span className="badge tag">{i.kind}</span> {i.detail}</li>)}</ul>}
+      <p className="muted">Based on: {s.sources.map((x, n) => <span key={n}>{n ? "; " : ""}{x.kind === "description" ? "your description" : x.kind === "rule" ? `rule “${x.label}”` : x.kind === "file" ? <code>{x.label}</code> : `“${x.label}”`}{x.detail ? ` (${x.detail})` : ""}</span>)}</p>
+      <form action={decideRuleSuggestion} className="ctx-form stack">
+        <input type="hidden" name="suggestionId" value={s._id} />
+        {s.kind !== "flag" && <>
+          <label>Title<input name="title" required defaultValue={s.title} maxLength={120} /></label>
+          <label>Instructions<textarea name="instructions" required defaultValue={s.instructions} rows={3} /></label>
+          <label>Severity<select name="severity" defaultValue={s.severity}>{["critical", "high", "medium", "low"].map((v) => <option key={v}>{v}</option>)}</select></label>
+        </>}
+        <div className="form-actions">
+          <button className="primary" name="decision" value="approved">{s.kind === "flag" ? "Disable newer" : s.kind === "refine" ? "Apply" : "Approve"}</button>
+          <button name="decision" value="rejected" formNoValidate>Dismiss</button>
         </div>
-      </td>
-    </tr>
+      </form>
+    </div>
   );
 }

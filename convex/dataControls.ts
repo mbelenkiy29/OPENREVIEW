@@ -129,7 +129,7 @@ export const requestDeletion = mutation({ args: { token: v.string(), organizatio
   if (!org || a.confirmName.trim() !== org.name) throw new Error("Type the workspace name exactly to confirm");
   const pending = await pendingOf(ctx, a.organizationId);
   if (pending && ["scheduled", "purging"].includes(pending.status)) throw new Error("Deletion is already scheduled");
-  if (await subscribed(ctx, a.organizationId)) throw new Error("This workspace has a subscription. Cancel it in Settings → Billing → Manage billing, then delete the workspace once the subscription has ended.");
+  if (await subscribed(ctx, a.organizationId)) throw new Error("This workspace has a subscription. Cancel it in Organization Settings → Billing & Usage → Manage billing, then delete the workspace once the subscription has ended.");
   const scheduledFor = Date.now() + graceDays() * 86_400_000;
   const id = await ctx.db.insert("workspaceDeletions", { organizationId: a.organizationId, name: org.name, requestedBy: user._id, requestedAt: Date.now(), scheduledFor, status: "scheduled", step: 0, counts: {} });
   const scheduledId = await ctx.scheduler.runAt(scheduledFor, internal.dataControls.startPurge, { deletionId: id });

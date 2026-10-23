@@ -98,14 +98,14 @@ try {
   }
   // Sign in and sign up: the same choices, linked to each other.
   await page.goto(url + "/login?error=link");
-  await page.getByRole("heading", { name: "Sign in to OpenReview", level: 1 }).waitFor();
-  await page.getByRole("link", { name: "Continue with GitHub" }).waitFor();
+  await page.getByRole("heading", { name: "Log into your account", level: 1 }).waitFor();
+  await page.getByRole("link", { name: "Sign in with GitHub" }).waitFor();
   await page.getByRole("alert").filter({ hasText: "expired or already used" }).waitFor();
   await page.screenshot({ path: "output/playwright/login.png", fullPage: true, caret: "initial" });
-  await page.getByRole("link", { name: "Create an account" }).click();
+  await page.getByRole("link", { name: "Sign up", exact: true }).click();
   await page.waitForURL("**/signup");
-  await page.getByRole("heading", { name: "Create your account", level: 1 }).waitFor();
-  await page.getByRole("link", { name: "Continue with GitHub" }).waitFor();
+  await page.getByRole("heading", { name: "Create an account", level: 1 }).waitFor();
+  await page.getByRole("link", { name: "Sign up with GitHub" }).waitFor();
   await page.goto(url + "/?error=signin");
   await page.waitForURL("**/login?error=signin");
   assert.equal((await page.request.get(`${url}/docs/openapi.yaml`)).status(), 200);
@@ -151,8 +151,9 @@ try {
     ],
   });
   await page.goto(`${url}/dashboard/repositories`);
+  // Repository names open their pull requests dialog.
   await page
-    .getByRole("heading", { name: "test-fixture/context-example", exact: true })
+    .getByRole("button", { name: "test-fixture/context-example", exact: true })
     .waitFor();
   // Guided setup: every step with the keyboard shortcut, live previews, reduced motion, 390 px, finish.
   await page.goto(`${url}/dashboard/onboarding/connect`);
@@ -226,7 +227,7 @@ try {
     await asWorkspace(organizationId);
   }
   // Fix agents: settings list the cloud agents and what each needs; the link page answers without a raw error.
-  await page.goto(`${url}/dashboard/settings/agents`);
+  await page.goto(`${url}/dashboard/account/review`);
   await page.getByRole("heading", { name: "Personal fix agent" }).waitFor();
   await page.getByRole("heading", { name: "Cloud agents" }).waitFor();
   await page.getByText("Local bridge (Fix on your machine)", { exact: true }).waitFor();
@@ -256,6 +257,9 @@ try {
   };
   // With analytics configured, the consent banner (bottom left) covers the lowest sidebar rows; a visitor
   // answers it once, so the walk declines it first.
+  // Personal Settings (where the agents check ended) has no tabs, so the walk starts from Analytics.
+  await page.goto(`${url}/dashboard/analytics`);
+  await settled();
   const consent = page.getByRole("region", { name: "Analytics cookie" });
   if (await consent.count()) await consent.getByRole("button", { name: "Decline" }).click();
   // The app chrome stays mounted while pages change: the Main navigation element must survive every
@@ -274,55 +278,51 @@ try {
     assert.ok(same, `${label}: the main navigation was mounted again`);
     assert.ok(!flashed, `${label}: the loading skeleton replaced the page`);
     await page.waitForFunction(() => {
-      const nav = document.querySelector('nav[aria-label="Main navigation"]'), bar = nav?.querySelector(".tab-indicator"), tab = nav?.querySelector('[aria-current="page"]');
+      const nav = document.querySelector('nav[aria-label="Main navigation"]'), bar = nav?.querySelector<HTMLElement>(".tab-indicator"), tab = nav?.querySelector('[aria-current="page"]');
+      // Chat opens from the header, so no tab is current and the bar hides.
+      if (bar && !tab) return bar.hidden;
       if (!bar || !tab) return false;
       const a = bar.getBoundingClientRect(), b = tab.getBoundingClientRect();
       return Math.abs(a.left - b.left) < 1 && Math.abs(a.width - b.width) < 1 && Math.abs(a.bottom - b.bottom) < 1;
     });
   };
   let dashboardPages = 0;
-  for (const name of [
-    "Analytics",
-    "Chat",
-    "Memory",
-    "Pull Requests",
-    "Settings",
-  ]) {
-    await visit(
-      page
-        .getByRole("navigation", { name: "Main navigation" })
-        .getByRole("link", { name, exact: true }),
-    );
+  // Greptile's eight tabs; settings-style tabs list their pages in a sub-navigation, Custom Context its views.
+  const subnavs: Record<string, string> = { "Code Review Settings": "Code Review Settings", "Custom Context": "Context views", "Organization Settings": "Organization Settings" };
+  for (const name of ["Analytics", "Repositories", "Code Review Settings", "Custom Context", "Pull Requests", "Code Providers", "Integrations", "Organization Settings"]) {
+    await visit(page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name, exact: true }));
     dashboardPages++;
     await stayed(name);
-    if (name === "Analytics") {
-      // Analytics sub-tabs: PR Reviews and Bugs Caught (the Findings page), each at its own URL.
-      const views = page.getByRole("navigation", { name: "Analytics views" });
-      for (const [label, path] of [["Bugs Caught", "/dashboard/analytics/findings"], ["PR Reviews", "/dashboard/analytics"]]) {
-        const link = views.getByRole("link", { name: label, exact: true });
-        await link.click();
-        await page.waitForURL((u) => u.pathname === path);
-        await settled();
-        assert.equal(await link.getAttribute("aria-current"), "page", `${label} is not marked as the current view`);
-        if (label === "Bugs Caught") await page.getByRole("button", { name: "Filter findings" }).waitFor();
-        await stayed(label);
-        dashboardPages++;
-      }
-    }
-    const secondary = page.locator("aside.secondary-nav nav").first();
-    if (!(await secondary.count())) continue;
-    for (const label of await secondary.getByRole("link").allTextContents()) {
-      const link = secondary.getByRole("link", { name: label, exact: true });
+    if (!subnavs[name]) continue;
+    const pages = page.getByRole("navigation", { name: subnavs[name] }).first().locator('a[href^="/dashboard/"]');
+    for (const label of await pages.allTextContents()) {
+      const link = page.getByRole("navigation", { name: subnavs[name] }).first().getByRole("link", { name: label, exact: true });
       await visit(link);
-      assert.equal(
-        await link.getAttribute("aria-current"),
-        "page",
-        `${label} is not marked as the current page`,
-      );
+      assert.equal(await link.getAttribute("aria-current"), "page", `${label} is not marked as the current page`);
       await stayed(label);
       dashboardPages++;
     }
   }
+  // Bugs Caught opens from Analytics; Chat from the header.
+  await visit(page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Analytics", exact: true }));
+  await visit(page.getByRole("link", { name: "View all bugs" }).first());
+  await page.getByRole("button", { name: "Filter findings" }).waitFor();
+  await stayed("Bugs Caught");
+  await visit(page.getByRole("link", { name: "Chat", exact: true }).first());
+  await stayed("Chat");
+  dashboardPages += 2;
+  // Personal Settings, from the account menu, swaps the tabs for ‹ Back.
+  await page.locator(".profile > summary").click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.waitForURL("**/dashboard/account");
+  await settled();
+  assert.equal(await page.getByRole("navigation", { name: "Main navigation" }).count(), 0, "Personal Settings still shows the tabs");
+  for (const label of await page.getByRole("navigation", { name: "Personal Settings" }).locator("a").allTextContents()) {
+    await visit(page.getByRole("navigation", { name: "Personal Settings" }).getByRole("link", { name: label, exact: true }));
+    dashboardPages++;
+  }
+  await page.getByRole("link", { name: "Back", exact: true }).click();
+  await page.waitForURL("**/dashboard/chat");
   // Findings moved to Analytics → Bugs Caught; old links still land there with their filters.
   for (const old of ["/dashboard/pulls/findings", "/dashboard/findings"]) {
     await page.goto(`${url}${old}?severity=high`);
@@ -332,9 +332,9 @@ try {
     token,
     organizationId,
   });
-  await page.goto(`${url}/dashboard/settings?repository=${repository._id}`);
+  await page.goto(`${url}/dashboard/code-review?repository=${repository._id}`);
   await page.getByLabel("Minimum confidence", { exact: true }).fill("0.92");
-  await page.getByRole("button", { name: "Save review settings" }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
   await page.waitForTimeout(500);
   assert.equal(
     (
@@ -345,29 +345,26 @@ try {
     ).settings.minimumConfidence,
     0.92,
   );
-  // Settings → Code Review lists the page's sections; a click scrolls to one and marks it.
-  await page.getByRole("navigation", { name: "settings navigation" }).getByRole("link", { name: "Security checks", exact: true }).click();
-  await page.waitForFunction(() => location.hash === "#review-security" && document.querySelector('a[href="#review-security"]')?.getAttribute("aria-current") === "location");
-  // Rules are added in a dialog (?add=1). Admins get the rule assistant there ("Draft with AI"); without a
-  // model run it has no suggestions to approve.
+  // Code Review Settings lists the page's sections; a click scrolls to one and marks it.
+  await page.getByRole("navigation", { name: "Code Review Settings" }).getByRole("link", { name: "OpenReview Comments", exact: true }).click();
+  await page.waitForFunction(() => location.hash === "#review-categories" && document.querySelector('a[href="#review-categories"]')?.getAttribute("aria-current") === "location");
+  // Context is added in Greptile's stepped dialog (?add=1). Admins can have the rule assistant optimize the
+  // description; without a model run it has nothing to suggest.
   await page.goto(`${url}/dashboard/rules?add=1`);
-  const addRule = page.getByRole("dialog", { name: "Add rule" });
-  await addRule.getByRole("heading", { name: "Draft with AI" }).waitFor();
-  assert.equal(await addRule.getByRole("button", { name: "Draft rule" }).count(), 1);
+  const addRule = page.getByRole("dialog", { name: "Add Context" });
+  // The dialog opens once the page hydrates.
+  await addRule.getByRole("button", { name: "Optimize" }).waitFor();
   await addRule.getByLabel("Title", { exact: true }).fill("Browser check membership");
-  await addRule
-    .getByLabel("Instructions", { exact: true })
-    .fill(
-      "All routes must validate organization membership before reading organization data.",
-    );
-  await addRule.getByRole("button", { name: "Create rule", exact: true }).click();
-  await page.getByRole("link", { name: "Browser check membership", exact: true }).first().waitFor();
+  await addRule.getByLabel("Rule Description").fill("All routes must validate organization membership before reading organization data.");
+  await addRule.getByRole("button", { name: "Next" }).click();
+  await addRule.getByRole("button", { name: "Create Context" }).click();
+  await page.getByText("Browser check membership", { exact: true }).first().waitFor();
   await page.getByRole("link", { name: "Chat", exact: true }).first().click();
   await page.getByRole("heading", { name: "Chat", exact: true }).waitFor();
   await page.getByRole("link", { name: "New chat" }).waitFor();
   await page.getByRole("heading", { name: "No indexed repositories" }).waitFor();
   assert.equal((await page.request.get(`${url}/api/chat/abcdefghij/stream`)).status(), 404);
-  await page.goto(`${url}/dashboard/memory/preferences`);
+  await page.goto(`${url}/dashboard/context/learned`);
   await page.getByRole("heading", { name: "Learned team conventions" }).waitFor();
   await page.getByLabel("Convention status").selectOption("suggested");
   await page.getByLabel("Search memory").fill("pagination");
@@ -392,13 +389,13 @@ try {
     ),
     "Mobile page overflows horizontally",
   );
-  // Phones: the main tabs form a bottom bar, and "Pull Requests" keeps its name behind the short label.
+  // Phones: the eight tabs stay at the top and scroll sideways inside their row.
   const tabBar = await page.getByRole("navigation", { name: "Main navigation" }).boundingBox();
-  assert.ok(tabBar && Math.abs(tabBar.y + tabBar.height - 844) <= 1 && Math.abs(tabBar.width - 390) <= 1, `The phone tab bar is not at the bottom: ${JSON.stringify(tabBar)}`);
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Pull Requests", exact: true }).waitFor();
+  assert.ok(tabBar && tabBar.y < 120 && Math.abs(tabBar.width - 390) <= 1, `The phone tab row is out of place: ${JSON.stringify(tabBar)}`);
+  assert.ok(await page.getByRole("navigation", { name: "Main navigation" }).evaluate((nav) => nav.scrollWidth > nav.clientWidth), "The phone tab row does not scroll");
   // Dark theme at mobile and desktop widths: no overflow, no console errors.
   await page.emulateMedia({ colorScheme: "dark" });
-  for (const path of ["/", "/dashboard", "/dashboard/chat", "/dashboard/settings/billing", "/docs/quickstart"]) {
+  for (const path of ["/", "/dashboard", "/dashboard/chat", "/dashboard/organization/billing", "/docs/quickstart"]) {
     await page.goto(url + path);
     await settled();
     await page.screenshot({ path: `output/playwright/dark-mobile${path === "/" ? "-home" : path.replaceAll("/", "-")}.png`, fullPage: true, caret: "initial" });
@@ -410,7 +407,7 @@ try {
   await page.screenshot({ path: "output/playwright/dark-desktop.png", fullPage: true, caret: "initial" });
   assert.deepEqual(errors, [], `Browser errors: ${errors.join("; ")}`);
   console.log(
-    `Browser verification passed: landing (interactive demos, motion and reduced motion), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px), repository selection, ${dashboardPages} dashboard pages (main tabs, Analytics sub-tabs and sidebars, with the app chrome kept mounted and no loading flash), review tabs, Findings redirects, Code Review section links, persisted settings/rules, Memory page filters, Chat page, mobile layout with the bottom tab bar, and dark theme. GitHub OAuth and real indexing still require external credentials.`,
+    `Browser verification passed: landing (interactive demos, motion and reduced motion), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px), repository selection, ${dashboardPages} dashboard pages (Greptile's eight tabs, their sub-navigation, Bugs Caught, Chat and Personal Settings, with the app chrome kept mounted and no loading flash), review tabs, Findings redirects, Code Review section links, persisted settings/context, learned preference filters, Chat page, the phone tab row, and dark theme. GitHub OAuth and real indexing still require external credentials.`,
   );
 } finally {
   await browser.close();

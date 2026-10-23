@@ -147,9 +147,9 @@ test("the tools step shows fix pull requests and deep reviews as Pro, disabled, 
   const { ToolsStep } = await import("../app/dashboard/onboarding/configure");
   const render = (locked: Entitlement[]) => renderToStaticMarkup(createElement(ToolsStep, { action: async () => ({}), organizationId: "org", admin: true, progress: null, heading: null, locked, defaults: { ...defaults, fixPullRequests: true, mode: "deep" } }));
   const starter = render(["review.deep", "fix.pullRequests"]);
-  assert.ok(starter.includes(upgradeNote["fix.pullRequests"]));
+  assert.ok(starter.includes(upgradeNote["fix.pullRequests"].replaceAll("&", "&amp;")), "the note names Billing & Usage, HTML-escaped");
   assert.ok(starter.includes("Deep reviews are on the Pro plan"));
-  assert.ok(starter.includes('href="/dashboard/settings/billing"'));
+  assert.ok(starter.includes('href="/dashboard/organization/billing"'));
   // A disabled fieldset submits nothing, so the form saves fix pull requests off; Deep can't be picked.
   assert.match(starter, /<fieldset disabled="" inert="">.*name="fixPullRequests"/s);
   assert.doesNotMatch(starter, /name="fixPullRequests"[^>]*checked/);

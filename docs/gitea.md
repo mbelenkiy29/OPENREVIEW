@@ -2,7 +2,7 @@
 
 Use a dedicated bot token with `write:repository`, `write:issue`, and `read:user`; include `read:organization` when discovering organization repositories. Grant the bot repository admin on selected repositories if follow-ups are enabled. Gitea 28 requires repository admin to inspect another author's native repository permissions; repository write alone returns HTTP 403. Instance administrator access is unnecessary. See the [native permission handler](https://github.com/go-gitea/gitea/blob/v28.0.0/routers/api/v1/repo/collaborators.go).
 
-Authorize the HTTPS instance host in `SCM_ALLOWED_HOSTS` on both the web server and Convex backend. Connect through Settings → Code providers, select repositories, and enable indexing/reviews. Credentials are encrypted with `CREDENTIAL_ENCRYPTION_KEY` and scoped to the workspace and provider.
+Authorize the HTTPS instance host in `SCM_ALLOWED_HOSTS` on both the web server and Convex backend. Connect through Code Providers, select repositories, and enable indexing/reviews. Credentials are encrypted with `CREDENTIAL_ENCRYPTION_KEY` and scoped to the workspace and provider.
 
 Allow the exact OpenReview callback hostname in Gitea’s `[webhook] ALLOWED_HOST_LIST` when outbound delivery is restricted; retain any existing required hosts and restart Gitea after configuration changes. Do not use a wildcard to solve delivery failures.
 

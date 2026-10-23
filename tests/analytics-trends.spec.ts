@@ -104,7 +104,7 @@ test('report adds Greptile-style breakdowns: severity per day, contributors, mer
  expect(r.contributors).toEqual([{author:'ana',prs:2,repositories:['acme/web','acme/secret']},{author:'bo',prs:1,repositories:['acme/web']}]);
  expect(r.mergeTime).toMatchObject({count:3,meanMs:16/3*3600000,medianMs:4*3600000});
  expect(r.mergeTime.byRepository.map(x=>[x.repository,x.meanMs/3600000,x.count])).toEqual([['acme/secret',10,1],['acme/web',3,2]]);
- expect(r.mergeTime.daily.map(x=>[x.date,x.meanMs/3600000])).toEqual([['2026-10-10',6],['2026-10-11',4]]);
+ expect(r.mergeTime.daily.map(x=>[x.date,x.meanMs/3600000,x.medianMs/3600000,x.count])).toEqual([['2026-10-10',6,6,2],['2026-10-11',4,4,1]]);
  expect(r.topComments).toEqual([expect.objectContaining({findingId:open,upvotes:2,repository:'acme/web'})]);
  // Filters and visibility: a member outside the Secret team never sees its merge times.
  expect((await t.query(api.analytics.report,{token:admin.token,organizationId:org,...period,author:'bo'})).mergeTime).toMatchObject({count:1,meanMs:4*3600000,medianMs:4*3600000});

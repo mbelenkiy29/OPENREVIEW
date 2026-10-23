@@ -5,12 +5,13 @@ import { notFound, redirect } from "next/navigation";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { backend, current } from "../../src/server";
-import { settingsNavigation } from "./portal";
+import { referralConfig } from "../../src/referrals";
 import { knowledgeView } from "../../src/knowledge-view";
 import { navigation } from "./sections/shared";
 import { needsSetup } from "../../src/onboarding-steps";
 import { billingConfig } from "../../src/billing";
 import { parseRuleQuery } from "../../src/rule-query";
+import { pageFor } from "./routes";
 
 // The workspace chosen in the workspace menu (cookie), else the first membership.
 export function activeWorkspace<T extends { _id?: string }>(user: { organizations: T[] }, jar: { get(name: string): { value: string } | undefined }) {
@@ -29,18 +30,20 @@ export async function loadDashboard({
   params: Promise<{ section?: string[] }>;
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const { section = [] } = await params,
+  const { section: path = [] } = await params,
     user = await viewer(),
     jar = await cookies();
   const organization = activeWorkspace(user, jar);
   if (!organization?._id) redirect("/dashboard/onboarding/workspace");
   const filters = await searchParams;
+  // Tab URLs (routes.ts) render internal sections; everything below is keyed by those.
+  const page = pageFor(path), section = page?.internal ?? path;
   // A new workspace on a billing deployment chooses a plan before anything else (Billing, Account and
   // the personal Referrals settings stay reachable); the server enforces the same rule.
   if (billingConfig().enabled && organization.planRequired && !organization.planSelectedAt && !(section[0] === "settings" && ["billing", "account", "referrals"].includes(section[1] ?? ""))) redirect("/dashboard/onboarding/plan");
   // Admins of a workspace still in guided setup land there; deep links are never redirected.
   if (!section[0] && needsSetup(organization) && ["owner", "admin"].includes(organization.role)) redirect("/dashboard/onboarding");
-  const aliases: Record<string, string[]> = { overview: ["analytics"], repositories: ["settings", "repositories"], reviews: ["pulls"], findings: ["analytics", "findings"], knowledge: ["memory", "knowledge"], rules: ["memory", "rules"], team: ["settings", "people"], usage: ["settings", "usage"] };
+  const aliases: Record<string, string[]> = { overview: ["analytics"], reviews: ["pulls"], findings: ["analytics", "findings"], knowledge: ["repositories", "knowledge"], rules: ["context"], team: ["organization", "people"], usage: ["organization", "billing"] };
   if (!section[0] || aliases[section[0]]) {
     const parts = aliases[section[0] ?? "overview"];
     const suffix = section.slice(1);
@@ -48,11 +51,10 @@ export async function loadDashboard({
     redirect(`/dashboard/${[...parts, ...suffix].join("/")}${query.size ? `?${query}` : ""}`);
   }
   const route = section[0];
-  if(route === "settings" && !section[1]) {
-    const query = new URLSearchParams(Object.entries(filters).filter((e): e is [string,string] => e[1] !== undefined));
-    redirect(`/dashboard/settings/${filters.repository ? "review" : "repositories"}${query.size ? "?"+query : ""}`);
-  }
-  if(route === "settings" && !settingsNavigation().some(([key])=>key === section[1]))notFound();
+  // Settings and Memory pages are reached only through their tab URLs (next.config.ts redirects the old ones).
+  if ((route === "settings" || route === "memory") && !page) notFound();
+  // Referrals exists only while the referral program is on.
+  if (route === "settings" && section[1] === "referrals" && !referralConfig().enabled) notFound();
   // Findings live under Analytics → Bugs Caught; /dashboard/pulls/findings redirects there (next.config.ts).
   const view = route === "analytics" ? section[1] === "findings" ? "findings" : "overview" : route === "pulls" ? "reviews" : route === "memory" ? section[1] === "knowledge" ? "knowledge" : "rules" : route === "settings" ? ({ repositories: "repositories", people: "team", usage: "usage" }[section[1] ?? ""] ?? "settings") : route;
   const reviewDetailId = route === "pulls" && section[1] !== "findings" && section[1] !== "pr" ? section[1] : undefined;
@@ -157,10 +159,11 @@ export async function loadDashboard({
       (r, search) => backend().query(api.dashboard.knowledge, {
         token: user.token, repositoryId: r._id, search,
       })),
-    route === "settings" && section[1] === "review" && requestedRepository
+    // Code Review Settings shows a repository's settings; without ?repository= it is the first one.
+    route === "settings" && section[1] === "review" && (requestedRepository ?? data.repositories[0])
       ? backend().query(api.settings.repository, {
           token: user.token,
-          repositoryId: requestedRepository as Id<"repositories">,
+          repositoryId: (requestedRepository ?? data.repositories[0]._id) as Id<"repositories">,
         })
       : null,
   ]);
@@ -176,6 +179,6 @@ export async function loadDashboard({
   ]);
   // Narrowed above: a dashboard always has a workspace.
   const workspace = organization as typeof organization & { _id: Id<"organizations"> };
-  return { kind: "dashboard" as const, active, aliases, apiKeys, locked, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, pull, checks, filters, findingsPage, isAdmin, jar, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleUsage, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
+  return { kind: "dashboard" as const, page, active, aliases, apiKeys, locked, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, pull, checks, filters, findingsPage, isAdmin, jar, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleUsage, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
 }
 export type DashboardContext = Extract<Awaited<ReturnType<typeof loadDashboard>>, { kind: "dashboard" }>;

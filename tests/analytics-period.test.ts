@@ -19,6 +19,10 @@ test('period presets: week from Monday, month, quarter and year through today (U
  assert.deepEqual(presetPeriod('quarter',now),{since:'2026-07-01',until:'2026-08-16'});
  assert.deepEqual(presetPeriod('quarter',Date.UTC(2026,11,31)),{since:'2026-10-01',until:'2026-12-31'});
  assert.deepEqual(presetPeriod('year',now),{since:'2026-01-01',until:'2026-08-16'});
+ assert.deepEqual(presetPeriod('last7',now),{since:'2026-08-10',until:'2026-08-16'});
+ assert.deepEqual(presetPeriod('last30',now),{since:'2026-07-18',until:'2026-08-16'});
+ assert.deepEqual(presetPeriod('last90',now),{since:'2026-05-19',until:'2026-08-16'});
+ assert.equal(presetPeriod('last14',now),undefined);
  assert.equal(presetPeriod('custom',now),undefined);
 });
 test('chart buckets: daily up to 90 days, then Monday weeks labelled by their first day in the period',()=>{

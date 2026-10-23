@@ -135,7 +135,7 @@ async function main() {
       await replaceLogin(config);
     } else {
       const saved = await currentLogin();
-      if (!saved || !("apiKey" in saved)) throw new Error("Onboarding needs an admin API key. Run openreview onboard --url <server> --api-key, or set OPENREVIEW_API_KEY (create the key in dashboard Settings → API keys).");
+      if (!saved || !("apiKey" in saved)) throw new Error("Onboarding needs an admin API key. Run openreview onboard --url <server> --api-key, or set OPENREVIEW_API_KEY (create the key in dashboard Organization Settings → API Keys).");
       config = saved;
     }
     const { onboard, httpApi } = await import("./onboard");

@@ -25,6 +25,6 @@ export function emailReview(event: NotificationEvent, n: ReviewNotice) {
   if (n.prTitle) lines.push(`Pull request: ${n.prTitle.replace(/[\r\n]+/g, " ").slice(0, 200)}${n.prUrl ? ` (${n.prUrl})` : ""}`, "");
   for (const f of listed(event, n)) lines.push(`- [${[priorityOf(f.severity) + " " + f.severity, ...findingTags(f).map((t) => tagLabels[t])].join(", ")}] ${f.title.replace(/[\r\n]+/g, " ").slice(0, 200)} (${f.filePath}:${f.startLine})`);
   if (n.reviewUrl) lines.push("", `View the review: ${n.reviewUrl}`);
-  lines.push("", "Change these emails in OpenReview → Settings → Notifications.");
+  lines.push("", "Change these emails in OpenReview → Organization Settings → Notifications.");
   return { subject: headline(event, n).slice(0, 200), text: lines.join("\n") };
 }

@@ -1,6 +1,6 @@
 # Public API
 
-Authenticate with a workspace API key, created under **Settings → API Keys**:
+Authenticate with a workspace API key, created under **Organization Settings → API Keys**:
 
 ```http
 Authorization: Bearer or_...

@@ -1,6 +1,6 @@
 # Automatic runtime validation
 
-Automatic execution is disabled by default. An organization administrator approves the exact digest-pinned image and command in Settings → Runtime & Approval. Organization defaults apply to teams and repositories until an explicit override is saved. **Sync from parent** removes the override. Policies are stored in the application database; pull request code cannot change them.
+Automatic execution is disabled by default. An organization administrator approves the exact digest-pinned image and command in Code Review Settings → Runtime & Approval. Organization defaults apply to teams and repositories until an explicit override is saved. **Sync from parent** removes the override. Policies are stored in the application database; pull request code cannot change them.
 
 Deploy the worker separately from Next.js/Convex, on an isolated Docker host. Use Node.js 24, pnpm 11, Docker, and this checkout. Create a named worker credential in the admin settings page, copy it once to the worker's private environment, and start:
 

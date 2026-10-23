@@ -26,7 +26,7 @@ export async function PullDiscussion({ token, pullRequestId, filters, canAct }: 
     {!shown.length && <p className="muted">No comments{items.length ? " match these filters" : " yet"}.</p>}
     <ol className="timeline">{shown.map((item, i) => <li key={i}>
       <details open={!collapsed && !(item.kind === "thread" && item.resolved)}>
-        <summary><strong>@{item.author}</strong>{item.bot && <span className="badge">bot</span>} {item.kind === "review" ? <>{item.state.toLowerCase().replaceAll("_", " ")}</> : item.kind === "thread" ? <>on <code>{item.path}{item.line ? ":" + item.line : ""}</code>{item.resolved && <span className="badge resolved">resolved</span>}</> : "commented"} · {time(item.createdAt)} · <a href={item.url} target="_blank" rel="noreferrer">GitHub ↗</a></summary>
+        <summary><span className="avatar-letter" aria-hidden>{item.author[0]?.toUpperCase()}</span><strong>@{item.author}</strong>{item.bot && <span className="badge">bot</span>} {item.kind === "review" ? <>{item.state.toLowerCase().replaceAll("_", " ")}</> : item.kind === "thread" ? <>on <code>{item.path}{item.line ? ":" + item.line : ""}</code>{item.resolved && <span className="badge resolved">resolved</span>}</> : "commented"} · {time(item.createdAt)} · <a href={item.url} target="_blank" rel="noreferrer">GitHub ↗</a></summary>
         {item.kind === "thread" ? <>
           {item.comments.map((c, j) => <div key={j} className="thread-comment"><p className="muted">@{c.author} · {time(c.createdAt)}</p><ReviewMarkdown>{c.body}</ReviewMarkdown></div>)}
           {canAct && <ThreadActions pullRequestId={pullRequestId} threadId={item.threadId} replyTo={item.replyTo} resolved={item.resolved} />}

@@ -167,7 +167,7 @@ export const reply = internalAction({
             conversationId,
           });
           body +=
-            "\n\nSaved a repository preference for this finding pattern. Inspect it in Memory → Learned preferences; workspace admins can disable it there.";
+            "\n\nSaved a repository preference for this finding pattern. Inspect it in Custom Context → Learned preferences; workspace admins can disable it there.";
         }
         await ctx.runMutation(internal.conversations.finish, {
           conversationId,

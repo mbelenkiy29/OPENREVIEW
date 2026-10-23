@@ -10,16 +10,17 @@ import { fixPrompt } from "../../../src/fix-prompt";
 import { cancelReview, retryP4Answer, reviewAgain } from "../actions";
 import { Copy } from "../live";
 import { FixButton } from "../fix-button";
-import { PullList, PullSidebar, SeverityTags } from "../pulls";
+import { PullList, PullSidebar, SeverityTags, StatusChip } from "../pulls";
 import { SidebarKeys, PullActions } from "../pull-list-client";
 import { PullDiscussion } from "../pull-discussion";
 import { PullChat } from "../pull-chat";
 import { CatalogReview } from "../catalog-sync";
 import { RuntimeReview, ApprovalReview } from "../runtime";
 import { CodeTab } from "../code-tab";
-import { when, ago, status } from "./shared";
+import { when, ago } from "./shared";
 import { findingCounts } from "../../../src/priority";
 import { SubNav } from "../tabs";
+import { Icon, type IconName } from "../../ui/icons";
 import type { DashboardContext } from "../load";
 
 export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
@@ -31,16 +32,17 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
   const counts = detail ? findingCounts(detail.findings) : {};
   const fixable = detail ? detail.findings.filter((f) => f.canFix).length : 0;
   const tab = filters.tab === "activity" ? "discussion" : ["review", "code", "discussion"].includes(filters.tab ?? "") ? filters.tab : filters.diff === "1" ? "code" : "overview";
-  const tabs: [string, React.ReactNode][] = [["overview", "Overview"], ["review", <>Review <SeverityTags counts={counts} /></>], ["discussion", "Discussion"], ["code", "Code"]];
+  const tabs: [string, React.ReactNode, IconName][] = [["overview", "Overview", "fileText"], ["review", <>Review <SeverityTags counts={counts} /></>, "bug"], ["discussion", "Discussion", "chatCircleText"], ["code", "Code", "code"]];
   const failing = checks?.filter((c) => c.conclusion && !["success", "neutral", "skipped"].includes(c.conclusion)).length ?? 0, running = checks?.some((c) => c.status !== "completed");
-  const ci = checks && checks.length > 0 && <span className={failing ? "ci-failed" : running ? "muted" : "ci-passed"}>{failing ? "⚠ CI failed" : running ? "CI running" : "✓ CI passed"}</span>;
-  const section = (title: string, icon: string, body: React.ReactNode, open = true) => <details className="ov-section" open={open}><summary><span className="ov-icon" aria-hidden>{icon}</span><span className="ov-title">{title}</span></summary><div className="ov-body">{body}</div></details>;
+  const ci = checks && checks.length > 0 && <span className={"status-chip " + (failing ? "failed" : running ? "pending" : "completed")}><Icon name={failing ? "x" : running ? "circleNotch" : "check"} />{failing ? "CI failed" : running ? "CI running" : "CI passed"}</span>;
+  // Greptile's card with a header strip: an icon and a mono label, the content below a hairline.
+  const section = (title: string, icon: IconName, body: React.ReactNode, open = true) => <details className="ov-section" open={open}><summary><Icon name={icon} /><span className="ov-title">{title}</span><Icon name="caretDown" /></summary><div className="ov-body">{body}</div></details>;
   const here = detail ? `/dashboard/pulls/${detail.review._id}` : pull ? `/dashboard/pulls/pr/${pull._id}` : "";
   const chatOpen = Boolean(pull && filters.chat === "1");
   const tabQuery = filters.tab ? `tab=${encodeURIComponent(filters.tab)}` : "";
-  const chatLink = pull && <Link className="button" data-chat-toggle aria-pressed={chatOpen} href={`${here}?${chatOpen ? tabQuery : `chat=1${tabQuery ? "&" + tabQuery : ""}`}`}><span aria-hidden>💬</span> Chat with PR</Link>;
+  const chatLink = pull && <Link className="button" data-chat-toggle aria-pressed={chatOpen} href={`${here}?${chatOpen ? tabQuery : `chat=1${tabQuery ? "&" + tabQuery : ""}`}`}><Icon name="chatCircleText" /> Chat with PR</Link>;
   const github = (url?: string) => url && <>{sep}<a href={url} target="_blank" rel="noreferrer">GitHub ↗</a></>;
-  const checkRows = checks && checks.length > 0 && <ul className="checks">{checks.map((c) => { const ok = c.status === "completed" && c.conclusion && ["success", "neutral", "skipped"].includes(c.conclusion); return <li key={c.name}><span className={"check " + (c.status !== "completed" ? "running" : ok ? "passed" : "failed")} aria-hidden>{c.status !== "completed" ? "…" : ok ? "✓" : "✕"}</span><span>{c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : c.name}{c.description && <small className="meta">{c.description}</small>}</span><span className="muted">{c.status !== "completed" ? c.status.replaceAll("_", " ") : c.conclusion}</span></li>; })}</ul>;
+  const checkRows = checks && checks.length > 0 && <ul className="checks">{checks.map((c) => { const ok = c.status === "completed" && c.conclusion && ["success", "neutral", "skipped"].includes(c.conclusion); return <li key={c.name}><span className={"status-chip " + (c.status !== "completed" ? "pending" : ok ? "completed" : "failed")}><Icon name={c.status !== "completed" ? "circleNotch" : ok ? "check" : "x"} /></span><span>{c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : c.name}{c.description && <small className="meta">{c.description}</small>}</span><span className="muted">{c.status !== "completed" ? c.status.replaceAll("_", " ") : c.conclusion}</span></li>; })}</ul>;
   return (
           (detail || pull ? (
             <div className={"pull-detail" + (chatOpen ? " with-chat" : "")}>
@@ -62,7 +64,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 <section className="status-card" aria-label="Review status">
                   <div className="facts">
                     {pull.isDraft && <span>PR is in draft mode</span>}
-                    <span>{pull.state === "open" ? "Not reviewed yet" : `${pull.state[0].toUpperCase() + pull.state.slice(1)} without a review`}</span>
+                    <span className="status-chip"><Icon name="circleDashed" />{pull.state === "open" ? "Not reviewed yet" : `${pull.state[0].toUpperCase() + pull.state.slice(1)} without a review`}</span>
                     {ci}
                   </div>
                   <div className="actions">{canAct && <PullActions pullRequestId={pull._id} head={pull.headSha} state={pull.state} draft={pull.isDraft} />}</div>
@@ -83,7 +85,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 <time dateTime={new Date(detail.review.createdAt).toISOString()} title={when(detail.review.createdAt)}>{ago(detail.review.createdAt)}</time>
                 {detail.review.headBranch && <>{sep}<span className="chip">{detail.review.headBranch}</span> → {detail.review.baseBranch}</>}
                 {sep}<span className="chip" title={detail.review.headSha}>{detail.review.headSha.slice(0, 7)}</span>
-                {diffStats}{pull && <>{sep}{pull.reviewCount} {pull.reviewCount === 1 ? "review" : "reviews"}</>}{detail.review.status !== "completed" && <>{sep}{status(detail.review.status)}</>}{github(detail.review.prUrl)}
+                {diffStats}{pull && <>{sep}{pull.reviewCount} {pull.reviewCount === 1 ? "review" : "reviews"}</>}{github(detail.review.prUrl)}
               </p>
               {detail.latestReviewId && detail.latestReviewId !== detail.review._id && (
                 <p role="status">
@@ -97,6 +99,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
               {detail.retryPending&&<p role="status">Retry {detail.review.retryAt ? "scheduled for "+when(detail.review.retryAt) : "pending"}. The review will update automatically.</p>}
               <section className="status-card" aria-label="Review status">
                 <div className="facts">
+                  <StatusChip pr={{ latest: detail.review }} latest={{ status: detail.review.status }} />
                   {pull?.isDraft && <span>PR is in draft mode</span>}
                   {detail.review.reviewScore && <span title={detail.review.reviewScore.reason}>{detail.review.reviewScore.value}/5</span>}
                   {ci}
@@ -107,14 +110,14 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                   {detail.canFix && fixable > 0 && <FixButton compact reviewId={detail.review._id} agent={personalAgent} label={`Fix ${fixable} ${fixable === 1 ? "issue" : "issues"}`} />}
                 </div>
               </section>
-              <SubNav label="Review sections" active={tab ?? "overview"} items={tabs.map(([key, label]): [string, string, React.ReactNode] => [key, `/dashboard/pulls/${detail.review._id}${key === "overview" ? "" : "?tab=" + key}`, label])} />
+              <SubNav label="Review sections" active={tab ?? "overview"} items={tabs.map(([key, label, icon]): [string, string, React.ReactNode, IconName] => [key, `/dashboard/pulls/${detail.review._id}${key === "overview" ? "" : "?tab=" + key}`, label, icon])} />
               {tab === "overview" && <>
-              {detail.review.approvalAssessment && section("Change impact", "◎", <>
+              {detail.review.approvalAssessment && section("Change impact", "gauge", <>
                 <p><strong className={"impact " + detail.review.approvalAssessment.risk}>{detail.review.approvalAssessment.risk[0].toUpperCase() + detail.review.approvalAssessment.risk.slice(1)}:</strong> {detail.review.approvalAssessment.reason}</p>
                 <p className="muted">Classified from what the change touches, independent of findings · {Math.round(detail.review.approvalAssessment.confidence*100)}% confidence. Approval also requires the configured policy and current provider checks.</p>
                 {detail.review.coverageLimits?.map(limit=><p key={limit} className="muted">{limit}</p>)}
               </>)}
-              {section("Pull Request Info", "▤", <div className="pr-info">
+              {section("Pull Request Info", "gitPullRequest", <div className="pr-info">
                 <div className="pr-info-box">
                   <h3>Review summary</h3>
                   <div className="pr-info-scroll">
@@ -131,8 +134,8 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                   {checkRows || <p className="muted">{checks ? "No checks reported for this revision." : "Checks are shown for GitHub repositories."}</p>}
                 </div>
               </div>)}
-              {section("Diagram", "◇", diagnostics && diagnostics.diagrams.length > 0 ? <MermaidDiagram code={diagnostics.diagrams[0]}/> : <p className="muted">No diagram was generated for this change.</p>)}
-              {section("Review details", "⋯", <>
+              {section("Diagram", "graph", diagnostics && diagnostics.diagrams.length > 0 ? <MermaidDiagram code={diagnostics.diagrams[0]}/> : <p className="muted">No diagram was generated for this change.</p>)}
+              {section("Review details", "listChecks", <>
                 {detail.review.modeDecision && <p className="muted">Review tier: <strong>{detail.review.modeDecision.mode}</strong> ({detail.review.modeDecision.source === "settings" ? "configured" : `requested by ${detail.review.modeDecision.source}`}{detail.review.modeDecision.capped ? `; ${detail.review.modeDecision.requested} was capped by the workspace limit` : ""})</p>}
                 {detail.review.aiAuthored && <p role="note">Written by a coding agent: <strong>{detail.review.aiAuthored.agent}</strong> ({detail.review.aiAuthored.detail}){detail.review.aiAuthored.model ? <> · reviewed with <code>{detail.review.aiAuthored.model}</code></> : null}</p>}
                 <RuntimeReview token={user.token} reviewId={detail.review._id} evidence={detail.review.runtimeEvidence}/>{detail.review.nativeP4?<p>Automatic approval is not available for Perforce reviews.</p>:<ApprovalReview token={user.token} reviewId={detail.review._id}/>}
@@ -148,7 +151,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
               </>}
               {tab === "review" && <>
               {!detail.historicalFindingsAvailable && detail.review.resultStorageId && <p role="status">Historical finding snapshots are unavailable for this review. An administrator can recover them from the saved review result.</p>}
-              {section("Findings", "⛉", detail.findings.length ? <>
+              {section("Findings", "bug", detail.findings.length ? <>
                 {detail.canFix && <p className="findings-tools">
                   <Copy value={fixPrompt(repoName(detail.review.repositoryId), `PR #${detail.review.prNumber}`, detail.findings.filter((finding) => finding.canFix).map((finding) => ({ ...findingSchema.parse(finding), agent: finding.agent, fingerprint: finding.fingerprint, commitSha: finding.commitSha })), detail.review.runtimeEvidence)} label="Copy Fix All prompt" />
                   <Link href={`/fix/${detail.review._id}`}>More ways to fix: cloud agents, deep links, Devin, fix pull request</Link>
@@ -248,7 +251,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
             </div>
           ) : (
             <>
-              <PullList login={user.user.login} admin={isAdmin} token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} />
+              <PullList login={user.user.login} admin={isAdmin} live={ctx.active} token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} />
             </>
           ))
   );

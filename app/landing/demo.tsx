@@ -11,9 +11,9 @@ import { PortalDisclosure } from "../dashboard/portal-disclosure";
 import { ScrollTable } from "../dashboard/scroll-table";
 import { priority, status } from "../dashboard/sections/shared";
 import { reviewVerdict, verdictLabels } from "../../src/verdict";
-import { LineChart } from "../ui/charts";
+import { ChartCard } from "../dashboard/analytics-chart";
 import { Mark } from "../ui/logo";
-import { Icon, type IconName } from "../ui/icons";
+import { Icon } from "../ui/icons";
 import { PanelTabs, useIndicator } from "../dashboard/tabs";
 import { priorityOf } from "../../src/priority";
 import { analyticsView, answerFor, revealWords, triggerFlags, triggerKey, wordCount } from "./demo-logic";
@@ -77,29 +77,40 @@ function Window({ title, label = `${title} demo`, caption, size, frame, children
   </figure>;
 }
 
-const tabs = ["Analytics", "Chat", "Memory", "Pull Requests", "Settings"] as const;
-type Tab = (typeof tabs)[number];
-const tabIcons: Record<Tab, IconName> = { Analytics: "chartLine", Chat: "chatCircle", Memory: "brain", "Pull Requests": "gitPullRequest", Settings: "gear" };
-type Nav = [label: string, icon: IconName, current: boolean, open: () => void][];
-function Chrome({ active, onTab, secondary, children }: { active: Tab; onTab: (tab: Tab) => void; secondary?: Nav; children: ReactNode }) {
-  const { list, bar } = useIndicator<HTMLElement>(active);
-  return <div className="shell">
+// The dashboard's eight tabs (app/dashboard/routes.ts); Chat opens from the header, as in the app.
+const tabs = ["Analytics", "Repositories", "Code Review Settings", "Custom Context", "Pull Requests", "Code Providers", "Integrations", "Organization Settings"] as const;
+type Tab = (typeof tabs)[number] | "Chat";
+const subtitles: Record<Tab, string> = {
+  Analytics: "", Chat: "Ask questions about your repositories.", Repositories: "Manage connected repositories and view review metrics.",
+  "Code Review Settings": "Configure how OpenReview reviews your pull requests.", "Custom Context": "Manage context for Acme",
+  "Pull Requests": "Review history across your repositories.", "Code Providers": "Connect or manage your code providers.",
+  Integrations: "Connect the tools OpenReview reads context from and reports to.", "Organization Settings": "Manage members, roles, and invitations.",
+};
+// The dashboard's chrome and page column ("shell portal"); replica-shell keeps its palette inside the window.
+function Chrome({ active, onTab, children }: { active: Tab; onTab: (tab: Tab) => void; children: ReactNode }) {
+  const { list, bar } = useIndicator<HTMLElement>(active === "Chat" ? undefined : active);
+  return <div className="shell portal replica-shell">
     <div className="portal-top">
       <div className="portal-identity">
-        <span className="brand"><Mark /><span className="brand-name">OpenReview</span></span>
-        <PortalDisclosure className="scope-selector" label={<><span className="scope-name">Acme</span><span className="role-badge">Admin</span><Icon name="caretUpDown" /></>}><div className="scope-menu"><p className="muted">Acme is a sample workspace.</p><a href="/signup">Create your workspace →</a></div></PortalDisclosure>
+        <span className="brand"><Mark /></span>
+        <PortalDisclosure className="scope-selector" label={<><span className="scope-name">Acme</span><span className="role-badge">Admin</span><Icon name="caretUpDown" /></>}><div className="menu org-menu"><p className="menu-label">Acme is a sample organization.</p><a className="menu-item" href="/signup"><Icon name="plus" /><span>Create your organization</span></a></div></PortalDisclosure>
         <div className="header-actions">
-          <Link className="header-button" href="/docs" title="Docs"><Icon name="question" /><span className="sr-only">Docs</span></Link>
-          <PortalDisclosure className="profile" label={<><Icon name="user" /><span className="sr-only">Account menu for @dana</span></>}><div className="profile-menu"><a href="/login">Sign in</a><a href="/signup">Create an account</a></div></PortalDisclosure>
+          <button type="button" className="header-button" aria-pressed={active === "Chat"} onClick={() => onTab("Chat")}><Icon name="chatCircle" /><span className="sr-only">Chat</span></button>
+          <Link className="header-button" href="/docs" title="Docs"><Icon name="bookOpen" /><span className="sr-only">Docs</span></Link>
+          <PortalDisclosure className="profile" label={<><Icon name="user" /><span className="sr-only">Account menu for @dana</span></>}><div className="menu user-menu"><a className="menu-item" href="/login">Sign in</a><a className="menu-item" href="/signup">Create an account</a></div></PortalDisclosure>
         </div>
       </div>
-      <nav ref={list} className="primary-nav" aria-label="Demo sections">{tabs.map((t) => <button key={t} type="button" data-key={t} aria-current={t === active ? "page" : undefined} onClick={() => onTab(t)}><Icon name={tabIcons[t]} />{t}</button>)}<span ref={bar} className="tab-indicator" aria-hidden="true" /></nav>
+      <nav ref={list} className="primary-nav" aria-label="Demo sections">{tabs.map((t) => <button key={t} type="button" data-key={t} aria-current={t === active ? "page" : undefined} onClick={() => onTab(t)}>{t}</button>)}<span ref={bar} className="tab-indicator" aria-hidden="true" /></nav>
     </div>
-    {secondary && <div className="secondary-nav"><nav aria-label={`${active} pages`}>{secondary.map(([label, icon, current, open]) => <button key={label} type="button" aria-current={current ? "page" : undefined} onClick={open}><Icon name={icon} /><span>{label}</span></button>)}</nav></div>}
-    <div className="content">{children}</div>
+    <div className="content page">{children}</div>
   </div>;
 }
-const PageHeader = ({ title }: { title: string }) => <header><div><p className="muted">Acme</p><H level={1}>{title}</H></div><span className="live">Updating automatically</span></header>;
+const PageHeader = ({ title, subtitle }: { title: string; subtitle?: string }) => <header className="page-header"><div><H level={1}>{title}</H>{subtitle && <p>{subtitle}</p>}</div><span className="live">Updating automatically</span></header>;
+/** Greptile's segmented control, for a page's views. */
+function Segmented<T extends string>({ label, views, value, onChange }: { label: string; views: [T, string][]; value: T; onChange: (v: T) => void }) {
+  return <div className="segmented" role="group" aria-label={label}>{views.map(([v, text]) => <button key={v} type="button" aria-pressed={v === value} onClick={() => onChange(v)}>{text}</button>)}</div>;
+}
+const chip = (state: string) => <span className={`status-chip ${state === "completed" ? "completed" : state === "failed" ? "failed" : "pending"}`}><Icon name={state === "completed" ? "check" : state === "failed" ? "warningCircle" : "circleNotch"} />{state}</span>;
 
 // ---------- Pull requests ----------
 type Pull = { number: number; title: string; author: string; head: string; headBranch: string; reviewedAt: string; state: string; files: DiffFile[]; found: DiffFinding[]; score?: { value: number; reason: string }; steps?: string[] };
@@ -110,12 +121,13 @@ const pulls: Pull[] = [
 type PullsView = "list" | number;
 
 function PullTable({ open }: { open: (n: number) => void }) {
-  return <section><ScrollTable label="Pull requests" className="table-scroll"><table><thead><tr><th>Pull request</th><th>Author</th><th>Latest review</th><th>Findings</th><th>Score</th></tr></thead><tbody>
+  return <ScrollTable label="Pull requests" className="table-box"><table><thead><tr><th>PR #</th><th>PR name</th><th>Repo</th><th>Branch</th><th>Status</th><th>Findings</th><th>Score</th></tr></thead><tbody>
     {pulls.map((p) => <tr key={p.number}>
-      <td><button type="button" className="pull-link" onClick={() => open(p.number)}><span>{pull.repo} #{p.number}</span><small>{p.title}</small></button></td>
-      <td>@{p.author}</td><td>{status(p.state)}</td><td>{p.score ? p.found.length : "—"}</td><td>{p.score ? `${p.score.value}/5` : "—"}</td>
+      <td>#{p.number}</td>
+      <td><button type="button" className="pull-link" onClick={() => open(p.number)}><span>{p.title}</span><small>@{p.author}</small></button></td>
+      <td><span className="repo-cell"><Icon name="githubLogo" />{pull.repo.split("/")[1]}</span></td><td className="mono muted">{p.headBranch}</td><td>{chip(p.state)}</td><td>{p.score ? p.found.length : "—"}</td><td>{p.score ? `${p.score.value}/5` : "—"}</td>
     </tr>)}
-  </tbody></table></ScrollTable></section>;
+  </tbody></table></ScrollTable>;
 }
 
 function PullDetail({ p }: { p: Pull }) {
@@ -282,55 +294,91 @@ function ChatPane({ answers, autoplay }: { answers: ReactNode[]; autoplay?: { fr
 }
 
 // ---------- Analytics ----------
+const isoDays = (days: string[]) => days.map((d) => `2026-${d}`);
 function AnalyticsPane() {
   const ids = useId();
-  const [days, setDays] = useState(14), [repository, setRepository] = useState("all"), [day, setDay] = useState<number | null>(null);
-  const [series, setSeries] = useState(["Reviews", "Findings", "Addressed"]);
-  const v = analyticsView(days, repository), max = Math.max(1, ...v.reviews), at = day ?? v.days.length - 1;
-  const lines = [{ label: "Reviews", values: v.reviews }, { label: "Findings", values: v.findings }, { label: "Addressed", values: v.addressed }];
+  const [days, setDays] = useState(14), [repository, setRepository] = useState("all");
+  const v = analyticsView(days, repository), labels = isoDays(v.days);
+  const repos = Object.keys(analytics.repositories).map((r) => [r, analyticsView(days, r)] as const);
+  const board = (caption: string, value: (view: ReturnType<typeof analyticsView>) => number) => <footer className="chart-board"><div className="chart-board-head"><h3 role="presentation">{caption}</h3></div><ol>{repos.map(([r, view]) => <li key={r}><Icon name="githubLogo" /><span className="chart-board-name">{r}</span><span className="chart-board-value">{value(view)}</span></li>)}</ol></footer>;
+  const total = (values: number[]) => values.reduce((a, b) => a + b, 0);
   return <>
-    <div className="filter-bar">
-      <label htmlFor={`${ids}-repo`}>Repository<select id={`${ids}-repo`} value={repository} onChange={(e) => setRepository(e.target.value)}><option value="all">All repositories</option>{Object.keys(analytics.repositories).map((r) => <option key={r}>{r}</option>)}</select></label>
-      <label htmlFor={`${ids}-days`}>Period<select id={`${ids}-days`} value={days} onChange={(e) => { setDays(Number(e.target.value)); setDay(null); }}><option value={7}>Last 7 days</option><option value={14}>Last 14 days</option></select></label>
+    <div className="analytics-filters demo-filters">
+      <label className="mini-select" htmlFor={`${ids}-repo`}><span className="sr-only">Repository</span><Icon name="code" /><select id={`${ids}-repo`} value={repository} onChange={(e) => setRepository(e.target.value)}><option value="all">All repositories</option>{Object.keys(analytics.repositories).map((r) => <option key={r}>{r}</option>)}</select><Icon name="caretUpDown" /></label>
+      <label className="mini-select" htmlFor={`${ids}-days`}><span className="sr-only">Period</span><Icon name="calendarBlank" /><select id={`${ids}-days`} value={days} onChange={(e) => setDays(Number(e.target.value))}><option value={7}>Last 7 days</option><option value={14}>Last 14 days</option></select><Icon name="caretUpDown" /></label>
     </div>
-    <div className="metrics">{v.metrics.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
+    <dl className="stat-summary">{v.metrics.map(([label, value]) => <div key={label}><dt>{label}</dt><dd><strong>{value}</strong></dd></div>)}</dl>
     <div className="analytics-grid">
-      <section>
-        <H level={2}>Review activity</H>
-        <p className="demo-readout" aria-live="polite">{v.days[at]} · {v.reviews[at]} review{v.reviews[at] === 1 ? "" : "s"} · {v.findings[at]} finding{v.findings[at] === 1 ? "" : "s"}</p>
-        <div className="activity-chart" onMouseLeave={() => setDay(null)}>{v.days.map((d, i) => <div key={d} data-active={day === i || undefined} onMouseEnter={() => setDay(i)}><div style={{ height: `${Math.max(2, (v.reviews[i] / max) * 140)}px` }} /><small>{d}</small></div>)}</div>
-      </section>
-      <section><H level={2}>Findings by severity</H>{v.severity.map(([s, n]) => <div className="stat-row" key={s}>{status(s)}<strong>{n}</strong></div>)}</section>
+      <ChartCard icon="gitPullRequest" title="Reviews by OpenReview" labels={labels} views={[{ label: "Reviews", kind: "bar", series: [{ label: "Reviews", values: v.reviews }], yTitle: "Reviews" }]} footer={board("Top Repos by Review Count", (view) => total(view.reviews))} />
+      <ChartCard icon="bug" title="Bugs caught" labels={labels} views={[{ label: "All Severity", kind: "bar", series: [{ label: "Bugs", values: v.findings }], yTitle: "Bugs caught" }]} footer={board("Repos with most bugs", (view) => total(view.findings))} />
+      <ChartCard icon="check" title="Addressed" labels={labels} views={[{ label: "Addressed", kind: "line", average: true, series: [{ label: "Addressed", values: v.addressed }], yTitle: "Addressed" }]} info="Findings fixed or resolved after a review" footer={board("Top repos by addressed findings", (view) => total(view.addressed))} />
+      <section className="chart-card"><header className="chart-card-head"><Icon name="warningCircle" /><h2 role="presentation">Findings by severity</h2></header><div className="chart-card-body">{v.severity.map(([sev, n]) => <div className="stat-row" key={sev}>{status(sev)}<strong>{n}</strong></div>)}</div></section>
     </div>
-    <section>
-      <fieldset className="demo-series"><legend className="sr-only">Series</legend>{lines.map((l) => <label key={l.label} className="check"><input type="checkbox" checked={series.includes(l.label)} onChange={(e) => setSeries(lines.map((x) => x.label).filter((x) => x === l.label ? e.target.checked : series.includes(x)))} />{l.label}</label>)}</fieldset>
-      <LineChart title="Reviews and findings per day" labels={v.days} series={lines.filter((l) => series.includes(l.label))} />
-    </section>
   </>;
 }
 
-// ---------- Memory ----------
-function MemoryPane({ view }: { view: "rules" | "preferences" }) {
+// ---------- Repositories, providers, integrations, organization ----------
+function RepositoriesPane() {
+  const rows = Object.keys(analytics.repositories).map((r) => [r, analyticsView(7, r)] as const);
+  return <>
+    <div className="toolbar-row"><label className="search-field"><span className="sr-only">Search repositories</span><Icon name="magnifyingGlass" /><input placeholder="Search for repos by name" /></label><button type="button" className="primary">Manage Repos</button></div>
+    <ScrollTable label="Repositories" className="table-box"><table><thead><tr><th>Repo</th><th>Reviews</th><th>Bugs caught</th><th>Status</th></tr></thead><tbody>
+      {rows.map(([r, v]) => <tr key={r}><td><span className="repo-cell"><Icon name="githubLogo" />{r}</span></td><td>{v.reviews.reduce((a, b) => a + b, 0)} reviews</td><td>{v.findings.reduce((a, b) => a + b, 0)}</td><td>{chip("completed")}</td></tr>)}
+    </tbody></table></ScrollTable>
+  </>;
+}
+function ProvidersPane() {
+  return <article className="provider-card" aria-label="GitHub Acme">
+    <div className="provider-head"><span className="provider-name"><Icon name="githubLogo" /><span><strong>GitHub</strong></span></span><span className="provider-sync"><span><Icon name="clock" />Last Sync:</span><strong>2 minutes ago</strong></span></div>
+    <details className="provider-foot"><summary><span>acme · Organization</span><span>{Object.keys(analytics.repositories).length} Repositories<Icon name="caretDown" /></span></summary>
+      <div className="provider-more"><ul className="provider-repos">{Object.keys(analytics.repositories).map((r) => <li key={r}><Icon name="githubLogo" /><span>{r}</span></li>)}</ul></div></details>
+  </article>;
+}
+function IntegrationsPane() {
+  const [on, setOn] = useState<string[]>(["Linear"]);
+  return <ScrollTable label="Integrations" className="table-box"><table><thead><tr><th>Integration</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+    {[["Linear", "Issues from selected teams and projects"], ["Atlassian", "Jira issues and Confluence pages linked from a pull request"], ["Notion", "Pages linked from a pull request"]].map(([name, about]) => <tr key={name}>
+      <td><strong>{name}</strong><br /><span className="muted">{about}</span></td>
+      <td><span className={on.includes(name) ? "status-chip completed" : "status-dot mono"}>{on.includes(name) ? <><Icon name="check" />Connected</> : "NOT CONFIGURED"}</span></td>
+      <td><button type="button" className="small" onClick={() => setOn(on.includes(name) ? on.filter((x) => x !== name) : [...on, name])}>{on.includes(name) ? "Disconnect" : "Connect"}</button></td>
+    </tr>)}
+  </tbody></table></ScrollTable>;
+}
+function OrganizationPane() {
+  return <ScrollTable label="People" className="table-box"><table><thead><tr><th>Email</th><th>Role</th><th>Actions</th></tr></thead><tbody>
+    {[["dana@acme.dev", "Admin", "You"], ["sam@acme.dev", "Member", ""], ["lee@acme.dev", "Member", "Pending"]].map(([email, role, tag]) => <tr key={email}><td>{email} {tag && <span className="role-badge">{tag}</span>}</td><td>{role}</td><td>{tag !== "You" && <span className="muted">⋯</span>}</td></tr>)}
+  </tbody></table></ScrollTable>;
+}
+
+// ---------- Custom Context ----------
+function ContextPane() {
+  const [view, setView] = useState<"rules" | "preferences">("rules");
   const [rules, setRules] = useState(memory.rules), [off, setOff] = useState<string[]>([]);
-  const toggle = (id: string, on: boolean) => setRules(rules.map((r) => r.id === id ? { ...r, on } : r));
-  return view === "rules" ? <section>
-    <div className="row"><H level={2}>Custom rules</H><span className="muted" aria-live="polite">{rules.filter((r) => r.on).length} of {rules.length} on</span></div>
-    <p className="muted">Rules are checked on every review, alongside the rules in .openreview.json.</p>
-    <ul className="wizard-toggles">{rules.map((r) => <li key={r.id} className="wizard-toggle"><label><span><strong>{r.title}</strong><span className="muted">{r.body}</span><span className="mono muted">{r.scope} · added by @{r.by}</span></span>
-      <input type="checkbox" role="switch" className="switch" checked={r.on} onChange={(e) => toggle(r.id, e.target.checked)} /></label></li>)}</ul>
-  </section> : <section>
-    <H level={2}>Learned preferences</H>
-    <p className="muted">Learned from reactions and recurring review comments. They reduce repeat comments, and never weaken security review or approve pull requests.</p>
-    <ul className="wizard-toggles">{memory.preferences.map((p) => <li key={p.id} className="wizard-toggle"><label><span><strong>{p.text}</strong><span className="muted">{p.source}</span></span>
-      <input type="checkbox" role="switch" className="switch" checked={!off.includes(p.id)} onChange={(e) => setOff(e.target.checked ? off.filter((x) => x !== p.id) : [...off, p.id])} /></label></li>)}</ul>
-  </section>;
+  return <>
+    <Segmented label="Context views" value={view} onChange={setView} views={[["rules", "Custom rules"], ["preferences", "Learned preferences"]]} />
+    {view === "rules" ? <ScrollTable label="Custom rules" className="table-box"><table><thead><tr><th>Rules</th><th>Scope</th><th>Status</th></tr></thead><tbody>
+      {rules.map((r) => <tr key={r.id}><td><strong>{r.title}</strong><br /><span className="muted">{r.body}</span></td><td className="mono muted">{r.scope}</td>
+        <td><label className="row-toggle"><span className="sr-only">{r.title} active</span><input type="checkbox" role="switch" className="toggle" checked={r.on} onChange={(e) => setRules(rules.map((x) => x.id === r.id ? { ...x, on: e.target.checked } : x))} /><span className="mono">{r.on ? "ACTIVE" : "INACTIVE"}</span></label></td></tr>)}
+    </tbody></table></ScrollTable>
+    : <ScrollTable label="Learned preferences" className="table-box"><table><thead><tr><th>Preference</th><th>Source</th><th>Status</th></tr></thead><tbody>
+      {memory.preferences.map((pref) => <tr key={pref.id}><td>{pref.text}</td><td className="muted">{pref.source}</td>
+        <td><input type="checkbox" role="switch" className="toggle" aria-label={`${pref.text} enabled`} checked={!off.includes(pref.id)} onChange={(e) => setOff(e.target.checked ? off.filter((x) => x !== pref.id) : [...off, pref.id])} /></td></tr>)}
+    </tbody></table></ScrollTable>}
+  </>;
 }
 
 // ---------- Settings ----------
 const presets = [{ value: "1", label: "Quiet", hint: "High severity, very confident only" }, { value: "2", label: "Balanced", hint: "Medium severity and up" }, { value: "3", label: "Thorough", hint: "Everything worth a look" }];
 const triggerToggles: [key: (typeof triggerFlags)[number], label: string, hint: string][] = [["automatic", "Review new pull requests", "When a pull request opens or is marked ready."], ["rereview", "Re-review new commits", "When new commits are pushed."], ["drafts", "Include drafts", "Also review draft pull requests."], ["threadReplies", "Answer replies", "Reply in OpenReview threads without an @openreview mention."]];
 
-function SettingsPane({ view, previews }: { view: "comments" | "triggers"; previews: SettingsPreviews }) {
+function SettingsPane({ previews }: { previews: SettingsPreviews }) {
+  const [view, setView] = useState<"comments" | "triggers">("comments");
+  return <>
+    <Segmented label="Code review settings" value={view} onChange={setView} views={[["comments", "OpenReview Comments"], ["triggers", "When OpenReview Reviews"]]} />
+    <SettingsView view={view} previews={previews} />
+  </>;
+}
+function SettingsView({ view, previews }: { view: "comments" | "triggers"; previews: SettingsPreviews }) {
   const [strictness, setStrictness] = useState("2"), [on, setOn] = useState<Record<string, boolean>>({ automatic: true, rereview: true, drafts: false, threadReplies: true });
   const name = useId();
   if (view === "comments") {
@@ -361,26 +409,25 @@ function SettingsPane({ view, previews }: { view: "comments" | "triggers"; previ
 // ---------- The hero: the whole app ----------
 export function AppDemo({ answers, previews }: { answers: ReactNode[]; previews: SettingsPreviews }) {
   const [tab, setTab] = useState<Tab>("Pull Requests"), [visited, setVisited] = useState<Tab[]>(["Pull Requests"]);
-  const [pullsView, setPulls] = useState<PullsView>(pull.number), [memoryView, setMemory] = useState<"rules" | "preferences">("rules"), [settingsView, setSettings] = useState<"comments" | "triggers">("comments");
+  const [pullsView, setPulls] = useState<PullsView>(pull.number);
   const open = (t: Tab) => { setTab(t); setVisited((v) => v.includes(t) ? v : [...v, t]); };
   const detail = typeof pullsView === "number" ? pulls.find((p) => p.number === pullsView) : undefined;
-  const secondary: Partial<Record<Tab, Nav>> = {
-    Memory: [["Custom rules", "listChecks", memoryView === "rules", () => setMemory("rules")], ["Learned preferences", "lightbulb", memoryView === "preferences", () => setMemory("preferences")]],
-    Settings: [["Review comments", "chatCircleText", settingsView === "comments", () => setSettings("comments")], ["Triggers", "slidersHorizontal", settingsView === "triggers", () => setSettings("triggers")]],
-  };
   const panes: Record<Tab, ReactNode> = {
     "Pull Requests": detail ? <PullDetail p={detail} /> : <PullTable open={setPulls} />,
     Chat: <ChatPane answers={answers} />,
-    // As in the app: Findings live under Analytics → Bugs Caught.
-    Analytics: <PanelTabs label="Analytics views" initial="reviews" tabs={[{ id: "reviews", label: <><Icon name="chartBar" />PR Reviews</>, panel: <AnalyticsPane /> }, { id: "bugs", label: <><Icon name="bug" />Bugs Caught</>, panel: findings.map((f) => <FindingCard key={f._id} f={f} />) }]} />,
-    Memory: <MemoryPane view={memoryView} />,
-    Settings: <SettingsPane view={settingsView} previews={previews} />,
+    Analytics: <AnalyticsPane />,
+    Repositories: <RepositoriesPane />,
+    "Code Review Settings": <SettingsPane previews={previews} />,
+    "Custom Context": <ContextPane />,
+    "Code Providers": <ProvidersPane />,
+    Integrations: <IntegrationsPane />,
+    "Organization Settings": <OrganizationPane />,
   };
-  const title = tab === "Pull Requests" ? (detail ? `Pull Requests · ${pull.repo} #${detail.number}` : "Pull Requests") : tab;
-  return <Window title={title} label="Dashboard demo" size="tall" caption={`The OpenReview dashboard for a sample workspace, open at ${pull.repo} #${pull.number} on its Code tab: the reviewed diff with a P0 finding inline at the changed line. The Overview tab holds the "Needs changes" verdict and a confidence score of ${score.value} out of 5. Use the section buttons to open Analytics, Chat, Memory and Settings.`}>
-    <Chrome active={tab} onTab={open} secondary={secondary[tab]}>
-      <PageHeader title={tab} />
-      {tabs.filter((t) => visited.includes(t)).map((t) => <div key={t} className="demo-pane" hidden={t !== tab}>{panes[t]}</div>)}
+  const title = tab === "Pull Requests" && detail ? `Pull Requests · ${pull.repo} #${detail.number}` : tab;
+  return <Window title={title} label="Dashboard demo" size="tall" caption={`The OpenReview dashboard for a sample workspace, open at ${pull.repo} #${pull.number} on its Code tab: the reviewed diff with a P0 finding inline at the changed line. The Overview tab holds the "Needs changes" verdict and a confidence score of ${score.value} out of 5. Use the tabs to open Analytics, Repositories, Code Review Settings, Custom Context, Code Providers, Integrations and Organization Settings, and the chat button for Chat.`}>
+    <Chrome active={tab} onTab={open}>
+      {!(tab === "Pull Requests" && detail) && <PageHeader title={tab === "Organization Settings" ? "People" : tab} subtitle={subtitles[tab] || undefined} />}
+      {(tabs as readonly Tab[]).concat("Chat").filter((t) => visited.includes(t)).map((t) => <div key={t} className="demo-pane" hidden={t !== tab}>{panes[t]}</div>)}
     </Chrome>
   </Window>;
 }
@@ -388,7 +435,7 @@ export function AppDemo({ answers, previews }: { answers: ReactNode[]; previews:
 // ---------- Feature demos ----------
 export function EvidenceDemo() {
   return <Window title={`${pull.repo} #${pull.number} · Verified findings`} size="short" caption="Verified findings with the file and line each depends on, its impact, quoted evidence that can be shown in place in the file, and a suggested fix.">
-    <div className="replica-pane"><section>
+    <div className="replica-pane portal replica-shell"><section>
       <H level={2}>Verified findings</H>
       <FixControl label="Fix All" />
       {findings.map((f, i) => <VerifiedFinding key={f._id} f={f} open={i === 0} />)}
@@ -412,7 +459,7 @@ export function SummaryDemo({ summaries }: { summaries: Record<string, ReactNode
   useAutoplay(frame, reviewed || run ? undefined : rereview);
   const shown = revisions.find((r) => r.sha === selected) ?? revisions[0];
   return <Window frame={frame} title={`${pull.repo} #${pull.number} · Review summary`} size="short" caption="The review summary for a pull request, with a button that re-reviews a newly pushed fix, and a history of reviews for each pushed revision.">
-    <div className="replica-pane">
+    <div className="replica-pane portal replica-shell">
       <section>
         <div className="row"><H level={2}>Review summary</H><button type="button" disabled={run !== null} onClick={rereview}>{run ? "Reviewing…" : "Re-review current PR"}</button></div>
         {!reviewed && !run && <p className="muted">@{pull.author} pushed {fixPush.sha.slice(0, 7)}: {fixPush.message} · not reviewed yet</p>}
@@ -430,18 +477,18 @@ export function SummaryDemo({ summaries }: { summaries: Record<string, ReactNode
 export function ChatDemo({ answers }: { answers: ReactNode[] }) {
   const frame = useRef<HTMLElement>(null);
   return <Window frame={frame} title="Chat" size="short" caption="Codebase chat: pick a sample question or type one, watch the investigation steps, and read an answer whose citations quote the indexed source.">
-    <div className="replica-pane"><ChatPane answers={answers} autoplay={{ frame, question: chat.answers[1].question }} /></div>
+    <div className="replica-pane portal replica-shell"><ChatPane answers={answers} autoplay={{ frame, question: chat.answers[1].question }} /></div>
   </Window>;
 }
 
 export function AgentDemo() {
   return <Window title="Analytics · Bugs Caught" size="short" caption="A finding under Analytics → Bugs Caught with controls to send it to Codex, Claude Code or Cursor Agent, copy a fix prompt, or open an agent with the prompt pre-filled.">
-    <div className="replica-pane"><FindingCard f={findings[0]} full /></div>
+    <div className="replica-pane portal replica-shell"><FindingCard f={findings[0]} full /></div>
   </Window>;
 }
 
 export function AnalyticsDemo() {
   return <Window title="Analytics" caption="The analytics page with repository and period filters: pull requests, reviews, verified findings and model cost, daily review activity, findings by severity and a trend of reviews and findings per day.">
-    <div className="replica-pane"><AnalyticsPane /></div>
+    <div className="replica-pane portal replica-shell"><AnalyticsPane /></div>
   </Window>;
 }

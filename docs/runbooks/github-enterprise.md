@@ -16,7 +16,7 @@
    - Webhook URL `<APP_URL>/api/providers/<connection id>/webhook`.
    - A generated webhook secret and private key.
 2. Install the app on the disposable repository and note the installation ID.
-3. In OpenReview, open **Settings → Code Providers → Connect provider → GitHub Enterprise**.
+3. In OpenReview, open **Code Providers → Connect provider → GitHub Enterprise**.
    - **Instance:** the instance root, or the GHE.com subdomain.
    - **Credential:** `{"appId":"…","privateKey":"…","installationId":…}`.
    - **Webhook secret:** the app's secret.

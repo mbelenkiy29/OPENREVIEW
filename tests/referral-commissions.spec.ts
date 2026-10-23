@@ -6,7 +6,7 @@ import schema from "../convex/schema";
 import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 
-// Phase 2 of the referral program: the Checkout coupon, codes added in Settings → Billing, and the
+// Phase 2 of the referral program: the Checkout coupon, codes added in Organization Settings → Billing & Usage, and the
 // commission ledger fed by invoice.paid. Stripe is mocked through fetch; nothing calls the network.
 const modules = import.meta.glob("../convex/**/*.ts");
 const secret = "referral-ledger-session-secret-at-least-32-chars", svc = "referral-ledger-service", whsec = "whsec_referral_fixture";
@@ -223,7 +223,7 @@ test("billing status shows the referral to owners and admins only, and offers th
   expect(await status(bob, org)).toEqual({ enabled: false });
 });
 
-test("referral codes added in Settings → Billing follow the anti-abuse rules, and every attempt counts against the limit", async () => {
+test("referral codes added in Organization Settings → Billing & Usage follow the anti-abuse rules, and every attempt counts against the limit", async () => {
   const t = convexTest(schema, modules);
   const { alice, code } = await referred(t);
   const frank = await signIn(t, 10, "frank"), frankCode = (await t.mutation(api.referrals.ensureCode, { token: frank.token }))!;
@@ -439,7 +439,7 @@ test("the referrer gets exactly one email when a workspace they referred first p
   await run(t);
   expect(mails).toHaveLength(1);
   expect(mails[0]).toMatchObject({ to: ["alice@example.com"], subject: "@bob subscribed to OpenReview" });
-  expect(mails[0].text).toMatch(/https:\/\/review\.example\.com\/dashboard\/settings\/referrals/);
+  expect(mails[0].text).toMatch(/https:\/\/review\.example\.com\/dashboard\/account\/referrals/);
   const referral = await referralOf(t, bob.userId);
   expect(referral.noticeSentAt).toBe(Date.now());
   expect(await t.action(internal.referralJobs.sendConversionNotice, { referralId: referral._id })).toBe("skipped");

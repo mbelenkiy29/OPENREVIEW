@@ -71,7 +71,7 @@ Status: **gated** = enforced by `src/plans.ts` today; **planned** = on Pro by de
 
 The phases below are the original build checklist. P0.1, P0.2, P1.1, P1.3 and P1.5 shipped with the Free/Starter/Pro plans (`src/plans.ts`, `billingAccounts.plan`, Checkout per plan, and the deep, repro-test and fix-PR gates). The Business tier is dropped: its SSO and audit items move to Pro.
 
-The second pass gated the rest of Pro (P1.4, P1.6, plus `analytics.history`, `auth.sso` and `audit.log`). Settings for a locked feature stay visible but disabled inside `<Locked>` (`app/dashboard/locked.tsx`), which links to Settings → Billing. Grandfathering is limited to SSO: a connection configured before keeps working and stays editable. The Perforce watcher and trigger keep working with their admin API key, because they are a code provider, not the public API.
+The second pass gated the rest of Pro (P1.4, P1.6, plus `analytics.history`, `auth.sso` and `audit.log`). Settings for a locked feature stay visible but disabled inside `<Locked>` (`app/dashboard/locked.tsx`), which links to Organization Settings → Billing & Usage. Grandfathering is limited to SSO: a connection configured before keeps working and stays editable. The Perforce watcher and trigger keep working with their admin API key, because they are a code provider, not the public API.
 
 ---
 
@@ -125,7 +125,7 @@ The second pass gated the rest of Pro (P1.4, P1.6, plus `analytics.history`, `au
 **Depends on:** P0.2
 **Files:** new `app/dashboard/locked.tsx`, `app/globals.css`, DESIGN.md.
 **Build:**
-- A `<Locked tier="pro" feature="Fix pull requests">` wrapper. It keeps the settings visible but disabled, adds one line saying which tier includes the feature, and links to Settings → Billing (admins) or tells members to ask an admin.
+- A `<Locked tier="pro" feature="Fix pull requests">` wrapper. It keeps the settings visible but disabled, adds one line saying which tier includes the feature, and links to Organization Settings → Billing & Usage (admins) or tells members to ask an admin.
 - No gradients and no modal upsell. The ember accent appears only on the upgrade link.
 
 **Acceptance:**
@@ -137,7 +137,7 @@ The second pass gated the rest of Pro (P1.4, P1.6, plus `analytics.history`, `au
 **Depends on:** P0.2
 **Files:** `convex/billingJobs.ts` (`checkout` gets a `tier` argument), `app/dashboard/billing.tsx`, `app/dashboard/onboarding/[step]/page.tsx` (plan step), `app/page.tsx` (pricing section).
 **Build:**
-- The plan step and Settings → Billing show Starter and Pro cards side by side. Each card's button opens Checkout for that tier's price. The remaining trial still carries over (`checkoutTrialEnd`).
+- The plan step and Organization Settings → Billing & Usage show Starter and Pro cards side by side. Each card's button opens Checkout for that tier's price. The remaining trial still carries over (`checkoutTrialEnd`).
 - Prices are shown from `BILLING_<TIER>_PRICE_LABEL` and are display only. Stripe is the source of truth at Checkout.
 
 **Acceptance:**
@@ -201,7 +201,7 @@ The second pass gated the rest of Pro (P1.4, P1.6, plus `analytics.history`, `au
 **Depends on:** P0.1
 **Files:** `convex/billing.ts` (`reviewAllowance`), `convex/notifications.ts`, the email templates.
 **Build:**
-- When a workspace crosses 80% and then 100% of its monthly fair-use limit, email the admins once per threshold per month and show a banner in Settings → Billing.
+- When a workspace crosses 80% and then 100% of its monthly fair-use limit, email the admins once per threshold per month and show a banner in Organization Settings → Billing & Usage.
 
 **Acceptance:**
 - [x] Tests: each alert is sent exactly once per threshold per month and never to viewers.
@@ -241,7 +241,7 @@ Same as P1.1, for "OpenReview Business" at $49.
 
 ### - [ ] P2.4 Audit log export and retention (`audit.export`)
 **Depends on:** P0.3
-**Files:** `app/dashboard` (Settings → Audit), the Convex audit queries.
+**Files:** `app/dashboard` (Organization Settings → Audit Log), the Convex audit queries.
 **Build:**
 - Admins export CSV or JSON for a date range, streamed and paginated.
 - Business keeps 1 year of audit history; other tiers keep 90 days. Pruning runs in a cron.

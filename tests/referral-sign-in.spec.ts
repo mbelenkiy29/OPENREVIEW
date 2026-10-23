@@ -71,10 +71,10 @@ test("a refused or cancelled account link returns to the page it started from, n
   await t.run(async (ctx) => { for (const s of await ctx.db.query("sessions").collect()) await ctx.db.patch(s._id, { createdAt: Date.now() - 20 * 60000 }); });
   holder.jar.set("openreview_session", await new SignJWT({ sid }).setProtectedHeader({ alg: "HS256" }).setIssuer("openreview").setAudience("openreview").setSubject(carol).setIssuedAt().setExpirationTime("1h").sign(new TextEncoder().encode(env.SESSION_SECRET)));
   const users = async () => (await t.run((ctx) => ctx.db.query("users").collect())).length, before = await users();
-  expect((await finish(await begin("link=1&next=/dashboard/settings/account"))).headers.get("location")).toBe(`${base}/dashboard/settings/account`);
+  expect((await finish(await begin("link=1&next=/dashboard/account"))).headers.get("location")).toBe(`${base}/dashboard/account`);
   expect(JSON.parse(decodeURIComponent(holder.jar.get("openreview_toast")!))).toMatchObject({ tone: "error" });
-  const state = await begin("link=1&next=/dashboard/settings/account");
-  expect((await finishOAuth(new Request(`${base}/api/auth/callback?error=access_denied&state=${state}`), "github", async () => { throw new Error("unused"); })).headers.get("location")).toBe(`${base}/dashboard/settings/account`);
+  const state = await begin("link=1&next=/dashboard/account");
+  expect((await finishOAuth(new Request(`${base}/api/auth/callback?error=access_denied&state=${state}`), "github", async () => { throw new Error("unused"); })).headers.get("location")).toBe(`${base}/dashboard/account`);
   expect(await users()).toBe(before);
 });
 

@@ -118,9 +118,9 @@ test("installs without state, from another user, for owner approval or without a
   const mismatch = await callback(new Request(callbackUrl("b".repeat(64))));
   expect(location(mismatch)).toMatch(/^\/dashboard\/onboarding\/connect\?error=github-install&message=Installation%20state%20mismatch/);
   // Another user's state.
-  holder.jar.set("openreview_install_state", seal({ state, organizationId, userId: "someone-else", returnTo: "/dashboard/settings/providers" }));
+  holder.jar.set("openreview_install_state", seal({ state, organizationId, userId: "someone-else", returnTo: "/dashboard/providers" }));
   const other = await callback(new Request(callbackUrl(state)));
-  expect(location(other)).toBe("/dashboard/settings/providers");
+  expect(location(other)).toBe("/dashboard/providers");
   expect(JSON.parse(decodeURIComponent(holder.jar.get("openreview_toast") ?? ""))).toMatchObject({ tone: "error", text: expect.stringMatching(/another session/) });
   // An organization owner must approve the install first.
   holder.jar.set("openreview_install_state", seal({ state, organizationId, userId: (await t.run((ctx) => ctx.db.query("users").first()))!._id, returnTo: "/dashboard/onboarding/connect" }));

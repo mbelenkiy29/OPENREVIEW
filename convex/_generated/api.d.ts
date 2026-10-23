@@ -110,6 +110,7 @@ import type * as repositoryContext from "../repositoryContext.js";
 import type * as repositoryContextJobs from "../repositoryContextJobs.js";
 import type * as repositoryContextTypes from "../repositoryContextTypes.js";
 import type * as repositoryIdentity from "../repositoryIdentity.js";
+import type * as repositoryMetrics from "../repositoryMetrics.js";
 import type * as repositoryOnboarding from "../repositoryOnboarding.js";
 import type * as reviewDiff from "../reviewDiff.js";
 import type * as reviewLifecycle from "../reviewLifecycle.js";
@@ -243,6 +244,7 @@ declare const fullApi: ApiFromModules<{
   repositoryContextJobs: typeof repositoryContextJobs;
   repositoryContextTypes: typeof repositoryContextTypes;
   repositoryIdentity: typeof repositoryIdentity;
+  repositoryMetrics: typeof repositoryMetrics;
   repositoryOnboarding: typeof repositoryOnboarding;
   reviewDiff: typeof reviewDiff;
   reviewLifecycle: typeof reviewLifecycle;

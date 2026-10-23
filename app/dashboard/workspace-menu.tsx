@@ -2,11 +2,13 @@
 
 import { usePathname, useSearchParams } from "next/navigation";
 import { Icon } from "../ui/icons";
+import { Dialog, DialogClose } from "../ui/dialog";
 import { createWorkspace, switchTeam, switchWorkspace } from "./actions";
 import { PortalDisclosure } from "./portal-disclosure";
 
-// Workspace and team switcher in the app header. It lives in the persistent portal layout, so the
-// selected team and the return path come from the URL rather than from page params.
+// Greptile's organization switcher: the name, a role badge and ⇅; its menu lists the organizations,
+// the teams that filter repository activity, and "Add organization". It lives in the persistent portal
+// layout, so the selected team and the return path come from the URL rather than from page params.
 export function WorkspaceMenu({ organizationId, name, role, organizations, teams, savedTeam }: {
   organizationId: string;
   name: string;
@@ -19,12 +21,25 @@ export function WorkspaceMenu({ organizationId, name, role, organizations, teams
   const selected = teams.find((t) => t._id === (team ?? savedTeam));
   // A review page returns to the pull request list; the server accepts only known dashboard paths.
   const returnTo = pathname.startsWith("/dashboard/pulls/") ? "/dashboard/pulls" : pathname;
-  return <PortalDisclosure className="scope-selector" label={<><span className="scope-name">{name}{selected && " / " + selected.name}</span><span className="role-badge">{role[0].toUpperCase() + role.slice(1)}</span><Icon name="caretUpDown" /></>}>
-    <div className="scope-menu">
-      <form action={switchWorkspace}><label className="sr-only" htmlFor="workspace">Workspace</label><select key={organizationId} id="workspace" name="organizationId" defaultValue={organizationId}>{organizations.map(o => <option key={o._id} value={o._id}>{o.name}</option>)}</select><button className="small">Switch workspace</button></form>
-      <form action={switchTeam}><label htmlFor="scope-team">Team</label><select key={organizationId+":"+(selected?._id??"")} id="scope-team" name="teamId" defaultValue={selected?._id??""}><option value="">All accessible teams</option>{teams.map(t=><option key={t._id} value={t._id}>{t.name}</option>)}</select><input type="hidden" name="returnTo" value={returnTo}/><button className="small">Apply team</button></form>
-      <p className="muted">Team selection filters repository activity. Workspace administration applies across the workspace.</p>
-      <form action={createWorkspace}><label>New workspace name<input name="name" required maxLength={100}/></label><button>Create workspace</button></form>
+  return <PortalDisclosure className="scope-selector" label={<><span className="scope-name">{name}{selected && " / " + selected.name}</span><span className="role-badge">{role[0].toUpperCase() + role.slice(1)}</span><Icon name="caretUpDown" /><span className="sr-only">Switch organization or team</span></>}>
+    <div className="menu org-menu">
+      {organizations.map((o) => <form key={o._id} action={switchWorkspace}>
+        <input type="hidden" name="organizationId" value={o._id} />
+        <button className="menu-item" aria-current={o._id === organizationId ? "true" : undefined}><Icon name="buildings" /><span>{o.name}</span>{o._id === organizationId && <Icon name="check" />}</button>
+      </form>)}
+      {teams.length > 0 && <form action={switchTeam} aria-label="Team">
+        <hr />
+        <p className="menu-label">Team</p>
+        <input type="hidden" name="returnTo" value={returnTo} />
+        {[{ _id: "", name: "All accessible teams" }, ...teams].map((t) => <button key={t._id} className="menu-item" name="teamId" value={t._id} aria-current={(selected?._id ?? "") === t._id ? "true" : undefined}><Icon name="usersThree" /><span>{t.name}</span>{(selected?._id ?? "") === t._id && <Icon name="check" />}</button>)}
+      </form>}
+      <hr />
+      <Dialog trigger={<><Icon name="plus" /><span>Add organization</span></>} triggerClassName="menu-item muted" title="Create Organization" description="Organizations keep their repositories, members and settings separate.">
+        <form action={createWorkspace} className="modal-body">
+          <label>Organization name<input name="name" required maxLength={100} placeholder="Acme" autoComplete="organization" /></label>
+          <footer className="modal-footer"><DialogClose>Cancel</DialogClose><button className="primary">Create Organization</button></footer>
+        </form>
+      </Dialog>
     </div>
   </PortalDisclosure>;
 }

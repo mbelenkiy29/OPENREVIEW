@@ -4,7 +4,7 @@ info:
   version: "1.0.0"
   description: |
     Every endpoint takes a workspace API key: `Authorization: Bearer or_...`. Create keys in
-    Settings → API Keys. A key belongs to one workspace and acts as its owner, so the owner's
+    Organization Settings → API Keys. A key belongs to one workspace and acts as its owner, so the owner's
     workspace role and team membership still limit every call.
 
     Scopes: `read` (query, search, repositories, reviews), `write` (also request reviews, send

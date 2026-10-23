@@ -12,9 +12,9 @@ import { verifiedEmail } from "./referralLedger";
 const appOrigin = () => new URL(process.env.APP_URL ?? "http://localhost:3000").origin;
 const emails = {
   welcome: { subject: "Thanks for signing up for OpenReview", paragraphs: ["Thanks for signing up. Connect a repository and OpenReview reviews its next pull request.", "If you have any questions, reply to this email."], action: { label: "Set up your workspace", path: "/dashboard/onboarding" } },
-  repository_connected: { subject: "Your first repository is connected", paragraphs: ["Your first repository is connected to OpenReview. Its next pull request gets an automatic review."], action: { label: "Manage repositories", path: "/dashboard/settings/repositories" } },
+  repository_connected: { subject: "Your first repository is connected", paragraphs: ["Your first repository is connected to OpenReview. Its next pull request gets an automatic review."], action: { label: "Manage repositories", path: "/dashboard/repositories" } },
   first_review_completed: { subject: "Your first review is done", paragraphs: ["OpenReview finished its first review in your workspace. The findings are on the pull request and in your dashboard."], action: { label: "See the review", path: "/dashboard/pulls" } },
-  subscribed: { subject: "Thanks for subscribing to OpenReview", paragraphs: ["Thanks for subscribing. Your workspace's plan is active."], action: { label: "Billing and usage", path: "/dashboard/settings/billing" } },
+  subscribed: { subject: "Thanks for subscribing to OpenReview", paragraphs: ["Thanks for subscribing. Your workspace's plan is active."], action: { label: "Billing and usage", path: "/dashboard/organization/billing" } },
 };
 type Kind = keyof typeof emails;
 const kind = v.union(...(Object.keys(emails) as Kind[]).map((k) => v.literal(k)));

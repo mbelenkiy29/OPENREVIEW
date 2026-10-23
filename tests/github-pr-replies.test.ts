@@ -108,7 +108,7 @@ test("check runs report what was reviewed and fail below a required confidence s
 });
 
 test("the billing notice links only to an HTTPS dashboard and names no plan details",()=>{
- assert.match(billingNoticeBody("https://openreview.tech"),/\[Settings → Billing\]\(https:\/\/openreview\.tech\/dashboard\/settings\/billing\)/);
+ assert.match(billingNoticeBody("https://openreview.tech"),/\[Organization Settings → Billing & Usage\]\(https:\/\/openreview\.tech\/dashboard\/organization\/billing\)/);
  assert.doesNotMatch(billingNoticeBody("http://localhost:3000"),/\]\(/);
  assert.doesNotMatch(billingNoticeBody(undefined),/\]\(|trial|limit/i);
 });

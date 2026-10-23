@@ -135,7 +135,7 @@ test("a workspace with a subscription that has not ended cannot be deleted, even
   const accountId = await t.run((ctx) => ctx.db.insert("billingAccounts", { organizationId: acme.organizationId, customerId: "cus_1", subscriptionId: "sub_1", status: "active", seats: 1, trialEndsAt: Date.now(), updatedAt: Date.now() }));
   const request = () => t.mutation(api.dataControls.requestDeletion, { token: acme.token, organizationId: acme.organizationId, confirmName: "Acme" });
   // Active, and still active while a cancellation waits for the period end.
-  await expect(request()).rejects.toThrow(/Cancel it in Settings → Billing → Manage billing/);
+  await expect(request()).rejects.toThrow(/Cancel it in Organization Settings → Billing & Usage → Manage billing/);
   await t.run((ctx) => ctx.db.patch(accountId, { status: "past_due" }));
   await expect(request()).rejects.toThrow(/subscription/);
   // Once Stripe has ended it, deletion can be scheduled.

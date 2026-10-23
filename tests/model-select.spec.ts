@@ -11,7 +11,7 @@ const env = { SERVICE_SECRET: "model-select-service", SESSION_SECRET: "model-sel
 beforeEach(() => { Object.assign(process.env, env); });
 afterEach(() => { for (const k of Object.keys(env)) if (!["SERVICE_SECRET", "SESSION_SECRET"].includes(k)) delete process.env[k]; });
 
-test("Settings → AI Model: a saved non-default model reads back and the select remounts on it", async () => {
+test("Code Review Settings → AI Model: a saved non-default model reads back and the select remounts on it", async () => {
   const t = convexTest(schema, modules);
   const id = await t.mutation(api.users.login, { secret: env.SERVICE_SECRET, githubId: 1, login: "admin", avatar: "" });
   const token = await new SignJWT({}).setSubject(id).setProtectedHeader({ alg: "HS256" }).setIssuer("openreview").setAudience("openreview").setExpirationTime("1h").sign(new TextEncoder().encode(env.SESSION_SECRET));

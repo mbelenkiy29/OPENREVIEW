@@ -8,7 +8,7 @@ import { upgradeNote, type Entitlement } from "../../src/plans";
 export function Locked({ feature, locked, note, className, children }: { feature: Entitlement; locked: readonly Entitlement[]; note?: string; className?: string; children?: ReactNode }) {
   if (!locked.includes(feature)) return children;
   return <div className={`locked ${className ?? ""}`}>
-    <p className="muted"><span className="badge">Pro</span> {note ?? upgradeNote[feature]} <Link href="/dashboard/settings/billing">Open Billing</Link></p>
+    <p className="muted"><span className="badge">Pro</span> {note ?? upgradeNote[feature]} <Link href="/dashboard/organization/billing">Open Billing</Link></p>
     {children && <fieldset disabled inert>{children}</fieldset>}
   </div>;
 }

@@ -10,7 +10,7 @@ import { priceFor } from "../src/plans";
 
 // Stripe Checkout / Customer Portal sessions for workspace admins, and seat-quantity sync.
 const appOrigin = () => new URL(process.env.APP_URL ?? "http://localhost:3000").origin;
-const returnPaths = { settings: "/dashboard/settings/billing", onboarding: "/dashboard/onboarding/plan" } as const;
+const returnPaths = { settings: "/dashboard/organization/billing", onboarding: "/dashboard/onboarding/plan" } as const;
 // Tags these sessions in the Stripe Dashboard so this flow can be compared with others.
 const integrationIdentifier = "openreview-starter-seats-qkvmhzrt";
 export const checkout = action({ args: { token: v.string(), organizationId: v.id("organizations"), returnTo: v.optional(v.union(v.literal("settings"), v.literal("onboarding"))), plan: v.optional(v.union(v.literal("starter"), v.literal("pro"))) }, handler: async (ctx, a): Promise<string> => {
@@ -45,7 +45,7 @@ export const checkout = action({ args: { token: v.string(), organizationId: v.id
 export const portal = action({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<string> => {
   const context = await ctx.runQuery(internal.billing.checkoutContext, a);
   if (!context.customerId) throw new Error("Start a subscription first");
-  return (await stripe<{ url: string }>("/v1/billing_portal/sessions", { customer: context.customerId, return_url: `${appOrigin()}/dashboard/settings/billing` }, stripeKey())).url;
+  return (await stripe<{ url: string }>("/v1/billing_portal/sessions", { customer: context.customerId, return_url: `${appOrigin()}/dashboard/organization/billing` }, stripeKey())).url;
 } });
 // Switches the seat price in place (the Customer Portal cannot update subscriptions with a metered item).
 // legacy is left alone, so a grandfathered Starter that comes back from Pro keeps its features.

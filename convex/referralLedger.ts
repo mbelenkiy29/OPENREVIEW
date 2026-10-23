@@ -58,7 +58,7 @@ export async function neverPaid(ctx: QueryCtx, organizationId: Id<"organizations
   return !referral || !await ctx.db.query("referralCommissions").withIndex("by_referral", (q) => q.eq("referralId", referral._id)).first();
 }
 export const codeWindowOpen = async (ctx: QueryCtx, organizationId: Id<"organizations">) => ((await ctx.db.get(organizationId))?.createdAt ?? 0) >= Date.now() - REFERRAL_CODE_WINDOW_DAYS * 86400000;
-// The person added this referral's code to this workspace (Settings → Billing), which may be older than the code.
+// The person added this referral's code to this workspace (Organization Settings → Billing & Usage), which may be older than the code.
 const codeAppliedHere = async (ctx: QueryCtx, organizationId: Id<"organizations">, userId: Id<"users">, referralId: Id<"referrals">) => Boolean(await ctx.db.query("auditEvents").withIndex("by_org_user", (q) => q.eq("organizationId", organizationId).eq("userId", userId)).filter((q) => q.and(q.eq(q.field("action"), "referral.code_applied"), q.eq(q.field("target"), referralId))).first());
 /** The referral a Checkout from this workspace uses: the workspace's own, or else the caller's unpaid
  *  one, which moves here only for the owner of a never-paid workspace created after the sign-up (or the
@@ -72,7 +72,7 @@ export async function checkoutReferral(ctx: QueryCtx, userId: Id<"users">, role:
   // shortcut: two Checkout sessions left open at once (they expire after 24h) can both carry the coupon; expire the earlier session on a move if this is abused.
   return { referral: mine, move: true, discount: coupon };
 }
-/** Settings → Billing for admins: who referred the workspace, whether Checkout applies the discount,
+/** Organization Settings → Billing & Usage for admins: who referred the workspace, whether Checkout applies the discount,
  *  and whether a referral code can still be added. */
 export async function referralStatus(ctx: QueryCtx, userId: Id<"users">, role: string, organizationId: Id<"organizations">) {
   const found = await checkoutReferral(ctx, userId, role, organizationId), live = found?.referral.status === "void" ? null : found;
@@ -154,7 +154,7 @@ export async function ledgerFor(ctx: QueryCtx, userId: Id<"users">) {
   const commissions = await ctx.db.query("referralCommissions").withIndex("by_referrer", (q) => q.eq("referrerId", userId)).take(ledgerLimit);
   return { commissions, redemptions: await ctx.db.query("referralRedemptions").withIndex("by_user", (q) => q.eq("userId", userId)).take(ledgerLimit) };
 }
-/** Referral credit applied to a workspace's bill (Settings → Billing), in cents. */
+/** Referral credit applied to a workspace's bill (Organization Settings → Billing & Usage), in cents. */
 export const referralCredit = async (ctx: QueryCtx, organizationId: Id<"organizations">) => (await ctx.db.query("referralRedemptions").withIndex("by_credit_org", (q) => q.eq("creditOrganizationId", organizationId)).take(1000)).reduce((sum, r) => sum + (r.status === "completed" ? r.amount : 0), 0);
 /** Ends a redemption that is still processing (completed with its Stripe id, or failed, which
  *  releases the balance) and audits it on the credited workspace while that still exists. */
@@ -174,5 +174,5 @@ export const payoutStatus = { transfers: v.union(v.literal("active"), v.literal(
 // the linking session's sign-in time (signedInAt).
 // shortcut: no security-notice emails and no first-payout delay; add them here if account takeover is seen despite this gate.
 export const recentSignIn = (session: Doc<"sessions"> | null) => session !== null && Date.now() - (session.signedInAt ?? session.createdAt) < 15 * 60000;
-export const signInAgain = { ok: false as const, error: "Sign in again to continue.", signIn: "/login?next=/dashboard/settings/referrals&reauth=1" };
+export const signInAgain = { ok: false as const, error: "Sign in again to continue.", signIn: "/login?next=/dashboard/account/referrals&reauth=1" };
 export const payoutsOff = "This deployment doesn’t offer cash payouts.";

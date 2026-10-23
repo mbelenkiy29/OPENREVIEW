@@ -88,7 +88,7 @@ Claude Code, Codex and other agents can run `openreview review --agent` before t
 openreview onboard --url https://review.example.com --api-key   # prompts for the admin key
 ```
 
-`openreview onboard` walks through setup with the workspace's API key. Create an admin-scope key under Settings → API keys. API keys are on the Pro plan; on Free and Starter, set up in the dashboard's guided setup instead, and use `openreview login` (browser sign-in) for reviews.
+`openreview onboard` walks through setup with the workspace's API key. Create an admin-scope key under Organization Settings → API Keys. API keys are on the Pro plan; on Free and Starter, set up in the dashboard's guided setup instead, and use `openreview login` (browser sign-in) for reviews.
 
 1. **Workspace.** It shows the workspace the key belongs to. An API key belongs to one workspace. To use another workspace, or to create a new one, the command prints the dashboard steps: switch to or create the workspace, generate a key there, and run it again.
 2. **Install link.** It prints the GitHub App install link for the workspace. It never changes settings at your code provider.

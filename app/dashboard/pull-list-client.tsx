@@ -3,36 +3,50 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { autoRuns, routineActions, type ChatPermission } from "../../src/pull-chat";
 import { useRouter } from "next/navigation";
 import { bulkFixPrompt, bulkReview, markFileReviewed, pullAction } from "./actions";
+import { Icon } from "../ui/icons";
+import { Dialog, DialogClose, useCloseDialog } from "../ui/dialog";
 
-const selected = () => [...document.querySelectorAll<HTMLInputElement>('input[form="bulk-pulls"]:checked')];
+const rowBoxes = () => [...document.querySelectorAll<HTMLInputElement>('input[form="bulk-pulls"]')];
+const selected = () => rowBoxes().filter((box) => box.checked);
 const typing = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
-// "N selected" bar for the pull request checkboxes (they join this form through form="bulk-pulls").
+// Greptile's bulk bar: it appears above the table while rows are selected (the checkboxes join this form
+// through form="bulk-pulls"), with a dark "Rerun (N)". Reruns clear the selection; results show as a toast.
 export function BulkBar() {
   const [count, setCount] = useState(0);
   const [state, action, pending] = useActionState(bulkReview, {});
-  const [copied, setCopied] = useState("");
+  const [note, setNote] = useState<{ text: string; error?: boolean } | null>(null);
   useEffect(() => {
     const update = () => setCount(selected().length);
     document.addEventListener("change", update);
     return () => document.removeEventListener("change", update);
   }, []);
-  return (
-    <form id="bulk-pulls" className="bulk-bar" action={action} onSubmit={(e) => { if (!confirm(`Re-review ${count} pull ${count === 1 ? "request" : "requests"}? Each review uses model credits.`)) e.preventDefault(); }}>
-      <span aria-live="polite">{count} selected</span>
-      {count > 0 && <>
-        <button type="submit" className="small" disabled={pending}>{pending ? "Starting reviews…" : "Re-review"}</button>
-        <button type="button" className="small" onClick={async () => {
-          const ids = selected().map((box) => box.value.split("|")[2]).filter(Boolean);
-          try { const prompt = await bulkFixPrompt(ids); if (!prompt) return setCopied("No fixable findings in the selection"); await navigator.clipboard.writeText(prompt); setCopied("Fix prompts copied"); }
-          catch { setCopied("Copy failed"); }
-        }}>Copy fix prompts</button>
-      </>}
-      {copied && <span role="status" className="muted">{copied}</span>}
-      {state.error && <span role="alert">{state.error}</span>}
-      {state.saved && <span role="status">{state.saved}</span>}
+  useEffect(() => {
+    if (state.saved) { selected().forEach((box) => { box.checked = false; }); document.dispatchEvent(new Event("change")); }
+    if (state.saved || state.error) setNote({ text: (state.saved ?? state.error)!, error: !state.saved });
+  }, [state]);
+  useEffect(() => { if (!note) return; const t = setTimeout(() => setNote(null), 5000); return () => clearTimeout(t); }, [note]);
+  const noun = `pull ${count === 1 ? "request" : "requests"}`;
+  return <>
+    <form id="bulk-pulls" className="bulk-bar" action={action} hidden={!count}>
+      <span className="bulk-count" aria-live="polite">{count} selected</span>
+      <button type="button" className="ghost" onClick={async () => {
+        const ids = selected().map((box) => box.value.split("|")[2]).filter(Boolean);
+        try { const prompt = await bulkFixPrompt(ids); if (!prompt) return setNote({ text: "No fixable findings in the selection" }); await navigator.clipboard.writeText(prompt); setNote({ text: "Fix prompts copied" }); }
+        catch { setNote({ text: "Copy failed", error: true }); }
+      }}><Icon name="copy" />Copy fix prompts</button>
+      <Dialog size="confirm" triggerClassName="primary rerun" trigger={pending ? "Starting reviews…" : `Rerun (${count})`} title={`Rerun ${count} ${noun}?`}>
+        <div className="modal-body"><p>OpenReview reviews the current revision of each selected {noun} again. Each review uses model credits.</p></div>
+        <div className="modal-footer"><DialogClose>Cancel</DialogClose><RerunButton /></div>
+      </Dialog>
     </form>
-  );
+    {note && <div className={`toast ${note.error ? "error" : "success"}`} role={note.error ? "alert" : "status"}><span>{note.text}</span><button type="button" className="ghost small" aria-label="Dismiss" onClick={() => setNote(null)}><Icon name="x" /></button></div>}
+  </>;
+}
+// Submits the bulk form from the confirm dialog (rendered into <body>, so it names the form).
+function RerunButton() {
+  const close = useCloseDialog();
+  return <button type="submit" form="bulk-pulls" className="primary" onClick={close}>Rerun</button>;
 }
 
 // J/K move, Enter opens, Space selects, ⌘A selects all, G re-reviews the selection, / searches.
@@ -63,7 +77,7 @@ export function PullKeys({ hints }: { hints: [string, string][] }) {
       else if (key === " " && row) { e.preventDefault(); row.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click(); }
       else if (key === "g") {
         if (!selected().length && row) row.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click();
-        document.querySelector<HTMLFormElement>("#bulk-pulls")?.requestSubmit();
+        if (selected().length) document.querySelector<HTMLButtonElement>('#bulk-pulls [aria-haspopup="dialog"]')?.click();
       }
     };
     document.addEventListener("keydown", onKey);
@@ -85,14 +99,20 @@ function KeyFooter({ hints }: { hints: [string, string][] }) {
       <span className="key-title">Keyboard Shortcuts</span>
       {hints.map(([k, label]) => <span key={label} className="key-hint">{keys(k)} {label}</span>)}
       <button type="button" className="link-button" onClick={() => setAll(!all)} aria-expanded={all}>View all</button>
-      <button type="button" className="key-close" aria-label="Hide keyboard shortcuts" onClick={() => { setHidden(true); try { localStorage.setItem("openreview:key-footer", "hidden"); } catch { /* not remembered */ } }}>×</button>
+      <button type="button" className="key-close" aria-label="Hide keyboard shortcuts" onClick={() => { setHidden(true); try { localStorage.setItem("openreview:key-footer", "hidden"); } catch { /* not remembered */ } }}><Icon name="x" /></button>
     </footer>
   );
 }
 
-// Header checkbox that selects or clears every row on the page (⌘A does the same).
+// Header checkbox that selects or clears every row on the page (⌘A does the same); it shows all, some or none.
 export function SelectAll() {
-  return <input type="checkbox" aria-label="Select all pull requests on this page" onChange={(e) => { const on = e.currentTarget.checked; document.querySelectorAll<HTMLInputElement>('input[form="bulk-pulls"]').forEach((b) => { b.checked = on; }); document.dispatchEvent(new Event("change")); }} />;
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const sync = () => { const on = selected().length, all = rowBoxes().length; if (ref.current) { ref.current.checked = on > 0 && on === all; ref.current.indeterminate = on > 0 && on < all; } };
+    document.addEventListener("change", sync);
+    return () => document.removeEventListener("change", sync);
+  }, []);
+  return <input ref={ref} type="checkbox" aria-label="Select all pull requests on this page" onChange={(e) => { const on = e.currentTarget.checked; rowBoxes().forEach((b) => { b.checked = on; }); document.dispatchEvent(new Event("change")); }} />;
 }
 
 // Copies the fix prompt for one review's findings (the list's "Copy Fix" action).
@@ -101,7 +121,7 @@ export function CopyFix({ reviewId }: { reviewId: string }) {
   return <button type="button" className="text-action" onClick={async () => {
     try { const prompt = await bulkFixPrompt([reviewId]); if (!prompt) return setLabel("Nothing to fix"); await navigator.clipboard.writeText(prompt); setLabel("Copied"); }
     catch { setLabel("Copy failed"); }
-  }}><span aria-hidden>⧉</span> {label}</button>;
+  }}><Icon name={label === "Copied" ? "check" : "copy"} /> {label}</button>;
 }
 
 // Rows-per-page box at the left of the pager.
@@ -134,7 +154,7 @@ export function SidebarKeys() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
   return <>
-    <button type="button" className="sidebar-toggle" aria-label="Toggle pull request list (⌘B)" title="Toggle sidebar (⌘B)" onClick={() => toggle(document.querySelector(".pull-detail"))}>◧</button>
+    <button type="button" className="sidebar-toggle" aria-label="Toggle pull request list (⌘B)" title="Toggle sidebar (⌘B)" onClick={() => toggle(document.querySelector(".pull-detail"))}><Icon name="sidebarSimple" /></button>
     <KeyFooter hints={[["J K", "switch PR"], ["H L", "switch tabs"], ["⇧ C", "chat"], ["M", "merge"], ["F", "fix"], ["/", "search"], ["⌘ B", "sidebar"]]} />
   </>;
 }
@@ -154,18 +174,20 @@ export function PullActions({ pullRequestId, head, state, draft }: { pullRequest
       <input type="hidden" name="pullRequestId" value={pullRequestId} />
       <input type="hidden" name="head" value={head} />
       {state === "open" ? <span className="merge-group">
-        <button name="action" value="merge" data-key="m" disabled={pending || draft} title={draft ? "Draft pull requests cannot be merged" : "Merge (M)"} onClick={ask("Merge this pull request on GitHub as you?")}><span aria-hidden>⑂</span> Merge <kbd>M</kbd></button>
+        <button name="action" value="merge" data-key="m" className="primary" disabled={pending || draft} title={draft ? "Draft pull requests cannot be merged" : "Merge (M)"} onClick={ask("Merge this pull request on GitHub as you?")}><Icon name="gitMerge" /> Merge <kbd>M</kbd></button>
         <details className="action-menu">
-          <summary aria-label="More pull request actions" data-key="x">▾</summary>
+          <summary aria-label="More pull request actions" data-key="x"><Icon name="caretDown" /></summary>
           <div className="menu">
             <label>Merge method<select name="method" defaultValue="squash"><option value="squash">Squash and merge</option><option value="merge">Create a merge commit</option><option value="rebase">Rebase and merge</option></select></label>
             <textarea name="body" rows={3} aria-label="Review comment" placeholder="Comment (required to request changes)" />
-            <button name="action" value="approve" data-key="a" disabled={pending} onClick={ask("Approve this pull request on GitHub as you?")}>Approve <kbd>A</kbd></button>
-            <button name="action" value="request_changes" disabled={pending}>Request changes <kbd>X</kbd></button>
-            <button name="action" value="comment" disabled={pending}>Comment</button>
-            <button name="action" value={draft ? "ready" : "draft"} data-key="d" disabled={pending} onClick={ask(draft ? "Mark this pull request ready for review on GitHub?" : "Convert this pull request to a draft on GitHub?")}>{draft ? "Ready for review" : "Convert to draft"} <kbd>D</kbd></button>
-            <button name="action" value="update_branch" data-key="u" disabled={pending} onClick={ask("Update this branch with its base branch on GitHub?")}>Update branch <kbd>U</kbd></button>
-            <button name="action" value="close" data-key="c" disabled={pending} onClick={ask("Close this pull request on GitHub?")}>Close pull request <kbd>C</kbd></button>
+            <hr />
+            <button name="action" value="approve" data-key="a" className="menu-item" disabled={pending} onClick={ask("Approve this pull request on GitHub as you?")}><span>Approve</span> <kbd>A</kbd></button>
+            <button name="action" value="request_changes" className="menu-item" disabled={pending}><span>Request changes</span> <kbd>X</kbd></button>
+            <button name="action" value="comment" className="menu-item" disabled={pending}><span>Comment</span></button>
+            <button name="action" value={draft ? "ready" : "draft"} data-key="d" className="menu-item" disabled={pending} onClick={ask(draft ? "Mark this pull request ready for review on GitHub?" : "Convert this pull request to a draft on GitHub?")}><span>{draft ? "Ready for review" : "Convert to draft"}</span> <kbd>D</kbd></button>
+            <button name="action" value="update_branch" data-key="u" className="menu-item" disabled={pending} onClick={ask("Update this branch with its base branch on GitHub?")}><span>Update branch</span> <kbd>U</kbd></button>
+            <hr />
+            <button name="action" value="close" data-key="c" className="menu-item danger" disabled={pending} onClick={ask("Close this pull request on GitHub?")}><span>Close pull request</span> <kbd>C</kbd></button>
           </div>
         </details>
       </span> : state === "closed" && <button name="action" value="reopen" data-key="o" disabled={pending}>Reopen <kbd>O</kbd></button>}
@@ -243,7 +265,7 @@ const permissionLabels: Record<ChatPermission, string> = { ask: "Ask every time"
 export function ChatPermissionChip({ threadId }: { threadId: string }) {
   const [mode, setMode] = useState<ChatPermission>("ask");
   useEffect(() => setMode(permissionOf(threadId).mode), [threadId]);
-  return <label className="permission-chip" title="Actions this chat may run without asking"><span aria-hidden>🛡</span><span className="sr-only">Chat permissions</span>
+  return <label className="permission-chip" title="Actions this chat may run without asking"><Icon name="shieldCheck" /><span className="sr-only">Chat permissions</span>
     <select value={mode} onChange={(e) => { const next = e.currentTarget.value as ChatPermission; if (next === "full" && !confirm("Full access lets this chat run every suggested action, including merges and closing, without asking. Continue?")) return; setMode(next); store(`openreview:chat-perm:${threadId}`).set(next); raised(threadId); }}>
       {(Object.keys(permissionLabels) as ChatPermission[]).map((k) => <option key={k} value={k}>{permissionLabels[k]}</option>)}
     </select>
@@ -277,7 +299,7 @@ export function ChatContext() {
   const clear = () => { setPicks([]); setOn(false); document.querySelectorAll("[data-chat-selected]").forEach((el) => el.removeAttribute("data-chat-selected")); };
   return <>
     <input type="hidden" name="context" value={picks.map((t) => "> " + t.replaceAll("\n", "\n> ")).join("\n\n").slice(0, 2500)} />
-    <button type="button" className={"icon-button" + (on ? " active" : "")} data-chat-context aria-pressed={on} title="Select context (Shift+S)" aria-label="Select context" onClick={() => setOn(!on)}>⌖</button>
+    <button type="button" className={"icon-button" + (on ? " active" : "")} data-chat-context aria-pressed={on} title="Select context (Shift+S)" aria-label="Select context" onClick={() => setOn(!on)}><Icon name="crosshairSimple" /></button>
     {(on || picks.length > 0) && <span className="context-state">{picks.length} selected{on && <button type="button" className="link-button" onClick={() => setOn(false)}>Done</button>}{picks.length > 0 && <button type="button" className="link-button" onClick={clear}>Clear</button>}</span>}
   </>;
 }

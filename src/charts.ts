@@ -15,3 +15,10 @@ export function segments(points: (string | null)[]) {
   if (run.length) out.push(run.join(" "));
   return out;
 }
+// Y-axis ticks from zero: about four even steps of 1, 2, 2.5 or 5 × 10ⁿ, the last at or above max.
+export function niceTicks(max: number, count = 4) {
+  const raw = Math.max(max, Number.MIN_VALUE) / count, mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw * (1 - 1e-9))!;
+  const steps = Math.ceil(max / step - 1e-9);
+  return Array.from({ length: steps + 1 }, (_, i) => Number((i * step).toPrecision(12)));
+}

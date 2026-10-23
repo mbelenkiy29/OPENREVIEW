@@ -1,6 +1,6 @@
 "use client";
 import * as Sentry from "@sentry/nextjs";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { Milestone } from "../convex/analyticsMilestones";
 import { measureSignup } from "../src/ads-pixel";
 import { withLoadedAnalytics } from "../src/analytics-loader";
@@ -34,10 +34,10 @@ export function TelemetryIdentity({ userId, workspaceId, milestones = [] }: { us
 }
 
 /** A sign-out form that also forgets the user in this browser's analytics, error reports and feedback widget. */
-export function SignOutForm({ action, label }: { action: () => Promise<void>; label: string }) {
+export function SignOutForm({ action, label, className = "small", icon }: { action: () => Promise<void>; label: string; className?: string; icon?: ReactNode }) {
   return <form action={action} onSubmit={() => {
     withLoadedAnalytics((a) => a.resetAnalytics());
     if (sentryDsn) Sentry.setUser(null);
     userJotLogout();
-  }}><button className="small">{label}</button></form>;
+  }}><button className={className}>{icon}{label}</button></form>;
 }

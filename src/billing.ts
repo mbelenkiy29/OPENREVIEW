@@ -23,7 +23,7 @@ export type BillingAccount = { status: string; seats: number; trialEndsAt: numbe
 // limit, used and capMicros are micro-dollars; overage is true when this request runs past the included usage.
 export type BillingDecision = { allowed: boolean; plan: "disabled" | Plan; limit: number | null; used: number; capMicros: number; overage: boolean; reason?: string };
 const paying = new Set(["active", "trialing", "past_due"]);
-export const freeTakenReason = (workspace: string) => `Free is one workspace per owner, and an owner of this workspace already has "${workspace}" on Free. A workspace admin can choose Starter or Pro in Settings → Billing, or use "${workspace}" for free reviews.`;
+export const freeTakenReason = (workspace: string) => `Free is one workspace per owner, and an owner of this workspace already has "${workspace}" on Free. A workspace admin can choose Starter or Pro in Organization Settings → Billing & Usage, or use "${workspace}" for free reviews.`;
 /** used includes in-flight reservations; request is the next call's reservation (0 for the pre-check at enqueue).
  * freeElsewhere names the owner's other Free workspace when this one gets no Free allowance (convex/billing.ts). */
 export function billingDecision(account: BillingAccount, used: number, now: number, config: BillingConfig, request = 0, freeElsewhere?: string): BillingDecision {
@@ -33,26 +33,26 @@ export function billingDecision(account: BillingAccount, used: number, now: numb
     // A subscription without a recorded plan predates Pro, so it is Starter.
     const plan = account.plan === "pro" ? "pro" as const : "starter" as const;
     const limit = Math.max(1, account.seats) * (plan === "pro" ? config.proUsagePerSeatMicros : config.usagePerSeatMicros), capMicros = Math.round((account.spendCapUsd ?? 0) * 1e6), base = { plan, limit, used, capMicros };
-    if (account.status === "past_due" && (account.pastDueSince ?? now) + config.graceDays * 86400000 <= now) return { ...base, allowed: false, overage: false, reason: "Payment is past due and the grace period has ended. Update the payment method in Settings → Billing." };
+    if (account.status === "past_due" && (account.pastDueSince ?? now) + config.graceDays * 86400000 <= now) return { ...base, allowed: false, overage: false, reason: "Payment is past due and the grace period has ended. Update the payment method in Organization Settings → Billing & Usage." };
     if (!over(limit)) return { ...base, allowed: true, overage: false };
     if (capMicros && !over(limit + capMicros)) return { ...base, allowed: true, overage: true };
     return { ...base, allowed: false, overage: false, reason: capMicros
-      ? `This workspace reached its extra usage cap of ${usdText(capMicros)} this month. Usage resets on ${resetText(now)}; a workspace admin can raise the cap in Settings → Billing.`
-      : `This workspace used its included usage for this month. Usage resets on ${resetText(now)}; a workspace admin can turn on extra usage in Settings → Billing.` };
+      ? `This workspace reached its extra usage cap of ${usdText(capMicros)} this month. Usage resets on ${resetText(now)}; a workspace admin can raise the cap in Organization Settings → Billing & Usage.`
+      : `This workspace used its included usage for this month. Usage resets on ${resetText(now)}; a workspace admin can turn on extra usage in Organization Settings → Billing & Usage.` };
   }
   // Free: no subscription (or a lapsed one). The allowance resets each month and has no extra usage.
   const base = { plan: "free" as const, limit: config.freeUsageMicros, used, capMicros: 0, overage: false };
   if (freeElsewhere) return { ...base, limit: 0, allowed: false, reason: freeTakenReason(freeElsewhere) };
-  if (over(config.freeUsageMicros)) return { ...base, allowed: false, reason: `This workspace used the Free plan's ${usdText(config.freeUsageMicros)} of usage for this month. Usage resets on ${resetText(now)}; a workspace admin can upgrade in Settings → Billing.` };
+  if (over(config.freeUsageMicros)) return { ...base, allowed: false, reason: `This workspace used the Free plan's ${usdText(config.freeUsageMicros)} of usage for this month. Usage resets on ${resetText(now)}; a workspace admin can upgrade in Organization Settings → Billing & Usage.` };
   return { ...base, allowed: true };
 }
 
 /** The 80% / 100% usage alert email; `used` is settled usage and `now` falls in the alert's period. */
 export function usageAlertEmail(workspace: string, threshold: number, d: BillingDecision, overageMicros: number, now: number, billingUrl?: string) {
   const reset = resetText(now), pause = threshold >= 100 ? `are paused until ${reset}` : "pause when it runs out";
-  const next = d.plan === "free" ? `Reviews ${pause}. A workspace admin can upgrade to Starter or Pro in Settings → Billing for more usage.`
-    : d.capMicros ? `Extra usage is on: ${usdText(Math.max(0, d.capMicros - overageMicros))} of the ${usdText(d.capMicros)} monthly cap is left. A workspace admin can change the cap in Settings → Billing.`
-    : `Extra usage is off, so reviews ${pause}. A workspace admin can turn on extra usage in Settings → Billing.`;
+  const next = d.plan === "free" ? `Reviews ${pause}. A workspace admin can upgrade to Starter or Pro in Organization Settings → Billing & Usage for more usage.`
+    : d.capMicros ? `Extra usage is on: ${usdText(Math.max(0, d.capMicros - overageMicros))} of the ${usdText(d.capMicros)} monthly cap is left. A workspace admin can change the cap in Organization Settings → Billing & Usage.`
+    : `Extra usage is off, so reviews ${pause}. A workspace admin can turn on extra usage in Organization Settings → Billing & Usage.`;
   return {
     subject: `${workspace} used ${threshold >= 100 ? "all" : `${threshold}%`} of this month's included OpenReview usage`,
     text: `${workspace} has used ${usdText(d.used)} of its ${usdText(d.limit ?? 0)} of included model usage this month. Usage resets on ${reset}.\n\n${next}${billingUrl ? `\n\n${billingUrl}` : ""}`,
