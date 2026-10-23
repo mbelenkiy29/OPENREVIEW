@@ -15,6 +15,7 @@ gsap.registerPlugin(useGSAP, ScrollTrigger, ScrollSmoother, SplitText);
 // Smooth scrolling, parallax, the hero window's settle and the pinned steps are for desktop
 // pointers. Touch screens keep native scrolling and get the reveals only.
 const desktopQuery = "(min-width: 1024px) and (pointer: fine)";
+const motionQuery = "(prefers-reduced-motion: no-preference)";
 const ease = "expo.out";
 const typeSpeed = 0.022; // seconds per character typed in the terminal
 
@@ -44,9 +45,9 @@ function rise(items: Element[]) {
 
 /** Builds every effect for the current media conditions and returns what undoes the non-GSAP parts.
  *  What the first screen needs is set up at once; each section further down is set up in its own
- *  idle moment, so the work never holds the main thread for long. `settled` is called whenever
- *  smoothed scrolling comes to rest. */
-function choreograph(root: HTMLElement, desktop: boolean, context: gsap.Context, settled: () => void) {
+ *  idle moment, so the work never holds the main thread for long. `moved` is called on every frame
+ *  of smoothed scrolling. */
+function choreograph(root: HTMLElement, desktop: boolean, context: gsap.Context, moved: () => void) {
   const all = <T extends Element = HTMLElement>(selector: string) => [...root.querySelectorAll<T>(selector)];
   const header = root.querySelector<HTMLElement>(":scope > .site-header");
   const cleanup: (() => void)[] = [];
@@ -61,7 +62,7 @@ function choreograph(root: HTMLElement, desktop: boolean, context: gsap.Context,
       // Keyboard focus that lands off-screen is brought into view, except for an anchor target,
       // which the click handler below scrolls to smoothly.
       onFocusIn: (_self, event) => event.target !== anchoring,
-      onStop: settled,
+      onUpdate: moved,
     });
     // Find in page, scrollIntoView and test drivers scroll the nearest scrollable box, which is the
     // smoother's fixed wrapper, and the smoother resets it on the next focus, so a click right after
@@ -254,28 +255,42 @@ export default function LandingMotion() {
     if (!root) return;
     ScrollTrigger.config({ ignoreMobileResize: true });
     let media: gsap.MatchMedia | undefined, live = true;
-    // A change of conditions (a window resized past the desktop width, reduced motion switched on or
-    // off) rebuilds everything, and ScrollTrigger's refresh scrolls to the top while it measures. The
-    // reader's place is noted whenever scrolling settles (native scrolling a moment after its last
-    // event, smoothed scrolling when the smoother stops) and put back once the rebuild is done.
-    let place: ReturnType<typeof readingPlace>, settle = 0;
-    const remember = () => { place = readingPlace(root); };
-    const settled = () => { window.clearTimeout(settle); settle = window.setTimeout(remember, 200); };
+    // Resizing reflows the page, and a change of conditions (the window crossing the desktop width,
+    // reduced motion switched on or off) rebuilds everything; either way ScrollTrigger's refresh
+    // scrolls to the top while it measures. So the reader's place is noted as they scroll (smoothed
+    // scrolling on each frame the smoother moves, native scrolling on each scroll event; about 0.1 ms
+    // a note), held from the moment the width or a condition changes, and put back after the refresh
+    // that follows. Height-only resizes, like a phone's address bar, don't hold it.
+    let place: ReturnType<typeof readingPlace>, held = false, release = 0, width = window.innerWidth;
+    const remember = () => { if (!held) place = readingPlace(root); };
+    const scrolled = () => { if (!ScrollSmoother.get()) remember(); };
+    const hold = () => {
+      held = true;
+      window.clearTimeout(release);
+      release = window.setTimeout(() => { held = false; }, 1500); // if no refresh follows
+    };
+    const resized = () => { if (window.innerWidth !== width) { width = window.innerWidth; hold(); } };
+    const conditions = [desktopQuery, motionQuery].map((query) => window.matchMedia(query));
     const restore = () => requestAnimationFrame(() => {
+      if (!held) return;
+      held = false;
+      window.clearTimeout(release);
       if (!place?.el.isConnected) return;
       const by = place.el.getBoundingClientRect().top - place.top, smoother = ScrollSmoother.get();
       if (smoother) smoother.scrollTop(smoother.scrollTop() + by);
       else window.scrollBy(0, by);
     });
-    window.addEventListener("scroll", settled, { passive: true });
-    ScrollTrigger.addEventListener("matchMedia", restore);
+    window.addEventListener("scroll", scrolled, { passive: true });
+    window.addEventListener("resize", resized);
+    conditions.forEach((query) => query.addEventListener("change", hold));
+    ScrollTrigger.addEventListener("refresh", restore);
     // Fonts decide where heading lines break, so the splits wait for them. Content below the fold is
     // still below it then; whatever the visitor reached first is simply left as rendered.
     void document.fonts.ready.then(() => {
       if (!live) return;
       // GSAP runs this whenever any condition matches, and again when either one changes.
       media = gsap.matchMedia();
-      media.add({ desktop: desktopQuery, motion: "(prefers-reduced-motion: no-preference)" }, (context) => {
+      media.add({ desktop: desktopQuery, motion: motionQuery }, (context) => {
         const { desktop, motion } = context.conditions as { desktop: boolean; motion: boolean };
         // Tells browser checks (scripts/browser.ts) that motion has started, or chose not to.
         root.dataset.motion = motion ? "on" : "reduced";
@@ -284,9 +299,11 @@ export default function LandingMotion() {
     });
     return () => {
       live = false;
-      window.removeEventListener("scroll", settled);
-      window.clearTimeout(settle);
-      ScrollTrigger.removeEventListener("matchMedia", restore);
+      window.removeEventListener("scroll", scrolled);
+      window.removeEventListener("resize", resized);
+      conditions.forEach((query) => query.removeEventListener("change", hold));
+      ScrollTrigger.removeEventListener("refresh", restore);
+      window.clearTimeout(release);
       media?.revert();
       delete root.dataset.motion;
     };
