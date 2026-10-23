@@ -8,7 +8,7 @@ OpenReview connects GitLab.com and authorized self-managed HTTPS instances throu
 2. For a self-managed instance, add its host (including a non-default port) to `SCM_ALLOWED_HOSTS` in both frontend and Convex environments. Preserve existing entries. HTTPS certificate verification remains enabled.
 3. In Settings → Code Providers, choose GitLab Cloud / self-managed, enter the instance URL, bot token and a random webhook secret, then connect. Credentials are encrypted with the operator's `CREDENTIAL_ENCRYPTION_KEY`.
 4. Select repositories, enable them, and inspect completed indexing, indexed revision, skipped files and failure/retry controls under Add/Remove Repos.
-5. Configure the displayed repository webhook URL in GitLab with the same secret token. Enable merge request, push and comment events, retaining SSL verification. Verify delivery before enabling automatic reviews. See [GitLab's project webhook API](https://docs.gitlab.com/api/project_webhooks/).
+5. Configure the displayed repository webhook URL in GitLab with the same secret token. Enable merge request, push, comment and pipeline events (pipeline events recheck automatic approvals when CI results change), retaining SSL verification. Verify delivery before enabling automatic reviews. See [GitLab's project webhook API](https://docs.gitlab.com/api/project_webhooks/).
 
 Automatic reviews honor effective Automatic review, draft, target-branch, ignored source-branch and Re-review settings. New code pushes are distinguished using GitLab's documented `object_attributes.oldrev`; approval events do not launch reviews. Push events index the default branch. See [GitLab's event payloads](https://docs.gitlab.com/user/project/integrations/webhook_events/).
 
@@ -69,7 +69,7 @@ The engine now supplies numbered source lines and validates exact coordinates, k
 
 After deployment, a real portal Re-review click completed review `mx78944n8fc2qdkdkjem8h8mkh8fkgqc` at the same corrected revision. It verified the return statement at line 3, marked the original finding resolved, and published native summary note 9 with the matching Resolved findings section and truthful unexecuted-test status. Both the native source and publication were read back; computer use verified review history and the rendered resolution, with empty browser warnings/errors.
 
-All 87 Node + 78 Convex tests (165), lint, typecheck and build passed. Vercel production `dpl_jLx3tz9WmCUvqxyfDzibuE7sLAMJ` is READY, and Convex deployment succeeded. The initial corrected review cost $0.074786; the repaired-resolution re-review cost $0.084048. Recorded hosted inference is $1.591860. Evidence: `followup-question.json`, `followup-evidence.json`, `replay-evidence.json`, `resolution-evidence.json` and `resolution-portal.png`. Broader provider, bridge, runtime/approval and OS acceptance remain incomplete.
+All 87 Node + 78 Convex tests (165), lint, typecheck and build passed. Vercel production `<deployment-id>` is READY, and Convex deployment succeeded. The initial corrected review cost $0.074786; the repaired-resolution re-review cost $0.084048. Recorded hosted inference is $1.591860. Evidence: `followup-question.json`, `followup-evidence.json`, `replay-evidence.json`, `resolution-evidence.json` and `resolution-portal.png`. Broader provider, bridge, runtime/approval and OS acceptance remain incomplete.
 
 ## Exact revision runtime archives
 
@@ -81,7 +81,7 @@ The subsequent hosted durable check passed: provider-native `rereview` created `
 
 The initial acceptance helper used the GitHub-compatible `reviews.request` mutation without GitLab's base/start revision key; its run was correctly cancelled before inference. GitLab manual runs must use the provider-native `providerJobs.rereview` action, as the portal does, to obtain current native revision identity. No validation was relaxed to make the helper pass.
 
-All 88 Node + 78 Convex tests (166), lint, typecheck and build passed. Production deployment `dpl_FWdSLmnzLtqMRhRSSf2nbxRhfrGN` is READY and Convex push succeeded. This review cost $0.071764; recorded hosted inference is $1.663624, below the $5 cap. Durable evidence and native publication: `runtime-durable-evidence.json`; browser proof: `runtime-portal.png`.
+All 88 Node + 78 Convex tests (166), lint, typecheck and build passed. Production deployment `<deployment-id>` is READY and Convex push succeeded. This review cost $0.071764; recorded hosted inference is $1.663624, below the $5 cap. Durable evidence and native publication: `runtime-durable-evidence.json`; browser proof: `runtime-portal.png`.
 
 
 ## Native opt-in approval
@@ -94,4 +94,4 @@ Live GitLab CE 19.4.1 native API acceptance created disposable documentation MR 
 
 The separate hosted durable approval test temporarily enabled a repository policy, evaluated that actual completed review and correctly blocked job qx71pxn02mcv61j21xdkw8vrg18fjww3 on maximum confidence. The original policy was restored and no native bot approval remained. Computer use verified the deployed blocked status/reason and 90% assessment, with no browser warnings/errors; screenshot approval-portal.png. Native adapter publication is proven; positive model-to-automatic-approval acceptance, live objection/required-check transitions, licensed external checks, GitLab.com and the wider OS/provider matrix remain pending. No model assessment or gate was weakened.
 
-All 101 Node + 81 Convex tests (182), lint, typecheck and production build pass. Deployed Convex and Vercel dpl_G3u3n8ZH3ddSBFboQ86fWexur2rv READY. Recorded hosted inference $1.725116, below the $5 cap; MR !2's automatic review added $0.038878. Evidence: approval-snapshot-evidence.json, approval-native-evidence.json, approval-durable-evidence.json and approval-portal.png under ignored output/setup/gitlab.
+All 101 Node + 81 Convex tests (182), lint, typecheck and production build pass. Deployed Convex and Vercel `<deployment-id>` READY. Recorded hosted inference $1.725116, below the $5 cap; MR !2's automatic review added $0.038878. Evidence: approval-snapshot-evidence.json, approval-native-evidence.json, approval-durable-evidence.json and approval-portal.png under ignored output/setup/gitlab.

@@ -21,6 +21,7 @@ import {POST as searchRoute} from '../app/api/search/route';
 import {GET as listRepositories,POST as enableRepository} from '../app/api/repositories/route';
 import {GET as repositoryStatus} from '../app/api/repositories/[id]/route';
 import {POST as requestReview} from '../app/api/reviews/route';
+import {GET as contextRoute} from '../app/api/context/route';
 
 const modules=import.meta.glob('../convex/**/*.ts');
 const indexed='d'.repeat(40);
@@ -104,6 +105,30 @@ test('validation errors are 400s with issue paths',async()=>{
  expect(await bad(queryRoute(request('/api/query',keys.read,'{not json')))).toEqual({error:'Request body must be JSON'});
  expect((await bad(repositoryStatus(request('/api/repositories/x',keys.read),params('id','x')))).issues[0].message).toBe('Invalid identifier');
  expect((await bad(enableRepository(request('/api/repositories',keys.write,{})))).issues[0].path).toBe('repositoryId');
+});
+
+test('each key gets 120 requests a minute; the 121st is refused with 429',async()=>{
+ const {keys}=await setup();
+ for(let i=0;i<120;i++)expect((await listRepositories(request('/api/repositories',keys.read))).status).toBe(200);
+ expect(await json(await listRepositories(request('/api/repositories',keys.read)))).toEqual([429,{error:'API key rate limit exceeded (120 requests per minute); retry shortly'}]);
+ // Budgets are per key, and the next minute starts afresh.
+ expect((await listRepositories(request('/api/repositories',keys.write))).status).toBe(200);
+ vi.advanceTimersByTime(60_000);
+ expect((await listRepositories(request('/api/repositories',keys.read))).status).toBe(200);
+},30_000);
+
+test('repository checks look up one repository; the list leaves out large dashboard fields',async()=>{
+ const {t,shop,keys}=await setup();
+ await t.run(ctx=>ctx.db.patch(shop._id,{branches:[{name:'main',sha:indexed,protected:true}],knowledgePaths:['AGENTS.md'],configFile:{sha:indexed,files:['.openreview.yml'],applied:[],blocked:[],warnings:[],values:'x'.repeat(1000),rules:0,checkedAt:0}}));
+ const [,list]=await json(await listRepositories(request('/api/repositories',keys.read)));
+ const listed=list.find((r:{_id:string})=>r._id===shop._id);
+ expect(listed).toMatchObject({_id:shop._id,fullName:'acme/shop',enabled:true,indexStatus:'ready'});
+ expect([listed.configFile,listed.branches,listed.knowledgePaths]).toEqual([undefined,undefined,undefined]);
+ expect(await json(await requestReview(request('/api/reviews',keys.rival,{repositoryId:shop._id,prNumber:1,headSha:'a'.repeat(40)})))).toEqual([403,{error:'Repository not accessible to this API key'}]);
+ expect((await contextRoute(request('/api/context?repositoryId='+shop._id,keys.rival))).status).toBe(403);
+ expect((await contextRoute(request('/api/context?repositoryId=not-an-id',keys.read))).status).toBe(403);
+ expect((await requestReview(request('/api/reviews',keys.write,{repositoryId:shop._id,prNumber:1,headSha:'a'.repeat(40)}))).status).toBe(202);
+ expect((await contextRoute(request('/api/context?repositoryId='+shop._id+'&query=total',keys.read))).status).toBe(200);
 });
 
 // Real timers here: convex-test runs the scheduled chat job while the route polls for its result.

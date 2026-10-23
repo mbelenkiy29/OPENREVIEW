@@ -6,23 +6,23 @@ For Kubernetes (Helm), AWS (Terraform), offline mode and the list of outbound ho
 
 ## Vercel and Convex Free
 
-The hosted deployment runs on Vercel **Pro** in team `michael-belenkiys-projects`, with Convex **Free** at `tidy-ocelot-457`.
-- **Hosting history:** the deployment was verified on the `open-review-free` Hobby team on 2026-10-04 and moved back to the Pro team on 2026-10-15. The move used Vercel's zero-downtime project transfer, so the project ID `prj_jMAK4u6yVJUfW2atnWbiZnF8F7b9`, deployments, environment variables, domains and the Git link are unchanged.
-- **Older URLs:** deployment URLs created before the move keep their `-open-review-free` suffix.
-- **Canonical URL:** https://openreview.tech (since 2026-10-15). The original https://openreview-flame-two.vercel.app and https://www.openreview.tech redirect to it with a 308.
+The hosted deployment runs on Vercel **Pro** in team `<vercel-team>`, with Convex **Free** at `<prod-deployment>`. Real resource names are kept out of this public repo; look them up in the Vercel and Convex dashboards.
+- **Hosting history:** the deployment was verified on the `<hobby-team>` Hobby team on 2026-10-04 and moved back to the Pro team on 2026-10-15. The move used Vercel's zero-downtime project transfer, so the project ID `<vercel-project-id>`, deployments, environment variables, domains and the Git link are unchanged.
+- **Older URLs:** deployment URLs created before the move keep their `-<hobby-team>` suffix.
+- **Canonical URL:** https://openreview.tech (since 2026-10-15). The original `<vercel-url>` and https://www.openreview.tech redirect to it with a 308.
 - **Convex resource:** it is managed by the Convex Marketplace integration in the same Pro team. Do not remove that integration: it owns the live backend.
 - **Local CLI:** the link (`.vercel/project.json`) and the CLI's default team target the Pro team.
 - **Evidence:** full evidence and acceptance boundaries are in [acceptance-matrix.md](acceptance-matrix.md).
 
 ### Custom domain and Git deployments (October 15, 2026)
 
-- **Domain.** `openreview.tech` is registered through Vercel in the team `michael-belenkiys-projects`. That team also hosts its DNS, pays its renewal and, since 2026-10-15, owns the `openreview` project. `www.openreview.tech` and the `.vercel.app` alias redirect to the apex.
-  - The `_vercel` TXT records added while the project lived in `open-review-free` are no longer needed, but they are harmless.
+- **Domain.** `openreview.tech` is registered through Vercel in the team `<vercel-team>`. That team also hosts its DNS, pays its renewal and, since 2026-10-15, owns the `openreview` project. `www.openreview.tech` and the `.vercel.app` alias redirect to the apex.
+  - The `_vercel` TXT records added while the project lived in `<hobby-team>` are no longer needed, but they are harmless.
 - **Origins.**
-  - `APP_URL` is `https://openreview.tech` in Vercel Production and in Convex `tidy-ocelot-457`.
+  - `APP_URL` is `https://openreview.tech` in Vercel Production and in Convex `<prod-deployment>`.
   - The GitHub App's callback URLs include `https://openreview.tech/api/auth/callback`; the earlier callbacks are kept.
   - The App's setup URL is `https://openreview.tech/api/github/callback`.
-  - The webhook is unchanged at `https://tidy-ocelot-457.convex.site/github/webhook`.
+  - The webhook is unchanged at `https://<prod-deployment>.convex.site/github/webhook`.
 - **Git.** The project deploys from `mbelenkiy29/OPENREVIEW` (named `GREPTILE` until 2026-10-16; the old URL redirects, and Vercel follows the repository by ID) with production branch `main`, so merges to `main` deploy automatically.
   - The Ignored Build Step (`if [ "$VERCEL_ENV" = "production" ]; then exit 1; else exit 0; fi`) builds production only, and branch pushes are skipped. This is because the Preview-scoped `CONVEX_DEPLOY_KEY` could not be confirmed to be a Convex preview key. A production key there would deploy unmerged branches to the production backend.
   - Before enabling previews, set a Convex preview deploy key for Preview and clear the ignore command.

@@ -63,18 +63,19 @@ export async function advanceSetup(_state: Result, form: FormData): Promise<Resu
   redirect(`/dashboard/onboarding/${next}`);
 }
 
-// The plan step's secondary choice: keep the trial and subscribe later in Settings → Billing.
-export async function continueOnTrial(form: FormData) {
+// The plan step's Free choice: no card; upgrade later in Settings → Billing.
+export async function continueOnFree(form: FormData) {
   const { token } = await current();
+  await backend().mutation(api.billing.chooseFreePlan, { token, organizationId: organizationOf(form) });
   const next = await backend().mutation(api.onboarding.advance, { token, organizationId: organizationOf(form), step: "plan" });
   redirect(`/dashboard/onboarding/${next}`);
 }
 
-// Stripe Checkout from setup: collects a card for the Starter plan; the remaining trial carries over.
+// Stripe Checkout from setup: collects a card for Starter or Pro; the remaining trial carries over.
 export async function checkoutFromSetup(form: FormData) {
   const { token } = await current();
   let url: string;
-  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: organizationOf(form), returnTo: "onboarding" }); }
+  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: organizationOf(form), returnTo: "onboarding", plan: z.enum(["starter", "pro"]).catch("pro").parse(form.get("plan")) }); }
   catch { redirect("/dashboard/onboarding/plan?billing=error"); }
   redirect(url);
 }

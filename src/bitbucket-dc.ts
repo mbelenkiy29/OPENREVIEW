@@ -7,6 +7,7 @@ import type { Scm, ScmChange, ScmApprovalSnapshot } from "./gitlab";
 import type { ChangedFile, Finding, SourceFile } from "./engine/types";
 import { changedLines } from "./engine/diff";
 import { findingComment } from "./github";
+import { retrying } from "./scm-transport";
 
 const commit = z.string().regex(/^[a-f0-9]{40}$/);
 const id = z.number().int().positive().safe();
@@ -71,7 +72,7 @@ export class BitbucketDC implements Scm {
  }
  async request<T>(endpoint:string,schema:z.ZodType<T,z.ZodTypeDef,unknown>,body?:unknown,namespace:"api/latest"|"build-status/latest"="api/latest",requirePublisher=false,method?:"PUT"):Promise<T>{
   if(!endpoint.startsWith("/")||endpoint.startsWith("//")||endpoint.includes("://"))throw new Error("Invalid Bitbucket API path");
-  const response=await fetch(this.base+"/rest/"+namespace+endpoint,{method:method??(body===undefined?"GET":"POST"),redirect:"error",headers:{authorization:"Bearer "+this.token,accept:"application/json","content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(60000)});
+  const verb=method??(body===undefined?"GET":"POST"),response=await retrying(verb,()=>fetch(this.base+"/rest/"+namespace+endpoint,{method:verb,redirect:"error",headers:{authorization:"Bearer "+this.token,accept:"application/json","content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(60000)}));
   if(!response.ok)throw new Error("Bitbucket Data Center "+response.status+" at "+endpoint.split("?")[0]);
   const authenticated=response.headers.get("x-ausername");if(requirePublisher&&(!this.botUsername||authenticated!==this.botUsername)||this.botUsername&&authenticated&&authenticated!==this.botUsername){await response.body?.cancel();throw new Error("Bitbucket token does not belong to the configured bot username or authenticated header is missing");}
   return schema.parse(JSON.parse(await this.read(response,4000000)));
@@ -291,7 +292,7 @@ export class BitbucketDC implements Scm {
  async blob(repo:string,p:string,sha:string):Promise<SourceFile>{
   commit.parse(sha);filePath({components:p.split("/")});await this.assertRepository(repo);
   const endpoint=this.prefix(repo)+"/raw/"+p.split("/").map(encodeURIComponent).join("/")+"?at="+sha;
-  const response=await fetch(this.base+"/rest/api/latest"+endpoint,{redirect:"error",headers:{authorization:"Bearer "+this.token},signal:AbortSignal.timeout(60000)});
+  const response=await retrying("GET",()=>fetch(this.base+"/rest/api/latest"+endpoint,{redirect:"error",headers:{authorization:"Bearer "+this.token},signal:AbortSignal.timeout(60000)}));
   if(!response.ok)throw new Error("Bitbucket Data Center "+response.status+" reading source");
   let content:string;
   try{content=await this.read(response,200000);}catch(error){if(error instanceof Error&&error.message.includes("coverage limit"))return {path:p,sha,content:"",size:200001};if(error instanceof Error&&error.message.includes("not UTF-8"))return {path:p,sha,content:"\0"};throw error;}

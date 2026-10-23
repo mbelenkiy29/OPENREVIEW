@@ -1,5 +1,6 @@
 "use node";
 import { action,internalAction } from "./_generated/server";
+import { pullObservation } from "../src/change-metadata";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -7,6 +8,7 @@ import { z } from "zod";
 import { createHash,timingSafeEqual } from "node:crypto";
 import { decryptCredential,encryptCredential } from "../src/credentials";
 import { verifyWebhook } from "../src/github";
+import { secretMatches } from "./auth";
 import { provider,discover as discoverRepositories } from "./scm";
 import { verifyOriginWebhook } from "../src/origin-auth";
 import { Origin } from "../src/origin";
@@ -55,7 +57,7 @@ export const refreshP4Ticket=action({args:{token:v.string(),connectionId:v.id("p
  await ctx.runMutation(internal.providerConnections.refreshP4,{token:a.token,id:c._id,previousCredentials:c.credentials,credentials:encryptCredential(JSON.stringify(next),c.organizationId+":perforce"),projectIds:projects.map(p=>p.id)});
 }});
 export const originWebhook=action({args:{secret:v.string(),body:v.string(),externalId:v.string(),timestamp:v.string(),signature:v.string()},handler:async(ctx,a)=>{
- if(!process.env.SERVICE_SECRET||a.secret!==process.env.SERVICE_SECRET)throw new Error("Unauthorized service");
+ if(!secretMatches(process.env.SERVICE_SECRET,a.secret))throw new Error("Unauthorized service");
  if(a.body.length>4000000||!process.env.ORIGIN_APP_ID)throw new Error("Invalid Origin webhook configuration or body");
  if(!await verifyOriginWebhook(a.body,a.externalId,a.timestamp,a.signature))throw new Error("Invalid Origin signature");
  const e=originEnvelope.parse(JSON.parse(a.body));
@@ -124,7 +126,7 @@ export const select=action({args:{token:v.string(),connectionId:v.id("providerCo
  await ctx.runMutation(internal.providerConnections.select,{token:a.token,connectionId:c._id,repositories});
 }});
 export const webhook=action({args:{secret:v.string(),connectionId:v.id("providerConnections"),signature:v.string(),externalId:v.string(),eventType:v.optional(v.string()),body:v.string()},handler:async(ctx,a)=>{
- if(!process.env.SERVICE_SECRET||a.secret!==process.env.SERVICE_SECRET)throw new Error("Unauthorized service");
+ if(!secretMatches(process.env.SERVICE_SECRET,a.secret))throw new Error("Unauthorized service");
  if(Buffer.byteLength(a.body)>4000000||!a.externalId||a.externalId.length>200)throw new Error("Invalid delivery");
  const c=await ctx.runQuery(internal.providerConnections.data,{id:a.connectionId});
  if(!["gitlab","gitea","github-enterprise","bitbucket-dc","azure-devops"].includes(c.kind))throw new Error("Webhook verifier unavailable");
@@ -148,14 +150,14 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
    if(envelope.event.type!==event.eventType)throw new Error("Origin stored event type mismatch");
    if(["pull_request.review.submitted","pull_request.review.dismissed"].includes(envelope.event.type)){
     const payload=z.object({pullRequest:z.object({number:z.string().regex(/^\d+$/),repository:z.object({id:z.string()})}),review:z.object({id:z.string().min(1)})}).parse(envelope.event.payload);
-    const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===payload.pullRequest.repository.id);
+    const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:payload.pullRequest.repository.id});
     if(repo?.enabled){const number=Number(payload.pullRequest.number);if(!Number.isSafeInteger(number)||number<1)throw new Error("Unsupported Origin change number");await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:number});}
    }
    if(/^repository\.check_run\.(created|updated|completed)$/.test(envelope.event.type)){
     const repository=z.object({id:z.string()}),sha=z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
     const payload=z.object({repository,checkSuite:z.object({id:z.string().min(1),repository,sha}),checkRun:z.object({id:z.string().min(1),repository,sha,checkSuite:z.object({id:z.string().min(1)})})}).parse(envelope.event.payload);
     if(payload.repository.id!==payload.checkSuite.repository.id||payload.repository.id!==payload.checkRun.repository.id||payload.checkSuite.sha!==payload.checkRun.sha||payload.checkSuite.id!==payload.checkRun.checkSuite.id)throw new Error("Origin check event repository, suite or revision mismatch");
-    const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===payload.repository.id);
+    const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:payload.repository.id});
     if(repo?.enabled)await ctx.runMutation(internal.approvals.forRevision,{repositoryId:repo._id,headSha:payload.checkRun.sha});
    }
    if(envelope.event.type==="pull_request.comment.created"){
@@ -163,7 +165,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
      pullRequest:z.object({number:z.string().regex(/^\d+$/),repository:z.object({id:z.string()})}),
      comment:z.object({id:z.string(),body:z.string().max(16000),thread:z.object({id:z.string()}),author:z.object({user:z.object({id:z.string()}).optional()})}),
     }).parse(envelope.event.payload);
-    const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===p.pullRequest.repository.id),author=p.comment.author.user?.id,number=Number(p.pullRequest.number);
+    const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:p.pullRequest.repository.id}),author=p.comment.author.user?.id,number=Number(p.pullRequest.number);
     if(repo?.enabled&&author&&/@openreview\b/i.test(p.comment.body)){
      if(!Number.isSafeInteger(number)||number<1)throw new Error("Unsupported Origin change number");
      const client=await provider(ctx,repo);if(!(client instanceof Origin)||!await client.canReply(repo.fullName,author))throw new Error("Comment author requires Origin repository write access");
@@ -178,13 +180,13 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
    }
    if(envelope.event.type==="repository.pushed"||/^pull_request\.(created|published|reopened|closed|merged|metadata\.updated|head_ref\.pushed|base_ref\.updated|stack_parent\.updated)$/.test(envelope.event.type)){
     const payload=z.object({repository:z.object({id:z.string()}),pullRequest:z.object({number:z.string().regex(/^\d+$/)}).optional()}).parse(envelope.event.payload);
-    const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===payload.repository.id);
+    const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:payload.repository.id});
     if(repo?.enabled){
      if(envelope.event.type==="repository.pushed")await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
      if(payload.pullRequest){
       const number=Number(payload.pullRequest.number);if(!Number.isSafeInteger(number)||number<1)throw new Error("Unsupported Origin change number");
       const pr=await (await provider(ctx,repo)).changeMetadata(repo.fullName,number);
-      await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+      await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
       await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
       const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
       if(pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
@@ -194,7 +196,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
   }else if(c.kind==="bitbucket-cloud"){
    const payload=bitbucketEvent.parse(JSON.parse(event.body));
    if(payload.workspace.uuid!==c.namespaceId||payload.eventType!==event.eventType)throw new Error("Bitbucket event workspace or type mismatch");
-   const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId==="{"+payload.repository.uuid+"}");
+   const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:"{"+payload.repository.uuid+"}"});
    if(repo?.enabled){
     if(payload.eventType==="avi:bitbucket:push:repository"){
      if(payload.push?.ref===repo.defaultBranch&&!payload.push.closed&&payload.push.after)await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
@@ -218,7 +220,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
       }
      }else{
       const pr=await client.changeMetadata(repo.fullName,number);
-      await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+      await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
       await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
       const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
       await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:number});
@@ -230,7 +232,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
   }else if(c.kind==="bitbucket-dc"){
    const payload=z.object({eventKey:z.string(),repository:z.object({id:z.number()}).optional(),pullRequest:z.object({id:z.number().int().positive(),toRef:z.object({repository:z.object({id:z.number()})})}).optional(),actor:z.object({name:z.string()}).optional(),comment:z.object({id:z.number().int().positive(),text:z.string().max(16000),author:z.object({name:z.string(),active:z.boolean()})}).optional(),commentParentId:z.number().int().positive().optional()}).parse(JSON.parse(event.body));
    const externalId=payload.pullRequest?.toRef.repository.id??payload.repository?.id;
-   const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===String(externalId));
+   const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:String(externalId)});
    if(repo?.enabled){
     if(payload.eventKey==="repo:refs_changed")await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
     const number=payload.pullRequest?.id;
@@ -247,7 +249,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
       }else await ctx.scheduler.runAfter(0,internal.conversationJobs.reply,{repositoryId:repo._id,prNumber:number,commentId:payload.comment.id,author,question:payload.comment.text,inline:payload.commentParentId!==undefined,parentCommentId:payload.commentParentId});
      }else if(!payload.eventKey.startsWith("pr:comment:")){
       const pr=await client.changeMetadata(repo.fullName,number);
-      await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+      await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
       await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
       await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:number});
       const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
@@ -259,13 +261,13 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
    // Service hook payloads name the event in the body; follow-up commands are not supported yet.
    const payload=z.object({eventType:z.string(),resource:z.object({repository:z.object({id:z.string()}).optional(),pullRequestId:z.number().int().positive().optional(),refUpdates:z.array(z.object({name:z.string(),newObjectId:z.string()})).optional(),pullRequest:z.object({pullRequestId:z.number().int().positive(),repository:z.object({id:z.string()})}).optional()}).passthrough()}).parse(JSON.parse(event.body));
    const repositoryId=payload.resource.repository?.id??payload.resource.pullRequest?.repository.id;
-   const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===repositoryId);
+   const repo=repositoryId?await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:repositoryId}):null;
    if(repo?.enabled){
     if(payload.eventType==="git.push"&&payload.resource.refUpdates?.some(u=>u.name==="refs/heads/"+repo.defaultBranch))await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
     const number=payload.resource.pullRequestId;
     if(number&&["git.pullrequest.created","git.pullrequest.updated","git.pullrequest.merged"].includes(payload.eventType)){
      const pr=await (await provider(ctx,repo)).changeMetadata(repo.fullName,number);
-     await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+     await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
      await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
      const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
      // Updates also fire for votes and descriptions; enqueue de-duplicates an already-reviewed head.
@@ -273,17 +275,20 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
     }
    }
   }else if(c.kind==="github-enterprise"){
-   const payload=z.object({installation:z.object({id:z.number().int().positive()}),repository:z.object({id:z.number()}).optional(),action:z.string().optional(),ref:z.string().optional(),pull_request:z.object({number:z.number().int().positive()}).optional(),issue:z.object({number:z.number().int().positive(),pull_request:z.unknown().optional()}).optional(),comment:z.object({id:z.number().int().positive(),body:z.string().max(16000),in_reply_to_id:z.number().int().positive().optional(),user:z.object({login:z.string(),type:z.string()})}).optional(),review:z.object({id:z.number().int().positive(),body:z.string().nullable(),user:z.object({login:z.string(),type:z.string()})}).optional()}).parse(JSON.parse(event.body));
-   const configuration=z.object({installationId:z.number().int().positive()}).parse(JSON.parse(decryptCredential(c.credentials,c.organizationId+":"+c.kind)));
+   const payload=z.object({installation:z.object({id:z.number().int().positive()}),repository:z.object({id:z.number()}).optional(),action:z.string().optional(),ref:z.string().optional(),pull_request:z.object({number:z.number().int().positive()}).optional(),check_run:z.object({head_sha:z.string(),app:z.object({id:z.number()}).nullish()}).optional(),check_suite:z.object({head_sha:z.string()}).optional(),sha:z.string().optional(),state:z.string().optional(),issue:z.object({number:z.number().int().positive(),pull_request:z.unknown().optional()}).optional(),comment:z.object({id:z.number().int().positive(),body:z.string().max(16000),in_reply_to_id:z.number().int().positive().optional(),user:z.object({login:z.string(),type:z.string()})}).optional(),review:z.object({id:z.number().int().positive(),body:z.string().nullable(),user:z.object({login:z.string(),type:z.string()})}).optional()}).parse(JSON.parse(event.body));
+   const configuration=z.object({installationId:z.number().int().positive(),appId:z.string().optional()}).parse(JSON.parse(decryptCredential(c.credentials,c.organizationId+":"+c.kind)));
    if(payload.installation.id!==configuration.installationId)throw new Error("GitHub Enterprise installation mismatch");
-   const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===String(payload.repository?.id));
+   const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:String(payload.repository?.id)});
    if(repo?.enabled){
     if(event.eventType==="push"&&payload.ref==="refs/heads/"+repo.defaultBranch)await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
     const number=payload.pull_request?.number??(payload.issue?.pull_request?payload.issue.number:undefined);
     if(number&&["pull_request","pull_request_review"].includes(event.eventType??""))await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:number});
+    // As on github.com: a check re-run on the same head sends no pull_request event; only finished, foreign checks matter.
+    const checkedSha=event.eventType==="check_run"&&payload.action==="completed"&&String(payload.check_run?.app?.id)!==configuration.appId?payload.check_run?.head_sha:event.eventType==="check_suite"&&payload.action==="completed"?payload.check_suite?.head_sha:event.eventType==="status"&&payload.state!=="pending"?payload.sha:undefined;
+    if(checkedSha)await ctx.runMutation(internal.approvals.forRevision,{repositoryId:repo._id,headSha:checkedSha});
     if(number&&event.eventType==="pull_request"){
      const pr=await (await provider(ctx,repo)).changeMetadata(repo.fullName,number);
-     await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+     await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
      await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
      const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
      if(["opened","synchronize","reopened","ready_for_review"].includes(payload.action??"")&&pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(payload.action!=="synchronize"||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches)(pr.base.ref))&&!picomatch(settings.ignoredBranches)(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
@@ -300,7 +305,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
    }
   }else if(c.kind==="gitea"){
    const payload=z.object({repository:z.object({id:z.number()}),action:z.string().optional(),ref:z.string().optional(),pull_request:z.object({number:z.number().int().positive()}).nullish(),number:z.number().int().positive().optional(),issue:z.object({number:z.number().int().positive()}).optional(),is_pull:z.boolean().optional(),sender:z.object({login:z.string()}).optional(),review:z.object({content:z.string().max(16000),type:z.string()}).nullish(),comment:z.object({id:z.number().int().positive(),body:z.string().max(16000),user:z.object({login:z.string()})}).optional()}).parse(JSON.parse(event.body));
-   const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===String(payload.repository.id));
+   const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:String(payload.repository.id)});
    if(repo?.enabled){
     if(event.eventType==="push"&&payload.ref==="refs/heads/"+repo.defaultBranch)await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
     const number=payload.pull_request?.number??payload.number;
@@ -309,7 +314,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
     if(number&&["pull_request","pull_request_sync","pull_request_review","pull_request_review_approved","pull_request_review_rejected","pull_request_review_comment"].includes(event.eventType??""))await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:number});
     if(["pull_request","pull_request_sync"].includes(event.eventType??"")&&number){
      const pr=await (await provider(ctx,repo)).changeMetadata(repo.fullName,number);
-     await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+     await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
      await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
      const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
      if(["opened","reopened","synchronized"].includes(payload.action??"")&&pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(payload.action!=="synchronized"||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches)(pr.base.ref))&&!picomatch(settings.ignoredBranches)(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
@@ -334,7 +339,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
    }
   }else{
   const payload=z.object({object_kind:z.string(),project:z.object({id:z.number()}),object_attributes:z.object({iid:z.number().optional()}).passthrough().optional()}).passthrough().parse(JSON.parse(event.body));
-  const repo=(await ctx.runQuery(internal.providerConnections.repositories,{connectionId:c._id})).find(r=>r.externalId===String(payload.project.id));
+  const repo=await ctx.runQuery(internal.providerConnections.repository,{connectionId:c._id,externalId:String(payload.project.id)});
   if(repo?.enabled){
    if(payload.object_kind==="push"&&payload.ref==="refs/heads/"+repo.defaultBranch)await ctx.scheduler.runAfter(0,internal.jobs.index,{repositoryId:repo._id});
    if(payload.object_kind==="note"){
@@ -355,11 +360,14 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
     const reaction=e.object_attributes.name==="thumbsup"?"+1" as const:e.object_attributes.name==="thumbsdown"?"-1" as const:undefined;
     if(reaction&&e.object_attributes.awardable_type==="Note"&&e.merge_request)await ctx.runMutation(internal.reactions.emoji,{repositoryId:repo._id,prNumber:e.merge_request.iid,noteId:String(e.object_attributes.awardable_id),user:e.user.username,reaction,award:e.event_type==="award"});
    }
+   // Pipeline re-runs on the same head send no MR event; merged-result pipelines run a merge sha, so prefer the MR.
+   // Only a finished pipeline can change the gates; created/pending/running updates are ignored.
+   if(payload.object_kind==="pipeline"){const p=z.object({object_attributes:z.object({sha:z.string(),status:z.string().optional()}),merge_request:z.object({iid:z.number().int().positive()}).nullish()}).parse(payload);if(["success","failed","canceled","skipped"].includes(p.object_attributes.status??"")){if(p.merge_request)await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:p.merge_request.iid});else await ctx.runMutation(internal.approvals.forRevision,{repositoryId:repo._id,headSha:p.object_attributes.sha});}}
    if(payload.object_kind==="merge_request"&&payload.object_attributes?.iid){
     const attributes=z.object({action:z.string(),oldrev:z.string().nullish()}).parse(payload.object_attributes);
     await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:payload.object_attributes.iid});
     const pr=await (await provider(ctx,repo)).changeMetadata(repo.fullName,payload.object_attributes.iid);
-    await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
+    await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
     await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:pr.number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
     const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
     if(["open","reopen","update"].includes(attributes.action)&&pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(!attributes.oldrev||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches)(pr.base.ref))&&!picomatch(settings.ignoredBranches)(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:pr.number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
@@ -375,5 +383,5 @@ export const rereview=action({args:{token:v.string(),repositoryId:v.id("reposito
  const pr=await (await provider(ctx,repo)).pullRequest(repo.fullName,a.prNumber);
  if(pr.state!=="open")throw new Error("Change is closed");
  if(a.expectedRevision!==undefined&&pr.head.sha!==a.expectedRevision||a.expectedRevisionKey!==undefined&&pr.revisionKey!==a.expectedRevisionKey)throw new Error('Revision changed; refresh the pull request list');
- return ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:a.prNumber,headSha:pr.head.sha,revisionKey:pr.revisionKey,force:a.force??true});
+ return ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:a.prNumber,headSha:pr.head.sha,revisionKey:pr.revisionKey,force:a.force??true,trigger:"manual"});
 }});

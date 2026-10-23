@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { convexTest } from "convex-test";
 import { SignJWT } from "jose";
 import schema from "../convex/schema";
-import { api } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { defaults } from "../src/review-settings";
 import { needsSetup } from "../src/onboarding-steps";
@@ -14,8 +14,8 @@ beforeEach(() => { vi.useFakeTimers(); process.env.SESSION_SECRET = secret; proc
 afterEach(() => { vi.useRealTimers(); });
 const jwt = (id: string) => new SignJWT({}).setProtectedHeader({ alg: "HS256" }).setIssuer("openreview").setAudience("openreview").setSubject(id).setExpirationTime("1h").sign(new TextEncoder().encode(secret));
 
-async function setup() {
-  const t = convexTest(schema, modules);
+async function setup(transactionLimits = false) {
+  const t = convexTest({ schema, modules, transactionLimits });
   const login = (githubId: number, name: string) => t.mutation(api.users.login, { secret: "onboarding-service-secret", githubId, login: name, avatar: "" });
   const aliceId = await login(1, "alice"), bobId = await login(2, "bob");
   const alice = await jwt(aliceId), bob = await jwt(bobId);
@@ -141,4 +141,25 @@ test("the code-graph sample is bounded to 12 files per repository and limited to
   expect(admin.graph[0].edges).toEqual([["src/file0.ts", "src/file1.ts"]]);
   const member = await t.query(api.onboarding.status, { token: bob, organizationId });
   expect(member.graph.map(g => g.repository)).toEqual(["alice/shop"]);
+});
+
+test("starting with 600 selected repositories enables every one in batches under the per-mutation scheduling limit", async () => {
+  const { t, alice, organizationId, repo } = await setup(true);
+  const ids = [repo._id, ...await t.run(async ctx => {
+    const { _id, _creationTime, ...fields } = repo; void _id; void _creationTime;
+    return Promise.all(Array.from({ length: 599 }, (_, i) => ctx.db.insert("repositories", { ...fields, githubId: 1000 + i, fullName: `alice/r${i}` })));
+  })];
+  await t.mutation(api.onboarding.select, { token: alice, organizationId, repositoryIds: ids });
+  await t.mutation(api.onboarding.start, { token: alice, organizationId, pauseReviews: true });
+  // Run only the onboarding continuations (index jobs would call GitHub).
+  const seen = new Set<string>();
+  for (;;) {
+    const next = (await t.run(ctx => ctx.db.system.query("_scheduled_functions").collect())).find(f => f.name.startsWith("onboarding") && !seen.has(f._id));
+    if (!next) break;
+    seen.add(next._id);
+    await t.mutation(internal.onboarding.enableBatch, next.args[0] as never);
+  }
+  expect(seen.size).toBeGreaterThan(0);
+  const repos = await t.run(ctx => Promise.all(ids.map(id => ctx.db.get(id))));
+  expect(repos.filter(r => r?.enabled && r.indexStatus === "queued")).toHaveLength(600);
 });

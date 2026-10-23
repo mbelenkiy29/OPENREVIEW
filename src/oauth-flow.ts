@@ -27,7 +27,10 @@ export async function beginOAuth(request: Request, provider: Provider, authorize
   return NextResponse.redirect(authorize(state, callbackUrl(provider)));
 }
 export async function startSession(userId: string, sid: string) {
-  (await cookies()).set("openreview_session", await signSession(userId, sid), { ...cookieOptions, maxAge: 7 * 86400 });
+  const jar = await cookies();
+  // A GitHub token left by an earlier sign-in on this browser belongs to that user; a GitHub sign-in sets its own after this.
+  jar.delete("openreview_github_setup");
+  jar.set("openreview_session", await signSession(userId, sid), { ...cookieOptions, maxAge: 7 * 86400 });
 }
 export async function finishOAuth(request: Request, provider: Provider, profile: (code: string, redirectUri: string) => Promise<Profile>, after?: () => Promise<void>) {
   const url = new URL(request.url), jar = await cookies(), cookie = jar.get(stateCookie(provider))?.value;

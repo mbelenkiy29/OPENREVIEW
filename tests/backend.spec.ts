@@ -293,7 +293,10 @@ test("provider event leases prevent duplicate claims and bound recovery after a 
  expect(await t.mutation(internal.providerConnections.claimEvent,{id})).toBe(false);
  await t.run(ctx=>ctx.db.patch(id,{updatedAt:Date.now()-16*60000}));
  expect(await t.mutation(internal.providerConnections.claimEvent,{id})).toBe(true);
- await t.run(ctx=>ctx.db.patch(id,{attempts:3,updatedAt:Date.now()-16*60000}));
+ // Claims follow the same six-attempt retry window as event failures (webhookRetryDelay).
+ await t.run(ctx=>ctx.db.patch(id,{attempts:5,updatedAt:Date.now()-16*60000}));
+ expect(await t.mutation(internal.providerConnections.claimEvent,{id})).toBe(true);
+ await t.run(ctx=>ctx.db.patch(id,{attempts:6,updatedAt:Date.now()-16*60000}));
  expect(await t.mutation(internal.providerConnections.claimEvent,{id})).toBe(false);
  expect((await t.run(ctx=>ctx.db.get(id)))?.status).toBe("failed");
 });
@@ -814,7 +817,7 @@ test("disabled repositories cancel indexing batches, late completion and recover
   await t.mutation(api.repositories.configure,{token:alice,repositoryId:repo._id,enabled:false});
   if(path==="batch")await t.action(internal.jobs.indexBatch,{jobId});
   else if(path==="completion")expect(await t.mutation(internal.repositories.finishIndex,{repositoryId:repo._id,jobId,sha:path,error:"Late failure"})).toBe(false);
-  else{await t.run(ctx=>ctx.db.patch(jobId,{attempts:3,updatedAt:Date.now()-16*60000}));await t.mutation(internal.recovery.sweep,{});}
+  else{await t.run(ctx=>ctx.db.patch(jobId,{attempts:3,updatedAt:Date.now()-16*60000}));await t.mutation(internal.recovery.sweepIndexJobs,{});}
   expect(await t.query(internal.repositories.indexJob,{jobId})).toMatchObject({status:"cancelled"});
   const saved=await t.run(ctx=>ctx.db.get(repo._id));expect(saved?.enabled).toBe(false);expect(saved?.indexStatus).toBe("cancelled");expect(saved?.error).toBeUndefined();
  }
@@ -912,9 +915,26 @@ test("Linear retrieval preserves native provenance, refresh leases and rejects a
  expect(await t.mutation(internal.integrations.refreshed,{id,lease:"wrong",credentials:"wrong",expiresAt:Date.now()+86400000})).toBe(false);await t.mutation(internal.integrations.refreshFailed,{id,lease:"first"});
  const issue=vi.spyOn(Linear.prototype,"issue").mockResolvedValue({id:"native-issue",identifier:"ENG-42",title:"Return cents",description:"Amounts must be integer cents.",updatedAt:"2026-10-02T12:00:00.000Z",url:"https://linear.app/engineering/issue/ENG-42/return-cents",team:{id:"team-native"},project:null});
  try{
-  const result=await t.action(internal.integrationJobs.requirements,{repositoryId,references:"Fix ENG-42 (ENG-42)"});expect(issue).toHaveBeenCalledTimes(1);expect(issue).toHaveBeenCalledWith("ENG-42",{organizationId:"org-native",teamIds:["team-native"],projectIds:[]});expect(result.files[0].provenance).toMatchObject({revision:"2026-10-02T12:00:00.000Z",sourceUrl:"https://linear.app/engineering/issue/ENG-42/return-cents"});expect(result.scopes).toEqual([{id,generation:2}]);
+  const result=await t.action(internal.integrationJobs.requirements,{repositoryId,actor:"alice",authorExternalId:"1",references:"Fix ENG-42 (ENG-42)"});expect(issue).toHaveBeenCalledTimes(1);expect(issue).toHaveBeenCalledWith("ENG-42",{organizationId:"org-native",teamIds:["team-native"],projectIds:[]});expect(result.files[0].provenance).toMatchObject({revision:"2026-10-02T12:00:00.000Z",sourceUrl:"https://linear.app/engineering/issue/ENG-42/return-cents"});expect(result.scopes).toEqual([{id,generation:2}]);
   issue.mockImplementationOnce(async()=>{await t.mutation(internal.integrations.scope,{...scope,generation:2,teamIds:[]});throw new Error("changed");});
-  await expect(t.action(internal.integrationJobs.requirements,{repositoryId,references:"ENG-42"})).rejects.toThrow("scope changed");
+  await expect(t.action(internal.integrationJobs.requirements,{repositoryId,actor:"alice",authorExternalId:"1",references:"ENG-42"})).rejects.toThrow("scope changed");
+ }finally{issue.mockRestore();}
+});
+test("a PR by someone outside the workspace referencing ENG-1 fetches no private Linear text",async()=>{
+ const {t,alice,organizationId}=await setup();process.env.CREDENTIAL_ENCRYPTION_KEY="b".repeat(64);
+ await t.mutation(api.repositories.connect,{token:alice,secret:"integration-service-secret",organizationId,installationId:78,account:"alice",accountId:1,repositories:[{id:782,fullName:"alice/public",defaultBranch:"main"}]});
+ const repositoryId=(await t.query(api.dashboard.overview,{token:alice,organizationId})).repositories[0]._id;
+ const id=await t.mutation(internal.integrations.save,{token:alice,organizationId,externalId:"org-native",name:"Engineering",credentials:encryptCredential(JSON.stringify({accessToken:"native-access-token",refreshToken:"native-refresh-token",expiresAt:Date.now()+86400000}),organizationId+":linear"),expiresAt:Date.now()+86400000});
+ await t.mutation(internal.integrations.scope,{token:alice,id,generation:1,teamIds:["team-native"],projectIds:[],repositoryIds:[repositoryId]});
+ const issue=vi.spyOn(Linear.prototype,"issue").mockResolvedValue({id:"native-issue",identifier:"ENG-1",title:"Secret roadmap",description:"Private.",updatedAt:"2026-10-02T12:00:00.000Z",url:"https://linear.app/engineering/issue/ENG-1/secret",team:{id:"team-native"},project:null});
+ try{
+  // An outsider, and an outsider reusing a member's login with their own GitHub account ID.
+  for(const author of [{actor:"mallory",authorExternalId:"666"},{actor:"alice",authorExternalId:"666"},{actor:"alice"}]){
+   const result=await t.action(internal.integrationJobs.requirements,{repositoryId,references:"Fixes ENG-1",...author});
+   expect(result).toEqual({files:[],scopes:[],coverage:[expect.stringContaining("Linked tickets and documents were not fetched")]});
+  }
+  expect(issue).not.toHaveBeenCalled();
+  expect((await t.action(internal.integrationJobs.requirements,{repositoryId,references:"Fixes ENG-1",actor:"alice",authorExternalId:"1"})).files).toHaveLength(1);
  }finally{issue.mockRestore();}
 });
 test("Linear revocation recovers an interrupted action and erases credentials after bounded failures",async()=>{
@@ -1431,10 +1451,10 @@ test("rules pagination retains inherited defaults beyond 200 without leaking pri
  const seen: string[]=[];let cursor:string|undefined;let pages=0;
  do{
   const result=await t.query(api.dashboard.rulesPage,{token:bob,organizationId,repositoryId:publicRepo._id,cursor});
-  expect(result.page.length).toBeLessThanOrEqual(30);seen.push(...result.page.map(r=>r.title));pages++;
+  expect(result.page.length).toBeLessThanOrEqual(10);seen.push(...result.page.map(r=>r.title));pages++;
   cursor=result.isDone?undefined:result.continueCursor;
  }while(cursor);
- expect(pages).toBe(7);expect(seen).toHaveLength(206);expect(new Set(seen).size).toBe(206);expect(seen).toContain("Workspace 0");expect(seen).toContain("Workspace 204");expect(seen).toContain("Public local");expect(seen).not.toContain("Private local");expect(seen).not.toContain("Foreign default");
+ expect(pages).toBe(21);expect(seen).toHaveLength(206);expect(new Set(seen).size).toBe(206);expect(seen).toContain("Workspace 0");expect(seen).toContain("Workspace 204");expect(seen).toContain("Public local");expect(seen).not.toContain("Private local");expect(seen).not.toContain("Foreign default");
  await expect(t.query(api.dashboard.rulesPage,{token:bob,organizationId,repositoryId:privateRepo._id})).rejects.toThrow("not accessible");
  await expect(t.query(api.dashboard.rulesPage,{token:alice,organizationId,teamId,repositoryId:publicRepo._id})).rejects.toThrow("not accessible");
  await expect(t.query(api.dashboard.rulesPage,{token:alice,organizationId:foreign})).rejects.toThrow("Forbidden");
@@ -1645,7 +1665,7 @@ test("selected teams scope analytics, PRs, findings and memory before pagination
  });
  const args={token:alice,organizationId,teamId};
  expect((await t.query(api.dashboard.overview,args)).repositories.map(r=>r._id)).toEqual([one._id]);
- expect((await t.query(api.pulls.list,{...args,paginationOpts:{numItems:30,cursor:null}})).page.map(p=>p.repositoryId)).toEqual([one._id]);
+ expect((await t.query(api.pulls.browse,{...args,page:1,pageSize:30})).page.map(p=>p.repositoryId)).toEqual([one._id]);
  expect((await t.query(api.findings.list,args)).page.map(f=>f.repositoryId)).toEqual([one._id]);
  expect((await t.query(api.settings.preferences,args)).map(p=>p.repositoryId)).toEqual([one._id]);
  expect(await t.query(api.analytics.report,{...args,since:now-1,until:now+1})).toMatchObject({totalReviews:1,totalPRs:1,findings:1});
@@ -1654,7 +1674,7 @@ test("selected teams scope analytics, PRs, findings and memory before pagination
  await expect(t.query(api.settings.preferences,{...args,repositoryId:two._id})).rejects.toThrow("not accessible");
  await expect(t.query(api.analytics.report,{...args,repositoryId:two._id,since:now-1,until:now+1})).rejects.toThrow("not accessible");
  await expect(t.query(api.findings.list,{...args,repositoryId:two._id})).rejects.toThrow("selected scope");
- await expect(t.query(api.pulls.list,{...args,repositoryId:two._id,paginationOpts:{numItems:30,cursor:null}})).rejects.toThrow("selected scope");
+ await expect(t.query(api.pulls.browse,{...args,repositoryId:two._id,page:1,pageSize:30})).rejects.toThrow("selected scope");
  await t.mutation(api.scopes.member,{token:alice,teamId,userId,role:"viewer",remove:true});await expect(t.query(api.dashboard.overview,{...args,token:bob})).rejects.toThrow("Team not accessible");
 });
 test("provider comment IDs cannot alias another repository's conversation or finding", async () => {
@@ -1817,7 +1837,7 @@ test("review retry state tracks the actual durable job, deduplicates failures an
  await t.mutation(internal.reviews.finished,{reviewId,error:"duplicate failure"});
  expect((await t.run(ctx=>ctx.db.get(reviewId)))!.retryScheduledId).toBe(queued!.retryScheduledId);
  await t.run(ctx=>ctx.db.patch(reviewId,{updatedAt:Date.now()-20*60000}));
- await t.mutation(internal.recovery.sweep,{});
+ await t.mutation(internal.recovery.sweepReviews,{});
  expect((await t.run(ctx=>ctx.db.get(reviewId)))!.retryScheduledId).toBe(queued!.retryScheduledId);
  expect(await t.mutation(internal.reviews.stage,{reviewId,status:"ingesting"})).toBe(true);
  const claimed=await t.run(ctx=>ctx.db.get(reviewId));expect(claimed).toMatchObject({status:"ingesting",attempts:2});expect(claimed!.retryScheduledId).toBeUndefined();expect(claimed!.error).toBeUndefined();
@@ -2044,4 +2064,11 @@ test("Findings read models hide stale, resolved, low-confidence, disabled and vi
  expect(await eligibility()).toBe(false);
  await t.run(ctx=>ctx.db.patch(newer,{status:"completed"}));expect(await eligibility()).toBe(false);
  expect(await t.run(ctx=>ctx.db.get(findingId))).toMatchObject({status:"open",commitSha:head,reviewId});
+});
+test("device pairing keeps a shared cap so spoofed client addresses cannot pair without limit",async()=>{
+ vi.useFakeTimers();vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));try{
+  const t=convexTest(schema,modules),pair=(i:number)=>t.mutation(api.bridge.startPair,{secret:"integration-service-secret",hash:i.toString(16).padStart(64,"0"),code:i.toString(16).padStart(12,"0"),name:"Spoofed",client:`10.0.${i}`});
+  for(let i=0;i<300;i++) await pair(i);
+  await expect(pair(300)).rejects.toThrow(/Rate limit/);
+ }finally{vi.useRealTimers();}
 });

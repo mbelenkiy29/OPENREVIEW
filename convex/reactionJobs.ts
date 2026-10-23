@@ -17,7 +17,8 @@ export const sync = internalAction({ args: { repositoryId: v.id("repositories"),
   return ctx.runMutation(internal.reactions.apply, { ...a, provider: "github", targets, observed });
 } });
 export const sweep = internalAction({ args: {}, handler: async (ctx): Promise<number> => {
-  const due = await ctx.runQuery(internal.reactions.due, { limit: 25 });
+  // 50 PRs/hour, 5s apart: about one GitHub call per finding comment, spread over tenants' installation tokens.
+  const due = await ctx.runMutation(internal.reactions.due, { limit: 50 });
   for (const [i, pr] of due.entries()) await ctx.scheduler.runAfter(i * 5000, internal.reactionJobs.sync, pr);
   return due.length;
 } });

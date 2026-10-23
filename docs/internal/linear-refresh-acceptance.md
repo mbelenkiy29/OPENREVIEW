@@ -1,6 +1,6 @@
 # Native Linear refresh and recovery action
 
-October 4, 2026. Release `dpl_B7QWGjhmd2RkQjQcad7QoP99DSRc` is READY at https://openreview-flame-two.vercel.app with Convex `tidy-ocelot-457`.
+October 4, 2026. Release `<deployment-id>` is READY at `<vercel-url>` with Convex `<prod-deployment>`.
 
 ## Implementation
 

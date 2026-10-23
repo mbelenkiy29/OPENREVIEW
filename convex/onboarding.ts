@@ -1,11 +1,13 @@
-import { choosePlanMessage, planMissing } from "./billing";
-import {query,mutation} from "./_generated/server";
+import { choosePlanMessage, hasEntitlement, planMissing } from "./billing";
+import {upgradeNote} from "../src/plans";
+import {query,mutation,internalMutation} from "./_generated/server";
+import {internal} from "./_generated/api";
 import {v} from "convex/values";
 import {authorize,visibleRepositories,audit} from "./auth";
 import {indexingAccess,enableIndexing} from "./repositories";
 import {connectionDigest} from "./indexAuthority";
 import type {QueryCtx,MutationCtx} from "./_generated/server";
-import type {Doc} from "./_generated/dataModel";
+import type {Doc,Id} from "./_generated/dataModel";
 import {repositoryIdentity} from "./repositoryIdentity";
 import {settingsValidator} from "./schema";
 import {assertValidSettings} from "./scopes";
@@ -72,11 +74,18 @@ export const start=mutation({args:{token:v.string(),organizationId:v.id("organiz
  }
  const repos=await visibleRepositories(ctx,a.token,a.organizationId),ids=organization?.onboardingRepositoryIds??repos.filter(r=>r.enabled).map(r=>r._id);
  if(!ids.length)throw new Error("Select repositories before indexing");
- let started=false;
- for(const id of ids){const r=repos.find(r=>r._id===id);if(!r)throw new Error("Selected repository is unavailable");const access=await setupAccess(ctx,r);if(access.setupError)throw new Error(access.setupError);if(!access.nativeIndex){await enableIndexing(ctx,r);started=true;}}
- if(!started)throw new Error("Use native Perforce indexing setup for the selected repositories");
+ const enable:Id<"repositories">[]=[];
+ for(const id of ids){const r=repos.find(r=>r._id===id);if(!r)throw new Error("Selected repository is unavailable");const access=await setupAccess(ctx,r);if(access.setupError)throw new Error(access.setupError);if(!access.nativeIndex)enable.push(id);}
+ if(!enable.length)throw new Error("Use native Perforce indexing setup for the selected repositories");
+ await enableRepositories(ctx,a.organizationId,enable);
  await audit(ctx,a.organizationId,user._id,"onboarding.indexing_started",a.organizationId);
 }});
+// A new repository schedules a catalog and an index job and Convex allows 1,000 scheduled functions per mutation, so enable 100 per transaction and continue with the rest.
+async function enableRepositories(ctx:MutationCtx,organizationId:Id<"organizations">,ids:Id<"repositories">[]){
+ for(const id of ids.slice(0,100)){const r=await ctx.db.get(id);if(r?.organizationId===organizationId&&!(await setupAccess(ctx,r)).setupError)await enableIndexing(ctx,r);}
+ if(ids.length>100)await ctx.scheduler.runAfter(0,internal.onboarding.enableBatch,{organizationId,repositoryIds:ids.slice(100)});
+}
+export const enableBatch=internalMutation({args:{organizationId:v.id("organizations"),repositoryIds:v.array(v.id("repositories"))},handler:(ctx,a)=>enableRepositories(ctx,a.organizationId,a.repositoryIds)});
 
 // Guided setup: each configuration step writes only its own workspace defaults.
 export const saveDefaults=mutation({args:{token:v.string(),organizationId:v.id("organizations"),step:v.string(),settings:settingsValidator},handler:async(ctx,a)=>{
@@ -84,6 +93,9 @@ export const saveDefaults=mutation({args:{token:v.string(),organizationId:v.id("
  if(!isConfigureStep(a.step))throw new Error("Unknown setup step");
  const allowed=stepKeys[a.step],rows=await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect(),row=rows.find(s=>!s.teamId);
  const changes=Object.fromEntries(allowed.map(key=>[key,(a.settings as Record<string,unknown>)[key]]).filter(([,value])=>value!==undefined));
+ // The tools step offers Pro options disabled on lower plans; refuse them here too.
+ if(changes.fixPullRequests===true&&!await hasEntitlement(ctx,a.organizationId,"fix.pullRequests"))throw new Error(upgradeNote["fix.pullRequests"]);
+ if(changes.mode==="deep"&&!await hasEntitlement(ctx,a.organizationId,"review.deep"))throw new Error("Deep reviews are on the Pro plan; a workspace admin can upgrade in Settings → Billing.");
  const merged={...(row?.settings??deploymentDefaults()),...changes} as Infer<typeof settingsValidator>,overrideKeys=[...new Set([...(row?.overrideKeys??[]),...allowed])];
  assertValidSettings(merged,overrideKeys);
  if(row)await ctx.db.patch(row._id,{settings:merged,overrideKeys});else await ctx.db.insert("scopeSettings",{organizationId:a.organizationId,settings:merged,overrideKeys});

@@ -138,6 +138,15 @@ test("the total budget stops running investigations and skips the rest, keeping 
   assert.deepEqual(timed.runs.map((r) => [r.status, r.stopReason]), [["stopped", "total hypothesis time budget exhausted"], ["skipped", "total hypothesis time budget exhausted"]]);
 });
 
+test("a deep review whose action started 5 minutes ago stops hypotheses within about a minute, not 8", async () => {
+  let clock = 0;
+  const model = new Scripted({ hypotheses: Array.from({ length: 4 }, (_, i) => hypothesis(i + 1)) }, (task, turn) => { clock += 30_000; return investigate(task, turn); });
+  const result = await runHypotheses({ input: { ...input, mode: "deep" }, payload: {}, model, tools: memoryToolbox(input.files, head), categories: ["correctness"], rules: [], budget: { ...hypothesisBudgets.deep, concurrency: 1 }, now: () => clock, startedAt: -5 * 60_000 });
+  assert.ok(clock <= 90_000, `hypotheses ran ${clock}ms`);
+  assert.deepEqual(result.runs.map((r) => [r.status, r.stopReason]), [["stopped", "total hypothesis time budget exhausted"], ...Array(3).fill(["skipped", "total hypothesis time budget exhausted"])]);
+  assert.ok(result.limits.includes("3 of 4 hypotheses were not investigated because the total hypothesis budget ran out"));
+});
+
 test("injected repository text cannot raise the cap, change budgets or move hypotheses outside the change", async () => {
   // The planner "obeys" the injected file and asks for many hypotheses; the cap and per-hypothesis budget still hold.
   const model = new Scripted({ hypotheses: Array.from({ length: 30 }, (_, i) => hypothesis(i + 1, { filePath: i % 2 ? "notes.ts" : "cart.ts", startLine: 1 })) }, () => ({ calls: [read("loop")] }));

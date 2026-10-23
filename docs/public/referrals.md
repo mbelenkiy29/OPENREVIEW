@@ -4,7 +4,7 @@ On the hosted service, anyone signed in can refer others and earn a share of wha
 
 - **Your link:** share `/r/<your code>`, or give someone the 8-character code. A new account created through the link is credited to you, and so is the first workspace it creates. Accounts that already exist can't be referred by link, but a workspace owner or admin can add your code under Settings → Billing in the workspace's first 30 days, before it subscribes.
 - **What they see:** the link page shows your GitHub username, if you have one. You see their GitHub username (or "Email sign-up"), when they sign up, when their workspace subscribes, and what you earn from each of its payments, including any share taken back after a refund or dispute. Neither of you sees anything else about the other's workspaces.
-- **Their discount:** a referred workspace gets the discount shown on the link page (for example 20% off its first 3 paid months), applied at Checkout.
+- **Their discount:** when one is available, a referred workspace gets the discount shown on the link page (for example 20% off its first 3 paid months), applied at Checkout.
 - **What you earn:** 20% of what the referred workspace pays, excluding tax, for 12 months from its first payment. You get one email when it first pays, if you have a verified email.
 - **30-day hold:** each commission is on hold for 30 days after the payment, then counts toward your available balance.
 - **Refunds and disputes:** a refund, or a dispute that is open or lost, takes back the matching share of that payment's commission. A dispute decided in OpenReview's favor gives it back. If this happens after you redeemed the money, your balance goes negative and your next commissions pay it back first.

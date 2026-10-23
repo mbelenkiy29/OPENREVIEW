@@ -24,6 +24,7 @@ test('review detail (REST API and MCP) adds priority, tags and outsideDiff witho
  await t.mutation(internal.reviews.save,{reviewId,storageId,summary:'Recorded review.',reviewScore:{value:1,reason:'A critical caller defect blocks merging this change.'},verdict:'changes',findings,resolved:[],usage:[]});
  const detail=await t.query(api.reviews.detail,{token,reviewId});
  expect(detail.review.verdict).toBe('changes');
+ expect(detail.review.findingCounts).toEqual({P1:1,security:1,P0:1,P2:1});
  const byTitle=Object.fromEntries(detail.findings.map(f=>[f.title,f]));
  expect([byTitle['Deleted accounts stay authorized'].priority,byTitle['Caller still multiplies cents'].priority,byTitle['Rounding drops a cent'].priority]).toEqual(['P1','P0','P2']);
  expect(byTitle['Deleted accounts stay authorized'].tags).toEqual(['security']);

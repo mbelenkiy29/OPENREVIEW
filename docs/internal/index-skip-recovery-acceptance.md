@@ -1,6 +1,6 @@
 # Idempotent indexing exclusion counts
 
-October 4, 2026. Fixed and deployed to production Convex tidy-ocelot-457. The existing Vercel frontend remains at READY release `dpl_GqVdoJFqYHjVQe88bdfN9FRj9CKB`; this change affects backend indexing only.
+October 4, 2026. Fixed and deployed to production Convex `<prod-deployment>`. The existing Vercel frontend remains at READY release `<deployment-id>`; this change affects backend indexing only.
 
 ## Problem and change
 

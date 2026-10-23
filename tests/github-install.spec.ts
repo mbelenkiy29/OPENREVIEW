@@ -174,7 +174,9 @@ test("Link an existing installation uses the same verified path, and refuses ins
   const f = form(501); f.set("organizationId", rivalOrg);
   await expect(linkGithubInstallation(f)).rejects.toMatchObject({ url: expect.stringMatching(/^\/dashboard\/github-link/) });
   expect(JSON.parse(decodeURIComponent(holder.jar.get("openreview_toast") ?? "")).text).toMatch(/already installed on acme for another OpenReview workspace/);
-  expect(await t.query(api.repositories.installationOwnership, { token: holder.session, organizationId: rivalOrg, installationIds: [501, 777] })).toEqual({ "501": "elsewhere", "777": "none" });
+  expect(await t.query(api.repositories.installationOwnership, { token: holder.session, secret: process.env.SERVICE_SECRET!, organizationId: rivalOrg, installationIds: [501, 777] })).toEqual({ "501": "elsewhere", "777": "none" });
+  // Without the web server's secret a workspace owner cannot probe installation ids directly.
+  await expect(t.query(api.repositories.installationOwnership, { token: holder.session, secret: "guess", organizationId: rivalOrg, installationIds: [501] })).rejects.toThrow("Unauthorized");
   // Without a fresh GitHub token the action re-authorizes first.
   holder.jar.delete("openreview_github_setup");
   await expect(linkGithubInstallation(f)).rejects.toMatchObject({ url: expect.stringMatching(/^\/api\/auth\/login\?purpose=github-install&next=%2Fdashboard%2Fgithub-link/) });

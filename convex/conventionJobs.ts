@@ -12,6 +12,9 @@ export const ingest = internalAction({ args: { repositoryId: v.id("repositories"
   const { repo } = await ctx.runQuery(internal.repositories.data, a);
   const none = { added: 0, merged: 0, rejected: 0 };
   if (!repo.enabled) return none;
+  // Learning is Pro; approved conventions keep applying. Mark the repository synced without moving the cursor,
+  // so the sweep moves on and an upgrade later learns from the comments it skipped.
+  if (!await ctx.runQuery(internal.billing.entitlement, { organizationId: repo.organizationId, key: "memory.conventions" })) return ctx.runMutation(internal.conventions.record, { repositoryId: repo._id, cursor: repo.conventionsCursor ?? 0, candidates: [] });
   const scm = await provider(ctx, repo);
   if (!scm.mergedReviewComments) return none;
   const batch = await scm.mergedReviewComments(repo.fullName, repo.conventionsCursor ?? 0, 10);
@@ -23,7 +26,7 @@ export const ingest = internalAction({ args: { repositoryId: v.id("repositories"
   return ctx.runMutation(internal.conventions.record, { repositoryId: repo._id, cursor: batch.cursor, candidates });
 } });
 export const sweep = internalAction({ args: {}, handler: async (ctx): Promise<number> => {
-  const due = await ctx.runQuery(internal.conventions.due, { limit: 10 });
+  const due = await ctx.runMutation(internal.conventions.due, { limit: 10 });
   for (const [i, repo] of due.entries()) await ctx.scheduler.runAfter(i * 30000, internal.conventionJobs.ingest, { repositoryId: repo.repositoryId });
   return due.length;
 } });

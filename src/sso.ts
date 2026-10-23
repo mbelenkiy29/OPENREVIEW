@@ -7,6 +7,9 @@ import { resolveTxt } from "node:dns/promises";
 import { verificationName, verificationValue } from "./sso-domains";
 import { SAML, ValidateInResponseTo, type CacheProvider, type Profile as SamlProfile } from "@node-saml/node-saml";
 import * as oidc from "openid-client";
+import { isIP } from "node:net";
+import { Agent } from "undici";
+import { isPrivateAddress, publicLookup } from "./oauth-server";
 
 export { domainSchema, emailDomain, verificationName, verificationValue, ssoEmailVerified } from "./sso-domains";
 
@@ -44,9 +47,19 @@ export function samlIdentity(p: SamlProfile) {
 
 // OIDC relying party for one connection: authorization code flow with PKCE (S256), state and nonce.
 export type OidcConnection = { issuer: string; clientId: string; clientSecret: string };
+// Issuers are owner-supplied, so every IdP request (discovery, JWKS, token) may only reach public
+// addresses: IP literals are checked here, hostnames at connect time (no DNS rebinding); openid-client
+// sends redirect: "manual", so redirects are never followed.
+const publicAgent = new Agent({ connect: { lookup: publicLookup } });
+export const ssoFetch: oidc.CustomFetch = async (url, options) => {
+  const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+  if (isIP(host) && isPrivateAddress(host)) throw new Error("The identity provider is at a private address");
+  return fetch(url, { ...options, dispatcher: publicAgent } as RequestInit);
+};
 // ID-token signatures are always checked against the IdP's JWKS (openid-client otherwise trusts TLS to
 // the token endpoint for them, which OIDC allows but which leaves no defense if that channel is proxied).
-export async function oidcConfiguration(c: OidcConnection, fetcher?: oidc.CustomFetch) {
+// SSO_ALLOW_PRIVATE=true is an operator setting for self-hosted installs whose IdP sits on an internal network.
+export async function oidcConfiguration(c: OidcConnection, fetcher: oidc.CustomFetch | undefined = process.env.SSO_ALLOW_PRIVATE === "true" ? undefined : ssoFetch) {
   return oidc.discovery(new URL(c.issuer), c.clientId, c.clientSecret, undefined, { execute: [oidc.enableNonRepudiationChecks], ...(fetcher ? { [oidc.customFetch]: fetcher } : {}) });
 }
 export async function oidcStart(config: oidc.Configuration, redirectUri: string) {

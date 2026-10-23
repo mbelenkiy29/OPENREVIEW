@@ -14,6 +14,7 @@ test('shared requirements action bounds the combined native Linear and Jira docu
  const t=convexTest(schema,modules),site={id:'11111111-1111-4111-8111-111111111111',name:'Native fixture',url:'https://fixture.atlassian.net',scopes:atlassianScopes};
  const repositoryId=await t.run(async ctx=>{
   const organizationId=await ctx.db.insert('organizations',{name:'Mixed requirements',createdAt:Date.now()}),repo=await ctx.db.insert('repositories',{organizationId,fullName:'fixture/repo',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()}),expiry=Date.now()+3600000;
+  await ctx.db.insert('organizationMembers',{organizationId,userId:await ctx.db.insert('users',{githubId:7,login:'author',avatar:'',createdAt:Date.now()}),role:'member'});
   for(const kind of ['linear','atlassian'] as const)await ctx.db.insert('integrationConnections',{organizationId,kind,externalId:kind==='linear'?'native-org':'native-sites',name:kind,credentials:encryptCredential(JSON.stringify({accessToken:'fixture-access-token',refreshToken:'fixture-refresh-token',expiresAt:expiry}),organizationId+':'+kind),expiresAt:expiry,active:true,generation:1,teamIds:kind==='linear'?['native-team']:[],projectIds:[],repositoryIds:[repo],...(kind==='atlassian'?{sites:[site],jiraProjectIds:[site.id+':10'],confluenceSpaceIds:[]}:{}),createdAt:Date.now()});
   return repo;
  });
@@ -29,7 +30,7 @@ test('shared requirements action bounds the combined native Linear and Jira docu
   throw new Error('Unexpected native request');
  });
  try{
-  const result=await t.action(internal.integrationJobs.requirements,{repositoryId,references:'PAY-1'});
+  const result=await t.action(internal.integrationJobs.requirements,{repositoryId,references:'PAY-1',actor:'author',authorExternalId:'7'});
   expect(linearBody&&jiraBody).toBe(true);expect(result.scopes).toHaveLength(2);expect(result.files).toHaveLength(1);expect(result.files[0].path).toContain('/linear/');expect(result.files.reduce((n,f)=>n+Buffer.byteLength(f.content,'utf8'),0)).toBeLessThanOrEqual(100000);expect(result.coverage.join()).toContain('Combined Linear and Atlassian');
   expect(citesFetchedRequirements(site.url+'/browse/PAY-1',result.files.map(f=>f.provenance!.sourceUrl!))).toBe(false);
  }finally{vi.unstubAllGlobals();}
@@ -66,19 +67,19 @@ test('Atlassian OAuth persistence, native scope selection, context provenance, r
   await expect(t.action(api.atlassianJobs.connect,{...grant,token:bob.token})).rejects.toThrow('Forbidden');expect(tokenCalls).toBe(0);
   id=await t.action(api.atlassianJobs.connect,grant);await expect(t.action(api.atlassianJobs.connect,grant)).rejects.toThrow('consumed');expect(tokenCalls).toBe(1);
   const data=await t.query(internal.integrations.data,{id});expect(data.credentials).not.toContain('fixture-access');expect(JSON.parse(decryptCredential(data.credentials,organizationId+':atlassian')).accessToken).toBe('fixture-access-1');
-  expect(await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,references:'PAY-1'})).toEqual({files:[],scopes:[],coverage:[]});
+  expect(await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,actor:'user-1',authorExternalId:'1',references:'PAY-1'})).toEqual({files:[],scopes:[],coverage:[]});
   await expect(t.action(api.atlassianJobs.discover,{token:viewer.token,id})).rejects.toThrow('Forbidden');
   const available=await t.action(api.atlassianJobs.discover,{token:alice.token,id});expect(available.projects[0].id).toBe(site.id+':10');expect(available.spaces[0].id).toBe(site.id+':20');
   const selected={token:alice.token,id,jiraProjectIds:[site.id+':10'],confluenceSpaceIds:[site.id+':20'],repositoryIds:[repo._id]};
   await expect(t.action(api.atlassianJobs.configure,{...selected,jiraProjectIds:[site.id+':99']})).rejects.toThrow('currently authorized');
   await t.action(api.atlassianJobs.configure,selected);
-  const context=await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,references:'PAY-1 https://product.atlassian.net/wiki/spaces/SPEC/pages/40/Money'});
+  const context=await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,actor:'user-1',authorExternalId:'1',references:'PAY-1 https://product.atlassian.net/wiki/spaces/SPEC/pages/40/Money'});
   expect(context.files).toHaveLength(2);expect(context.coverage).toEqual([]);expect(context.files.map(f=>f.provenance?.sourceUrl)).toEqual([site.url+'/browse/PAY-1',site.url+'/wiki/pages/viewpage.action?pageId=40']);expect(context.files.map(f=>f.sha)).toEqual(['2026-10-02T00:00:00.000Z','4']);
   expect(citesFetchedRequirements(site.url+'/browse/PAY-999',context.files.map(f=>f.provenance!.sourceUrl!))).toBe(false);
   expect(citesFetchedRequirements('http://PRODUCT.ATLASSIAN.NET/browse/PAY-1',context.files.map(f=>f.provenance!.sourceUrl!))).toBe(false);
   expect(citesFetchedRequirements('https://PRODUCT.ATLASSIAN.NET/browse/PAY-1',context.files.map(f=>f.provenance!.sourceUrl!))).toBe(true);
   await t.query(internal.integrations.validate,{repositoryId:repo._id,scopes:context.scopes});
-  outside=true;contentReads.length=0;const denied=await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,references:'PAY-1'});expect(denied.files).toEqual([]);expect(denied.coverage.join(' ')).toContain('outside selected resources');expect(contentReads).toEqual([]);outside=false;
+  outside=true;contentReads.length=0;const denied=await t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,actor:'user-1',authorExternalId:'1',references:'PAY-1'});expect(denied.files).toEqual([]);expect(denied.coverage.join(' ')).toContain('outside selected resources');expect(contentReads).toEqual([]);outside=false;
   await t.run(ctx=>ctx.db.patch(id,{expiresAt:1,credentials:data.credentials})); // Token timestamp is inside encrypted credentials.
   const credentials=JSON.parse(decryptCredential(data.credentials,organizationId+':atlassian'));credentials.expiresAt=1;
   const {encryptCredential}=await import('../src/credentials');await t.run(ctx=>ctx.db.patch(id,{credentials:encryptCredential(JSON.stringify(credentials),organizationId+':atlassian')}));
@@ -86,7 +87,7 @@ test('Atlassian OAuth persistence, native scope selection, context provenance, r
   const refreshed=await t.query(internal.integrations.data,{id});expect(JSON.parse(decryptCredential(refreshed.credentials,organizationId+':atlassian')).refreshToken).toBe('fixture-refresh-2');
   unauthorized=true;await expect(t.action(api.atlassianJobs.discover,{token:alice.token,id})).rejects.toThrow('401');expect(tokenCalls).toBe(3);unauthorized=false;
   await t.action(api.atlassianJobs.configure,selected);await expect(t.query(internal.integrations.validate,{repositoryId:repo._id,scopes:context.scopes})).rejects.toThrow('scope changed');
-  disconnectDuringRead=true;await expect(t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,references:'PAY-1'})).rejects.toThrow('scope changed');
+  disconnectDuringRead=true;await expect(t.action(internal.integrationJobs.requirements,{repositoryId:repo._id,actor:'user-1',authorExternalId:'1',references:'PAY-1'})).rejects.toThrow('scope changed');
   const removed=await t.run(ctx=>ctx.db.get(id));expect(removed?.credentials).toBe('');expect(removed?.sites).toEqual([]);expect(removed?.active).toBe(false);expect(removed?.error).toContain('Connected Apps');
   await expect(t.action(api.atlassianJobs.discover,{token:alice.token,id})).rejects.toThrow('disconnected');expect(await t.query(internal.integrations.forRepository,{repositoryId:repo._id})).toEqual([]);
   expect(await t.run(ctx=>ctx.db.query('integrationRevocations').collect())).toEqual([]);

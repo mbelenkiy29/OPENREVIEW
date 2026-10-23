@@ -58,14 +58,15 @@ export const configure=action({args:{token:v.string(),id:v.id("integrationConnec
  if(a.jiraProjectIds.some(id=>!value.projects.some(p=>p.id===id))||a.confluenceSpaceIds.some(id=>!value.spaces.some(p=>p.id===id)))throw new Error("Select only currently authorized Atlassian resources");
  await ctx.runMutation(internal.integrations.scope,{...a,teamIds:[],projectIds:[],generation:connection.generation});
 }});
-export const requirements=internalAction({args:{repositoryId:v.id("repositories"),references:v.string()},handler:async(ctx,a):Promise<{files:SourceFile[];scopes:{id:Id<"integrationConnections">;generation:number}[];coverage:string[]}>=>{
+export const requirements=internalAction({args:{repositoryId:v.id("repositories"),references:v.string(),deadline:v.number()},handler:async(ctx,a):Promise<{files:SourceFile[];scopes:{id:Id<"integrationConnections">;generation:number}[];coverage:string[]}>=>{
  const connections=await ctx.runQuery(internal.integrations.forRepository,{repositoryId:a.repositoryId,kind:"atlassian"});
  const files:SourceFile[]=[],coverage:string[]=[],scopes=connections.map(c=>({id:c._id,generation:c.generation}));if(!connections.length)return{files,coverage,scopes};
  const keys=[...new Set(a.references.match(/\b[A-Z][A-Z0-9_]{0,49}-[1-9]\d{0,19}\b/g)??[])];
  const urls=[...new Set(a.references.match(/https:\/\/[^\s<>()\[\]`"']+/g)??[])].map(s=>{try{return new URL(s.replace(/[.,;:!]+$/,""));}catch{return null;}}).filter((u):u is URL=>!!u);
  // ponytail: ten referenced issues/pages per connection and 100KB total context; diagnostics expose truncation.
- let bytes=0;
+ let bytes=0,stop=false;
  for(const c of connections){
+  if(stop)break;
   const data=await ctx.runQuery(internal.integrations.data,{id:c._id});
   const references:{site:AtlassianSite;key?:string;pageId?:string}[]=[];
   for(const site of data.sites??[]){
@@ -79,13 +80,16 @@ export const requirements=internalAction({args:{repositoryId:v.id("repositories"
   const unique=[...new Map(references.map(r=>[r.site.id+":"+(r.key??r.pageId),r])).values()];
   if(unique.length>10)coverage.push("Atlassian retrieval limited to ten referenced issues/pages per connection.");
   if(!unique.length)coverage.push(`No Jira keys or Confluence page URLs matched selected resources in connection ${c._id}; no Atlassian requirements were fetched.`);
-  for(const r of unique.slice(0,10))try{
+  for(const r of unique.slice(0,10)){
+   if(Date.now()>a.deadline){coverage.push("Requirements retrieval reached its 60-second deadline; remaining tickets and pages were not fetched.");stop=true;break;}
+   try{
    const {value:item,connection}=await read(ctx,c._id,(api,connection)=>r.key?api.issue(r.site,r.key,(connection.jiraProjectIds??[]).filter(id=>id.startsWith(r.site.id+":")).map(id=>id.split(":")[1])):api.page(r.site,r.pageId!,(connection.confluenceSpaceIds??[]).filter(id=>id.startsWith(r.site.id+":")).map(id=>id.split(":")[1])));
    if(connection.generation!==c.generation)throw new Error("Integration changed");
    const content=`# ${item.title}\nSource: ${item.url}\nRevision: ${item.revision}\n\n${item.description}`,size=Buffer.byteLength(content,"utf8");
-   if(bytes+size>100000){coverage.push("Atlassian requirements exceeded the 100KB context limit.");continue;}
+   if(bytes+size>100000){coverage.push("Atlassian requirements exceeded the 100KB context limit.");stop=true;break;}
    bytes+=size;files.push({path:`requirements/atlassian/${c._id}/${r.site.id}/${r.key??r.pageId}.md`,content,sha:item.revision,provenance:{repository:"Atlassian: "+r.site.name,revision:item.revision,sourceUrl:item.url}});
   }catch{coverage.push(`Atlassian reference ${r.key??r.pageId} was unavailable or outside selected resources in connection ${c._id}; its requirements were not used.`);}
+  }
  }
  await ctx.runQuery(internal.integrations.validate,{repositoryId:a.repositoryId,scopes});return{files,scopes,coverage:[...new Set(coverage)]};
 }});

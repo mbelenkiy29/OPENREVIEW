@@ -12,7 +12,7 @@ Per-repository transport failure recovery is implemented and regression-tested; 
 
 `src/knowledge-view.ts` supplies the dashboard's validated, filtered read state. Four regression checks cover partial failures retaining successful entries without exposing private exception text; all-failed versus successful-empty results and retry recovery; the 200/201-character boundary with no truncated or invalid reads; and encoded retry URLs retaining team/repository/search. Retry uses a normal page link to obtain a fresh server read rather than reuse the router's existing failed navigation. The fixture does not claim a native retry click after a real hosted outage.
 
-Hosted READY release: `dpl_FZ8tTMNe8NYYhodAJ4PK7vY8nbv9`. Native Chrome walkthrough on the production alias:
+Hosted READY release: `<deployment-id>`. Native Chrome walkthrough on the production alias:
 
 - Direct 201-character query retained the selected Origin repository and complete original search; an inline error appeared, without counts or an empty-result claim. Screenshot: `output/setup/knowledge-search-too-long-current.png`.
 - Filling “Money” and clicking Apply restored two Origin entries with the complete indexed Git revision `ea89f9a94db4cea48cbcf3d759bb44ea61e1f0eb`. Screenshot: `output/setup/knowledge-search-recovered-current.png`.
@@ -21,4 +21,4 @@ Hosted READY release: `dpl_FZ8tTMNe8NYYhodAJ4PK7vY8nbv9`. Native Chrome walkthro
 
 This walkthrough is desktop evidence, not a new mobile/dark-mode proof. The verified Origin Knowledge result is left open; the separate Linear restoration consent remains awaiting its pending approval.
 
-Recovery regression release: `dpl_DH5mp4BMHsC89jk3gYcSaM8yqL1H` is READY. Hosted build passed. Native Chrome again verified a 201-character error without empty/count claims, correction through the visible Apply button to two Origin entries, retained repository selection and empty warning/error logs. Current screenshot: `output/setup/knowledge-retry-recovered-current.png`. The preceding native Perforce revision display walkthrough remains valid historical evidence; it was not repeated in this recovery-only release. No live failed-read retry is claimed.
+Recovery regression release: `<deployment-id>` is READY. Hosted build passed. Native Chrome again verified a 201-character error without empty/count claims, correction through the visible Apply button to two Origin entries, retained repository selection and empty warning/error logs. Current screenshot: `output/setup/knowledge-retry-recovered-current.png`. The preceding native Perforce revision display walkthrough remains valid historical evidence; it was not repeated in this recovery-only release. No live failed-read retry is claimed.

@@ -8,6 +8,7 @@ import { findingComment, summaryMarker } from "./github";
 import { changedLines } from "./engine/diff";
 import { unifiedPatch } from "./text-diff";
 import type { Scm, ScmChange } from "./gitlab";
+import { retrying } from "./scm-transport";
 
 // Azure DevOps Services / Server (REST 7.1). Repositories are "<project>/<repo>" with the repo GUID
 // as externalId. Credentials: a PAT, or JSON {tenantId, clientId, clientSecret} for a Microsoft
@@ -42,7 +43,7 @@ export class AzureDevOps implements Scm {
   }
   private url(path: string) { if (path.includes("://") || path.startsWith("/")) throw new Error("Invalid Azure DevOps API path"); return `${this.base}/${path}${path.includes("?") ? "&" : "?"}api-version=${apiVersion}`; }
   private async send(path: string, init: RequestInit = {}) {
-    const response = await this.fetchImpl(this.url(path), { ...init, redirect: "error", headers: { authorization: await this.authorization(), accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers as Record<string, string> | undefined) }, signal: AbortSignal.timeout(60000) });
+    const response = await retrying(init.method, async () => this.fetchImpl(this.url(path), { ...init, redirect: "error", headers: { authorization: await this.authorization(), accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers as Record<string, string> | undefined) }, signal: AbortSignal.timeout(60000) }));
     if (!response.ok) throw new AzureDevOpsError(response.status, path);
     return response;
   }

@@ -74,15 +74,26 @@ export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
                   defaultValue={filters.since ?? ""}
                 />
               </label>
+              <label>
+                Until
+                <input
+                  name="until"
+                  type="date"
+                  defaultValue={filters.until ?? ""}
+                />
+              </label>
               <button>Filter findings</button>
               <Link href="/dashboard/findings">Reset filters</Link>
             </form>
-            {!visibleFindings.length && (
+            {!visibleFindings.length && (findingsPage && !findingsPage.isDone ? (
+              // Reads per page are capped, so a rare filter can come back empty before the end of the list.
+              <Empty title="No matches in this part of the list" text="Choose Next findings to keep searching older findings." />
+            ) : (
               <Empty
                 title="No findings yet"
                 text="Open a pull request in an enabled repository. Verified findings will appear here."
               />
-            )}
+            ))}
             {visibleFindings.some((f) => f.canFix) && (
               <Copy
                 label="Copy eligible tasks on this page"

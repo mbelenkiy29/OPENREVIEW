@@ -1,6 +1,6 @@
 # Bridge pairing review before access grant
 
-October 4, 2026. Production release `dpl_GXUnX9eTXGhGNdcDW2ek5aPq23pU` is READY on Vercel with the matching Convex deployment.
+October 4, 2026. Production release `<deployment-id>` is READY on Vercel with the matching Convex deployment.
 
 Personal agents now first reviews a pairing code. The preview shows the device name, signed-in account, selected workspace, 90-day revocable access scope and code expiry. Reviewing does not bind the device or grant access. Approval rechecks current account, workspace membership, device identity, expiration and revocation. Changing the input hides the previous preview; changing workspace/account remounts the form. Existing direct approval API callers remain compatible.
 

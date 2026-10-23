@@ -7,7 +7,7 @@ import { cloudAgentValidator, codingAgentValidator, handoffValidator } from "./s
 import { effectiveSettings } from "./scopes";
 import { rateLimit } from "./rateLimit";
 import { fixPrompt, eligibleFixFinding } from "../src/fix-prompt";
-import {p4FixAuthority} from "./p4FixAuthority";
+import {p4FixAuthority,p4FixMetadata} from "./p4FixAuthority";
 import { findingSchema } from "../src/engine/types";
 import { resolveAgentChoice } from "../src/fix-agents";
 
@@ -19,11 +19,16 @@ async function device(ctx: MutationCtx, hash: string) {
   await ctx.db.patch(d._id,{lastSeen:Date.now()});
   return d;
 }
-export const startPair = mutation({args:{secret:v.string(),hash:v.string(),code:v.string(),name:v.string()},handler:async(ctx,a)=>{
-  service(a.secret); if(!/^[a-f0-9]{64}$/.test(a.hash)|| !/^[a-f0-9]{12}$/.test(a.code)||a.name.length>100) throw new Error("Invalid pairing");
-  await rateLimit(ctx,"bridge:pair",30);
+// Pairing needs no sign-in, so it has two limits: per caller (the web route passes the client address) so one caller
+// cannot use up everyone's pairings, plus a looser shared cap because without a proxy the caller sets its own address.
+export const startPair = mutation({args:{secret:v.string(),hash:v.string(),code:v.string(),name:v.string(),client:v.optional(v.string())},handler:async(ctx,a)=>{
+  service(a.secret); if(!/^[a-f0-9]{64}$/.test(a.hash)|| !/^[a-f0-9]{12}$/.test(a.code)||a.name.length>100||(a.client?.length??0)>100) throw new Error("Invalid pairing");
+  await rateLimit(ctx,"bridge:pair",300);
+  await rateLimit(ctx,`bridge:pair:${a.client??"unknown"}`,30);
   const existing=await ctx.db.query("bridgeDevices").withIndex("by_hash",q=>q.eq("tokenHash",a.hash)).unique();
   if(existing) throw new Error("Pairing already started");
+  // Approval finds the device by code with unique(), so a copied code would block the real device's approval.
+  if(await ctx.db.query("bridgeDevices").withIndex("by_code",q=>q.eq("code",a.code)).first()) throw new Error("Pairing code already in use");
   return ctx.db.insert("bridgeDevices",{tokenHash:a.hash,code:a.code,name:a.name,expiresAt:Date.now()+10*60000,revoked:false,createdAt:Date.now()});
 }});
 function pairingCode(value:string){const code=value.trim().replaceAll("-","").toLowerCase();if(!/^[a-f0-9]{12}$/.test(code))throw new Error("Invalid or expired pairing code");return code;}
@@ -82,9 +87,10 @@ export const createFix = mutation({args:{token:v.string(),reviewId:v.id("reviews
  const latest=await ctx.db.query("reviews").withIndex("by_pr",q=>q.eq("repositoryId",r.repositoryId).eq("prNumber",r.prNumber)).order("desc").first();
  if(latest?._id!==r._id||r.status!=="completed") throw new Error("Fix requires the latest completed review");
  const repo=await ctx.db.get(r.repositoryId);if(!repo)throw new Error("Repository unavailable");
- if(r.nativeP4)await p4FixAuthority(ctx,r);else if(!repo.enabled)throw new Error("Repository disabled");
+ if(r.nativeP4)await p4FixMetadata(ctx,r);else if(!repo.enabled)throw new Error("Repository disabled");
  const config=await effectiveSettings(ctx,repo);
- const f=(await ctx.db.query("findings").withIndex("by_pr",q=>q.eq("repositoryId",repo._id).eq("prNumber",r.prNumber)).collect()).filter(f=>eligibleFixFinding(f,r,latest?._id,config.minimumConfidence)&&(!a.findingId||f._id===a.findingId));
+ // Only this review's findings are eligible, so read by review: a long PR's full history can pass the read limit.
+ const f=(await ctx.db.query("findings").withIndex("by_review",q=>q.eq("reviewId",r._id)).collect()).filter(f=>eligibleFixFinding(f,r,latest?._id,config.minimumConfidence)&&(!a.findingId||f._id===a.findingId));
  if(!f.length)throw new Error("No eligible unresolved findings at this revision");
  for(const finding of f)await requireFindingReader(ctx,user._id,finding);
  const prompt=fixPrompt(repo.fullName,`PR #${r.prNumber}`,f.map(f=>({...findingSchema.parse(f),fingerprint:f.fingerprint,agent:f.agent,commitSha:f.commitSha})),r.runtimeEvidence)+"\nDo not commit, push, merge, or mark issues resolved. Leave an inspectable diff and report test results."+(r.nativeP4?"\nThis is a native Perforce client. Do not submit a changelist, sync, unshelve, change client mappings, revert unrelated files or overwrite unrelated opened files. Limit any native action changes required by remediation to the reviewed target files. Preserve the prepared checkout and report native diffs and regression results.":"");
@@ -96,7 +102,7 @@ async function pendingClaim(ctx:MutationCtx,a:{secret:string;hash:string;request
  const review=await ctx.db.get(r.reviewId);const latest=await ctx.db.query("reviews").withIndex("by_pr",q=>q.eq("repositoryId",r.repositoryId).eq("prNumber",review?.prNumber ?? -1)).order("desc").first();
  if(!review||review.status!=="completed"||latest?._id!==review._id||review.headSha!==r.headSha)throw new Error("Review revision changed");
  await requireContextReader(ctx,d.userId!,review);
- const {repo}=await repositoryAccess(ctx,d.userId!,r.repositoryId,true);if(review.nativeP4)await p4FixAuthority(ctx,review);else if(!repo.enabled)throw new Error("Repository disabled");
+ const {repo}=await repositoryAccess(ctx,d.userId!,r.repositoryId,true);if(review.nativeP4)await p4FixMetadata(ctx,review);else if(!repo.enabled)throw new Error("Repository disabled");
  if(checkFindings){
   // Old unbound requests expire after five minutes; do not infer their selection from prompt text.
   if(!r.findingIds?.length)throw new Error("Fix request must be recreated with current findings");
@@ -118,7 +124,7 @@ export const claim = internalMutation({args:{...claimArgs,current:v.object({head
  const {d,r,repo,review}=await pendingClaim(ctx,a);
  if(a.current.state!=="open"||a.current.headSha!==r.headSha||a.current.revisionKey!==review.revisionKey)throw new Error("Provider revision changed or pull request closed; re-review before fixing");
  if(!!review.nativeP4!==!!a.current.native)throw new Error("Fix provider identity mismatch");
- if(a.current.native){const b=await p4FixAuthority(ctx,review);if(a.current.native.instance!==b.connection.instance||a.current.native.project!==repo.externalId||!review.baseSha?.startsWith(`p4:${a.current.native.serverId}:submitted:`))throw new Error("P4 fix context identity mismatch");}
+ if(a.current.native){const b=await p4FixMetadata(ctx,review);if(a.current.native.instance!==b.connection.instance||a.current.native.project!==repo.externalId||!review.baseSha?.startsWith(`p4:${a.current.native.serverId}:submitted:`))throw new Error("P4 fix context identity mismatch");}
  await ctx.db.patch(r._id,{status:"claimed",deviceId:d._id,updatedAt:Date.now()});
  return {requestId:r._id,repository:repo.fullName,remoteUrl:repo.remoteUrl,headSha:r.headSha,agent:r.agent,prompt:r.prompt,...(a.current.native?{native:a.current.native}:{})};
 }});

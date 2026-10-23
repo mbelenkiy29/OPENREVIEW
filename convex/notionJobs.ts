@@ -56,7 +56,7 @@ export const revoke=internalAction({args:{id:v.id("integrationRevocations")},han
  catch{await ctx.runMutation(internal.integrations.revocationResult,{id:a.id,lease,success:false});}
 }});
 // Pages linked from the PR title, description or branch; at most ten per connection, 100KB.
-export const requirements=internalAction({args:{repositoryId:v.id("repositories"),references:v.string()},handler:async(ctx,a):Promise<{files:SourceFile[];scopes:{id:Id<"integrationConnections">;generation:number}[];coverage:string[]}>=>{
+export const requirements=internalAction({args:{repositoryId:v.id("repositories"),references:v.string(),deadline:v.number()},handler:async(ctx,a):Promise<{files:SourceFile[];scopes:{id:Id<"integrationConnections">;generation:number}[];coverage:string[]}>=>{
  const connections=await ctx.runQuery(internal.integrations.forRepository,{repositoryId:a.repositoryId,kind:"notion"});
  const files:SourceFile[]=[],coverage:string[]=[],scopes=connections.map(c=>({id:c._id,generation:c.generation}));
  if(!connections.length)return {files,scopes,coverage};
@@ -64,12 +64,13 @@ export const requirements=internalAction({args:{repositoryId:v.id("repositories"
  if(truncated)coverage.push("Notion retrieval limited to the first 10 linked pages.");
  if(!ids.length)coverage.push("No Notion page links were found in the PR title, description or branch; no Notion requirements were fetched.");
  let bytes=0;
- for(const c of connections)for(const id of ids){
+ for(const [c,id] of connections.flatMap(c=>ids.map(id=>[c,id] as const))){
+  if(Date.now()>a.deadline){coverage.push("Requirements retrieval reached its 60-second deadline; remaining tickets and pages were not fetched.");break;}
   try{
-   const {value:page,connection}=await read(ctx,c._id,notion=>notion.page(id));
+   const {value:page,connection}=await read(ctx,c._id,notion=>notion.page(id,a.deadline));
    if(connection.generation!==c.generation)throw new Error("Integration changed");
    const content=`# ${page.title}\nSource: ${page.url}\nUpdated: ${page.revision}\n\n${page.text}`,size=Buffer.byteLength(content,"utf8");
-   if(bytes+size>100000){coverage.push("Notion requirements context exceeded the 100KB limit.");continue;}
+   if(bytes+size>100000){coverage.push("Notion requirements context exceeded the 100KB limit.");break;}
    bytes+=size;files.push({path:`requirements/notion/${c._id}/${id}.md`,content,sha:page.revision,provenance:{repository:"Notion: "+connection.name,revision:page.revision,sourceUrl:page.url}});
   }catch{coverage.push(`Notion page ${id} was unavailable or not shared with the integration in connection ${c._id}; its requirements were not used.`);}
  }

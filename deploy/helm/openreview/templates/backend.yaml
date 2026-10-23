@@ -15,6 +15,8 @@ spec:
         app.kubernetes.io/component: backend
     spec:
       terminationGracePeriodSeconds: 30
+      # UID/GID 1000 is the image's `ubuntu` user; fsGroup makes the data volume group-writable for it (re-chowned only when the root dir mismatches, so restarts stay fast).
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, fsGroupChangePolicy: OnRootMismatch }
       {{- if .Values.config.grammars.enabled }}
       initContainers:
         - name: grammars
@@ -25,6 +27,10 @@ spec:
       containers:
         - name: convex-backend
           image: "{{ .Values.backend.image.repository }}@{{ .Values.backend.image.digest }}"
+          # shortcut: the upstream image's scripts and binary are executable by root only (mode 744), so they run
+          # from a pod-owned copy; drop this once the upstream image runs as non-root.
+          workingDir: /opt/convex
+          command: ["bash", "-c", "cp /convex/*.sh /convex/convex-local-backend /convex/generate_key . && chmod u+x * && exec ./run_backend.sh"]
           ports:
             - { name: functions, containerPort: 3210 }
             - { name: site, containerPort: 3211 }
@@ -43,13 +49,15 @@ spec:
           resources: {{- toYaml .Values.backend.resources | nindent 12 }}
           volumeMounts:
             - { name: data, mountPath: /convex/data }
+            - { name: bin, mountPath: /opt/convex }
             {{- if .Values.config.grammars.enabled }}
             - { name: grammars, mountPath: /grammars, readOnly: true }
             {{- end }}
-      {{- if .Values.config.grammars.enabled }}
       volumes:
+        - { name: bin, emptyDir: {} }
+        {{- if .Values.config.grammars.enabled }}
         - { name: grammars, emptyDir: {} }
-      {{- end }}
+        {{- end }}
   volumeClaimTemplates:
     - metadata: { name: data }
       spec:

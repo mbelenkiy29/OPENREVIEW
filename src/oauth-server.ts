@@ -117,16 +117,17 @@ export function parseClientMetadata(clientId: string, document: unknown) {
   return { client: { clientId, name: d.client_name, redirectUris: d.redirect_uris } } as const;
 }
 export type MetadataFetcher = (url: URL) => Promise<{ status: number; contentType: string; body: string }>;
+// Connect-time DNS lookup that refuses hosts resolving to a private address (also used for SSO issuers).
+export const publicLookup = (hostname: string, options: object, callback: (error: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void) =>
+  dnsLookup(hostname, { ...options, all: true }, (error, addresses: LookupAddress[]) => {
+    if (error) return callback(error, []);
+    if (!addresses.length || addresses.some((a) => isPrivateAddress(a.address))) return callback(Object.assign(new Error("Host resolves to a private address"), { code: "EPRIVATE" }), []);
+    callback(null, (options as { all?: boolean }).all ? addresses : addresses[0].address, addresses[0].family);
+  });
 // Production fetcher: HTTPS GET with a lookup that refuses private addresses at connect time (so DNS
 // rebinding cannot slip through), no redirects, 16 KB and 5 s limits.
 export const safeMetadataFetch: MetadataFetcher = (url) => new Promise((resolve, reject) => {
-  const lookup = (hostname: string, options: object, callback: (error: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void) =>
-    dnsLookup(hostname, { ...options, all: true }, (error, addresses: LookupAddress[]) => {
-      if (error) return callback(error, []);
-      if (!addresses.length || addresses.some((a) => isPrivateAddress(a.address))) return callback(Object.assign(new Error("Client metadata host resolves to a private address"), { code: "EPRIVATE" }), []);
-      callback(null, (options as { all?: boolean }).all ? addresses : addresses[0].address, addresses[0].family);
-    });
-  const req = httpsRequest(url, { method: "GET", headers: { accept: "application/json" }, timeout: 5000, lookup: lookup as never }, (res) => {
+  const req = httpsRequest(url, { method: "GET", headers: { accept: "application/json" }, timeout: 5000, lookup: publicLookup as never }, (res) => {
     let size = 0; const chunks: Buffer[] = [];
     res.on("data", (chunk: Buffer) => { size += chunk.length; if (size > 16_384) { req.destroy(new Error("Client metadata document is too large")); return; } chunks.push(chunk); });
     res.on("end", () => resolve({ status: res.statusCode ?? 0, contentType: String(res.headers["content-type"] ?? ""), body: Buffer.concat(chunks).toString("utf8") }));

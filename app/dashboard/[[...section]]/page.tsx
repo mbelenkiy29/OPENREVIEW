@@ -9,6 +9,7 @@ import { PreferencesPanel } from "../preferences";
 import { ChatPanel } from "../chat";
 import { NotificationsPanel } from "../notifications";
 import { BillingPanel } from "../billing";
+import { ModelPanel } from "../model-panel";
 import { AccountPanel } from "../account";
 import { ReferralsPanel } from "../referrals";
 import { EmailInvitations } from "../email-invitations";
@@ -37,22 +38,22 @@ export default async function Dashboard(props: {
   const ctx = await loadDashboard(props);
   const { active, data, filters, isAdmin, organization, reviewDetailId, route, savedTeam, scopes, section, selectedTeam, user, view } = ctx;
   return (
-    <div className="shell">
-      <PortalNav organization={(organization.name ?? "Workspace")+(selectedTeam?" / "+selectedTeam.name:"")} login={user.user.login} route={route} section={section[1]} team={filters.team} scopeSelector={<><form action={switchWorkspace}><label className="sr-only" htmlFor="workspace">Workspace</label><select key={organization._id} id="workspace" name="organizationId" defaultValue={organization._id}>{user.organizations.map(o => <option key={o._id} value={o._id}>{o.name}</option>)}</select><button className="small">Switch workspace</button></form><form action={switchTeam}><label htmlFor="scope-team">Team</label><select key={organization._id+":"+(selectedTeam?._id??"")} id="scope-team" name="teamId" defaultValue={selectedTeam?._id??""}><option value="">All accessible teams</option>{scopes.teams.map(t=><option key={t._id} value={t._id}>{t.name}</option>)}</select><input type="hidden" name="returnTo" value={"/dashboard/"+(reviewDetailId?"pulls":section.join("/"))}/><button className="small">Apply team</button></form><p className="muted">Team selection filters repository activity. Workspace administration applies across the workspace.</p><form action={createWorkspace}><label>New workspace name<input name="name" required maxLength={100}/></label><button>Create workspace</button></form></>}>
+    <div className="shell portal">
+      <PortalNav organization={(organization.name ?? "Workspace")+(selectedTeam?" / "+selectedTeam.name:"")} role={organization.role} login={user.user.login} route={route} section={section[1]} team={filters.team} scopeSelector={<><form action={switchWorkspace}><label className="sr-only" htmlFor="workspace">Workspace</label><select key={organization._id} id="workspace" name="organizationId" defaultValue={organization._id}>{user.organizations.map(o => <option key={o._id} value={o._id}>{o.name}</option>)}</select><button className="small">Switch workspace</button></form><form action={switchTeam}><label htmlFor="scope-team">Team</label><select key={organization._id+":"+(selectedTeam?._id??"")} id="scope-team" name="teamId" defaultValue={selectedTeam?._id??""}><option value="">All accessible teams</option>{scopes.teams.map(t=><option key={t._id} value={t._id}>{t.name}</option>)}</select><input type="hidden" name="returnTo" value={"/dashboard/"+(reviewDetailId?"pulls":section.join("/"))}/><button className="small">Apply team</button></form><p className="muted">Team selection filters repository activity. Workspace administration applies across the workspace.</p><form action={createWorkspace}><label>New workspace name<input name="name" required maxLength={100}/></label><button>Create workspace</button></form></>}>
         <SignOutForm action={logout} label="Sign out" />
       </PortalNav>
-      <main className="content">
-        <header>
+      <main className={view === "reviews" ? (ctx.detail || ctx.pull ? "content pull-detail-page" : "content pulls-page") : "content"}>
+        {/* The Pull Requests tab follows Greptile's chrome-free layout; Live still refreshes running reviews. */}
+        {view === "reviews" ? <><h1 className="sr-only">Pull Requests</h1><div className="pulls-live"><Live active={active} /></div></> : <header>
           <div>
-            <p className="muted">{organization.name}{selectedTeam&&" / "+selectedTeam.name}</p>
             <h1>{view === "overview" ? "Analytics" : view === "reviews" ? "Pull Requests" : route === "memory" ? ({clusters:"Cross-repository context",preferences:"Learned preferences",integrations:"Integrations",rules:"Custom rules",knowledge:"Knowledge Base"}[section[1]??"rules"]??"Memory") : route === "settings" ? settingsNavigation().find(([key])=>key===section[1])?.[1] : navigation.find((n) => n.toLowerCase() === view)}</h1>
           </div>
           <Live active={active} />
-        </header>
+        </header>}
         <WorkspaceInvitations invitations={user.invitations}/>
         {savedTeam&&!selectedTeam&&filters.team===undefined&&<p role="status">Your previously selected team is no longer accessible. Showing all accessible repositories; use the workspace menu to select a team.</p>}
         {view === "overview" && needsSetup(organization) && <section className="setup-banner" aria-label="Workspace setup"><p><strong>Setup isn’t finished.</strong> {organization.onboarding?.reviewsPaused ? "Automatic reviews are paused until you choose when reviews run." : "Finish connecting repositories and choosing review behavior."}</p>{isAdmin ? <Link className="button primary small" href="/dashboard/onboarding">Resume setup</Link> : <p className="muted">A workspace admin is completing setup.</p>}</section>}
-        {view === "overview" && <AnalyticsView token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} />}
+        {view === "overview" && <AnalyticsView token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} locked={ctx.locked} />}
         {view === "repositories" && <RepositoriesSection ctx={ctx} />}
         {view === "reviews" && <ReviewsSection ctx={ctx} />}
         {view === "findings" && <FindingsSection ctx={ctx} />}
@@ -65,16 +66,17 @@ export default async function Dashboard(props: {
         {route === "settings" && section[1] === "account" && <AccountPanel token={user.token}/>}
         {route === "settings" && section[1] === "referrals" && <ReferralsPanel token={user.token} payouts={filters.payouts}/>}
         {route === "settings" && section[1] === "people" && isAdmin && <EmailInvitations token={user.token} organizationId={organization._id} status={filters.emailInvite}/>}
-        {route === "settings" && section[1] === "people" && isAdmin && <SsoSettings token={user.token} organizationId={organization._id}/>}
+        {route === "settings" && section[1] === "people" && isAdmin && <SsoSettings token={user.token} organizationId={organization._id} locked={ctx.locked}/>}
         {route === "settings" && section[1] === "data" && <DataControls token={user.token} organizationId={organization._id}/>}
+        {route === "settings" && section[1] === "model" && <ModelPanel token={user.token} organizationId={organization._id} admin={isAdmin}/>}
         {route === "settings" && section[1] === "billing" && <BillingPanel token={user.token} organizationId={organization._id} filters={filters}/>}
         {route === "settings" && section[1] === "notifications" && <NotificationsPanel token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters}/>}
         {route === "chat" && <ChatPanel token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters}/>}
         {route === "memory" && section[1] === "preferences" && <PreferencesPanel token={user.token} organizationId={organization._id} repositories={data.repositories} admin={isAdmin} filters={filters}/>}
-        {route === "memory" && section[1] === "integrations" && <IntegrationsPanel token={user.token} organizationId={organization._id} admin={isAdmin} repositories={data.repositories} selected={filters.integration} error={filters.error} saved={filters.saved} />}
+        {route === "memory" && section[1] === "integrations" && <IntegrationsPanel token={user.token} organizationId={organization._id} admin={isAdmin} locked={ctx.locked} repositories={data.repositories} selected={filters.integration} error={filters.error} saved={filters.saved} />}
         {route === "memory" && section[1] === "clusters" && <ScopePanel token={user.token} organizationId={organization._id} admin={isAdmin} clusters />}
         {route === "settings" && section[1] === "teams" && <ScopePanel token={user.token} organizationId={organization._id} admin={isAdmin} />}
-        {route === "settings" && section[1] === "audit" && (isAdmin ? <AuditPanel token={user.token} organizationId={organization._id} cursor={filters.activityCursor} /> : <p>Workspace admin access required.</p>)}
+        {route === "settings" && section[1] === "audit" && (isAdmin ? <AuditPanel token={user.token} organizationId={organization._id} cursor={filters.activityCursor} locked={ctx.locked} /> : <p>Workspace admin access required.</p>)}
         {route === "settings" && section[1] === "providers" && (isAdmin ? <ProvidersPanel token={user.token} organizationId={organization._id} connectionId={filters.connection} projectId={filters.project} after={filters.after} inspect={filters.inspect} /> : <p>Workspace admin access required.</p>)}
         {route === "settings" && ["review","keys"].includes(section[1]) && <ReviewSettingsSection ctx={ctx} />}
       </main>

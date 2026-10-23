@@ -1,8 +1,7 @@
 import { internalMutation, mutation, query } from "./_generated/server";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { decodeJwt } from "jose";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authenticated, authenticatedSession, authorize, service } from "./auth";
 import { rateLimit } from "./rateLimit";
@@ -11,7 +10,6 @@ import { recentSignIn, recordReferralSignup } from "./referralLedger";
 import { lifecycleEmail } from "./lifecycleEmails";
 import { emailAddress } from "../src/email";
 import { normalizeReferralCode, referralConfig } from "../src/referrals";
-import { sessionHash } from "../src/session-hash";
 
 // Identities, sessions, email invitations and magic links.
 // Linking rule: a new provider account joins an existing user only when BOTH sides carry the
@@ -23,12 +21,19 @@ const sessionDays = 7;
 const hex64 = /^[a-f0-9]{64}$/;
 type Profile = { provider: (typeof providers)[number] | "sso"; providerUserId: string; login: string; avatar: string; email?: string; emailVerified: boolean };
 export async function linkIdentity(ctx: MutationCtx, p: Profile): Promise<Id<"users">> { return (await resolveIdentity(ctx, p)).userId; }
+// GitHub accounts a user verifiably holds: the one that created the user (users.githubId) and any linked later
+// (an identities row). Rows linked before logins were stored have no login until the next GitHub sign-in.
+export async function githubAccounts(ctx: QueryCtx, user: Doc<"users">): Promise<{ id: string; login?: string }[]> {
+  const linked = (await ctx.db.query("identities").withIndex("by_user", (q) => q.eq("userId", user._id)).take(20)).filter((i) => i.provider === "github");
+  return [...(user.githubId === undefined ? [] : [{ id: String(user.githubId), login: user.login }]), ...linked.map((i) => ({ id: i.providerUserId, login: i.login }))];
+}
+const githubLogin = (p: { provider: string; login: string }) => (p.provider === "github" ? { login: p.login } : {});
 // The user a provider identity signs in as; `created` only when this sign-in made a new user.
 export async function resolveIdentity(ctx: MutationCtx, p: Profile): Promise<{ userId: Id<"users">; created: boolean }> {
   const now = Date.now(), email = p.email ? emailAddress.safeParse(p.email).data : undefined;
   const existing = await ctx.db.query("identities").withIndex("by_provider_user", (q) => q.eq("provider", p.provider).eq("providerUserId", p.providerUserId)).unique();
   if (existing) {
-    await ctx.db.patch(existing._id, { lastLoginAt: now, ...(email ? { email, emailVerified: p.emailVerified } : {}) });
+    await ctx.db.patch(existing._id, { lastLoginAt: now, ...githubLogin(p), ...(email ? { email, emailVerified: p.emailVerified } : {}) });
     if (p.avatar) await ctx.db.patch(existing.userId, { avatar: p.avatar });
     if (p.provider === "github") await ctx.db.patch(existing.userId, { login: p.login });
     return { userId: existing.userId, created: false };
@@ -41,7 +46,7 @@ export async function resolveIdentity(ctx: MutationCtx, p: Profile): Promise<{ u
   if (!userId && email && p.emailVerified) userId = (await ctx.db.query("identities").withIndex("by_email", (q) => q.eq("email", email)).filter((q) => q.eq(q.field("emailVerified"), true)).first())?.userId;
   const created = !userId;
   if (!userId) userId = await ctx.db.insert("users", { login: p.login.slice(0, 100), avatar: p.avatar, ...(p.provider === "github" ? { githubId: Number(p.providerUserId) } : {}), createdAt: now });
-  await ctx.db.insert("identities", { userId, provider: p.provider, providerUserId: p.providerUserId, ...(email ? { email } : {}), emailVerified: Boolean(email && p.emailVerified), createdAt: now, lastLoginAt: now });
+  await ctx.db.insert("identities", { userId, provider: p.provider, providerUserId: p.providerUserId, ...githubLogin(p), ...(email ? { email } : {}), emailVerified: Boolean(email && p.emailVerified), createdAt: now, lastLoginAt: now });
   if (created) await lifecycleEmail(ctx, "welcome", { userId });
   return { userId, created };
 }
@@ -68,7 +73,8 @@ export const signIn = mutation({ args: { secret: v.string(), provider, providerU
     signedInAt = session?.signedInAt ?? session?.createdAt ?? 0;
     const existing = await ctx.db.query("identities").withIndex("by_provider_user", (q) => q.eq("provider", a.provider).eq("providerUserId", a.providerUserId)).unique();
     if (existing && existing.userId !== current._id) throw new Error("This account is already linked to another OpenReview user");
-    if (!existing) { const email = a.email ? emailAddress.safeParse(a.email).data : undefined; await ctx.db.insert("identities", { userId: current._id, provider: a.provider, providerUserId: a.providerUserId, ...(email ? { email } : {}), emailVerified: Boolean(email && a.emailVerified), createdAt: Date.now(), lastLoginAt: Date.now() }); }
+    if (!existing) { const email = a.email ? emailAddress.safeParse(a.email).data : undefined; await ctx.db.insert("identities", { userId: current._id, provider: a.provider, providerUserId: a.providerUserId, ...githubLogin(a), ...(email ? { email } : {}), emailVerified: Boolean(email && a.emailVerified), createdAt: Date.now(), lastLoginAt: Date.now() }); }
+    else await ctx.db.patch(existing._id, githubLogin(a));
     userId = current._id;
   } else {
     const resolved = await resolveIdentity(ctx, { provider: a.provider, providerUserId: a.providerUserId, login: a.login, avatar: a.avatar, email: a.email, emailVerified: a.emailVerified });
@@ -80,12 +86,11 @@ export const signIn = mutation({ args: { secret: v.string(), provider, providerU
 } });
 
 export const sessionValid = query({ args: { token: v.string() }, handler: async (ctx, a) => { try { await authenticated(ctx, a.token); return true; } catch { return false; } } });
-const currentHash = (token: string) => { const sid = decodeJwt(token).sid; return typeof sid === "string" ? sessionHash(sid) : undefined; };
 export const sessions = query({ args: { token: v.string() }, handler: async (ctx, a) => {
-  const user = await authenticated(ctx, a.token), current = currentHash(a.token);
+  const { user, session } = await authenticatedSession(ctx, a.token);
   const rows = (await ctx.db.query("sessions").withIndex("by_user", (q) => q.eq("userId", user._id)).take(200)).filter((s) => !s.revokedAt && s.expiresAt > Date.now());
   const identities = await ctx.db.query("identities").withIndex("by_user", (q) => q.eq("userId", user._id)).take(20);
-  return { sessions: rows.map((s) => ({ _id: s._id, provider: s.provider, userAgent: s.userAgent ?? null, createdAt: s.createdAt, expiresAt: s.expiresAt, current: s.hash === current })).sort((x, y) => y.createdAt - x.createdAt), identities: identities.map((i) => ({ provider: i.provider, email: i.email ?? null, emailVerified: i.emailVerified, lastLoginAt: i.lastLoginAt })) };
+  return { sessions: rows.map((s) => ({ _id: s._id, provider: s.provider, userAgent: s.userAgent ?? null, createdAt: s.createdAt, expiresAt: s.expiresAt, current: s._id === session?._id })).sort((x, y) => y.createdAt - x.createdAt), identities: identities.map((i) => ({ provider: i.provider, email: i.email ?? null, emailVerified: i.emailVerified, lastLoginAt: i.lastLoginAt })) };
 } });
 export const revokeSession = mutation({ args: { token: v.string(), sessionId: v.id("sessions") }, handler: async (ctx, a) => {
   const user = await authenticated(ctx, a.token), session = await ctx.db.get(a.sessionId);
@@ -93,10 +98,8 @@ export const revokeSession = mutation({ args: { token: v.string(), sessionId: v.
   if (!session.revokedAt) await ctx.db.patch(session._id, { revokedAt: Date.now() });
 } });
 export const signOut = mutation({ args: { token: v.string() }, handler: async (ctx, a) => {
-  let hash: string | undefined;
-  try { await authenticated(ctx, a.token); hash = currentHash(a.token); } catch { return; }
-  const session = hash ? await ctx.db.query("sessions").withIndex("by_hash", (q) => q.eq("hash", hash)).unique() : null;
-  if (session && !session.revokedAt) await ctx.db.patch(session._id, { revokedAt: Date.now() });
+  const session = await authenticatedSession(ctx, a.token).then((r) => r.session, () => null);
+  if (session) await ctx.db.patch(session._id, { revokedAt: Date.now() });
 } });
 export async function revokeAllSessions(ctx: MutationCtx, userId: Id<"users">) {
   const now = Date.now();
@@ -178,7 +181,7 @@ export const backfillIdentities = internalMutation({ args: { cursor: v.optional(
   for (const user of page.page) {
     if (user.githubId === undefined) continue;
     const exists = await ctx.db.query("identities").withIndex("by_provider_user", (q) => q.eq("provider", "github").eq("providerUserId", String(user.githubId))).unique();
-    if (!exists) { await ctx.db.insert("identities", { userId: user._id, provider: "github", providerUserId: String(user.githubId), emailVerified: false, createdAt: user.createdAt, lastLoginAt: user.createdAt }); created++; }
+    if (!exists) { await ctx.db.insert("identities", { userId: user._id, provider: "github", providerUserId: String(user.githubId), login: user.login, emailVerified: false, createdAt: user.createdAt, lastLoginAt: user.createdAt }); created++; }
   }
   if (!page.isDone) await ctx.scheduler.runAfter(0, internal.identity.backfillIdentities, { cursor: page.continueCursor });
   return { created, done: page.isDone };

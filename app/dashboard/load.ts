@@ -9,6 +9,7 @@ import { knowledgeView } from "../../src/knowledge-view";
 import { navigation } from "./sections/shared";
 import { needsSetup } from "../../src/onboarding-steps";
 import { billingConfig } from "../../src/billing";
+import { parseRuleQuery } from "../../src/rule-query";
 
 // The workspace chosen in the workspace menu (cookie), else the first membership.
 export function activeWorkspace<T extends { _id?: string }>(user: { organizations: T[] }, jar: { get(name: string): { value: string } | undefined }) {
@@ -48,7 +49,8 @@ export async function loadDashboard({
   }
   if(route === "settings" && !settingsNavigation().some(([key])=>key === section[1]))notFound();
   const view = route === "analytics" ? "overview" : route === "pulls" ? section[1] === "findings" ? "findings" : "reviews" : route === "memory" ? section[1] === "knowledge" ? "knowledge" : "rules" : route === "settings" ? ({ repositories: "repositories", people: "team", usage: "usage" }[section[1] ?? ""] ?? "settings") : route;
-  const reviewDetailId = route === "pulls" && section[1] !== "findings" ? section[1] : undefined;
+  const reviewDetailId = route === "pulls" && section[1] !== "findings" && section[1] !== "pr" ? section[1] : undefined;
+  const pullDetailId = route === "pulls" && section[1] === "pr" ? section[2] : undefined;
   const requestedRepository = filters.repository;
   if (!navigation.some((n) => n.toLowerCase() === view)) notFound();
   const scopes=await backend().query(api.scopes.list,{token:user.token,organizationId:organization._id});
@@ -80,14 +82,23 @@ export async function loadDashboard({
             filters.since && Number.isFinite(Date.parse(filters.since))
               ? Date.parse(filters.since)
               : undefined,
+          until:
+            filters.until && Number.isFinite(Date.parse(filters.until))
+              ? Date.parse(filters.until) + 86400000 - 1
+              : undefined,
         })
       : null;
   const visibleFindings = findingsPage?.page ?? data.findings.map(f=>({...f,canFix:false}));
   const ruleView=view==="rules"&&!["clusters","integrations","preferences"].includes(section[1]??"");
   if(ruleView&&requestedRepository&&!data.repositories.some(r=>r._id===requestedRepository))notFound();
-  const rulesPage=ruleView?await backend().query(api.dashboard.rulesPage,{token:user.token,organizationId:organization._id,
-    ...(selectedTeam?{teamId:selectedTeam._id}:{}),...(requestedRepository?{repositoryId:requestedRepository as Id<"repositories">}:{}),cursor:filters.cursor}):null;
-  const visibleRules=rulesPage?.page??data.rules;
+  // The search box's repository: token names a repository; one that matches nothing shows no rules.
+  const ruleQuery=parseRuleQuery(filters.q),queryRepository=!ruleQuery.repository?undefined:data.repositories.find(r=>[r.fullName,repositoryDisplay(r)].some(n=>n.toLowerCase()===ruleQuery.repository!.toLowerCase()));
+  const ruleRepository=ruleQuery.repository?queryRepository?._id:requestedRepository;
+  const rulesPage=!ruleView?null:ruleQuery.repository&&!queryRepository?{page:[],isDone:true,continueCursor:""}:await backend().query(api.dashboard.rulesPage,{token:user.token,organizationId:organization._id,
+    ...(selectedTeam?{teamId:selectedTeam._id}:{}),...(ruleRepository?{repositoryId:ruleRepository as Id<"repositories">}:{}),cursor:filters.cursor,
+    ...(ruleQuery.text?{search:ruleQuery.text}:{}),...(ruleQuery.status?{status:ruleQuery.status}:{})});
+  const visibleRules=rulesPage?.page??[];
+  const ruleUsage=ruleView&&filters.rule?await backend().query(api.dashboard.ruleUsage,{token:user.token,organizationId:organization._id,ruleId:filters.rule as Id<"customRules">,...(selectedTeam?{teamId:selectedTeam._id}:{})}).catch(()=>[]):[];
   const repoName = (id: string) =>
     data.repositories.find((r) => r._id === id)?.fullName ?? id;
   const repoLabel = (id: string) => repositoryDisplay(data.repositories.find(r => r._id === id));
@@ -102,7 +113,7 @@ export async function loadDashboard({
         ["queued", "generating"].includes(r.knowledgeStatus ?? ""),
     ) ||
     data.reviews.some(
-      (r) => !["completed", "failed", "cancelled"].includes(r.status),
+      (r) => !["completed", "failed", "cancelled", "skipped"].includes(r.status),
     );
   let detail = null;
   if (view === "reviews" && reviewDetailId)
@@ -111,7 +122,14 @@ export async function loadDashboard({
       reviewId: reviewDetailId as Id<"reviews">,
       historyCursor: filters.historyCursor,
     });
-  if(detail&&!['completed','failed','cancelled'].includes(detail.review.status))active=true;
+  if(detail&&!['completed','failed','cancelled','skipped'].includes(detail.review.status))active=true;
+  // The pull request row behind a review (size, draft, reviewers), or an unreviewed pull request opened by id.
+  const pull = detail ? await backend().query(api.pulls.get, { token: user.token, repositoryId: detail.review.repositoryId, number: detail.review.prNumber })
+    : pullDetailId ? await backend().query(api.pulls.get, { token: user.token, pullRequestId: pullDetailId as Id<"pullRequests"> }).catch(() => null) : null;
+  if (pullDetailId && !pull) notFound();
+  if (pullDetailId && pull?.latest) redirect(`/dashboard/pulls/${pull.latest._id}`);
+  // Live CI for the open pull request (GitHub and GitHub Enterprise); a provider error just hides the panel.
+  const checks = pull ? await backend().action(api.pullInsights.checks, { token: user.token, pullRequestId: pull._id }).catch(() => null) : null;
   const diagnostics=detail?.review.resultStorageId?await backend().action(api.jobs.diagnostics,{token:user.token,reviewId:detail.review._id}):null;
   const personalAgent=(await backend().query(api.bridge.personal,{token:user.token,organizationId:detail?.review.organizationId??organization._id})).agent;
   if(view === "knowledge" && requestedRepository && !data.repositories.some(r=>r._id===requestedRepository))notFound();
@@ -146,6 +164,8 @@ export async function loadDashboard({
   const conventions = repoSettings ? await backend().query(api.conventions.list, { token: user.token, repositoryId: repoSettings.repo._id }) : [];
   // Narrowed above: a dashboard always has a workspace.
   const workspace = organization as typeof organization & { _id: Id<"organizations"> };
-  return { kind: "dashboard" as const, active, aliases, apiKeys, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, filters, findingsPage, isAdmin, jar, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
+  // Pro features this plan lacks: their settings render inside <Locked> (none with billing off).
+  const locked = await backend().query(api.billing.locked, { token: user.token, organizationId: workspace._id });
+  return { kind: "dashboard" as const, active, aliases, apiKeys, locked, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, pull, checks, filters, findingsPage, isAdmin, jar, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleUsage, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
 }
 export type DashboardContext = Extract<Awaited<ReturnType<typeof loadDashboard>>, { kind: "dashboard" }>;

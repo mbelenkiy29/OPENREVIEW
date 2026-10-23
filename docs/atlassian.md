@@ -14,7 +14,7 @@ Live acceptance must verify the real admin authorization, encrypted storage, res
 
 Primary API references: [3LO OAuth](https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/), [Jira projects](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-projects/), [Jira issues](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/), [Confluence pages](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-page/), [Confluence spaces](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space/).
 
-The selected project and space IDs include their cloud-site ID, preventing collisions across sites. Only explicitly referenced Jira keys and Confluence page URLs from a PR title, description or branch are fetched, with a ten-reference limit per connection and 100KB combined context cap. Retrieval failures and absent references appear in coverage diagnostics. Summary citations must match fetched sources.
+The selected project and space IDs include their cloud-site ID, preventing collisions across sites. Only explicitly referenced Jira keys and Confluence page URLs from a PR title, description or branch are fetched, with a ten-reference limit per connection and 100KB combined context cap. Retrieval failures and absent references appear in coverage diagnostics. Summary citations must match fetched sources. Jira issues and Confluence pages are fetched only when the PR author is a verified workspace member (see [Linear](linear.md)), which is not possible yet for Azure DevOps, so Azure DevOps reviews skip ticket context.
 
 Linear and Atlassian share a single 100KB UTF-8 budget in the review requirements context. Documents that do not fit are omitted whole, including their citation provenance; a smaller subsequent document can still fit. Coverage reports the number omitted. Per-provider retrieval ceilings also remain visible.
 
@@ -22,7 +22,7 @@ Disconnect removes encrypted credentials and resource selections immediately, ad
 
 ## Domain change — October 15, 2026
 
-Production moved to https://openreview.tech, and the OAuth callback is built from `APP_URL`. The Atlassian OAuth 3LO app must list `https://openreview.tech/api/integrations/atlassian/callback`, alongside or instead of the old `openreview-flame-two.vercel.app` callback. Until it does, the provider rejects the redirect when someone connects.
+Production moved to https://openreview.tech, and the OAuth callback is built from `APP_URL`. The Atlassian OAuth 3LO app must list `https://openreview.tech/api/integrations/atlassian/callback`, alongside or instead of the old `<vercel-url>` callback. Until it does, the provider rejects the redirect when someone connects.
 
 ## Live resource discovery — October 4, 2026
 
