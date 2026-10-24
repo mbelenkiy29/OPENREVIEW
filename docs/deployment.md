@@ -52,7 +52,7 @@ Turn this on before the emailed sign-in link gets traffic. Details and defaults 
 
 1. **Cloudflare Turnstile.** Create a widget in Managed mode for `openreview.tech`, then set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` on the web app (Production).
    - Start with `TURNSTILE_MODE=monitor`.
-   - After a few days of `auth.magic_link` log lines with few `challenge_failed` among real users, remove it (enforce is the default).
+   - Monitor mode refuses nothing on the check's result but records it on each `auth.magic_link` line as `turnstile.outcome`; the form waits for the token just as it does when enforcing. After a few days with few `"outcome":"fail"` among real users, remove it (enforce is the default).
    - `TURNSTILE_MODE=off` is the kill switch.
 2. **Caps.** Set `AUTH_EMAIL_HOURLY`, `AUTH_EMAIL_DAILY` and `USER_EMAIL_DAILY` on Convex so that together they stay below the Resend plan's daily quota.
 3. **Internal accounts.** Set `ANALYTICS_INTERNAL_EMAIL_DOMAINS`, `ANALYTICS_INTERNAL_EMAILS` or `ANALYTICS_INTERNAL_GITHUB_LOGINS` on Convex.
