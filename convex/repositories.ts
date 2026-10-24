@@ -15,6 +15,7 @@ import { audit, authorize, authorizeRepository, visibleRepositories, service } f
 import { removeFile } from "./removeFile";
 import { settingsValidator,providerGroupValidator,nativeDepotIndexValidator } from "./schema";
 import {indexWriteAllowed,indexBatchMatches} from "./indexAuthority";
+import {workspacePurging} from "./dataControls";
 import {adoptP4Baseline} from "./p4Polling";
 import {p4SubmittedRevision} from "../src/p4-revision";
 
@@ -32,6 +33,8 @@ export async function indexingAccess(ctx:QueryCtx|MutationCtx,repo:Doc<"reposito
  return null;
 }
 export async function enableIndexing(ctx:MutationCtx,repo:Doc<"repositories">){
+ // A workspace being purged stays quiet (convex/dataControls.ts quiesce).
+ if(await workspacePurging(ctx,repo.organizationId))throw new Error("This workspace is being deleted");
  const error=await indexingAccess(ctx,repo);if(error)throw new Error(error);
  if(await planMissing(ctx,repo.organizationId))throw new Error(choosePlanMessage);
  const scheduled=repo.indexScheduledId?await ctx.db.system.get(repo.indexScheduledId):null;

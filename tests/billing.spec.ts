@@ -169,6 +169,23 @@ test('signed Stripe webhooks link the workspace, apply once, and ignore replays 
  expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).plan).toBe('free');
 });
 
+test('events from the same second never move a subscription back: active stays active, canceled stays canceled',async()=>{
+ const {t,org}=await setup();
+ const created=Math.floor(Date.now()/1000);
+ await deliver(t,{id:'evt_checkout',type:'checkout.session.completed',created,data:{object:{mode:'subscription',client_reference_id:org,customer:'cus_1',subscription:'sub_1'}}});
+ const status=async()=>(await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0].status;
+ // Stripe creates the subscription incomplete and activates it within a second; the update arrives first.
+ await deliver(t,subscription('evt_active','customer.subscription.updated','active',1,created+5,org));
+ await deliver(t,subscription('evt_created','customer.subscription.created','incomplete',1,created+5,org));
+ expect(await status()).toBe('active');
+ // A cancellation that shares its second with a last update stays canceled.
+ await deliver(t,subscription('evt_deleted','customer.subscription.deleted','canceled',1,created+9,org));
+ await deliver(t,subscription('evt_late_update','customer.subscription.updated','active',1,created+9,org));
+ expect(await status()).toBe('canceled');
+ const outcomes=(await t.run(ctx=>ctx.db.query('stripeEvents').collect())).map(e=>[e.eventId,e.outcome]);
+ expect(outcomes.slice(1)).toEqual([['evt_active','active'],['evt_created','stale'],['evt_deleted','canceled'],['evt_late_update','stale']]);
+});
+
 test('a second subscription from another open Checkout neither replaces nor, once cancelled, ends the first',async()=>{
  const {t,org}=await setup();
  const created=Math.floor(Date.now()/1000),log=vi.spyOn(console,'error').mockImplementation(()=>{});

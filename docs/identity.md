@@ -75,7 +75,7 @@ never meet them.
 - **Managing sessions:**
   - **Settings → Account & sessions** lists active sessions.
   - **Sign out** ends the current one.
-  - **Sign out everywhere** revokes all of them, plus any older session-less cookies from before this change.
+  - **Sign out everywhere** revokes all of them, plus any older session-less cookies from before this change. Its cutoff time is checked on every request, so it ends every earlier session even when there are more rows than one revoke pass marks.
 - **Workspace removal:** removing a member from a workspace signs them out everywhere. It also revokes their API keys and bridge pairings for that workspace.
 
 ## Email invitations

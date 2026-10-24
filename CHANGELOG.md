@@ -4,6 +4,15 @@
 
 ## October 2026
 
+### Security and billing fixes
+- **Sign out everywhere** now ends every earlier session, however many there are.
+- Connecting an MCP client approves only the request the consent page showed, even if another tab started a different one.
+- Review emails skip members who can't open a repository the review drew context from, as the dashboard already did.
+- Registering a CLI or MCP client is limited per network, so one caller can't block everyone else's sign-in.
+- Deleting a workspace first stops its repositories, so nothing new is written while it is removed.
+- During a paid-plan trial, reviews stop at the included usage; extra usage starts once the trial ends.
+- A subscription's status can't go backwards when Stripe sends two events in the same second.
+
 ### Dashboard navigation
 - Switching tabs no longer shows a loading screen. The header, tabs and sidebar stay in place, the tab you click is marked at once, and the page changes when it's ready.
 - The underline slides to the tab you click, and so does the box on the review page's tabs. Every Memory and Settings sidebar row has an icon.

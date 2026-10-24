@@ -2,6 +2,8 @@ import { z } from "zod";
 import { api } from "../../../../convex/_generated/api";
 import { newSecret, validRedirectUri } from "../../../../src/oauth-server";
 import { backend } from "../../../../src/server";
+import { clientIp, ipBucket } from "../../../../src/client-ip";
+import { limitKey } from "../../../../src/limit-key";
 
 // RFC 7591 Dynamic Client Registration for MCP clients that do not support Client ID Metadata
 // Documents yet (the MCP specification deprecates it but allows it). Public clients only.
@@ -21,9 +23,9 @@ export async function POST(request: Request) {
   if (!d.redirect_uris.every(validRedirectUri)) return fail("invalid_redirect_uri", "Redirect URIs must use HTTPS or a loopback http address, without fragments");
   if ((d.token_endpoint_auth_method ?? "none") !== "none") return fail("invalid_client_metadata", "Only public clients (token_endpoint_auth_method none) are supported");
   if (d.response_types && !d.response_types.includes("code")) return fail("invalid_client_metadata", "The client must use the authorization code flow");
-  const clientId = newSecret("orc_");
+  const clientId = newSecret("orc_"), ip = clientIp(request.headers), ipHash = ip ? await limitKey(ipBucket(ip)) : undefined;
   try {
-    await backend().mutation(api.oauth.saveClient, { secret: process.env.SERVICE_SECRET ?? "", clientId, name: d.client_name ?? "MCP client", redirectUris: d.redirect_uris, kind: "registered" });
+    await backend().mutation(api.oauth.saveClient, { secret: process.env.SERVICE_SECRET ?? "", clientId, name: d.client_name ?? "MCP client", redirectUris: d.redirect_uris, kind: "registered", ...(ipHash ? { ipHash } : {}) });
   } catch { return fail("invalid_client_metadata", "Registration failed"); }
   return Response.json({ client_id: clientId, client_id_issued_at: Math.floor(Date.now() / 1000), client_name: d.client_name ?? "MCP client", redirect_uris: d.redirect_uris, grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none" }, { status: 201, headers });
 }
