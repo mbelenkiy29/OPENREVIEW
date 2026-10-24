@@ -32,6 +32,8 @@ export async function indexingAccess(ctx:QueryCtx|MutationCtx,repo:Doc<"reposito
  return null;
 }
 export async function enableIndexing(ctx:MutationCtx,repo:Doc<"repositories">){
+ // A workspace being purged stays quiet (convex/dataControls.ts quiesce).
+ if((await ctx.db.query("workspaceDeletions").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).take(20)).some(d=>d.status==="purging"))throw new Error("This workspace is being deleted");
  const error=await indexingAccess(ctx,repo);if(error)throw new Error(error);
  if(await planMissing(ctx,repo.organizationId))throw new Error(choosePlanMessage);
  const scheduled=repo.indexScheduledId?await ctx.db.system.get(repo.indexScheduledId):null;

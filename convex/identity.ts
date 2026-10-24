@@ -95,7 +95,7 @@ export const signIn = mutation({ args: { secret: v.string(), provider, providerU
 export const sessionValid = query({ args: { token: v.string() }, handler: async (ctx, a) => { try { await authenticated(ctx, a.token); return true; } catch { return false; } } });
 export const sessions = query({ args: { token: v.string() }, handler: async (ctx, a) => {
   const { user, session } = await authenticatedSession(ctx, a.token);
-  const rows = (await ctx.db.query("sessions").withIndex("by_user", (q) => q.eq("userId", user._id)).take(200)).filter((s) => !s.revokedAt && s.expiresAt > Date.now());
+  const rows = (await ctx.db.query("sessions").withIndex("by_user", (q) => q.eq("userId", user._id)).order("desc").take(200)).reverse().filter((s) => !s.revokedAt && s.expiresAt > Date.now() && s.createdAt >= (user.sessionsValidAfter ?? 0));
   const identities = await ctx.db.query("identities").withIndex("by_user", (q) => q.eq("userId", user._id)).take(20);
   return { sessions: rows.map((s) => ({ _id: s._id, provider: s.provider, userAgent: s.userAgent ?? null, createdAt: s.createdAt, expiresAt: s.expiresAt, current: s._id === session?._id })).sort((x, y) => y.createdAt - x.createdAt), identities: identities.map((i) => ({ provider: i.provider, email: i.email ?? null, emailVerified: i.emailVerified, lastLoginAt: i.lastLoginAt })) };
 } });
@@ -111,7 +111,8 @@ export const signOut = mutation({ args: { token: v.string() }, handler: async (c
 export async function revokeAllSessions(ctx: MutationCtx, userId: Id<"users">) {
   const now = Date.now();
   await ctx.db.patch(userId, { sessionsValidAfter: now });
-  for (const s of await ctx.db.query("sessions").withIndex("by_user", (q) => q.eq("userId", userId)).take(500)) if (!s.revokedAt) await ctx.db.patch(s._id, { revokedAt: now });
+  // Rows past these 500 are already invalid through sessionsValidAfter (convex/auth.ts); marking the newest keeps the list honest.
+  for (const s of await ctx.db.query("sessions").withIndex("by_user", (q) => q.eq("userId", userId)).order("desc").take(500)) if (!s.revokedAt) await ctx.db.patch(s._id, { revokedAt: now });
 }
 export const signOutEverywhere = mutation({ args: { token: v.string() }, handler: async (ctx, a) => { const user = await authenticated(ctx, a.token); await revokeAllSessions(ctx, user._id); } });
 // Removal from a workspace revokes the member's sessions and that workspace's API keys and bridges.

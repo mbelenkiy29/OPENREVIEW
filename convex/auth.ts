@@ -31,6 +31,8 @@ export async function authenticatedSession(ctx: QueryCtx | MutationCtx, token: s
     if (typeof payload.sid !== "string" || !/^[A-Za-z0-9_-]{32,128}$/.test(payload.sid)) throw new Error("Unauthorized");
     session = await ctx.db.query("sessions").withIndex("by_hash", (q) => q.eq("hash", sessionHash(payload.sid as string))).unique();
     if (!session || session.userId !== user._id || session.revokedAt || session.expiresAt <= Date.now()) throw new Error("Unauthorized");
+    // The cutoff covers every session, including rows sign-out-everywhere did not reach.
+    if (user.sessionsValidAfter && session.createdAt < user.sessionsValidAfter) throw new Error("Unauthorized");
   }
   return { user, session };
 }

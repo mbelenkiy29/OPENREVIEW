@@ -424,3 +424,23 @@ test("an undated old conversation expires even behind 100 older conversations th
   expect(await t.run((ctx) => ctx.db.get(ids.undated))).toBeNull();
   expect((await t.run((ctx) => ctx.db.query("conversations").collect())).length).toBe(100);
 });
+
+test("the purge first stops new work: repositories are disabled, re-enabling is refused, and pushes and reviews during the drain write nothing", async () => {
+  process.env.WORKSPACE_DELETION_GRACE_DAYS = "0";
+  const t = convexTest(schema, modules);
+  const acme = await workspace(t, 551, "Acme");
+  await t.run((ctx) => ctx.db.patch(acme.repo._id, { enabled: true }));
+  await t.mutation(api.dataControls.requestDeletion, { token: acme.token, organizationId: acme.organizationId, confirmName: "Acme" });
+  const [deletion] = await t.run((ctx) => ctx.db.query("workspaceDeletions").collect());
+  await t.mutation(internal.dataControls.startPurge, { deletionId: deletion._id });
+  await t.mutation(internal.dataControls.quiesce, { deletionId: deletion._id });
+  expect((await t.run((ctx) => ctx.db.get(acme.repo._id)))?.enabled).toBe(false);
+  // While the purge runs, a webhook push and a pull request event are turned away, and nobody can switch the repository back on.
+  expect(await t.mutation(internal.repositories.indexing, { repositoryId: acme.repo._id, sha: "c".repeat(40), total: 1 })).toBeNull();
+  expect(await t.mutation(internal.reviews.enqueue, { repositoryId: acme.repo._id, prNumber: 9, headSha: "d".repeat(40), trigger: "automatic" })).toBeNull();
+  await expect(t.mutation(api.repositories.configure, { token: acme.token, repositoryId: acme.repo._id, enabled: true })).rejects.toThrow(/being deleted/);
+  // The purge itself waits for jobs already running, then removes everything.
+  await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
+  expect((await t.run((ctx) => ctx.db.get(deletion._id)))?.status).toBe("done");
+  expect(await owned(t, acme.organizationId, acme.repo._id)).toEqual({});
+});

@@ -80,14 +80,22 @@ test("MCP OAuth: discovery, client metadata documents, consent, PKCE code exchan
   // 3. Consent: the signed-in user approves one workspace; the client receives a code, state and issuer.
   holder.jar.set("openreview_session", alice.token); holder.session = alice.token;
   const approved = await approveAuthorization(Object.assign(new FormData(), {}) as FormData).catch((r) => r) as Redirect;
-  expect(approved).toBeInstanceOf(Error); // organizationId missing → rejected by validation, no redirect
+  expect(approved.url).toBe("/oauth/consent"); // a form that names no request is sent back to the consent page, with no code
   await authorize(new Request(authorizeUrl(params)));
-  const consent = new FormData(); consent.set("organizationId", org); consent.append("scopes", "read");
-  const redirected = new URL(((await approveAuthorization(consent).catch((r) => r)) as Redirect).url);
+  // The form carries the challenge of the request it showed.
+  const consent = (challenge: string) => { const f = new FormData(); f.set("organizationId", org); f.append("scopes", "read"); f.set("challenge", challenge); return f; };
+  const redirected = new URL(((await approveAuthorization(consent(p1.challenge)).catch((r) => r)) as Redirect).url);
   expect([redirected.origin + redirected.pathname, redirected.searchParams.get("state"), redirected.searchParams.get("iss")]).toEqual([redirectUri, "s-1", base]);
   const code1 = redirected.searchParams.get("code")!;
   expect(code1).toMatch(/^orx_/);
   expect(holder.jar.has("openreview_oauth_request")).toBe(false);
+  // Another tab starting a different request replaces the cookie; the page already on screen cannot approve it.
+  await authorize(new Request(authorizeUrl(params)));
+  const other = pkce();
+  await authorize(new Request(authorizeUrl({ ...params, code_challenge: other.challenge, state: "s-other" })));
+  expect(((await approveAuthorization(consent(p1.challenge)).catch((r) => r)) as Redirect).url).toBe("/oauth/consent");
+  expect(((await denyAuthorization(consent(p1.challenge)).catch((r) => r)) as Redirect).url).toBe("/oauth/consent");
+  expect(holder.jar.has("openreview_oauth_request")).toBe(true);
 
   // 4. Token exchange with the PKCE verifier; tokens are opaque, short-lived and never cached.
   const exchange = async (code: string, verifier: string) => token(form({ grant_type: "authorization_code", code, redirect_uri: redirectUri, client_id: clientId, code_verifier: verifier, resource }));
@@ -96,7 +104,7 @@ test("MCP OAuth: discovery, client metadata documents, consent, PKCE code exchan
   // That attempt consumed the code; start again for a clean exchange.
   const p2 = pkce();
   await authorize(new Request(authorizeUrl({ ...params, code_challenge: p2.challenge })));
-  const code2 = new URL(((await approveAuthorization(consent).catch((r) => r)) as Redirect).url).searchParams.get("code")!;
+  const code2 = new URL(((await approveAuthorization(consent(p2.challenge)).catch((r) => r)) as Redirect).url).searchParams.get("code")!;
   const issued = await exchange(code2, p2.verifier);
   expect(issued.headers.get("cache-control")).toBe("no-store");
   const tokens = await issued.json();
@@ -122,7 +130,7 @@ test("MCP OAuth: discovery, client metadata documents, consent, PKCE code exchan
   // 7. Refresh tokens rotate; reusing an old one revokes the grant.
   const p3 = pkce();
   await authorize(new Request(authorizeUrl({ ...params, code_challenge: p3.challenge })));
-  const fresh = await (await exchange(new URL(((await approveAuthorization(consent).catch((r) => r)) as Redirect).url).searchParams.get("code")!, p3.verifier)).json();
+  const fresh = await (await exchange(new URL(((await approveAuthorization(consent(p3.challenge)).catch((r) => r)) as Redirect).url).searchParams.get("code")!, p3.verifier)).json();
   const rotated = await (await token(form({ grant_type: "refresh_token", refresh_token: fresh.refresh_token, client_id: clientId }))).json();
   expect(rotated.access_token).not.toBe(fresh.access_token);
   expect((await rpc(rotated.access_token, initialize)).status).toBe(200);
@@ -136,7 +144,7 @@ test("MCP OAuth: discovery, client metadata documents, consent, PKCE code exchan
   expect((await register(new Request(`${base}/api/oauth/register`, { method: "POST", body: JSON.stringify({ redirect_uris: ["http://evil.example/cb"] }) }))).status).toBe(400);
   const p4 = pkce();
   await authorize(new Request(authorizeUrl({ ...params, client_id: legacy.client_id, redirect_uri: "http://localhost:4545/cb", code_challenge: p4.challenge, scope: "read write" })));
-  const denied = new URL(((await denyAuthorization().catch((r) => r)) as Redirect).url);
+  const denied = new URL(((await denyAuthorization(consent(p4.challenge)).catch((r) => r)) as Redirect).url);
   expect([denied.searchParams.get("error"), denied.searchParams.get("iss")]).toEqual(["access_denied", base]);
   await expect(t.mutation(api.oauth.approve, { token: viewer.token, organizationId: org, clientId, clientName: "x", redirectUri, codeChallenge: p4.challenge, resource, scopes: ["read", "write"], hash: "a".repeat(64) })).rejects.toThrow(/exceeds your workspace role/);
   await expect(t.mutation(api.oauth.approve, { token: mallory.token, organizationId: org, clientId, clientName: "x", redirectUri, codeChallenge: p4.challenge, resource, scopes: ["read"], hash: "b".repeat(64) })).rejects.toThrow();
@@ -144,7 +152,7 @@ test("MCP OAuth: discovery, client metadata documents, consent, PKCE code exchan
   // 9. Connections are listed and revocable from the dashboard and by the client (RFC 7009); API keys still work.
   const p5 = pkce();
   await authorize(new Request(authorizeUrl({ ...params, code_challenge: p5.challenge })));
-  const last = await (await exchange(new URL(((await approveAuthorization(consent).catch((r) => r)) as Redirect).url).searchParams.get("code")!, p5.verifier)).json();
+  const last = await (await exchange(new URL(((await approveAuthorization(consent(p5.challenge)).catch((r) => r)) as Redirect).url).searchParams.get("code")!, p5.verifier)).json();
   const connections = await t.query(api.oauth.connections, { token: alice.token, organizationId: org });
   expect(connections.map((c) => [c.clientName, c.scopes, c.mine])).toEqual([["Example Agent", ["read"], true]]);
   expect(await t.query(api.oauth.connections, { token: mallory.token, organizationId: rival })).toEqual([]);
@@ -152,7 +160,7 @@ test("MCP OAuth: discovery, client metadata documents, consent, PKCE code exchan
   expect((await rpc(last.access_token, initialize)).status).toBe(401);
   const p6 = pkce();
   await authorize(new Request(authorizeUrl({ ...params, code_challenge: p6.challenge })));
-  const clientRevoked = await (await exchange(new URL(((await approveAuthorization(consent).catch((r) => r)) as Redirect).url).searchParams.get("code")!, p6.verifier)).json();
+  const clientRevoked = await (await exchange(new URL(((await approveAuthorization(consent(p6.challenge)).catch((r) => r)) as Redirect).url).searchParams.get("code")!, p6.verifier)).json();
   expect((await revokeRoute(new Request(`${base}/api/oauth/revoke`, { method: "POST", body: new URLSearchParams({ token: clientRevoked.refresh_token, client_id: clientId }).toString() }))).status).toBe(200);
   expect((await rpc(clientRevoked.access_token, initialize)).status).toBe(401);
   const key = "or_oauth_test_key";
@@ -170,6 +178,17 @@ test("dynamic registration is unauthenticated, so it is capped at 30 new clients
   expect(await reg()).toBe(400);
   vi.setSystemTime(Date.UTC(2026, 9, 21, 12, 1));
   expect(await reg()).toBe(201);
+});
+
+test("with a trusted client address, one network's registrations cannot block everyone else's", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(Date.UTC(2026, 9, 21, 12)); process.env.CLIENT_IP_SOURCE = "header:x-real-ip";
+  onTestFinished(() => { vi.useRealTimers(); delete process.env.CLIENT_IP_SOURCE; });
+  holder.t = convexTest(schema, modules);
+  const reg = async (ip: string) => (await register(new Request(`${base}/api/oauth/register`, { method: "POST", headers: { "x-real-ip": ip }, body: JSON.stringify({ redirect_uris: ["http://localhost:4545/cb"] }) }))).status;
+  for (let i = 0; i < 10; i++) expect(await reg("203.0.113.9")).toBe(201);
+  expect(await reg("203.0.113.9")).toBe(400);
+  // Another user's `openreview login` in the same minute still registers.
+  expect(await reg("198.51.100.7")).toBe(201);
 });
 
 test("service functions accept only the exact backend secret", async () => {
