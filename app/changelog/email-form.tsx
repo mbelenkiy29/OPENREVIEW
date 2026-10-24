@@ -12,15 +12,15 @@ const notes: Record<string, string> = {
 
 /**
  * Changelog updates by email (convex/changelogJobs.ts). The page is static, so the result of
- * subscribing or confirming comes back as `?email=` and is read here. `turnstile` is the bot check's
- * site key and mode (src/turnstile.ts), read on the server.
+ * subscribing or confirming comes back as `?email=` and is read here. `turnstile` holds the bot check's
+ * site key (src/turnstile.ts), read on the server; it is absent when the check is off.
  */
-export function ChangelogEmail({ turnstile }: { turnstile?: { siteKey: string; enforce: boolean } }) {
+export function ChangelogEmail({ turnstile }: { turnstile?: { siteKey: string } }) {
   const [note, setNote] = useState("");
   useEffect(() => { setNote(notes[new URLSearchParams(location.search).get("email") ?? ""] ?? ""); }, []);
   return <form id="email" action="/api/changelog/subscribe" method="post" className="changelog-email">
     <label>Email<input type="email" name="email" required maxLength={254} autoComplete="email" placeholder="you@company.com" /></label>
-    {turnstile && <TurnstileField siteKey={turnstile.siteKey} action="changelog" enforce={turnstile.enforce} />}
+    {turnstile && <TurnstileField siteKey={turnstile.siteKey} action="changelog" />}
     <button>Subscribe</button>
     <p role="status" className="muted">{note}</p>
   </form>;

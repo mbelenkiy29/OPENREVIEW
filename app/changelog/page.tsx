@@ -23,7 +23,7 @@ export default async function Changelog() {
     <main className="docs-content review-markdown">
       <h1>Changelog</h1>
       <p>Follow along with the <a href="/changelog/feed.xml">RSS feed</a>{email && ", or get the new entries by email at most once a week"}.</p>
-      {email && <ChangelogEmail turnstile={turnstile.mode === "off" ? undefined : { siteKey: turnstile.siteKey!, enforce: turnstile.mode === "enforce" }} />}
+      {email && <ChangelogEmail turnstile={turnstile.mode === "off" ? undefined : { siteKey: turnstile.siteKey! }} />}
       {months.map((m) => <Fragment key={m.id}>
         <h2 id={m.id}>{m.title}</h2>
         {m.intro && md(m.intro)}

@@ -21,7 +21,7 @@ export function SignInOptions({ next, mode = "login", referral }: { next?: strin
         <input type="hidden" name="from" value={mode} />
         {code && <input type="hidden" name="referral" value={code} />}
         <label>Work email<input type="email" name="email" required maxLength={254} autoComplete="email" placeholder="you@company.com" /></label>
-        {turnstile.mode !== "off" && <TurnstileField siteKey={turnstile.siteKey!} action="magic_link" enforce={turnstile.mode === "enforce"} />}
+        {turnstile.mode !== "off" && <TurnstileField siteKey={turnstile.siteKey!} action="magic_link" />}
         <button>Email me a sign-in link</button>
         {turnstile.mode === "enforce" && <noscript><p className="muted">Email sign-in needs JavaScript; use another sign-in method.</p></noscript>}
       </form>
