@@ -164,6 +164,8 @@ export const startPurge = internalMutation({ args: { deletionId: v.id("workspace
 // enableIndexing refuses while the workspace purges. Running jobs get drainMs to finish, so nothing writes
 // into a table the purge has already emptied.
 export const drainMs = 10 * 60000;
+/** Whether the workspace's current deletion (its newest receipt) is purging. */
+export const workspacePurging = async (ctx: { db: MutationCtx["db"] }, organizationId: Id<"organizations">) => (await pendingOf(ctx, organizationId))?.status === "purging";
 export const quiesce = internalMutation({ args: { deletionId: v.id("workspaceDeletions"), cursor: v.optional(v.string()) }, handler: async (ctx, a) => {
   const d = await ctx.db.get(a.deletionId);
   if (!d || d.status !== "purging") return;

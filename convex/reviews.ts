@@ -18,6 +18,7 @@ import { eligibleFixFinding } from "../src/fix-prompt";
 import { effectiveSettings } from "./scopes";
 import { scheduleIndexIfIdle } from "./repositories";
 import { rateLimit } from "./rateLimit";
+import { workspacePurging } from "./dataControls";
 import { queueReactions } from "./reactions";
 import {repositoryContextValidator,validateRepositoryContext,requireContextReader,contextReadable,requireFindingReader} from "./repositoryContext";
 import {validateIntegrationScopes} from "./integrations";
@@ -176,6 +177,9 @@ export const stage = internalMutation({
       !["queued", "failed", "waiting_runtime", "waiting_agent"].includes(review.status)
     )
       return false;
+    // A review that resumes while its workspace is purged (one waiting on a long runtime job outlives the
+    // purge's drain) starts nothing and writes nothing the purge has already cleared.
+    if (args.status === "ingesting" && await workspacePurging(ctx, review.organizationId)) return false;
     if(args.status==="ingesting"&&review.retryScheduledId){
       const retry=await ctx.db.system.get(review.retryScheduledId);
       if(retry?.state.kind==="pending")await ctx.scheduler.cancel(retry._id);

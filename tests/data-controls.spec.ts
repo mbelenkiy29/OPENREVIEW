@@ -429,9 +429,15 @@ test("the purge first stops new work: repositories are disabled, re-enabling is 
   process.env.WORKSPACE_DELETION_GRACE_DAYS = "0";
   const t = convexTest(schema, modules);
   const acme = await workspace(t, 551, "Acme");
-  await t.run((ctx) => ctx.db.patch(acme.repo._id, { enabled: true }));
+  // Twenty earlier requests the owner cancelled: the current deletion is the newest receipt, not the first ones.
+  const waiting = await t.run(async (ctx) => {
+    await ctx.db.patch(acme.repo._id, { enabled: true });
+    for (let i = 0; i < 20; i++) await ctx.db.insert("workspaceDeletions", { organizationId: acme.organizationId, name: "Acme", requestedBy: acme.userId, requestedAt: i, scheduledFor: i, status: "cancelled", step: 0, counts: {} });
+    // A review parked on a long runtime test job, which can outlast the drain.
+    return ctx.db.insert("reviews", { organizationId: acme.organizationId, repositoryId: acme.repo._id, prNumber: 3, headSha: "e".repeat(40), status: "waiting_runtime", mode: "standard", attempts: 1, createdAt: Date.now(), updatedAt: Date.now() });
+  });
   await t.mutation(api.dataControls.requestDeletion, { token: acme.token, organizationId: acme.organizationId, confirmName: "Acme" });
-  const [deletion] = await t.run((ctx) => ctx.db.query("workspaceDeletions").collect());
+  const deletion = (await t.run((ctx) => ctx.db.query("workspaceDeletions").collect())).find((d) => d.status === "scheduled")!;
   await t.mutation(internal.dataControls.startPurge, { deletionId: deletion._id });
   await t.mutation(internal.dataControls.quiesce, { deletionId: deletion._id });
   expect((await t.run((ctx) => ctx.db.get(acme.repo._id)))?.enabled).toBe(false);
@@ -439,6 +445,11 @@ test("the purge first stops new work: repositories are disabled, re-enabling is 
   expect(await t.mutation(internal.repositories.indexing, { repositoryId: acme.repo._id, sha: "c".repeat(40), total: 1 })).toBeNull();
   expect(await t.mutation(internal.reviews.enqueue, { repositoryId: acme.repo._id, prNumber: 9, headSha: "d".repeat(40), trigger: "automatic" })).toBeNull();
   await expect(t.mutation(api.repositories.configure, { token: acme.token, repositoryId: acme.repo._id, enabled: true })).rejects.toThrow(/being deleted/);
+  // When its job finishes, the parked review does not start again or log a stage.
+  const runs = async () => (await t.run((ctx) => ctx.db.query("reviewRuns").collect())).filter((r) => r.reviewId === waiting).length;
+  const before = await runs();
+  expect(await t.mutation(internal.reviews.stage, { reviewId: waiting, status: "ingesting" })).toBe(false);
+  expect(await runs()).toBe(before);
   // The purge itself waits for jobs already running, then removes everything.
   await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
   expect((await t.run((ctx) => ctx.db.get(deletion._id)))?.status).toBe("done");
