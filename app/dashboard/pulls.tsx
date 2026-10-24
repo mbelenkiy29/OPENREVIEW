@@ -33,8 +33,8 @@ export async function PullList({token,organizationId,repositories,filters,admin,
  const tokenRepo=repoName?repositories.find(r=>r.fullName.toLowerCase()===repoName||r.fullName.toLowerCase().endsWith("/"+repoName)):undefined;
  const repositoryId=(tokenRepo?._id??filters.repository) as Id<"repositories">|undefined,state=parsed.state??(filters.state==="closed"?"closed":"open");
  const pageSize=sizes.includes(Number(filters.size))?Number(filters.size):10,page=Math.max(1,Math.floor(Number(filters.p))||1);
- const catalogs=await backend().query(api.pullCatalogs.list,{token,organizationId,...(filters.team?{teamId:filters.team as Id<"teams">}:{}),...(repositoryId?{repositoryId}:{})});
- const result=parsed.repo&&!tokenRepo?{page:[],total:0,capped:false}:await browse(token,organizationId,filters,{repositoryId,page,pageSize,search:parsed.search??filters.search,author:parsed.author??filters.author,reviewer:parsed.reviewer,state,status:parsed.status,impact:parsed.impact,scoreMin:parsed.scoreMin,scoreMax:parsed.scoreMax});
+ // Independent reads: load the import status and the list together.
+ const [catalogs,result]=await Promise.all([backend().query(api.pullCatalogs.list,{token,organizationId,...(filters.team?{teamId:filters.team as Id<"teams">}:{}),...(repositoryId?{repositoryId}:{})}),parsed.repo&&!tokenRepo?{page:[],total:0,capped:false}:browse(token,organizationId,filters,{repositoryId,page,pageSize,search:parsed.search??filters.search,author:parsed.author??filters.author,reviewer:parsed.reviewer,state,status:parsed.status,impact:parsed.impact,scoreMin:parsed.scoreMin,scoreMax:parsed.scoreMax})]);
  const link=(changes:Record<string,string|undefined>)=>{const next=new URLSearchParams(Object.entries({...filters,cursor:undefined,...changes} as Record<string,string|undefined>).filter((e):e is [string,string]=>Boolean(e[1])));return "/dashboard/pulls"+(next.size?"?"+next:"");};
  const pages=Math.max(1,Math.ceil(result.total/pageSize)),shown=[...new Set([1,page-1,page,page+1,pages])].filter(n=>n>=1&&n<=pages).sort((a,b)=>a-b);
  const suggestions:[string,string,string][]=[[withToken(q,"author",login),"author is","you"],[withToken(q,"reviewer",login),"review requested from","you"],...repositories.slice(0,2).map(r=>[withToken(q,"repo",r.fullName),"repo is",r.fullName] as [string,string,string]),[withToken(q,"impact","high"),"impact is","high"]];
@@ -45,7 +45,7 @@ export async function PullList({token,organizationId,repositories,filters,admin,
    <nav className="state-toggle" aria-label="Pull request state">{([["open","Open","⑂"],["closed","Closed","⊘"]] as const).map(([value,label,icon])=><Link key={value} href={link({state:value==="open"?undefined:value,q:withoutToken(q,"state")||undefined,p:undefined})} aria-current={(state==="open"?"open":"closed")===value?"page":undefined}><span aria-hidden>{icon}</span> {label}</Link>)}</nav>
   </div>
   <p className="suggestions"><span className="suggested">Suggested</span>{suggestions.map(([value,key,shown])=><Link key={key+shown} className="suggestion" href={link({q:value,p:undefined})}><span className="k">{key}</span> <span className="v">{shown}</span></Link>)}{q&&<Link className="suggestion clear" href={link({q:undefined,p:undefined})}>Clear</Link>}</p>
-  <div className="bulk-row"><BulkBar/><Link className="button small" href="/dashboard/pulls/findings">Findings</Link></div>
+  <div className="bulk-row"><BulkBar/><Link className="button small" href="/dashboard/analytics/findings">Findings</Link></div>
   <div className="table-wrap pulls-wrap"><table className="pulls-table"><thead><tr><th className="row-select"><SelectAll/></th><th>Pull request</th><th>Review status</th><th>Actions</th></tr></thead><tbody>{result.page.map(pr=>{
    const repo=repositories.find(r=>r._id===pr.repositoryId),latest=currentReview(pr,repo),risk=latest?.approvalAssessment?.risk,title=repositoryDisplay(repo)+" #"+pr.number+": "+pr.title;
    return <tr key={pr._id}>

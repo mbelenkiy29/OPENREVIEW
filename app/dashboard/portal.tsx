@@ -4,49 +4,38 @@ import type { ReactNode } from "react";
 import type { Id, Doc } from "../../convex/_generated/dataModel";
 import { api } from "../../convex/_generated/api";
 import { backend } from "../../src/server";
-import { SettingsNavigation } from "./settings-navigation";
+import { Sidebar, type NavGroup } from "./sidebar";
+import { PrimaryTabs } from "./tabs";
+import { WorkspaceMenu } from "./workspace-menu";
 import { PortalDisclosure } from "./portal-disclosure";
 import { UserJotButton } from "../userjot";
 import { userJotConfig } from "../../src/userjot";
 import {ThemePicker} from "../theme";
+import { SignOutForm } from "../telemetry-identity";
 import { Mark } from "../ui/logo";
+import { Icon } from "../ui/icons";
 import {analyticsPeriod, chartBuckets, periodPresets, presetPeriod} from "../../src/analytics-period";
 import { BarList, LineChart } from "../ui/charts";
-import { setMinutesPerFinding } from "./actions";
+import { logout, setMinutesPerFinding } from "./actions";
 import { referralConfig } from "../../src/referrals";
 import { historyFloor, type Entitlement } from "../../src/plans";
 import { Locked } from "./locked";
 
 // Read per request: Referrals appears only while the referral program is on (unknown keys 404).
-const settingsGroups = () => [
-  { label: "Repositories", links: [["repositories", "Add/Remove Repos"], ["providers", "Code Providers"]] },
-  { label: "Agent Config", links: [["review", "Code Review"], ["model", "AI Model"], ["agents", "Personal agents"], ["automation", "Runtime & Approval"]] },
-  { label: "Admin", links: [["teams", "Teams & Inheritance"], ["people", "People"], ["usage", "Usage"], ["billing", "Billing"], ["notifications", "Notifications"], ["data", "Data & deletion"]] },
-  { label: "Developer", links: [["keys", "API Keys"], ["audit", "Audit Log"]] },
-  { label: "Personal", links: [["account", "Account & sessions"], ...(referralConfig().enabled ? [["referrals", "Referrals"]] : [])] },
+const settingsGroups = (): NavGroup[] => [
+  { label: "Repositories", links: [["repositories", "Add/Remove Repos", "folders"], ["providers", "Code Providers", "plugs"]] },
+  { label: "Agent Config", links: [["review", "Code Review", "code"], ["model", "AI Model", "cpu"], ["agents", "Personal agents", "robot"], ["automation", "Runtime & Approval", "terminalWindow"]] },
+  { label: "Admin", links: [["teams", "Teams & Inheritance", "usersThree"], ["people", "People", "users"], ["usage", "Usage", "gauge"], ["billing", "Billing", "creditCard"], ["notifications", "Notifications", "bell"], ["data", "Data & deletion", "database"]] },
+  { label: "Developer", links: [["keys", "API Keys", "key"], ["audit", "Audit Log", "clipboardText"]] },
+  { label: "Personal", links: [["account", "Account & sessions", "userCircle"], ...(referralConfig().enabled ? [["referrals", "Referrals", "gift"] satisfies NavGroup["links"][number]] : [])] },
 ];
 export const settingsNavigation = () => settingsGroups().flatMap(group => group.links);
 
-// 16px stroke icons for the main tabs, drawn in the Lucide style.
-const tabIcons: Record<string, ReactNode> = {
-  analytics: <path d="M3 3v18h18M7 14l4-4 4 4 5-5" />,
-  chat: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
-  memory: <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />,
-  pulls: <><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 0 1 2 2v7M6 9v12" /></>,
-  settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1" /></>,
-};
-const memoryIcons: Record<string, ReactNode> = {
-  rules: <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />,
-  clusters: <><circle cx="5" cy="6" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="12" cy="18" r="2" /><path d="M7 6h10M6 8l5 8M18 8l-5 8" /></>,
-  knowledge: tabIcons.memory,
-  integrations: <path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4" />,
-  preferences: <path d="M12 3l1.9 5.8H20l-4.9 3.6 1.9 5.8-5-3.6-5 3.6 1.9-5.8L4 8.8h6.1z" />,
-};
-export function PortalNav({ organization, role, login, route, section, team,scopeSelector,children }: { organization: string; role?: string; login: string; route: string; section?: string; team?:string;scopeSelector:ReactNode;children: ReactNode }) {
-  const href=(path:string)=>path+(team!==undefined?"?team="+encodeURIComponent(team):"");
-  const feedback = Boolean(userJotConfig());
-  const secondary = route === "memory" ? [["rules", "Custom rules"], ["clusters", "Cross-repo context"], ["knowledge", "Knowledge Base"], ["integrations", "Integrations"], ["preferences", "Learned preferences"]] : route === "settings" ? settingsNavigation() : route === "pulls" && section === "findings" ? [["", "All Pull Requests"], ["findings", "Findings"]] : [];
-  return <><div className="portal-top"><div className="portal-identity"><Link className="brand" href={href("/dashboard/analytics")}><Mark /> OpenReview</Link><PortalDisclosure className="scope-selector" label={organization}><div className="scope-menu">{scopeSelector}</div></PortalDisclosure>{role&&<span className="role-badge">{role[0].toUpperCase()+role.slice(1)}</span>}<PortalDisclosure className="profile" label={`@${login}`}><div className="profile-menu"><ThemePicker/>{children}<Link href="/dashboard/onboarding">Workspace setup</Link><Link href="/dashboard/settings/agents">Personal settings</Link>{referralConfig().enabled && <Link href="/dashboard/settings/referrals">Refer someone</Link>}{feedback && <div className="profile-feedback"><UserJotButton className="link-button">Request a feature</UserJotButton><UserJotButton className="link-button">Report a bug</UserJotButton><Link href="/feedback/roadmap">Roadmap</Link></div>}</div></PortalDisclosure></div><nav className="primary-nav" aria-label="Main navigation">{[["analytics", "Analytics"], ["chat", "Chat"], ["memory", "Memory"], ["pulls", "Pull Requests"], ["settings", "Settings"]].map(([key,label]) => <Link key={key} href={href(`/dashboard/${key}`)} aria-current={route === key ? "page" : undefined}><svg className="tab-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{tabIcons[key]}</svg>{label}</Link>)}</nav></div>{secondary.length > 0 && <aside className="secondary-nav">{route === "settings" ? <SettingsNavigation groups={settingsGroups()} section={section} team={team} /> : <nav aria-label={`${route} navigation`}>{route === "memory" && <p className="nav-group-title">Memory</p>}{secondary.map(([key,label]) => <Link key={key} href={href(`/dashboard/${route}${key ? `/${key}` : ""}`)} aria-current={(section ?? (route === "memory" ? "rules" : "")) === key ? "page" : undefined}>{memoryIcons[key]&&route==="memory"&&<svg className="tab-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{memoryIcons[key]}</svg>}{label}</Link>)}</nav>}</aside>}</>;
+// The app chrome, rendered once by the portal layout and kept mounted across navigations: identity row,
+// main tabs and the Memory/Settings sidebar.
+export function PortalNav({ login, role, organizationId, name, organizations, teams, savedTeam }: { login: string; role: string; organizationId: string; name: string; organizations: { _id: string; name: string }[]; teams: { _id: string; name: string }[]; savedTeam?: string }) {
+  const feedback = Boolean(userJotConfig()), referrals = referralConfig().enabled;
+  return <><div className="portal-top"><div className="portal-identity"><Link className="brand" href="/dashboard/analytics"><Mark /><span className="brand-name">OpenReview</span></Link><WorkspaceMenu organizationId={organizationId} name={name} role={role} organizations={organizations} teams={teams} savedTeam={savedTeam} /><div className="header-actions"><Link className="header-button" href="/docs" title="Docs"><Icon name="question" /><span className="sr-only">Docs</span></Link>{referrals && <Link className="header-button" href="/dashboard/settings/referrals" title="Refer someone"><Icon name="gift" /><span className="sr-only">Refer someone</span></Link>}<PortalDisclosure className="profile" label={<><Icon name="user" /><span className="sr-only">Account menu for @{login}</span></>}><div className="profile-menu"><p className="muted">Signed in as @{login}</p><ThemePicker/><SignOutForm action={logout} label="Sign out" /><Link href="/dashboard/onboarding">Workspace setup</Link><Link href="/dashboard/settings/agents">Personal settings</Link><Link href="/docs">Docs</Link>{referrals && <Link href="/dashboard/settings/referrals">Refer someone</Link>}{feedback && <div className="profile-feedback"><UserJotButton className="link-button">Request a feature</UserJotButton><UserJotButton className="link-button">Report a bug</UserJotButton><Link href="/feedback/roadmap">Roadmap</Link></div>}</div></PortalDisclosure></div></div><PrimaryTabs /></div><Sidebar settings={settingsGroups()} /></>;
 }
 const hours=(ms:number|null)=>ms===null?"—":`${(ms/3600000).toFixed(1)} h`;
 // Laid out like Greptile's Analytics tab: filters, four cards, then six charts each paired with a leaderboard; our cost and impact numbers follow.
@@ -85,7 +74,7 @@ export async function AnalyticsView({token,organizationId,repositories,filters,l
     <div className="metrics">{tiles.map(([label,value,detail])=><div key={label}><span>{label}</span><strong>{value}</strong>{detail&&<small className="muted">{detail}</small>}</div>)}</div>
     <div className="analytics-grid">
       <section><LineChart title={`Reviews per ${unit}`} labels={labels} series={[{label:"Reviews",values:sum(d=>byDate.get(d)?.reviews??0)}]}/>{t&&<BarList title="Top repositories by review count" items={top(r=>r.reviews).map(r=>({label:r.label,value:r.reviews}))}/>}</section>
-      <section><LineChart title={`Bugs caught by severity per ${unit}`} labels={labels} series={(["critical","high","medium","low"] as const).map(s=>({label:s,values:sum(d=>byDate.get(d)?.[s]??0)}))}/>{t&&<BarList title="Repositories with the most bugs" items={top(r=>r.findings).map(r=>({label:r.label,value:r.findings,detail:`${r.high} critical or high`}))}/>}<p><Link href={`/dashboard/pulls/findings?${new URLSearchParams({since,until,...scope})}`}>View all bugs →</Link></p></section>
+      <section><LineChart title={`Bugs caught by severity per ${unit}`} labels={labels} series={(["critical","high","medium","low"] as const).map(s=>({label:s,values:sum(d=>byDate.get(d)?.[s]??0)}))}/>{t&&<BarList title="Repositories with the most bugs" items={top(r=>r.findings).map(r=>({label:r.label,value:r.findings,detail:`${r.high} critical or high`}))}/>}<p><Link href={`/dashboard/analytics/findings?${new URLSearchParams({since,until,...scope})}`}>View all bugs →</Link></p></section>
       <section><LineChart title="Average time to merge (hours)" labels={labels} series={[{label:"Mean hours",values:mergeHours}]} format={v=>`${v} h`}/>{report.mergeTime.count?<BarList title="Slowest repositories to merge" items={report.mergeTime.byRepository.map(r=>({label:r.repository,value:Math.round(r.meanMs/360000)/10,detail:`${r.count} merged`}))} format={v=>`${v} h`}/>:<p className="muted">Merge time runs from when OpenReview first sees a pull request to its merge, recorded for pull requests merged from now on.</p>}</section>
       <section><BarList title="Top contributors (PRs reviewed)" items={report.contributors.map(c=>({label:"@"+c.author,value:c.prs,detail:c.repositories.join(", ")}))}/></section>
       {t?<section><LineChart title="Addressed rate (cumulative %)" labels={labels} series={[{label:"Addressed %",values:rate}]} format={v=>`${v}%`}/><BarList title="Top repositories by addressed rate" items={top(r=>r.findings?r.addressed/r.findings:0).map(r=>({label:r.label,value:Math.round(r.addressed/r.findings*100),detail:`${r.addressed} of ${r.findings}`}))} format={v=>`${v}%`}/></section>:unavailable}

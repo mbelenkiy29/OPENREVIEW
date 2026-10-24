@@ -19,6 +19,7 @@ import { RuntimeReview, ApprovalReview } from "../runtime";
 import { CodeTab } from "../code-tab";
 import { when, ago, status } from "./shared";
 import { findingCounts } from "../../../src/priority";
+import { SubNav } from "../tabs";
 import type { DashboardContext } from "../load";
 
 export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
@@ -106,9 +107,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                   {detail.canFix && fixable > 0 && <FixButton compact reviewId={detail.review._id} agent={personalAgent} label={`Fix ${fixable} ${fixable === 1 ? "issue" : "issues"}`} />}
                 </div>
               </section>
-              <nav className="tabs" aria-label="Review sections">
-                {tabs.map(([key, label]) => <Link key={key} href={`/dashboard/pulls/${detail.review._id}${key === "overview" ? "" : "?tab=" + key}`} aria-current={tab === key ? "page" : undefined}>{label}</Link>)}
-              </nav>
+              <SubNav label="Review sections" active={tab ?? "overview"} items={tabs.map(([key, label]): [string, string, React.ReactNode] => [key, `/dashboard/pulls/${detail.review._id}${key === "overview" ? "" : "?tab=" + key}`, label])} />
               {tab === "overview" && <>
               {detail.review.approvalAssessment && section("Change impact", "◎", <>
                 <p><strong className={"impact " + detail.review.approvalAssessment.risk}>{detail.review.approvalAssessment.risk[0].toUpperCase() + detail.review.approvalAssessment.risk.slice(1)}:</strong> {detail.review.approvalAssessment.reason}</p>

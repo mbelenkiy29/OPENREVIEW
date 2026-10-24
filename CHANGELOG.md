@@ -13,6 +13,14 @@
 - During a paid-plan trial, reviews stop at the included usage; extra usage starts once the trial ends.
 - A subscription's status can't go backwards when Stripe sends two events in the same second.
 
+### Dashboard navigation
+- Switching tabs no longer shows a loading screen. The header, tabs and sidebar stay in place, the tab you click is marked at once, and the page changes when it's ready.
+- The underline slides to the tab you click, and so does the box on the review page's tabs. Every Memory and Settings sidebar row has an icon.
+- Findings moved to **Analytics → Bugs Caught**, next to **PR Reviews**. Old Findings links, including "View all bugs", still work.
+- **Settings → Code Review** lists the page's sections in the sidebar and marks the one you're reading.
+- On phones, the main tabs move to a bar at the bottom of the screen, and each sidebar becomes a menu.
+- Dashboard pages load faster: independent data now loads in parallel.
+
 ### Landing page
 - The landing page now moves:
   - The headline rises in as the page opens.

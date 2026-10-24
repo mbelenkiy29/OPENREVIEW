@@ -1,62 +1,64 @@
-import { createWorkspace, logout, switchWorkspace, switchTeam } from "../actions";
-import { DataControls } from "../data-controls";
-import { SsoSettings } from "../sso-settings";
-import { Live } from "../live";
-import { SignOutForm } from "../../telemetry-identity";
-import { ProvidersPanel } from "../providers";
-import { IntegrationsPanel } from "../integrations";
-import { PreferencesPanel } from "../preferences";
-import { ChatPanel } from "../chat";
-import { NotificationsPanel } from "../notifications";
-import { BillingPanel } from "../billing";
-import { ModelPanel } from "../model-panel";
-import { AccountPanel } from "../account";
-import { ReferralsPanel } from "../referrals";
-import { EmailInvitations } from "../email-invitations";
-import { ScopePanel, AuditPanel } from "../scopes";
-import { AgentSettings } from "../agents";
+import { DataControls } from "../../data-controls";
+import { SsoSettings } from "../../sso-settings";
+import { Live } from "../../live";
+import { ProvidersPanel } from "../../providers";
+import { IntegrationsPanel } from "../../integrations";
+import { PreferencesPanel } from "../../preferences";
+import { ChatPanel } from "../../chat";
+import { NotificationsPanel } from "../../notifications";
+import { BillingPanel } from "../../billing";
+import { ModelPanel } from "../../model-panel";
+import { AccountPanel } from "../../account";
+import { ReferralsPanel } from "../../referrals";
+import { EmailInvitations } from "../../email-invitations";
+import { ScopePanel, AuditPanel } from "../../scopes";
+import { AgentSettings } from "../../agents";
 import Link from "next/link";
-import { needsSetup } from "../../../src/onboarding-steps";
-import { RuntimeSettings } from "../runtime";
-import { PortalNav, AnalyticsView, settingsNavigation } from "../portal";
-import { WorkspaceInvitations } from "../invitations";
-import { RepositoriesSection } from "../sections/repositories";
-import { ReviewsSection } from "../sections/reviews";
-import { FindingsSection } from "../sections/findings";
-import { RulesSection } from "../sections/rules";
-import { TeamSection } from "../sections/team";
-import { KnowledgeSection } from "../sections/knowledge";
-import { UsageSection } from "../sections/usage";
-import { ReviewSettingsSection } from "../sections/settings-review";
-import { navigation } from "../sections/shared";
-import { loadDashboard } from "../load";
+import { needsSetup } from "../../../../src/onboarding-steps";
+import { RuntimeSettings } from "../../runtime";
+import { AnalyticsView, settingsNavigation } from "../../portal";
+import { SubNav } from "../../tabs";
+import { WorkspaceInvitations } from "../../invitations";
+import { RepositoriesSection } from "../../sections/repositories";
+import { ReviewsSection } from "../../sections/reviews";
+import { FindingsSection } from "../../sections/findings";
+import { RulesSection } from "../../sections/rules";
+import { TeamSection } from "../../sections/team";
+import { KnowledgeSection } from "../../sections/knowledge";
+import { UsageSection } from "../../sections/usage";
+import { ReviewSettingsSection } from "../../sections/settings-review";
+import { navigation } from "../../sections/shared";
+import { loadDashboard } from "../../load";
 
 export default async function Dashboard(props: {
   params: Promise<{ section?: string[] }>;
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const ctx = await loadDashboard(props);
-  const { active, data, filters, isAdmin, organization, reviewDetailId, route, savedTeam, scopes, section, selectedTeam, user, view } = ctx;
+  const { active, data, filters, isAdmin, organization, route, savedTeam, section, selectedTeam, user, view } = ctx;
   return (
-    <div className="shell portal">
-      <PortalNav organization={(organization.name ?? "Workspace")+(selectedTeam?" / "+selectedTeam.name:"")} role={organization.role} login={user.user.login} route={route} section={section[1]} team={filters.team} scopeSelector={<><form action={switchWorkspace}><label className="sr-only" htmlFor="workspace">Workspace</label><select key={organization._id} id="workspace" name="organizationId" defaultValue={organization._id}>{user.organizations.map(o => <option key={o._id} value={o._id}>{o.name}</option>)}</select><button className="small">Switch workspace</button></form><form action={switchTeam}><label htmlFor="scope-team">Team</label><select key={organization._id+":"+(selectedTeam?._id??"")} id="scope-team" name="teamId" defaultValue={selectedTeam?._id??""}><option value="">All accessible teams</option>{scopes.teams.map(t=><option key={t._id} value={t._id}>{t.name}</option>)}</select><input type="hidden" name="returnTo" value={"/dashboard/"+(reviewDetailId?"pulls":section.join("/"))}/><button className="small">Apply team</button></form><p className="muted">Team selection filters repository activity. Workspace administration applies across the workspace.</p><form action={createWorkspace}><label>New workspace name<input name="name" required maxLength={100}/></label><button>Create workspace</button></form></>}>
-        <SignOutForm action={logout} label="Sign out" />
-      </PortalNav>
+    <>
+      {/* Next scrolls a new page to the top only when its first element is off-screen. This marker sits at
+          the document top, so a page opened after a short scroll starts at the top, not under the header. */}
+      <span className="page-top" aria-hidden="true" />
       <main className={view === "reviews" ? (ctx.detail || ctx.pull ? "content pull-detail-page" : "content pulls-page") : "content"}>
         {/* The Pull Requests tab follows Greptile's chrome-free layout; Live still refreshes running reviews. */}
         {view === "reviews" ? <><h1 className="sr-only">Pull Requests</h1><div className="pulls-live"><Live active={active} /></div></> : <header>
           <div>
-            <h1>{view === "overview" ? "Analytics" : view === "reviews" ? "Pull Requests" : route === "memory" ? ({clusters:"Cross-repository context",preferences:"Learned preferences",integrations:"Integrations",rules:"Custom rules",knowledge:"Knowledge Base"}[section[1]??"rules"]??"Memory") : route === "settings" ? settingsNavigation().find(([key])=>key===section[1])?.[1] : navigation.find((n) => n.toLowerCase() === view)}</h1>
+            <h1>{view === "overview" || view === "findings" ? "Analytics" : route === "memory" ? ({clusters:"Cross-repository context",preferences:"Learned preferences",integrations:"Integrations",rules:"Custom rules",knowledge:"Knowledge Base"}[section[1]??"rules"]??"Memory") : route === "settings" ? settingsNavigation().find(([key])=>key===section[1])?.[1] : navigation.find((n) => n.toLowerCase() === view)}</h1>
           </div>
           <Live active={active} />
         </header>}
         <WorkspaceInvitations invitations={user.invitations}/>
         {savedTeam&&!selectedTeam&&filters.team===undefined&&<p role="status">Your previously selected team is no longer accessible. Showing all accessible repositories; use the workspace menu to select a team.</p>}
-        {view === "overview" && needsSetup(organization) && <section className="setup-banner" aria-label="Workspace setup"><p><strong>Setup isn’t finished.</strong> {organization.onboarding?.reviewsPaused ? "Automatic reviews are paused until you choose when reviews run." : "Finish connecting repositories and choosing review behavior."}</p>{isAdmin ? <Link className="button primary small" href="/dashboard/onboarding">Resume setup</Link> : <p className="muted">A workspace admin is completing setup.</p>}</section>}
-        {view === "overview" && <AnalyticsView token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} locked={ctx.locked} />}
+        {(view === "overview" || view === "findings") && <SubNav label="Analytics views" active={view === "findings" ? "bugs" : "reviews"} items={[["reviews", "/dashboard/analytics", "PR Reviews", "chartBar"], ["bugs", "/dashboard/analytics/findings", "Bugs Caught", "bug"]]}>
+          {view === "overview" ? <>
+            {needsSetup(organization) && <section className="setup-banner" aria-label="Workspace setup"><p><strong>Setup isn’t finished.</strong> {organization.onboarding?.reviewsPaused ? "Automatic reviews are paused until you choose when reviews run." : "Finish connecting repositories and choosing review behavior."}</p>{isAdmin ? <Link className="button primary small" href="/dashboard/onboarding">Resume setup</Link> : <p className="muted">A workspace admin is completing setup.</p>}</section>}
+            <AnalyticsView token={user.token} organizationId={organization._id} repositories={data.repositories} filters={filters} locked={ctx.locked} />
+          </> : <FindingsSection ctx={ctx} />}
+        </SubNav>}
         {view === "repositories" && <RepositoriesSection ctx={ctx} />}
         {view === "reviews" && <ReviewsSection ctx={ctx} />}
-        {view === "findings" && <FindingsSection ctx={ctx} />}
         {view === "rules" && !["clusters","integrations","preferences"].includes(section[1] ?? "") && <RulesSection ctx={ctx} />}
         {view === "team" && <TeamSection ctx={ctx} />}
         {view === "knowledge" && <KnowledgeSection ctx={ctx} />}
@@ -80,6 +82,6 @@ export default async function Dashboard(props: {
         {route === "settings" && section[1] === "providers" && (isAdmin ? <ProvidersPanel token={user.token} organizationId={organization._id} connectionId={filters.connection} projectId={filters.project} after={filters.after} inspect={filters.inspect} /> : <p>Workspace admin access required.</p>)}
         {route === "settings" && ["review","keys"].includes(section[1]) && <ReviewSettingsSection ctx={ctx} />}
       </main>
-    </div>
+    </>
   );
 }
