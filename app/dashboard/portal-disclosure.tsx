@@ -1,11 +1,14 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, type ReactNode } from "react";
 
 export function PortalDisclosure({ className, label, children }: {
   className: string; label: ReactNode; children: ReactNode;
 }) {
-  const ref = useRef<HTMLDetailsElement>(null);
+  const ref = useRef<HTMLDetailsElement>(null), pathname = usePathname();
+  // The app chrome stays mounted across navigations, so close the menu when the page changes.
+  useEffect(() => { if (ref.current) ref.current.open = false; }, [pathname]);
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
       const details = ref.current;

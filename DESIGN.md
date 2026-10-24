@@ -15,10 +15,10 @@ existing classes and tokens; avoid inline colours.
 - **One accent, used sparingly.** Ember is for links, focus rings, emphasis and the dot in the logo. Never use it as a background fill.
 - **Two weights.** Inter at 400 for headings and body text, 500 for labels and small headings. Headings never use 600 or 700, and they tighten as they grow.
 - **Monospace for machine text.** File paths, SHAs, timestamps, metric labels, badges and code are set in JetBrains Mono.
-- **Square-ish corners.** Use 4px on controls, cards and tiles, and 8px on popovers and windows. No pills.
+- **Square-ish corners.** Use 4px on controls, cards and tiles, and 8px on popovers and windows. No pills. Main tabs are the exception: they are square, so the hover fill meets the rule below them.
 - **No gradients, glows, pure white or pure black.**
 - **Motion explains state; on the landing page it also tells the story.**
-  - In the app, entrances are short (240–320 ms), and loops are kept for waiting states, such as a provider that isn't connected yet or files that are still indexing.
+  - In the app, entrances are short (240–320 ms; tabs are quicker, see Tabs), and loops are kept for waiting states, such as a provider that isn't connected yet or files that are still indexing.
   - The landing page is choreographed: content eases in over about a second as it scrolls into view, and one section plays as a pinned sequence. See [Landing motion](#landing-motion).
   - Everywhere, motion moves only transforms and opacity, and every screen is complete without it: `prefers-reduced-motion` stops the animation and leaves the final state.
 
@@ -75,10 +75,18 @@ All of these are global classes in `app/globals.css`.
   - `.small` is a compact variant.
 - **Inputs.** Inputs, selects and textareas have a transparent background and a `--line-strong` border, with an ember focus ring. Selects use a custom chevron. `label` stacks its control under the text; `label.check` puts a checkbox inline with its text.
 - **Cards.** A bare `section` is a card: `--surface`, a hairline border and a 4px radius. An `article` inside a card is separated by hairlines. `.empty` is a dashed, transparent card for empty states.
-- **App chrome** (`app/dashboard/portal.tsx`).
-  - `.portal-top` is a sticky 52px identity row, with the logo, workspace menu and profile menu, above a `.primary-nav` row of tabs. The active tab is a `--soft` tile.
-  - `.secondary-nav` is a sticky 232px sidebar with mono group labels.
-  - Menus are 8px popovers with `--shadow-popover`.
+- **App chrome** (`app/dashboard/(portal)/layout.tsx`, `app/dashboard/portal.tsx`). The portal layout renders the chrome once. It stays mounted while pages change, so switching tabs never shows a loading screen.
+  - `.portal-top` is sticky. A 48px identity row holds the logo, the workspace menu (with a role badge and ⇅) and 28px bordered icon buttons for Docs, Refer someone and the account menu. Below it is the 36px `.primary-nav` row. `--header-h` is 85px: 48 + 36 + the 1px rule.
+  - Main tabs (`PrimaryTabs`) are links with a 16px icon and a 14px/500 label, and a `--surface-2` fill on hover. One 2px ink bar, `.tab-indicator`, slides and stretches to the current tab.
+  - `.secondary-nav` is a sticky 240px sidebar for Memory and Settings (`app/dashboard/sidebar.tsx`). Rows are 36px with an icon, and the current page has a `--soft` fill. Group labels are 13px semibold, separated by hairlines. Settings → Code Review expands into links to the page's sections, and the one in view is marked as you scroll.
+  - Menus are 8px popovers with `--shadow-popover`. They close when the page changes.
+  - Below 640px the main tabs become a bottom bar: an icon over a 12px label ("PRs" for Pull Requests) and a static 32×2px marker on the current tab. Below 600px each sidebar becomes a select.
+- **Tabs** (`app/dashboard/tabs.tsx`). Greptile's tab anatomy in our tokens.
+  - `PrimaryTabs` and `SubNav` are links. A click marks the tab at once and navigates in a transition, so the old page stays on screen until the new one is ready. `SubNav` gives Analytics its PR Reviews and Bugs Caught views, and the review page its Overview, Review, Discussion and Code tabs (`?tab=`).
+  - `PanelTabs` are ARIA tabs over panels that are all rendered and hidden until selected, used by the landing replicas. Arrow keys, Home and End move between tabs.
+  - In-page tabs are 32px. A bordered `.tab-box` slides over the list's hairline, and the panel that comes in fades up 4px.
+  - Timing: the main bar slides in 220 ms `cubic-bezier(0.16, 1, 0.3, 1)`; the box and the panel fade take 200 ms; sidebar carets and section links take 150 ms. Bars jump into place on first paint and on resize.
+- **Icons** (`app/ui/icons.tsx`). Phosphor regular paths (MIT), drawn inline and `aria-hidden`. Each sits beside a visible or screen-reader label: 16px in tabs and sidebars, 20px in the phone tab bar.
 - **Data.**
   - `.metrics` is a hairline-divided grid with mono labels and 36px tabular numbers.
   - `.badge` is a mono 11px tinted chip, and status names map to tones. For example, `critical` and `high` are red, `medium` is amber, `completed` is green, `running` is ember, and `low` and `queued` are muted.
@@ -156,7 +164,7 @@ The landing page's motion lives in `app/landing/motion.tsx`, with its styles at 
 - Links inside running text on public pages are underlined, so they don't rely on colour alone.
 - Status is never shown by colour alone: badges always carry their text.
 - Layouts hold at 390px without horizontal page scroll in both themes. Wide tables and diffs scroll inside their own containers. `pnpm test:e2e` checks this.
-- `prefers-reduced-motion` turns off transitions, the skeleton pulse, every guided-setup animation and all landing motion, including smooth scrolling.
+- `prefers-reduced-motion` turns off transitions (tab bars jump instead of sliding), the skeleton pulse, the tab panel and section-link fades, every guided-setup animation and all landing motion, including smooth scrolling.
 
 ## Adding UI
 
