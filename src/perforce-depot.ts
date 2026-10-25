@@ -151,7 +151,7 @@ export async function p4ShelfInput(client:P4CodeReview,projectId:string,reviewId
 
 export async function uploadP4Index(artifactInput:unknown,repositoryInput:string,configurationInput:unknown){
   const repositoryId=z.string().regex(/^[a-z0-9]{20,64}$/).parse(repositoryInput);
-  const artifact=z.object({codeReviewInstance:z.string().url(),inventory:z.unknown()}).parse(artifactInput);
+  const artifact=z.object({codeReviewInstance:z.string().url(),inventory:z.unknown().optional()}).parse(artifactInput);
   const inventory=parseP4SubmittedInventory(artifact.inventory);if(Buffer.byteLength(JSON.stringify(inventory))>750000||inventory.manifest.length>8000)throw new Error("P4 inventory exceeds hosted upload coverage (750 KB / 8,000 records)");
   const {config,origin}=hostedOrigin(configurationInput);
   const response=await fetch(new URL("/api/p4/index",origin),{method:"POST",redirect:"error",headers:{authorization:"Bearer "+config.apiKey,"content-type":"application/json"},body:JSON.stringify({repositoryId,instance:artifact.codeReviewInstance,inventory}),signal:AbortSignal.timeout(60000)});

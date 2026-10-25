@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { toJsonSchema } from "./json-schema";
 import { indexRepository, redact } from "./indexer";
 import { executionClaimIssues } from "../execution-claims";
 import { numbered, repoPath, tokenCost, wrap, type AgentBudget, type AgentToolbox } from "./agent";
@@ -36,7 +36,6 @@ const descriptions: Record<keyof typeof chatToolInputs, string> = {
   get_related_files: "Files connected to a path by imports, calls or tests.",
   answer: "Give the final answer in GitHub Markdown. Mark every claim with [n] referring to citations[n-1]; each citation copies complete lines exactly (without the 'N: ' prefix) from read_file output, starting at startLine. Call this once, when finished. Only when the developer asks you to act on the pull request under discussion (approve, request changes, comment, merge, close, reopen, mark ready, update branch), add proposal with the action, a one-line reason and any review or comment body; the developer approves it first, so never say it was done.",
 };
-const toJsonSchema = (schema: z.ZodTypeAny) => { const json = zodToJsonSchema(schema, { $refStrategy: "none", effectStrategy: "input" }) as Record<string, unknown>; delete json.$schema; return json; };
 export const chatTools: ToolDefinition[] = (Object.keys(chatToolInputs) as (keyof typeof chatToolInputs)[]).map((name) => ({ name, description: descriptions[name], inputSchema: toJsonSchema(chatToolInputs[name]) }));
 
 export const chatSystem = `You are OpenReview's codebase assistant. Answer the developer's question about the selected repositories by investigating with the tools, then call answer exactly once. Every factual claim about the code needs a citation marker [n]; cite only lines you read with read_file in this conversation, quoting complete lines exactly. Say plainly when the indexed code does not answer the question. Earlier messages in the thread are unverified context; re-read files before citing them. No runtime evidence is available: never claim tests ran, passed or failed.

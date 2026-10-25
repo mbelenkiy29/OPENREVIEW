@@ -33,8 +33,8 @@ export const revoke=mutation({args:{token:v.string(),id:v.id("providerInstallReq
 }});
 export const connectBitbucket=mutation({args:{secret:v.string(),tokenHash:v.string(),installationId:v.string(),workspaceId:v.string(),credentials:v.string(),invocationId:v.string(),invocationExpiresAt:v.number()},handler:async(ctx,a)=>{
  service(a.secret);const r=await request(ctx,a.tokenHash);
- const workspace=z.string().uuid().parse(a.workspaceId),prefix="ari:cloud:ecosystem::installation/";
- if(!a.installationId.startsWith(prefix)||!z.string().uuid().safeParse(a.installationId.slice(prefix.length)).success||!a.invocationId||a.invocationId.length>200||!a.credentials||a.credentials.length>40000||a.invocationExpiresAt<=Date.now()||a.invocationExpiresAt>Date.now()+300000)throw new Error("Invalid verified Forge installation");
+ const workspace=z.guid().parse(a.workspaceId),prefix="ari:cloud:ecosystem::installation/";
+ if(!a.installationId.startsWith(prefix)||!z.guid().safeParse(a.installationId.slice(prefix.length)).success||!a.invocationId||a.invocationId.length>200||!a.credentials||a.credentials.length>40000||a.invocationExpiresAt<=Date.now()||a.invocationExpiresAt>Date.now()+300000)throw new Error("Invalid verified Forge installation");
  const receiptKey="bitbucket:"+a.invocationId;
  if(await ctx.db.query("providerReceipts").withIndex("by_jti",q=>q.eq("jti",receiptKey)).unique())throw new Error("Forge invocation already consumed");
  const old=await ctx.db.query("providerConnections").withIndex("by_installation",q=>q.eq("kind","bitbucket-cloud").eq("installationId",a.installationId)).unique();

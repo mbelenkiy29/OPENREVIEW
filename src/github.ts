@@ -84,7 +84,7 @@ export class Github {
     const app = new Github(jwt, configuration?.base);
     const token = await app.request(
       `/app/installations/${id}/access_tokens`,
-      z.object({ token: z.string(), permissions: z.record(z.string()) }),
+      z.object({ token: z.string(), permissions: z.record(z.string(), z.string()) }),
       { method: "POST", body: "{}" },
     );
     if (
@@ -210,7 +210,7 @@ export class Github {
           login: z.string(),
           type: z.string(),
         }),
-        permissions: z.record(z.string()),
+        permissions: z.record(z.string(), z.string()),
       }),
     );
   }

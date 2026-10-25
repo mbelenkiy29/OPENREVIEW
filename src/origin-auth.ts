@@ -1,6 +1,7 @@
 import { createHash, createPublicKey, verify, type JsonWebKey } from "node:crypto";
 import { importPKCS8, SignJWT, jwtVerify, createLocalJWKSet } from "jose";
 import { z } from "zod";
+import { isoTimestamp } from "./iso-timestamp";
 
 export const originApi="https://api.cursor.com/v1/origin";
 export const originScopes=["repository:metadata:read","repository:contents:read","repository:pull_requests:read","repository:pull_requests:reviews:read","repository:pull_requests:reviews:write","repository:checks:read"];
@@ -29,7 +30,7 @@ export async function originInstallationToken(credentials:z.infer<typeof originC
  const jwt=await new SignJWT({}).setProtectedHeader({alg:"EdDSA",kid:c.appId,typ:"JWT"}).setIssuer(c.appId).setAudience("origin-apps").setIssuedAt().setExpirationTime("5m").sign(key);
  const response=await fetch(originApi+"/app/installations/"+encodeURIComponent(c.installationId)+"/access_tokens",{method:"POST",redirect:"error",headers:{authorization:"Bearer "+jwt,"content-type":"application/json"},body:JSON.stringify({scopes:originScopes}),signal:AbortSignal.timeout(30000)});
  if(!response.ok)throw new Error("Origin installation authentication rejected ("+response.status+")");
- const token=z.object({token:z.string().startsWith("oit_"),expiresAt:z.string().datetime({offset:true})}).parse(await response.json());
+ const token=z.object({token:z.string().startsWith("oit_"),expiresAt:isoTimestamp}).parse(await response.json());
  if(Date.parse(token.expiresAt)<=Date.now() || Date.parse(token.expiresAt)>Date.now()+15*60000)throw new Error("Origin returned an invalid installation-token expiry");
  return token;
 }
@@ -58,7 +59,7 @@ async function originReadAccess(credentials:z.infer<typeof originCredentials>,pe
  const jwtExpiresAt=Math.floor(Date.now()/1000)+300,key=await importPKCS8(c.privateKey,"EdDSA"),jwt=await new SignJWT({}).setProtectedHeader({alg:"EdDSA",kid:c.appId,typ:"JWT"}).setIssuer(c.appId).setAudience("origin-apps").setIssuedAt().setExpirationTime(jwtExpiresAt).sign(key);
  const response=await fetch(originApi+"/app/installations/"+encodeURIComponent(c.installationId)+"/user_access_tokens",{method:"POST",redirect:"error",headers:{authorization:"Bearer "+jwt,"content-type":"application/json"},body:JSON.stringify({userId:p.userId,scopes:["repository:metadata:read","repository:contents:read","repository:pull_requests:read"],repositoryIds:[repositoryId]}),signal:AbortSignal.timeout(30000)});
  if(!response.ok)throw new Error("Origin personal access rejected ("+response.status+")");
- const token=z.object({token:z.string().min(1).max(20000),expiresAt:z.string().datetime({offset:true})}).parse(await response.json());
+ const token=z.object({token:z.string().min(1).max(20000),expiresAt:isoTimestamp}).parse(await response.json());
  if(Date.parse(token.expiresAt)<=Date.now()||Date.parse(token.expiresAt)>jwtExpiresAt*1000)throw new Error("Origin personal token expiry invalid");
  const native=await fetch(originApi+"/repos/_/"+encodeURIComponent(repositoryId),{redirect:"error",headers:{authorization:"Bearer "+token.token},signal:AbortSignal.timeout(30000)});
  if(!native.ok)throw new Error("Origin personal repository access rejected ("+native.status+")");

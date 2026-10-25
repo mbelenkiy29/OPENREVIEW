@@ -11,7 +11,7 @@ import { labelTier, tiers, wantsReview } from "../src/review-tier";
 
 const payloadSchema = z.object({
   action: z.string().optional(),
-  installation: z.object({ id: z.number(), permissions: z.record(z.string()).optional() }).optional(),
+  installation: z.object({ id: z.number(), permissions: z.record(z.string(), z.string()).optional() }).optional(),
   repository: z
     .object({
       id: z.number(),

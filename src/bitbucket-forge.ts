@@ -2,7 +2,7 @@ import {createRemoteJWKSet,customFetch,jwtVerify} from "jose";
 import {z} from "zod";
 
 const keys=createRemoteJWKSet(new URL("https://forge.cdn.prod.atlassian-dev.net/.well-known/jwks.json"),{[customFetch]:(url,options)=>fetch(url,{...options,redirect:"error"})});
-const uuid=z.string().uuid();
+const uuid=z.guid();
 const workspaceId=z.string().transform(s=>s.replace(/^\{(.+)\}$/,"$1")).pipe(uuid);
 const claims=z.object({
  app:z.object({id:z.string(),environment:z.object({id:z.string()}),module:z.object({type:z.string(),key:z.string()}).optional(),installationId:z.string().optional(),installation:z.object({id:z.string().refine(s=>s.startsWith("ari:cloud:ecosystem::installation/")&&uuid.safeParse(s.slice("ari:cloud:ecosystem::installation/".length)).success),contexts:z.array(z.object({name:z.string(),apiBaseUrl:z.string(),workspaceId:workspaceId.optional()})).min(1).max(20)})}),
