@@ -15,6 +15,7 @@ if (sentryDsn)
     beforeSend: scrubSentryEvent,
     beforeSendTransaction: scrubSentryTransaction,
     beforeBreadcrumb: scrubBreadcrumb,
+    denyUrls: [/\/sdk\/v3\/uj\.js/], // UserJot widget (cdn.userjot.com): its storage errors aren't ours
   });
 
 // PostHog sets a cookie, so it starts only for visitors who accepted analytics (the banner in
