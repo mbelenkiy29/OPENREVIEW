@@ -259,8 +259,10 @@ test('an admin switches plans in the app: the seat price is swapped with prorati
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'starter',legacy:true});
 });
 
-test('a new workspace must choose a plan: nothing indexes, reviews or finishes setup until Stripe confirms the trial',async()=>{
- const {t,alice,bob,repo}=await setup();
+test('a second workspace must choose a plan: nothing indexes, reviews or finishes setup until Stripe confirms the trial',async()=>{
+ const {t,alice,bob,org,repo}=await setup();
+ // Alice's first workspace (Acme) started on Free when she created it, so this one has no Free allowance.
+ expect((await t.run(ctx=>ctx.db.get(org)))?.plan).toBe('free');
  const fresh=await t.mutation(api.users.createOrganization,{token:alice.token,name:'New customer'});
  expect((await t.run(ctx=>ctx.db.get(fresh)))?.planRequired).toBe(true);
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:fresh})).toMatchObject({planRequired:true,planSelected:false,planMissing:true});
@@ -283,18 +285,17 @@ test('a new workspace must choose a plan: nothing indexes, reviews or finishes s
  expect(typeof (await t.run(ctx=>ctx.db.get(fresh)))?.planSelectedAt).toBe('number');
  await deliver(t,{id:'evt_new_trialing',type:'customer.subscription.updated',created:created+2,data:{object:{id:'sub_new',customer:'cus_new',status:'trialing',metadata:{organizationId:fresh},items:{data:[{id:'si_new',quantity:1,current_period_end:created+14*86400,price:{id:'price_pro'}}]}}}});
  expect((await t.run(ctx=>ctx.db.get(fresh)))?.plan).toBe('pro');
- expect((await t.run(ctx=>ctx.db.query('auditEvents').collect())).filter(e=>e.action==='billing.plan_selected').map(e=>[e.organizationId,e.target])).toEqual([[fresh,'pro']]);
+ expect((await t.run(ctx=>ctx.db.query('auditEvents').collect())).filter(e=>e.action==='billing.plan_selected').map(e=>[e.organizationId,e.target])).toEqual([[org,'free'],[fresh,'pro']]);
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:fresh})).toMatchObject({planSelected:true,planMissing:false});
  await t.mutation(api.repositories.configure,{token:alice.token,repositoryId:newRepo._id,enabled:true});
  expect(await t.mutation(api.onboarding.advance,{token:alice.token,organizationId:fresh,step:'plan'})).toBe('connect');
- // Free needs no Checkout: an admin picks it and setup continues (bob, since alice already has Free in Acme).
+ // An owner's first workspace needs no choice: it starts on Free and setup goes on to connect (bob owns none yet).
  const freeOrg=await t.mutation(api.users.createOrganization,{token:bob.token,name:'Free customer'});
- await expect(t.mutation(api.onboarding.advance,{token:bob.token,organizationId:freeOrg,step:'plan'})).rejects.toThrow(/Choose a plan/);
- await t.mutation(api.billing.chooseFreePlan,{token:bob.token,organizationId:freeOrg});
  expect((await t.run(ctx=>ctx.db.get(freeOrg)))?.plan).toBe('free');
+ await t.mutation(api.billing.chooseFreePlan,{token:bob.token,organizationId:freeOrg});
  expect(await t.query(api.billing.status,{token:bob.token,organizationId:freeOrg})).toMatchObject({plan:'free',planSelected:true,planMissing:false,freeElsewhere:null});
  expect(await t.mutation(api.onboarding.advance,{token:bob.token,organizationId:freeOrg,step:'plan'})).toBe('connect');
- expect((await t.run(ctx=>ctx.db.query('auditEvents').collect())).filter(e=>e.action==='billing.plan_selected').map(e=>[e.organizationId,e.target])).toEqual([[fresh,'pro'],[freeOrg,'free']]);
+ expect((await t.run(ctx=>ctx.db.query('auditEvents').collect())).filter(e=>e.action==='billing.plan_selected').map(e=>[e.organizationId,e.target])).toEqual([[org,'free'],[fresh,'pro'],[freeOrg,'free']]);
  // Workspaces from before plans were required are untouched.
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:repo.organizationId})).toMatchObject({planRequired:false,planMissing:false});
 });
@@ -337,14 +338,15 @@ test('Free is one workspace per owner: a second one gets no allowance until it s
  await deliver(t,{id:'evt_side_sub',type:'customer.subscription.updated',created:created+1,data:{object:{id:'sub_side',customer:'cus_side',status:'active',metadata:{organizationId:second},items:{data:[{id:'si_side',quantity:1,current_period_end:created+30*86400,price:{id:'price_seat'}}]}}}});
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:second})).toMatchObject({plan:'starter',freeElsewhere:null,allowed:true});
  await spend(t,second);
- // Once Acme is paid too, the next workspace may take Free.
+ // Once Acme is paid too, the next workspace starts on Free.
  await t.run(async ctx=>{const account=(await ctx.db.query('billingAccounts').withIndex('by_org',q=>q.eq('organizationId',acme)).unique())!;await ctx.db.patch(account._id,{subscriptionId:'sub_acme',status:'active',seats:1});});
  const third=await workspace('Third');
- await t.mutation(api.billing.chooseFreePlan,{token:alice.token,organizationId:third});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:third})).toMatchObject({plan:'free',planSelected:true,planMissing:false,freeElsewhere:null});
  await spend(t,third);
  // With billing off (self-hosted) there is no Free plan to share.
  delete process.env.BILLING_ENABLED;
  const fourth=await workspace('Self-hosted');
+ expect((await t.run(ctx=>ctx.db.get(fourth)))?.planSelectedAt).toBeUndefined();
  for(let i=0;i<5;i++)await reserve(t,fourth);
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:fourth})).toEqual({enabled:false});
 });

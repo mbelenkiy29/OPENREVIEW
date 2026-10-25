@@ -68,16 +68,21 @@ async function decide(ctx: QueryCtx, organizationId: Id<"organizations">, accoun
   const config = billingConfig(), decision = billingDecision(account, used, now, config, request);
   return decision.plan === "free" ? billingDecision(account, used, now, config, request, await freeElsewhere(ctx, organizationId, now)) : decision;
 }
-// Free needs no Stripe confirmation: an admin picks it and the workspace can start.
+// Free needs no Stripe confirmation, so the workspace can start at once. Returns the name of the owner's
+// other Free workspace instead when that one already has the Free allowance.
+export async function startOnFree(ctx: MutationCtx, organizationId: Id<"organizations">, userId: Id<"users">): Promise<string | undefined> {
+  const organization = await ctx.db.get(organizationId);
+  if (!organization || organization.planSelectedAt) return;
+  const taken = await freeElsewhere(ctx, organizationId, Date.now());
+  if (taken) return taken;
+  await ctx.db.patch(organizationId, { planSelectedAt: Date.now(), plan: "free" });
+  await audit(ctx, organizationId, userId, "billing.plan_selected", "free");
+}
 export const chooseFreePlan = mutation({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
   if (!billingConfig().enabled) throw new Error("Billing is disabled on this deployment");
-  const organization = await ctx.db.get(a.organizationId);
-  if (!organization || organization.planSelectedAt) return;
-  const taken = await freeElsewhere(ctx, a.organizationId, Date.now());
+  const taken = await startOnFree(ctx, a.organizationId, user._id);
   if (taken) throw new ConvexError("Billing: " + freeTakenReason(taken));
-  await ctx.db.patch(a.organizationId, { planSelectedAt: Date.now(), plan: "free" });
-  await audit(ctx, a.organizationId, user._id, "billing.plan_selected", "free");
 } });
 // Whether the workspace's plan includes a feature; with billing off every feature is unlocked.
 export async function hasEntitlement(ctx: QueryCtx, organizationId: Id<"organizations">, key: Entitlement) {

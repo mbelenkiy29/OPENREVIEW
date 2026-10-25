@@ -1,6 +1,6 @@
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
-import { scheduleSeatSync } from "./billing";
+import { scheduleSeatSync, startOnFree } from "./billing";
 import { billingConfig } from "../src/billing";
 import { githubAccounts, linkIdentity } from "./identity";
 import { v } from "convex/values";
@@ -66,7 +66,7 @@ export const createOrganization = mutation({
       onboarding: { startedAt: Date.now() },
       // Opts the workspace into one-time emails (convex/lifecycleEmails.ts); older workspaces have none.
       lifecycleEmails: [],
-      // On billing deployments a new workspace chooses a plan before anything else runs.
+      // On billing deployments a new workspace needs a plan before anything else runs.
       ...(billingConfig().enabled ? { planRequired: true } : {}),
       createdAt: Date.now(),
     });
@@ -75,6 +75,9 @@ export const createOrganization = mutation({
       userId: user._id,
       role: "owner",
     });
+    // The owner's first Free workspace starts on Free, so setup goes straight to connecting code; a
+    // later one chooses Starter or Pro on the plan step (one Free workspace per owner).
+    if (billingConfig().enabled) await startOnFree(ctx, organizationId, user._id);
     await bindReferralOnWorkspace(ctx, user._id, organizationId);
     return organizationId;
   },
