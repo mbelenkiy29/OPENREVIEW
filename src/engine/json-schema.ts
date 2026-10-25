@@ -1,5 +1,4 @@
-import type { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z } from "zod";
 
 const anthropicFormats = new Set(["date-time", "time", "date", "duration", "email", "hostname", "uri", "ipv4", "ipv6", "uuid"]);
 const bounds = ["minLength", "maxLength", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "pattern", "maxItems", "default"];
@@ -8,11 +7,24 @@ const bounds = ["minLength", "maxLength", "minimum", "maximum", "exclusiveMinimu
 // rejects length/number bounds and open objects, so those are stripped there; zod still enforces
 // every constraint (and refinements) on the returned value. Returns undefined when the schema
 // cannot be expressed (non-object root, any/never/record nodes), keeping prompt-only JSON mode.
+// A zod schema's input as JSON Schema, in the shape zod-to-json-schema produced (and the prompts were tuned on):
+// objects closed unless the schema says otherwise, and no safe-integer bounds from .int(). Throws on
+// unrepresentable nodes (transforms' outputs, bigint, ...).
+export function toJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
+  const json = z.toJSONSchema(schema, { io: "input", target: "draft-7", override: ({ jsonSchema: node }) => {
+    if (node.type === "object" && node.additionalProperties === undefined) node.additionalProperties = false;
+    if (node.maximum === Number.MAX_SAFE_INTEGER) delete node.maximum;
+    if (node.minimum === Number.MIN_SAFE_INTEGER) delete node.minimum;
+  } }) as Record<string, unknown>;
+  delete json.$schema;
+  return json;
+}
+
 export function structuredSchema(schema: z.ZodTypeAny, target: "anthropic" | "openai"): Record<string, unknown> | undefined {
   let json: Record<string, unknown>;
-  try { json = zodToJsonSchema(schema, { $refStrategy: "none", effectStrategy: "input" }) as Record<string, unknown>; }
+  try { json = toJsonSchema(schema); }
   catch { return undefined; }
-  delete json.$schema; delete json.definitions;
+  delete json.definitions;
   if (json.type !== "object") return undefined;
   let expressible = true;
   const walk = (node: unknown): unknown => {

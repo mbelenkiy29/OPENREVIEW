@@ -21,7 +21,7 @@ import { wantsReview } from "../src/review-tier";
 import { scmNetwork } from "../src/scm-transport";
 import { P4CodeReview,p4Credential,type P4Project,type P4Review,type P4ApprovalInspection } from "../src/perforce";
 import picomatch from "picomatch";
-const originEnvelope=z.object({deliveryId:z.string(),appId:z.string(),installationId:z.string().optional(),event:z.object({type:z.string(),payload:z.record(z.unknown())})});
+const originEnvelope=z.object({deliveryId:z.string(),appId:z.string(),installationId:z.string().optional(),event:z.object({type:z.string(),payload:z.record(z.string(),z.unknown())})});
 export const updateNetwork=action({args:{token:v.string(),connectionId:v.id("providerConnections"),apiUrl:v.optional(v.string()),caBundle:v.optional(v.string()),proxyUrl:v.optional(v.string())},handler:async(ctx,a):Promise<void>=>{
  await ctx.runQuery(internal.providerConnections.authorizeAdmin,{token:a.token,connectionId:a.connectionId});
  const c=await ctx.runQuery(internal.providerConnections.data,{id:a.connectionId});

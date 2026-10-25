@@ -17,7 +17,7 @@ import { retrying } from "./scm-transport";
 const apiVersion = "7.1";
 const devOpsScope = "499b84ac-1321-427f-aa17-267ca6975798/.default";
 export class AzureDevOpsError extends Error { constructor(readonly status: number, path: string) { super(`Azure DevOps ${status} at ${path.split("?")[0]}`); } }
-const entra = z.object({ tenantId: z.string().uuid(), clientId: z.string().uuid(), clientSecret: z.string().min(8) });
+const entra = z.object({ tenantId: z.guid(), clientId: z.guid(), clientSecret: z.string().min(8) });
 const identity = z.object({ id: z.string(), uniqueName: z.string().optional(), displayName: z.string().optional() });
 const commit = z.object({ commitId: z.string().regex(/^[a-f0-9]{40}$/) });
 const prSchema = z.object({ pullRequestId: z.number().int().positive(), title: z.string(), description: z.string().nullish(), isDraft: z.boolean().optional(), status: z.enum(["active", "completed", "abandoned", "notSet", "all"]), createdBy: identity, sourceRefName: z.string(), targetRefName: z.string(), lastMergeSourceCommit: commit, lastMergeTargetCommit: commit, repository: z.object({ id: z.string(), name: z.string(), project: z.object({ name: z.string() }) }) });
