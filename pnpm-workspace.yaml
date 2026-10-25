@@ -11,5 +11,3 @@ overrides:
   ws: 8.21.1
   # body-parser (via the MCP SDK) wants raw-body ^3; 4.0.0 rejects an unparseable `limit` instead of dropping the cap (AIKIDO-2026-274460).
   raw-body: 4.0.0
-patchedDependencies:
-  next@15.5.28: patches/next@15.5.28.patch
