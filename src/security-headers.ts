@@ -30,7 +30,9 @@ export function contentSecurityPolicy(nonce?: string, development = process.env.
     // UserJot also adds its stylesheets and the Google Fonts CSS for Inter.
     "style-src 'self' 'unsafe-inline' https://cdn.userjot.com https://fonts.googleapis.com",
     // UserJot serves post and team images through its media proxy; the Reddit pixel may fall back to an image beacon.
-    "img-src 'self' data: blob: https://media.userjot.com https://cdn.userjot.com https://alb.reddit.com",
+    // Profile pictures come from the sign-in provider (src/identity.ts): GitHub, Google (lh3–lh6), and GitLab.com
+    // uploads or Gravatar for GitLab accounts without one.
+    "img-src 'self' data: blob: https://media.userjot.com https://cdn.userjot.com https://alb.reddit.com https://avatars.githubusercontent.com https://*.googleusercontent.com https://gitlab.com https://secure.gravatar.com",
     // Our fonts ship in the bundle (@fontsource); UserJot's Inter comes from Google Fonts.
     "font-src 'self' https://fonts.gstatic.com",
     // PostHog and Sentry go through same-origin proxies (src/telemetry.ts). UserJot's API and live updates,

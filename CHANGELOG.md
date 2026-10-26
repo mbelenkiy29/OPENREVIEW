@@ -41,6 +41,7 @@
 - Switching tabs never shows a loading screen: the header and tabs stay in place, the tab you click is marked at once, and its underline slides there. On phones, the tabs scroll sideways at the top.
 - Dashboard pages load faster: independent data now loads in parallel.
 - Confirmation messages after saving show again; they were being dropped.
+- Your profile picture shows in the header again for GitHub, Google and GitLab accounts; the site's security policy had been blocking it.
 
 ### Landing page
 - The landing page now moves:
