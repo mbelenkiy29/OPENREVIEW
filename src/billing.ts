@@ -5,11 +5,11 @@ import type { Plan } from "./plans";
 // Starter and Pro are per-seat subscriptions that include model usage each month, metered in micro-dollars
 // of inference cost (pricier models use it faster). Past it, an admin-set monthly cap allows extra usage,
 // reported to Stripe as meter events. Paid plans start with a trial at Checkout (trialDays).
-export type BillingConfig = { enabled: boolean; trialDays: number; freeUsageMicros: number; usagePerSeatMicros: number; proUsagePerSeatMicros: number; graceDays: number };
+export type BillingConfig = { enabled: boolean; trialDays: number; freeUsageMicros: number; usagePerSeatMicros: number; proUsagePerSeatMicros: number; graceDays: number; starterFixesPerSeat: number; proFixesPerSeat: number };
 export const int = (value: string | undefined, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isInteger(n) && n >= min && n <= max ? n : fallback; };
 const usd = (value: string | undefined, fallback: number) => { const n = Number(value); return Math.round((value?.trim() && Number.isFinite(n) && n >= 0 && n <= 100_000 ? n : fallback) * 1e6); };
 export function billingConfig(env: Record<string, string | undefined> = process.env): BillingConfig {
-  return { enabled: env.BILLING_ENABLED === "true", trialDays: int(env.BILLING_TRIAL_DAYS, 14, 0, 365), freeUsageMicros: usd(env.BILLING_FREE_USAGE_USD, 3), usagePerSeatMicros: usd(env.BILLING_USAGE_PER_SEAT_USD, 6), proUsagePerSeatMicros: usd(env.BILLING_PRO_USAGE_PER_SEAT_USD, 12), graceDays: int(env.BILLING_GRACE_DAYS, 7, 0, 60) };
+  return { enabled: env.BILLING_ENABLED === "true", trialDays: int(env.BILLING_TRIAL_DAYS, 14, 0, 365), freeUsageMicros: usd(env.BILLING_FREE_USAGE_USD, 3), usagePerSeatMicros: usd(env.BILLING_USAGE_PER_SEAT_USD, 6), proUsagePerSeatMicros: usd(env.BILLING_PRO_USAGE_PER_SEAT_USD, 12), graceDays: int(env.BILLING_GRACE_DAYS, 7, 0, 60), starterFixesPerSeat: int(env.BILLING_STARTER_FIXES_PER_SEAT, 5, 0, 10_000), proFixesPerSeat: int(env.BILLING_PRO_FIXES_PER_SEAT, 20, 0, 10_000) };
 }
 // Billed seats: owners, admins and members; viewers are free.
 export const seatCount = (members: { role: string }[]) => members.filter((m) => m.role !== "viewer").length;
@@ -17,7 +17,7 @@ export const periodKey = (now: number) => new Date(now).toISOString().slice(0, 7
 /** When the current usage period (UTC calendar month) resets. */
 export const nextPeriodStart = (now: number) => { const d = new Date(now); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1); };
 export const usdText = (micros: number) => `$${(micros / 1e6).toFixed(2)}`;
-const resetText = (now: number) => new Date(nextPeriodStart(now)).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+export const resetText = (now: number) => new Date(nextPeriodStart(now)).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
 
 export type BillingAccount = { status: string; seats: number; trialEndsAt: number; pastDueSince?: number; subscriptionId?: string; spendCapUsd?: number; plan?: string };
 // limit, used and capMicros are micro-dollars; overage is true when this request runs past the included usage.
@@ -48,6 +48,13 @@ export function billingDecision(account: BillingAccount, used: number, now: numb
   if (freeElsewhere) return { ...base, limit: 0, allowed: false, reason: freeTakenReason(freeElsewhere) };
   if (over(config.freeUsageMicros)) return { ...base, allowed: false, reason: `This workspace used the Free plan's ${usdText(config.freeUsageMicros)} of usage for this month. Usage resets on ${resetText(now)}; a workspace admin can upgrade in Organization Settings → Billing & Usage.` };
   return { ...base, allowed: true };
+}
+
+/** Hosted agent fix runs a workspace gets each month, pooled across seats; null is unlimited (billing off). */
+export function fixRunLimit(decision: BillingDecision, seats: number, config: BillingConfig): number | null {
+  if (decision.plan === "disabled") return null;
+  if (decision.plan === "free") return 0;
+  return Math.max(1, seats) * (decision.plan === "pro" ? config.proFixesPerSeat : config.starterFixesPerSeat);
 }
 
 /** The 80% / 100% usage alert email; `used` is settled usage and `now` falls in the alert's period. */

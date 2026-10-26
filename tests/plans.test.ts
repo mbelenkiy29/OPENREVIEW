@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { entitled, entitlements, planForPrice, priceFor } from "../src/plans";
+import { billingConfig, billingDecision, fixRunLimit } from "../src/billing";
 
-test("only Pro unlocks the costly features, and self-hosted (billing off) unlocks everything", () => {
+test("only Pro unlocks the costly features (Starter also gets fix pull requests), and self-hosted (billing off) unlocks everything", () => {
   for (const key of entitlements) {
     assert.equal(entitled("pro", key), true, key);
-    assert.equal(entitled("starter", key), false, key);
+    assert.equal(entitled("starter", key), key === "fix.pullRequests", key);
     assert.equal(entitled("free", key), false, key);
     assert.equal(entitled("disabled", key), true, key);
     assert.equal(entitled("starter", key, true), true, "a grandfathered Starter subscription keeps it");
@@ -20,4 +21,13 @@ test("Stripe seat prices map to plans, monthly or annual; unknown prices map to 
   assert.equal(priceFor("pro", env), "price_p");
   assert.throws(() => priceFor("pro", {}), /Configure STRIPE_PRO_PRICE_ID/);
   assert.throws(() => priceFor("starter", { STRIPE_SEAT_PRICE_ID: "bad id" }), /Configure STRIPE_SEAT_PRICE_ID/);
+});
+
+test("hosted fix runs: none on Free, 5 per Starter seat and 20 per Pro seat, pooled; unlimited with billing off", () => {
+  const config = billingConfig({ BILLING_ENABLED: "true" }), now = Date.UTC(2026, 9, 14);
+  const plan = (account: Parameters<typeof billingDecision>[0]) => billingDecision(account, 0, now, config);
+  const free = plan({ status: "trial", seats: 3, trialEndsAt: now }), starter = plan({ status: "active", seats: 3, trialEndsAt: now, subscriptionId: "sub_1" }), pro = plan({ status: "active", seats: 3, trialEndsAt: now, subscriptionId: "sub_1", plan: "pro" });
+  assert.deepEqual([free, starter, pro].map((d) => fixRunLimit(d, 3, config)), [0, 15, 60]);
+  assert.equal(fixRunLimit(starter, 0, config), 5, "at least one seat");
+  assert.equal(fixRunLimit(billingDecision({ status: "trial", seats: 3, trialEndsAt: now }, 0, now, billingConfig({})), 3, config), null);
 });

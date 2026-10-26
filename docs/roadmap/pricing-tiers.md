@@ -54,7 +54,7 @@ Status: **gated** = enforced by `src/plans.ts` today; **planned** = on Pro by de
 | Extra usage up to an admin cap |  | ✓ | ✓ | live | none |
 | Deep reviews (agentic and hypothesis engines) |  |  | ✓ | gated | `review.deep` |
 | Generated reproduction tests |  |  | ✓ | gated | `review.reproTests` |
-| Fix pull requests |  |  | ✓ | gated | `fix.pullRequests` |
+| Fix pull requests (5 / 20 runs per seat a month) |  | ✓ | ✓ | gated | `fix.pullRequests` |
 | Requirements check from Linear, Jira, Confluence and Notion |  |  | ✓ | gated | `context.requirements` |
 | Learned conventions from human reviewers |  |  | ✓ | gated | `memory.conventions` |
 | Public API keys |  |  | ✓ | gated | `api.access` |

@@ -3,11 +3,12 @@
 export const plans = ["free", "starter", "pro"] as const;
 export type Plan = (typeof plans)[number];
 // Pro features: the ones that cost us to run, plus the team and admin features. Security checks never are.
+// Starter also gets hosted fix pull requests, with a smaller monthly run limit (fixRunLimit in src/billing.ts).
 export const entitlements = ["review.deep", "review.reproTests", "fix.pullRequests", "context.requirements", "memory.conventions", "api.access", "analytics.history", "auth.sso", "audit.log"] as const;
 export type Entitlement = (typeof entitlements)[number];
 export const planCatalog: Record<Plan, { name: string; entitlements: readonly Entitlement[] }> = {
   free: { name: "Free", entitlements: [] },
-  starter: { name: "Starter", entitlements: [] },
+  starter: { name: "Starter", entitlements: ["fix.pullRequests"] },
   pro: { name: "Pro", entitlements },
 };
 // legacy: a Starter subscription from before Pro existed keeps every feature it had (grandfathered).
@@ -16,7 +17,7 @@ export const entitled = (plan: Plan | "disabled", key: Entitlement, legacy = fal
 export const upgradeNote: Record<Entitlement, string> = {
   "review.deep": "Deep reviews are on the Pro plan, so this review ran at the standard tier.",
   "review.reproTests": "Generated reproduction tests are on the Pro plan.",
-  "fix.pullRequests": "Fix pull requests are on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage.",
+  "fix.pullRequests": "Fix pull requests are on the Starter and Pro plans; a workspace admin can upgrade in Organization Settings → Billing & Usage.",
   "context.requirements": "Linked Linear, Jira, Confluence and Notion requirements are on the Pro plan, so they were not checked in this review.",
   "memory.conventions": "Learning conventions from review comments is on the Pro plan; approved conventions keep applying.",
   "api.access": "API keys are on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage. Your keys are kept and work again after upgrading.",

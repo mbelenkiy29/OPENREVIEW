@@ -6,7 +6,8 @@ import schema from '../convex/schema';
 import {api,internal} from '../convex/_generated/api';
 import type {Id} from '../convex/_generated/dataModel';
 import {STALE_RESERVATION_MS} from '../convex/inferenceBudget';
-import {entitlements} from '../src/plans';
+import {choosePlanMessage,fixAllowance,releaseFix} from '../convex/billing';
+import {entitlements,upgradeNote} from '../src/plans';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='billing-session-secret-at-least-32-characters',whsec='whsec_billing_fixture';
 const env={SESSION_SECRET:secret,SERVICE_SECRET:'billing-service',BILLING_ENABLED:'true',BILLING_FREE_USAGE_USD:'0.02',BILLING_USAGE_PER_SEAT_USD:'0.01',BILLING_PRO_USAGE_PER_SEAT_USD:'0.02',BILLING_GRACE_DAYS:'7',STRIPE_WEBHOOK_SECRET:whsec,STRIPE_SECRET_KEY:'sk_test_fixture',STRIPE_SEAT_PRICE_ID:'price_seat',STRIPE_PRO_PRICE_ID:'price_pro',APP_URL:'https://review.example.com'};
@@ -528,4 +529,43 @@ test('no usage alert is sent with billing off',async()=>{
  await t.finishAllScheduledFunctions(vi.runAllTimers);
  expect((await t.run(ctx=>ctx.db.query('billingUsage').first()))?.alertsSent).toBeUndefined();
  expect(sent).toHaveLength(0);
+});
+
+test('hosted agent fixes: none on Free, 5 per Starter seat pooled until refused, a release frees one, unlimited with billing off',async()=>{
+ const {t,alice,org}=await setup();
+ const fix=()=>t.run(ctx=>fixAllowance(ctx,org)),release=()=>t.run(ctx=>releaseFix(ctx,org));
+ const fixes=async(expected:{used:number;limit:number|null})=>expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({fixes:expected});
+ const selected=(await t.run(ctx=>ctx.db.get(org)))!.planSelectedAt;
+ await t.run(ctx=>ctx.db.patch(org,{planRequired:true,planSelectedAt:undefined}));
+ expect(await fix()).toEqual({allowed:false,reason:'Billing: '+choosePlanMessage});
+ await t.run(ctx=>ctx.db.patch(org,{planRequired:undefined,planSelectedAt:selected}));
+ // Free: refused with the upgrade note and nothing counted.
+ expect(await fix()).toEqual({allowed:false,reason:'Billing: '+upgradeNote['fix.pullRequests']});
+ await fixes({used:0,limit:0});
+ // Starter with 2 billed seats (alice and bob; viewers are free): 10 runs this month, pooled.
+ await t.run(async ctx=>{const account=(await ctx.db.query('billingAccounts').withIndex('by_org',q=>q.eq('organizationId',org)).unique())!;await ctx.db.patch(account._id,{customerId:'cus_1',subscriptionId:'sub_1',status:'active',plan:'starter',seats:2});});
+ for(let i=0;i<10;i++)expect(await fix()).toEqual({allowed:true});
+ expect(await fix()).toEqual({allowed:false,reason:'Billing: This workspace used its 10 agent fixes for this month. They reset on November 1. Pro includes 20 per seat; a workspace admin can upgrade in Organization Settings → Billing & Usage.'});
+ await fixes({used:10,limit:10});
+ // A run that never started gives its fix back.
+ await release();
+ await fixes({used:9,limit:10});
+ expect(await fix()).toEqual({allowed:true});
+ expect((await fix()).allowed).toBe(false);
+ // A new month starts from zero, and a release never takes the count below it.
+ vi.setSystemTime(Date.UTC(2026,10,1,0,0,1));
+ await release();
+ await fixes({used:0,limit:10});
+ expect(await fix()).toEqual({allowed:true});
+ // Each run also needs the plan's model usage: out of it, the usage reason wins and nothing is counted.
+ await spend(t,org);await spend(t,org);
+ expect(await fix()).toEqual({allowed:false,reason:expect.stringMatching(/^Billing: This workspace used its included usage for this month/)});
+ await fixes({used:1,limit:10});
+ // Pro: 20 per seat.
+ await t.run(async ctx=>{const account=(await ctx.db.query('billingAccounts').withIndex('by_org',q=>q.eq('organizationId',org)).unique())!;await ctx.db.patch(account._id,{plan:'pro'});});
+ await fixes({used:1,limit:40});
+ // Billing off (self-hosted): unlimited and not counted.
+ delete process.env.BILLING_ENABLED;
+ for(let i=0;i<50;i++)expect(await fix()).toEqual({allowed:true});
+ expect(await t.run(async ctx=>(await ctx.db.query('billingUsage').collect()).map(u=>u.fixes))).toEqual([10,1]);
 });
