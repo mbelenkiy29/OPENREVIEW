@@ -46,7 +46,7 @@ export function bearerChallenge(base: string, options: { error?: "invalid_token"
 }
 
 export const tokenHash = (value: string) => createHash("sha256").update(value).digest("hex");
-export const newSecret = (prefix: "ora_" | "orr_" | "orx_" | "orc_") => prefix + randomBytes(32).toString("base64url");
+export const newSecret = (prefix: "ora_" | "orr_" | "orx_" | "orc_" | "orq_") => prefix + randomBytes(32).toString("base64url");
 export const s256 = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
 export const validVerifier = (verifier: string) => /^[A-Za-z0-9\-._~]{43,128}$/.test(verifier);
 

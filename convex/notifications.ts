@@ -10,6 +10,7 @@ import { billingConfig, billingDecision, usageAlertEmail } from "../src/billing"
 import { notificationEvents } from "../src/notifications";
 import { mentionQuestion, slackChannelId } from "../src/slack";
 import { egressAllowed, offline } from "../src/egress";
+import { contextReadable } from "./repositoryContext";
 
 // Notifications: Slack channels (admin-linked) and per-member email. Everything is inert until a
 // Slack workspace is installed or a member verifies an email address.
@@ -129,6 +130,8 @@ export const reviewTargets = internalQuery({ args: { reviewId: v.id("reviews") }
     if (!p.email || !p.emailVerifiedAt) continue;
     const user = await ctx.db.get(p.userId);
     try { await repositoryAccess(ctx, p.userId, repo._id); } catch { continue; }
+    // As on the dashboard: a review that used context from a repository this member can't read stays hidden.
+    if (!await contextReadable(ctx, p.userId, review)) continue;
     const mine = Boolean(user && pr && user.login.toLowerCase() === pr.author.toLowerCase());
     const events = ([["review.completed", p.reviewCompleted], ["finding.high", p.highSeverity]] as const).filter(([, l]) => l === "all" || (l === "mine" && mine)).map(([e]) => e);
     if (events.length) recipients.push({ userId: p.userId, email: p.email, events });

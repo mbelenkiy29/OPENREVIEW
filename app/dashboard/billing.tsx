@@ -39,7 +39,7 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
         {s.hasCustomer && <form action={openBillingPortal}><input type="hidden" name="organizationId" value={organizationId} /><button>Manage billing</button></form>}
       </div> : <p className="muted">Only workspace owners and admins can change billing.</p>}
       {s.admin && subscribed && <p className="muted">Switching plans takes effect now and is prorated: the price difference for the rest of this period is on the next invoice.</p>}
-      {s.admin && subscribed && <form action={setSpendingCap} className="filter-bar"><input type="hidden" name="organizationId" value={organizationId} /><label>Extra usage cap per month (USD, 0 = off)<input type="number" name="capUsd" min={0} max={1000000} step="0.01" defaultValue={s.capUsd} required /></label><button>Save cap</button><span className="muted">Usage past the included amount is billed at the end of the period, up to this cap.</span></form>}
+      {s.admin && subscribed && <form action={setSpendingCap} className="filter-bar"><input type="hidden" name="organizationId" value={organizationId} /><label>Extra usage cap per month (USD, 0 = off)<input type="number" name="capUsd" min={0} max={1000000} step="0.01" defaultValue={s.capUsd} required /></label><button>Save cap</button><span className="muted">Usage past the included amount is billed at the end of the period, up to this cap. During a trial, reviews stop at the included usage instead.</span></form>}
     </section>
     {s.referral?.canApply && <section aria-labelledby="referral-code-heading">
       <h2 id="referral-code-heading">Referral code</h2>

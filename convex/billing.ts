@@ -232,6 +232,10 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
     if (s.organizationId && s.organizationId !== account.organizationId) return record("workspace mismatch");
     if (liveSubscription(account) && s.id !== account.subscriptionId) return other(account, s.id);
     if (account.lastEventCreated && a.created < account.lastEventCreated) return record("stale");
+    // Stripe timestamps are whole seconds: a subscription is created "incomplete" and updated to "active"
+    // within one, and a cancellation can share its second with a last update. An equal-time event cannot
+    // be ordered, so it never moves this subscription back to its creation or out of "canceled".
+    if (a.created === account.lastEventCreated && s.id === account.subscriptionId && (a.type === "customer.subscription.created" || account.status === "canceled")) return record("stale");
     const deleted = a.type === "customer.subscription.deleted", plan = planForPrice(s.price);
     // An unknown seat price keeps the recorded plan.
     await ctx.db.patch(account._id, { ...(plan ? { plan } : {}), subscriptionId: s.id, subscriptionItemId: s.itemId, status: deleted ? "canceled" : s.status, seats: s.quantity, currentPeriodEnd: s.currentPeriodEnd, pastDueSince: s.status === "past_due" ? account.pastDueSince ?? a.created : undefined, lastEventCreated: a.created, updatedAt: Date.now() });

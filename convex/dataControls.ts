@@ -5,6 +5,7 @@ import type { Doc, Id, TableNames } from "./_generated/dataModel";
 import schema from "./schema";
 import { audit, authorize, service } from "./auth";
 import { openSubscription } from "../src/billing";
+import { disableRepository } from "./repositories";
 
 // Data controls (M3): data sharing (private by default), retention for reviews and transcripts, and
 // owner-only workspace deletion with a grace period followed by a resumable purge of every
@@ -157,7 +158,21 @@ export const startPurge = internalMutation({ args: { deletionId: v.id("workspace
   }
   await audit(ctx, d.organizationId, undefined, "workspace.purge_started", d._id);
   await ctx.db.patch(d._id, { status: "purging", startedAt: Date.now() });
-  await ctx.scheduler.runAfter(0, internal.dataControls.purge, { deletionId: d._id });
+  await ctx.scheduler.runAfter(0, internal.dataControls.quiesce, { deletionId: d._id });
+} });
+// Before any row goes, stop new work: every writer (webhooks, indexing, reviews) checks repo.enabled, and
+// enableIndexing refuses while the workspace purges. Running jobs get drainMs to finish, so nothing writes
+// into a table the purge has already emptied.
+export const drainMs = 10 * 60000;
+/** Whether the workspace's current deletion (its newest receipt) is purging. */
+export const workspacePurging = async (ctx: { db: MutationCtx["db"] }, organizationId: Id<"organizations">) => (await pendingOf(ctx, organizationId))?.status === "purging";
+export const quiesce = internalMutation({ args: { deletionId: v.id("workspaceDeletions"), cursor: v.optional(v.string()) }, handler: async (ctx, a) => {
+  const d = await ctx.db.get(a.deletionId);
+  if (!d || d.status !== "purging") return;
+  const page = await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", d.organizationId)).paginate({ cursor: a.cursor ?? null, numItems: 100 });
+  for (const repo of page.page) if (repo.enabled) await disableRepository(ctx, repo);
+  if (!page.isDone) await ctx.scheduler.runAfter(0, internal.dataControls.quiesce, { deletionId: d._id, cursor: page.continueCursor });
+  else await ctx.scheduler.runAfter(drainMs, internal.dataControls.purge, { deletionId: d._id });
 } });
 // One bounded chunk per transaction; the receipt holds the step and cursor, so a crash or redeploy
 // resumes where it stopped, and re-running a finished step deletes nothing.
