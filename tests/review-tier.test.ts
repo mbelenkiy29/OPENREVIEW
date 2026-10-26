@@ -48,11 +48,12 @@ test("openreview:<tier> labels select a tier; the highest of several wins; other
   assert.ok(isTierLabel(" openreview:standard ") && !isTierLabel("openreview:"));
 });
 
-test("precedence: comment over label over configured tier; the admin cap applies last", () => {
+test("precedence: comment over label over configured tier, raising only; the admin cap applies last", () => {
   assert.deepEqual(resolveTier({ configured: "standard" }), { mode: "standard", source: "settings", capped: false, requested: "standard" });
   assert.deepEqual(resolveTier({ configured: "standard", requested: { mode: "deep", source: "label" } }), { mode: "deep", source: "label", capped: false, requested: "deep" });
-  // A comment may also lower the tier for one run.
-  assert.deepEqual(resolveTier({ configured: "deep", requested: { mode: "fast", source: "comment" } }), { mode: "fast", source: "comment", capped: false, requested: "fast" });
+  // A request never lowers the configured tier.
+  assert.deepEqual(resolveTier({ configured: "deep", requested: { mode: "fast", source: "comment" } }), { mode: "deep", source: "settings", capped: false, requested: "deep" });
+  assert.equal(resolveTier({ configured: "standard", requested: { mode: "standard", source: "label" } }).source, "settings");
   // Caps: a workspace limit of standard stops deep from comments, labels and folders alike.
   assert.deepEqual(resolveTier({ configured: "standard", requested: { mode: "deep", source: "comment" }, cap: "standard" }), { mode: "standard", source: "comment", capped: true, requested: "deep" });
   assert.deepEqual(resolveTier({ configured: "deep", cap: "standard" }), { mode: "standard", source: "settings", capped: true, requested: "deep" });

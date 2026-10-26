@@ -30,7 +30,9 @@ function parts(summary: string) {
 }
 
 // footerItems go on the footer line after the review count (commit and dashboard links).
-export function disclosureLayout(summary: string, footerItems: readonly string[] = []) {
+export function disclosureLayout(summary: string, footerItems: readonly string[] = [], layout: Record<string, string> = {}) {
+  const layoutOf = (label: string) => { const key = (Object.keys(summaryLabels) as (keyof typeof summaryLabels)[]).find((k) => summaryLabels[k] === label); return key ? layout[key] : undefined; };
+  const placed = (label: string, heading: string, body: string, open: boolean) => { const state = layoutOf(label); return state === "plain" ? `### ${heading}\n\n${body}` : fold(heading, body, state ? state === "open" : open); };
   const tail = summary.match(footer);
   const [verdictText, ...chunks] = summary.slice(0, tail?.index ?? summary.length).split(/\n\n(?=### )/);
   const verdict = verdictText.match(/^\*\*([^*\n]+)\*\*(?: · Confidence score \*\*(\d)\/5\*\*)?$/);
@@ -40,16 +42,19 @@ export function disclosureLayout(summary: string, footerItems: readonly string[]
     const newline = chunk.indexOf("\n");
     const label = (newline < 0 ? chunk : chunk.slice(0, newline)).slice(4).trim();
     const body = newline < 0 ? "" : chunk.slice(newline + 1);
+    // A section's sectionLayout setting (plain/open/collapsed) overrides where it would go by default.
+    const state = layoutOf(label);
     const scored = label === summaryLabels.score ? body.match(/^\*\*(\d)\/5\*\* — ([\s\S]*)$/) : null;
     if (scored) { score ??= scored[1]; reason = scored[2]; }
     else if (label === summaryLabels.overview) overview = body;
     else if (label === summaryLabels.diagram) diagram = body.replace(/^```mermaid\n/, "```mermaid\n%%{init: {'theme': 'neutral'}}%%\n");
-    else if (shown.has(label)) main.push(chunk);
+    else if (state === "open") main.push(fold(label, body, true));
+    else if (state === "plain" || (!state && shown.has(label))) main.push(chunk);
     else more.push(chunk);
   }
   const head = (score ? `<h2>Confidence Score: ${score}/5</h2>` : "<h2>OpenReview</h2>") + "\n\n" + (verdict ? `**${verdict[1]}.**${reason ? " " + escapeDisclosure(reason) : ""}` : verdictText);
   const line = [tail?.[1] ? `Reviews (${tail[1]})` : "", ...footerItems, tail ? tail[2].replace(/ it$/, "") : "", "Reviewed by OpenReview"].filter(Boolean).join(" · ");
-  return [head, overview && fold("Summary", overview), ...main, diagram && fold("Diagram", diagram, true), more.length ? fold("More details", more.join("\n\n")) : "", `<sub>${line}</sub>`].filter(Boolean).join("\n\n") + (tail?.[3] ?? "");
+  return [head, overview && placed(summaryLabels.overview, "Summary", overview, false), ...main, diagram && placed(summaryLabels.diagram, "Diagram", diagram, true), more.length ? fold("More details", more.join("\n\n")) : "", `<sub>${line}</sub>`].filter(Boolean).join("\n\n") + (tail?.[3] ?? "");
 }
 
 // The "compact" comment style: summary, confidence score, important files and diagram up front; every

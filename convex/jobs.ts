@@ -21,7 +21,8 @@ import { validSequence } from "../src/diagrams";
 import { incrementalDiff } from "../src/incremental";
 import { addressedFindings } from "../src/commit-signals";
 import { effectiveThresholds, sizeLimitIssue } from "../src/triggers";
-import { applyRepoConfig, cascadeSummary, fileSettings, loadRepoConfig, type LoadedRepoConfig } from "../src/repo-config";
+import { applyRepoConfig, cascadeSummary, configSnapshot, fileSettings, loadRepoConfig, type LoadedRepoConfig } from "../src/repo-config";
+import { ruleText } from "../src/rule-files";
 import { type CheckConclusion } from "../src/github";
 import { billingNoticeBody, checkOutcome, supersededCheck } from "../src/check-run";
 import { AgentSuspended } from "../src/engine/agent";
@@ -72,6 +73,8 @@ async function draftGeneratedTests(ctx: ActionCtx, a: { reviewId: Id<"reviews">;
   }
   return tests.length > 0 && await ctx.runMutation(internal.runtime.requestTests, { reviewId: a.reviewId, tests });
 }
+// hideFooter drops the footer after its review number is assigned, so numbering stays continuous.
+const footer = (hide: boolean | undefined, text: string) => (hide ? "" : text);
 // One feature tip for the summary footer when the Feature tips section is on; the choice is recorded
 // for the per-repository cooldown, and a publish retry reuses it.
 async function chooseTip(ctx: ActionCtx, reviewId: Id<"reviews">, sections: readonly string[] | undefined, signals: { references: string; rules: number; strictness: number; engine: string; agenticAvailable: boolean }) {
@@ -344,7 +347,7 @@ export const review = internalAction({
       });
       return;
     }
-    let check: { scm: Scm; repository: string; id: number } | null = null;
+    let check: { scm: Scm; repository: string; id: number } | null = null, requester: { scm: Scm; repository: string } | undefined;
     try {
       const claimed = await ctx.runMutation(internal.reviews.stage, {
         ...args,
@@ -357,6 +360,7 @@ export const review = internalAction({
       );
       if (!repo.enabled) throw new Error("Repository disabled");
       const github = await provider(ctx,repo);
+      requester = { scm: github, repository: repo.fullName };
       const pr = await github.pullRequest(repo.fullName, state.review.prNumber);
       if (pr.head.sha !== state.review.headSha || pr.state !== "open" || pr.revisionKey !== state.review.revisionKey) {
         await ctx.runMutation(internal.reviews.stage, {...args,status:"cancelled",detail:"Obsolete revision or closed change"});
@@ -402,13 +406,13 @@ export const review = internalAction({
           repo.fullName,
           pr.number,
           state.review.headSha,
-          result.summary + reviewFooter(await ctx.runMutation(internal.reviews.assignNumber, { reviewId: args.reviewId }), github instanceof AzureDevOps ? "azure-devops" : "other", await chooseTip(ctx, args.reviewId, settings.summarySections, { references: [pr.title, pr.body ?? "", pr.head.ref].join("\n"), rules: rules.length, strictness: settings.strictness ?? 0, engine: settings.reviewEngine, agenticAvailable: false })),
+          result.summary + footer(settings.hideFooter, reviewFooter(await ctx.runMutation(internal.reviews.assignNumber, { reviewId: args.reviewId }), github instanceof AzureDevOps ? "azure-devops" : "other", settings.hideFooter ? null : await chooseTip(ctx, args.reviewId, settings.summarySections, { references: [pr.title, pr.body ?? "", pr.head.ref].join("\n"), rules: rules.length, strictness: settings.strictness ?? 0, engine: settings.reviewEngine, agenticAvailable: false }))),
           inlineFindings(result.findings).slice(0, settings.maxComments),
           args.reviewId,
           settings.commentStyle,
           state.review.revisionKey,
           result.findings.length+(result.metadata?.carriedForward?.length??0),
-          { placement: settings.summaryPlacement === "comment" ? "comment" : "description", fixLabel: await ctx.runQuery(internal.repositories.fixLabel, { repositoryId: state.review.repositoryId }) },
+          { placement: settings.summaryPlacement === "comment" ? "comment" : "description", fixLabel: await ctx.runQuery(internal.repositories.fixLabel, { repositoryId: state.review.repositoryId }), sectionLayout: settings.sectionLayout },
         );
         if(result.repositoryContext)await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:result.repositoryContext});
         await ctx.runMutation(internal.reviews.finished, {
@@ -429,12 +433,14 @@ export const review = internalAction({
         });
         return;
       }
-      const limit = state.review.trigger === "mention" || state.review.trigger === "manual" ? undefined : sizeLimitIssue(pr.diff, settings);
+      // Explicit requests bypass the size limits and the drafts setting.
+      const explicit = state.review.trigger === "mention" || state.review.trigger === "manual";
+      const limit = explicit ? undefined : sizeLimitIssue(pr.diff, settings);
       if (limit) {
         await ctx.runMutation(internal.reviews.stage, { ...args, status: "skipped", detail: limit });
         return;
       }
-      if (pr.draft && !settings.drafts) {
+      if (pr.draft && !settings.drafts && !explicit) {
         await ctx.runMutation(internal.reviews.stage, {
           ...args,
           status: "skipped",
@@ -461,7 +467,7 @@ export const review = internalAction({
       const configured = applyRepoConfig(settings, repoConfig, pr.diff.map((f) => f.path));
       const effective = configured.settings;
       if (repoConfig.files.length || repoConfig.warnings.length || repo.configFile)
-        await ctx.runMutation(internal.repositories.recordConfigFile, { repositoryId: repo._id, sha: pr.base.sha, files: repoConfig.files, applied: configured.applied, blocked: configured.blocked, warnings: repoConfig.warnings, values: JSON.stringify(repoConfig.settings).slice(0, 4000), rules: repoConfig.rules.length, ...(repoConfig.levels?.length ? { cascade: JSON.stringify(cascadeSummary(repoConfig.levels)) } : {}) });
+        await ctx.runMutation(internal.repositories.recordConfigFile, { repositoryId: repo._id, sha: pr.base.sha, files: repoConfig.files, applied: configured.applied, blocked: configured.blocked, warnings: repoConfig.warnings, values: configSnapshot(repoConfig.settings), rules: repoConfig.rules.length, ...(repoConfig.levels?.length ? { cascade: JSON.stringify(cascadeSummary(repoConfig.levels)) } : {}) });
       const guidance = repositoryGuidance(repoConfig.guides ?? []);
       const directorySettings = (path: string) => {
         const resolved = fileSettings(repoConfig.levels ?? [], path, settings.lockedKeys ?? []);
@@ -469,7 +475,8 @@ export const review = internalAction({
         const thresholds = effectiveThresholds({ ...effective, ...resolved.settings });
         return { ...(resolved.settings.categories ? { categories: resolved.settings.categories } : {}), minimumConfidence: thresholds.minimumConfidence, severityThreshold: z.enum(severities).parse(thresholds.severityThreshold), ignored: resolved.ignored, ...(resolved.ignoredBy ? { ignoredBy: resolved.ignoredBy } : {}) };
       };
-      // K2: comment > label > configured tier (raised by touched folders); the admin cap applies last.
+      // K2: comment > label > configured tier (raised by touched folders); a request only raises a fixed tier
+      // ("auto" counts as no tier); the admin cap applies last.
       // A plan without deep reviews caps the tier at standard, below any admin cap.
       const deepAllowed = await ctx.runQuery(internal.billing.entitlement, { organizationId: repo.organizationId, key: "review.deep" }), adminCap = z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep");
       const tier = resolveTier({ configured: z.enum(modes).parse(effective.mode), diff: pr.diff, requested: state.review.requestedMode ? { mode: state.review.requestedMode, source: state.review.requestedModeSource ?? "comment" } : undefined, cap: deepAllowed || adminCap !== "deep" ? adminCap : "standard" });
@@ -671,7 +678,7 @@ export const review = internalAction({
             category: r.category,
             globs: r.globs,
             enabled: r.enabled,
-          })), ...repoConfig.rules],
+          })), ...repoConfig.rules, ...(effective.assistantRules ? (repoConfig.assistantRules ?? []).filter((r) => !rules.some((d) => ruleText(d.instructions) === ruleText(r.instructions))) : [])],
           preferences: [...preferences, ...(await ctx.runQuery(internal.conventions.approvedForRepo, { repositoryId: repo._id }))],
           guidance: selectPacks(guidance.packs, scope.diff, sources).map(({ id, version, title, body, source }) => ({ id, version, title, body, source })),
           knowledge: selectKnowledge(await ctx.runQuery(internal.knowledge.forReview, { repositoryId: repo._id }), scope.diff.map((f) => f.path), new Set(head.keys()), knowledgeTokenBudgets[tier.mode]).selected,
@@ -736,13 +743,13 @@ export const review = internalAction({
         repo.fullName,
         pr.number,
         pr.head.sha,
-        result.summary + reviewFooter(await ctx.runMutation(internal.reviews.assignNumber, { reviewId: args.reviewId }), github instanceof AzureDevOps ? "azure-devops" : "other", await chooseTip(ctx, args.reviewId, effective.summarySections, { references: [pr.title, pr.body ?? "", pr.head.ref].join("\n"), rules: rules.length + repoConfig.rules.length, strictness: effective.strictness ?? 0, engine: effective.reviewEngine, agenticAvailable: typeof modelProvider.runTools === "function" })),
+        result.summary + footer(effective.hideFooter, reviewFooter(await ctx.runMutation(internal.reviews.assignNumber, { reviewId: args.reviewId }), github instanceof AzureDevOps ? "azure-devops" : "other", effective.hideFooter ? null : await chooseTip(ctx, args.reviewId, effective.summarySections, { references: [pr.title, pr.body ?? "", pr.head.ref].join("\n"), rules: rules.length + repoConfig.rules.length, strictness: effective.strictness ?? 0, engine: effective.reviewEngine, agenticAvailable: typeof modelProvider.runTools === "function" }))),
         inlineFindings(result.findings).slice(0, effective.maxComments),
         args.reviewId,
         effective.commentStyle,
           state.review.revisionKey,
           result.findings.length+(result.metadata.carriedForward?.length??0),
-          { placement: settings.summaryPlacement === "comment" ? "comment" : "description", fixLabel: await ctx.runQuery(internal.repositories.fixLabel, { repositoryId: state.review.repositoryId }) },
+          { placement: settings.summaryPlacement === "comment" ? "comment" : "description", fixLabel: await ctx.runQuery(internal.repositories.fixLabel, { repositoryId: state.review.repositoryId }), sectionLayout: effective.sectionLayout },
       );
       if(result.repositoryContext)await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:result.repositoryContext});
       await ctx.runMutation(internal.reviews.finished, {
@@ -769,6 +776,7 @@ export const review = internalAction({
           error: message,
         }),
       );
+      if (requester && !supersededCheck(message)) await confirmRequest(requester.scm, requester.repository, state.review.triggerComment, "confused");
       await ctx.runMutation(internal.reviews.finished, {
         ...args,
         error: message,
@@ -805,10 +813,10 @@ async function resolveFixedThreads(ctx: ActionCtx, scm: Scm, repositoryId: Id<"r
   }
 }
 
-// 👍 on the comment that asked for this review, once the review is published.
-async function confirmRequest(scm: Scm, repository: string, comment?: { id: number; inline: boolean }) {
+// 👍 on the comment that asked for this review once it is published, or 😕 when it fails.
+async function confirmRequest(scm: Scm, repository: string, comment?: { id: number; inline: boolean }, content: "+1" | "confused" = "+1") {
   if (!comment || !scm.react) return;
-  try { await scm.react(repository, comment.id, comment.inline, "+1"); }
+  try { await scm.react(repository, comment.id, comment.inline, content); }
   catch (error) { console.error(JSON.stringify({ event: "github.reaction_failed", repository, error: redact(error instanceof Error ? error.message : "failed").slice(0, 300) })); }
 }
 

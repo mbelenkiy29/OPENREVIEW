@@ -48,7 +48,8 @@ test("indexing before configuration holds automatic reviews once, and never over
   await t.mutation(api.onboarding.select, { token: alice, organizationId, repositoryIds: [repo._id] });
   await expect(t.mutation(api.onboarding.start, { token: alice, organizationId })).rejects.toThrow("behavior");
   await t.mutation(api.onboarding.start, { token: alice, organizationId, pauseReviews: true });
-  expect(await workspaceRow()).toMatchObject({ overrideKeys: ["automatic"], settings: { automatic: false } });
+  // New workspaces also start with Greptile-like defaults: no re-review on push, dependency bots skipped.
+  expect(await workspaceRow()).toMatchObject({ overrideKeys: ["automatic", "rereview", "excludedAuthors"], settings: { automatic: false, rereview: false, excludedAuthors: ["dependabot[bot]", "renovate[bot]"] } });
   expect((await organization())?.onboarding?.reviewsPaused).toBe(true);
   expect((await t.run(ctx => ctx.db.get(repo._id)))?.indexStatus).toBe("queued");
   expect((await t.query(api.onboarding.status, { token: alice, organizationId })).defaults.automatic).toBe(false);
@@ -71,7 +72,7 @@ test("configuration steps are admin-only, write only their own keys, validate va
   let row = await workspaceRow();
   // automatic and maxComments belong to other steps: unchanged.
   expect(row?.settings).toMatchObject({ summarySections: ["overview", "score"], commentStyle: "detailed", automatic: false, maxComments: defaults.maxComments });
-  expect(row?.overrideKeys.sort()).toEqual(["automatic", "commentStyle", "summarySections"]);
+  expect(row?.overrideKeys.sort()).toEqual(["automatic", "commentStyle", "excludedAuthors", "rereview", "summarySections"]);
   await expect(t.mutation(api.onboarding.saveDefaults, { token: alice, organizationId, step: "comments", settings: { ...defaults, maxComments: 99 } })).rejects.toThrow("Invalid settings");
   await expect(t.mutation(api.onboarding.saveDefaults, { token: alice, organizationId, step: "summary", settings: { ...defaults, summarySections: ["overview", "nonsense"] } })).rejects.toThrow("Invalid settings");
   await t.mutation(api.onboarding.saveDefaults, { token: alice, organizationId, step: "comments", settings: { ...defaults, maxComments: 5, strictness: 1, categories: ["security", "correctness"] } });
@@ -117,7 +118,7 @@ test("setup can't be skipped: finishing needs an indexing repository and release
   expect(org?.onboarding).toMatchObject({ step: "done", skipped: false, reviewsPaused: false });
   expect(org?.onboarding?.completedAt).toBeTypeOf("number");
   expect(needsSetup(org)).toBe(false);
-  expect(await workspaceRow()).toMatchObject({ settings: { automatic: true }, overrideKeys: [] });
+  expect(await workspaceRow()).toMatchObject({ settings: { automatic: true }, overrideKeys: ["rereview", "excludedAuthors"] });
   expect(await audits()).toEqual(expect.arrayContaining(["onboarding.reviews_resumed", "onboarding.completed"]));
   expect(await audits()).not.toContain("onboarding.skipped");
   // Reopening and finishing again re-stamps completion.

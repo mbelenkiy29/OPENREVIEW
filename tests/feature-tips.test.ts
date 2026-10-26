@@ -15,7 +15,7 @@ test("tips are chosen from review data in priority order", () => {
   assert.deepEqual(eligibleTips({ ...quiet, recentFindings: 10, dismissedFindings: 5 }).map((t) => t.key), ["strictness"]);
   assert.deepEqual(eligibleTips({ ...quiet, recentFindings: 10, dismissedFindings: 4 }), []);
   assert.deepEqual(eligibleTips({ ...quiet, recentFindings: 9, dismissedFindings: 9 }), []);
-  assert.deepEqual(eligibleTips({ ...quiet, recentFindings: 10, dismissedFindings: 9, strictness: 3 }), []);
+  assert.deepEqual(eligibleTips({ ...quiet, recentFindings: 10, dismissedFindings: 9, strictness: 1 }), []);
   const all = eligibleTips({ ...quiet, references: "Fixes ENG-42", connected: { linear: false, atlassian: false }, rules: 0, recentFindings: 12, dismissedFindings: 8, engine: "pipeline" });
   assert.deepEqual(all.map((t) => t.key), ["ticket", "strictness", "rules", "agentic"]);
 });

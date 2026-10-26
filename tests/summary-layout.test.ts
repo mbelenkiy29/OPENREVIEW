@@ -88,6 +88,15 @@ test("summary counts read naturally and the risk line has one confidence number"
  assert.doesNotMatch(reviewSummary(data([])),/Prompt for your coding agent/,"no prompt without findings");
 });
 
+test("section layout overrides: a section can be shown plainly, expanded or collapsed",()=>{
+ const summary=reviewSummary(data([finding()]))+reviewFooter(3,"other");
+ const layout=disclosureLayout(summary,[],{diagram:"collapsed",affectedAreas:"plain",overview:"open"});
+ assert.match(layout,/<details><summary><h3>Diagram<\/h3><\/summary>/);
+ assert.match(layout,/<details open><summary><h3>Summary<\/h3><\/summary>/);
+ assert.ok(layout.indexOf("### Files changed\n")<layout.indexOf("<h3>Diagram"),"a plain section moves up with the issues, out of More details");
+ assert.equal(disclosureLayout(summary,[],{}),disclosureLayout(summary),"no overrides keeps the default layout");
+});
+
 test("compact layout: summary, score, important files and diagram first; the rest collapsed; prompt and one-line footer last",()=>{
  const summary=reviewSummary(data([finding(),finding({fingerprint:"cd34",title:"Old caller breaks",outsideDiff:true})]))+reviewFooter(3,"other");
  const layout=compactLayout(summary,"[`abc1234`](https://github.com/o/r/commit/abc1234)","\n\n[View review](https://x)");

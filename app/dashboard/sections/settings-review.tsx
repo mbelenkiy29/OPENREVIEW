@@ -17,6 +17,8 @@ import type { DashboardContext } from "../load";
 // subtitle above a white card of setting rows. The section ids are the sub-navigation's jump targets
 // (reviewSections in ../sidebar.tsx lists them in this order). One form saves every field (saveSettings).
 const FORM = "review-settings-form";
+// The stored snapshot is capped in length; an older cut-off one shows no values rather than breaking the page.
+const fileSnapshot = (values: string): Record<string, unknown> => { try { return JSON.parse(values) as Record<string, unknown>; } catch { return {}; } };
 
 const pct = (n: number) => Math.round(n * 100) + "%";
 const strictnessStops: Stop[] = [
@@ -58,7 +60,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
     <div className="actions"><Link className="button primary" href="/dashboard/providers">Go to Code Providers</Link><Link className="button" href="/dashboard/organization/teams">Workspace &amp; team defaults</Link></div>
   </div></div>;
   const { repo, settings: s, models } = repoSettings, config = repo.configFile;
-  const fileValues = config ? JSON.parse(config.values) as Record<string, unknown> : {};
+  const fileValues = config ? fileSnapshot(config.values) : {};
   return <div className="review-settings">
     {!isAdmin && <p className="notice-banner" role="status"><Icon name="lockSimple" />Workspace admin access is required to edit these settings.</p>}
     <form action={saveSettings} id={FORM} className="stack">
@@ -91,7 +93,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
             <Row id="rs-summaryPlacement" title="Summary location" help="Where the summary goes on GitHub. It is edited in place on every review, so the pull request stays quiet.">
               <select key={s.summaryPlacement} id="rs-summaryPlacement" name="summaryPlacement" defaultValue={s.summaryPlacement ?? "description"} aria-describedby="rs-summaryPlacement-help"><option value="description">Pull request description</option><option value="comment">One comment</option></select>
             </Row>
-            <SummarySettings key={JSON.stringify([repo._id, s.summarySections, s.commentStyle])} initial={s.summarySections} style={s.commentStyle} />
+            <SummarySettings key={JSON.stringify([repo._id, s.summarySections, s.commentStyle, s.hideFooter, s.sectionLayout])} initial={s.summarySections} style={s.commentStyle} hideFooter={s.hideFooter} layout={s.sectionLayout} />
           </div>
         </div>
 

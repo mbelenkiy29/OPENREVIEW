@@ -128,6 +128,11 @@ export function groundedOutside(finding: Candidate, input: ReviewInput): boolean
     return false;
   });
 }
+// Rule globs: a leading "!" excludes paths (a nested folder's disabledRules adds these).
+export function ruleApplies(globs: string[], path: string) {
+  const include = globs.filter((g) => !g.startsWith("!")), exclude = globs.filter((g) => g.startsWith("!")).map((g) => g.slice(1));
+  return (!include.length || picomatch(include)(path)) && !(exclude.length && picomatch(exclude)(path));
+}
 export async function reviewChange(
   input: ReviewInput,
   model: ModelProvider,
@@ -185,7 +190,7 @@ export async function reviewChange(
   const rules = input.rules.filter(
     (r) =>
       r.enabled &&
-      (!r.globs.length || diff.some((f) => picomatch(r.globs)(f.path))),
+      (!r.globs.length || diff.some((f) => ruleApplies(r.globs, f.path))),
   );
   const buildPayload = () => ({
     classification: classifyChanges(diff),
@@ -343,12 +348,14 @@ export async function reviewChange(
   };
   // Only custom-rule findings must cite a supplied rule. A ruleId the model invents on any other finding
   // is dropped, not the finding: a real defect must not disappear because of a made-up label.
-  for (const f of candidates) if (f.ruleId && f.category !== "rules" && !rules.some((r) => r.id === f.ruleId)) delete f.ruleId;
+  // A rule applies to a file when its globs (including "!" exclusions from disabledRules) match it.
+  const citesApplicableRule = (f: { ruleId?: string; filePath: string }) => rules.some((r) => r.id === f.ruleId && (!r.globs.length || ruleApplies(r.globs, f.filePath)));
+  for (const f of candidates) if (f.ruleId && f.category !== "rules" && !citesApplicableRule(f)) delete f.ruleId;
   const plausible = candidates.filter((f) => {
     const reason = f.confidence < minimum ? "Below confidence threshold"
       : severities.indexOf(f.severity) > threshold ? "Below severity threshold"
       : !grounded(f, safeInput) && !groundedOutside(f, safeInput) ? "Evidence or changed-line location does not match source"
-      : f.ruleId && !rules.some((r) => r.id === f.ruleId) ? "Unknown or inapplicable rule"
+      : f.ruleId && !citesApplicableRule(f) ? "Unknown or inapplicable rule"
       : directoryReason(f) ? directoryReason(f)
       : f.category === "security" && deterministic.findings.some((d) => d.filePath === f.filePath && f.startLine <= d.endLine && d.startLine <= f.endLine) ? "Duplicate of a deterministic security check" : "";
     if (reason) suppress(f, reason);

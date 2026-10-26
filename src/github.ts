@@ -46,7 +46,8 @@ const summaryPointer = "## OpenReview\n\nThe review summary for this pull reques
 // the author's text kept) or one issue comment (the default here; review settings choose). Both are
 // edited in place on every review.
 // fixLabel: the inline "Fix with …" link text on hosts with a single fix link (GitHub shows one per agent instead).
-export type PublishOptions = { placement?: "description" | "comment"; fixLabel?: string };
+// sectionLayout: per-section plain/open/collapsed placement in the GitHub summary.
+export type PublishOptions = { placement?: "description" | "comment"; fixLabel?: string; sectionLayout?: Record<string, string> };
 // GitHub rejects pull request bodies longer than 65,536 characters; past that the comment is used.
 const descriptionLimit = 65000;
 const treeSchema = z.object({
@@ -336,6 +337,7 @@ export class Github {
         head: z.object({ sha: z.string(), ref: z.string() }),
         base: z.object({ sha: z.string(), ref: z.string() }),
         changed_files: z.number().int().nonnegative().optional(),
+        labels: z.array(z.object({ name: z.string() })).optional(),
       }),
     );
     const files = await this.paginate(
@@ -399,8 +401,10 @@ export class Github {
         }),
       ),
     ]);
+    const { labels, ...fields } = pr;
     return {
-      ...pr,
+      ...fields,
+      ...(labels?.length ? { labels: labels.map((l) => l.name) } : {}),
       // The description may carry OpenReview's own summary block; reviews read only the author's text.
       body: pr.body === null ? null : withoutDescriptionSummary(pr.body),
       ...(pr.user.id?{authorExternalId:String(pr.user.id)}:{}),
@@ -465,7 +469,7 @@ export class Github {
   }
   // Reactions on a pull request comment (pull_requests:write covers both kinds); GitHub returns the
   // existing reaction when it is already there, so repeats are harmless.
-  async react(repository: string, commentId: number, inline: boolean, content: "eyes" | "+1") {
+  async react(repository: string, commentId: number, inline: boolean, content: "eyes" | "+1" | "confused") {
     if (!Number.isSafeInteger(commentId) || commentId < 1) return;
     await this.request(`/repos/${repository}/${inline ? "pulls" : "issues"}/comments/${commentId}/reactions`, z.object({ id: z.number() }), { method: "POST", body: JSON.stringify({ content }) });
   }
@@ -710,7 +714,7 @@ export class Github {
     const link = (fingerprint: string) => threads.get(fingerprint);
     const body = (style === "compact"
       ? threadLinks(compactLayout(summary, `[\`${sha.slice(0, 7)}\`](${commit})`, reviewLinks(marker,unresolvedCount)), link)
-      : threadLinks(disclosureLayout(summary, [`Last reviewed commit: [\`${sha.slice(0, 7)}\`](${commit})`, ...reviewLinkItems(marker, unresolvedCount, "View in OpenReview")]), link)) + `\n\n${summaryMarker}\n<!-- openreview:${marker} -->`;
+      : threadLinks(disclosureLayout(summary, [`Last reviewed commit: [\`${sha.slice(0, 7)}\`](${commit})`, ...reviewLinkItems(marker, unresolvedCount, "View in OpenReview")], options.sectionLayout), link)) + `\n\n${summaryMarker}\n<!-- openreview:${marker} -->`;
     const note = (options.placement === "description" && await this.upsertDescriptionSummary(repository, number, body, publisher, description)) || await this.upsertSummary(repository, number, body, publisher, description);
     await current();
     return review ?? { id: note.id, reused: note.reused, comments: [] };

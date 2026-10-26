@@ -22,7 +22,7 @@ import { createDevinSession, validDevinKey } from "../../src/devin";
 import { fixHandoffPrompt } from "../../src/fix-handoff";
 import {approvalPolicySchema} from "../../src/approval";
 import {runtimePolicySchema} from "../../src/runtime-policy";
-import {approvalDefaults,runtimeDefaults} from "../../src/review-settings";
+import {approvalDefaults,runtimeDefaults,sectionLayoutFromForm} from "../../src/review-settings";
 import { REFERRAL_PAYOUT_REVIEW_CENTS, formatMoney, parseMoneyInput, stripeHostedUrl } from "../../src/referrals";
 import { safeNext } from "../../src/identity";
 
@@ -316,6 +316,8 @@ export async function saveSettings(form: FormData) {
       maxReviewTier: form.has("maxReviewTier") ? text(form, "maxReviewTier") : previous.settings.maxReviewTier ?? "deep",
       ...Object.fromEntries((["agentTurns", "agentToolCalls", "hypothesisTurns", "hypothesisToolCalls"] as const).map((key) => [key, form.has(key) ? Number(text(form, key) || 0) : previous.settings[key] ?? 0])),
       summarySections:form.has("summaryConfigured")?form.getAll("summarySections").map(String):previous.settings.summarySections,
+      hideFooter:form.has("summaryConfigured")?form.has("hideFooter"):previous.settings.hideFooter??false,
+      sectionLayout:form.has("summaryConfigured")?sectionLayoutFromForm(form):previous.settings.sectionLayout??{},
     },
   });
   await notify("Review settings saved.");

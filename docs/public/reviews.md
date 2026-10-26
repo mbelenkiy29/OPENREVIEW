@@ -115,7 +115,7 @@ A change can break code it did not touch, such as a caller in another file that 
 
 ## Review tier per pull request
 
-The tier (fast, standard or deep) comes from, in order: an `@openreview review fast|standard|deep` comment for that run, an `openreview:fast|standard|deep` label on the pull request (several labels: the highest wins; a tier label also starts reviews of labelled pull requests even when automatic reviews are off), then the configured tier, which touched `.openreview/` folders can raise. A configured tier of `auto` picks one per pull request: deep for 1,000+ changed lines, or 200+ lines when a file touches security- or data-sensitive code (the same risk score that orders files in large reviews); fast for 50 or fewer lines of low-risk changes; standard otherwise. Generated, lock and docs files don't count toward size. Any explicit tier (comment, label or folder) replaces `auto`. Admins can cap the tier with **Highest tier a request may use** (`maxReviewTier`); the cap applies to every source. The review page shows the tier used and where it came from.
+The tier (fast, standard or deep) comes from, in order: an `@openreview review fast|standard|deep` comment for that run, an `openreview:fast|standard|deep` label on the pull request (several labels: the highest wins; a tier label also starts reviews of labelled pull requests even when automatic reviews are off), then the configured tier, which touched `.openreview/` folders can raise. A configured tier of `auto` picks one per pull request: deep for 1,000+ changed lines, or 200+ lines when a file touches security- or data-sensitive code (the same risk score that orders files in large reviews); fast for 50 or fewer lines of low-risk changes; standard otherwise. Generated, lock and docs files don't count toward size. Any explicit tier (comment, label or folder) replaces `auto`. With a fixed configured tier, a comment or label can raise it for a pull request but never lower it. Admins can cap the tier with **Highest tier a request may use** (`maxReviewTier`); the cap applies to every source. The review page shows the tier used and where it came from.
 
 ## Commands in pull requests
 
@@ -125,7 +125,7 @@ Collaborators with write access can mention `@openreview`:
 | --- | --- |
 | `@openreview review again` | Re-review the current revision |
 | `@openreview review security` | Run a security-focused review |
-| `@openreview review fast` / `standard` / `deep` | Re-review at that tier for this run (an admin cap may lower it) |
+| `@openreview review fast` / `standard` / `deep` | Re-review at that tier for this run if it is higher than the configured tier (an admin cap may lower it) |
 | `@openreview explain this` | Explain a finding or code, citing current source |
 | `@openreview what code depends on this` | Show callers and dependents |
 | `@openreview fix this` | In a finding thread: reply with a validated suggestion and a fix-with-your-agent link |

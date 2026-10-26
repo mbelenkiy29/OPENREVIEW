@@ -36,6 +36,9 @@ test("excluded author globs, branch filters and drafts block both automatic and 
   assert.equal(decide("opened", filtered).review, true);
   assert.equal(decide("opened", { ...base, targetBranches: ["release/*"] }).review, false);
   assert.equal(decide("opened", { ...base, ignoredBranches: ["feature"] }).review, false);
+  // Branch globs ignore case, like Greptile's filters.
+  assert.equal(decide("opened", { ...base, ignoredBranches: ["FEATURE"] }).review, false);
+  assert.equal(decide("opened", { ...base, targetBranches: ["MAIN"] }).review, true);
   assert.equal(decide("opened", base, pr({ draft: true })).review, false);
   assert.equal(decide("opened", { ...base, drafts: true }, pr({ draft: true })).review, true);
 });
