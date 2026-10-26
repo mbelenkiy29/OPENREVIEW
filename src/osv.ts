@@ -19,7 +19,7 @@ export const osvVulnSchema = z.object({
   database_specific: severity,
   affected: z.array(z.object({
     package: z.object({ ecosystem: z.string(), name: z.string() }).optional(),
-    ranges: z.array(z.object({ events: z.array(z.record(z.string())) })).optional(),
+    ranges: z.array(z.object({ events: z.array(z.record(z.string(), z.string())) })).optional(),
     ecosystem_specific: severity,
     database_specific: severity,
   })).optional(),

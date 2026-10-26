@@ -15,7 +15,7 @@ export const sendConversionNotice = internalAction({ args: { referralId: v.id("r
   const notice = await ctx.runMutation(internal.referrals.claimConversionNotice, a);
   if (!notice) return "skipped";
   const { rateBps, months, holdDays } = referralConfig();
-  const result = await sendEmail({ to: notice.to, ...conversionEmail({ name: notice.name, rateBps, months, holdDays, url: `${appOrigin()}/dashboard/settings/referrals` }) });
+  const result = await sendEmail({ to: notice.to, ...conversionEmail({ name: notice.name, rateBps, months, holdDays, url: `${appOrigin()}/dashboard/account/referrals` }) });
   return "skipped" in result ? "skipped" : "sent";
 } });
 
@@ -49,15 +49,32 @@ export const resolveChargeEvent = internalAction({ args: { ...chargeEvent, attem
     const payments = await listAll<{ id: string; invoice: string | { id: string } }>("/v1/invoice_payments", { payment: { type: "payment_intent", payment_intent: paymentIntent }, status: "paid" }, key);
     const outcomes = [];
     for (const p of payments) outcomes.push(await ctx.runMutation(internal.referrals.applyChargeEvent, { invoiceId: typeof p.invoice === "string" ? p.invoice : p.invoice.id, charge: facts }));
-    if (outcomes.includes("applied")) return "applied";
-    // A refund can arrive before its invoice's commission (a late invoice.paid): look again on the retry ladder below.
-    // shortcut: no verifyDue re-check (deferred); a commission created after the last retry (a hand-run accrue) keeps the refund unless voided by hand.
-    if (a.customer && payments.length && outcomes.every((o) => o === "no commission") && attempt < 4) { await ctx.scheduler.runAfter(60000 * 4 ** attempt, internal.referralJobs.resolveChargeEvent, { ...a, attempt: attempt + 1 }); return "retrying"; }
-    return "no commission";
+    // A refund or dispute can come before its invoice's commission (a late invoice.paid): checkInvoiceCharges looks again once it accrues.
+    return outcomes.includes("applied") ? "applied" : "no commission";
   } catch (error) {
     // Stripe already has our 200 for the event, so a failed read is retried here (1, 4, 16 and 64 minutes), then logged.
     if (attempt < 4) { await ctx.scheduler.runAfter(60000 * 4 ** attempt, internal.referralJobs.resolveChargeEvent, { ...a, attempt: attempt + 1 }); return "retrying"; }
     console.error(JSON.stringify({ event: "referral.charge_unresolved", kind: a.kind, reason: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
+    throw error;
+  }
+} });
+/** Scheduled once a commission accrues: a refund or dispute of its invoice handled before then (a webhook
+ *  outage and redelivery, a late invoice.paid) had no commission to take back. Each refunded or disputed
+ *  charge of the invoice's PaymentIntents goes through resolveChargeEvent. Stripe read failures retry as there. */
+export const checkInvoiceCharges = internalAction({ args: { invoiceId: v.string(), attempt: v.optional(v.number()) }, handler: async (ctx, { attempt = 0, invoiceId }): Promise<string> => {
+  try {
+    const key = stripeKey(), payments = await listAll<{ id: string; payment: { type: string; payment_intent?: unknown } }>("/v1/invoice_payments", { invoice: invoiceId, status: "paid" }, key);
+    let queued = 0;
+    for (const { payment } of payments) {
+      if (payment.type !== "payment_intent" || typeof payment.payment_intent !== "string") continue;
+      for (const c of await listAll<{ id: string; amount_refunded: number; disputed: boolean }>("/v1/charges", { payment_intent: payment.payment_intent }, key)) {
+        if (c.amount_refunded > 0 || c.disputed) { await ctx.scheduler.runAfter(0, internal.referralJobs.resolveChargeEvent, { chargeId: c.id, kind: c.disputed ? "dispute" : "refund", paymentIntent: payment.payment_intent }); queued++; }
+      }
+    }
+    return queued ? "queued" : "clean";
+  } catch (error) {
+    if (attempt < 4) { await ctx.scheduler.runAfter(60000 * 4 ** attempt, internal.referralJobs.checkInvoiceCharges, { invoiceId, attempt: attempt + 1 }); return "retrying"; }
+    console.error(JSON.stringify({ event: "referral.invoice_unchecked", reason: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
     throw error;
   }
 } });
@@ -91,7 +108,7 @@ function payoutBranch(ctx: ActionCtx, r: Doc<"referralRedemptions">, account: st
   const group = `referral-redemption-${r._id}`;
   return {
     find: async () => (await stripeGet<List<{ id: string }>>("/v1/transfers", { transfer_group: group, limit: 1 }, stripeKey())).data[0]?.id ?? null,
-    check: async () => (await refreshAccount(ctx, account)).transfers === "active" ? null : "Stripe can’t pay your account until its setup is complete (Continue setup under Settings → Referrals), so the amount is back in your balance.",
+    check: async () => (await refreshAccount(ctx, account)).transfers === "active" ? null : "Stripe can’t pay your account until its setup is complete (Continue setup under Personal Settings → Referrals), so the amount is back in your balance.",
     post: async () => (await stripe<{ id: string }>("/v1/transfers", { amount: r.amount, currency: r.currency, destination: account, transfer_group: group, description: "OpenReview referral payout", metadata: { referralRedemptionId: r._id } }, stripeKey(), fetch, r.idempotencyKey)).id,
     rejected: "Stripe didn’t accept the payout, so the amount is back in your balance.",
     unchecked: "Stripe couldn’t check your payout account, so the amount is back in your balance.",
@@ -153,7 +170,7 @@ export const reconcileRedemptions = internalAction({ args: {}, handler: async (c
 
 // Payout accounts (Phase 4): Stripe Connect Accounts v2 with the recipient configuration and the
 // Express dashboard. Stripe hosts onboarding and keeps the identity and bank details.
-// shortcut: no Connect notification banner (so no scoped CSP for /dashboard/settings/referrals in next.config.ts) or thin-event webhook; the status is re-read from Stripe on Referrals page loads and before every transfer.
+// shortcut: no Connect notification banner (so no scoped CSP for /dashboard/account/referrals in next.config.ts) or thin-event webhook; the status is re-read from Stripe on Referrals page loads and before every transfer.
 type V2Account = { id: string; configuration?: { recipient?: { capabilities?: { stripe_balance?: { stripe_transfers?: { status?: string } } } } | null } | null; requirements?: { summary?: { minimum_deadline?: { status?: string | null } | null } | null } | null };
 const transferStatuses = ["active", "pending", "restricted", "unsupported"] as const;
 const payoutStatusOf = (a: V2Account) => {
@@ -167,7 +184,7 @@ async function refreshAccount(ctx: ActionCtx, accountId: string) {
 }
 const hash8 = async (text: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].slice(0, 4).map((b) => b.toString(16).padStart(2, "0")).join("");
 type PayoutStep = { ok: true; url: string } | { ok: false; error: string; signIn?: string };
-/** Settings → Referrals → Set up payouts / Continue setup: creates the caller's connected account on first
+/** Personal Settings → Referrals → Set up payouts / Continue setup: creates the caller's connected account on first
  *  use, then returns a Stripe-hosted link: onboarding until it first could receive transfers, an update after. */
 export const startPayoutSetup = action({ args: { token: v.string(), country: v.string() }, handler: async (ctx, a): Promise<PayoutStep> => {
   const context = await ctx.runQuery(internal.referrals.payoutContext, { token: a.token, recent: true });
@@ -185,10 +202,10 @@ export const startPayoutSetup = action({ args: { token: v.string(), country: v.s
     catch (error) { if (error instanceof StripeError && error.status === 409 && error.type === "idempotency_error") return { ok: false, error: "Stripe is still working on an earlier payout setup request. Wait a minute, then try again." }; throw error; }
     account = await ctx.runMutation(internal.referrals.savePayoutAccount, { userId: context.userId, accountId: created.id, country, ...payoutStatusOf(created) });
   }
-  const type = account.onboarded ? "account_update" : "account_onboarding", back = `${appOrigin()}/dashboard/settings/referrals?payouts=`;
+  const type = account.onboarded ? "account_update" : "account_onboarding", back = `${appOrigin()}/dashboard/account/referrals?payouts=`;
   return { ok: true, url: (await stripeV2<{ url: string }>("POST", "/v2/core/account_links", key, { body: { account: account.accountId, use_case: { type, [type]: { configurations: ["recipient"], refresh_url: `${back}refresh`, return_url: `${back}return` } } } })).url };
 } });
-/** Re-reads the caller's payout account from Stripe (Settings → Referrals, on load). Null without one.
+/** Re-reads the caller's payout account from Stripe (Personal Settings → Referrals, on load). Null without one.
  *  At most once a minute per account: the page renders after every dashboard action, and a token holder could loop this. */
 export const refreshMyPayoutAccount = action({ args: { token: v.string() }, handler: async (ctx, a): Promise<string | null> => {
   const account = (await ctx.runQuery(internal.referrals.payoutContext, { token: a.token, recent: false }))?.account;

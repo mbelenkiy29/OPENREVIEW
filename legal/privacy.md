@@ -28,8 +28,8 @@ OpenReview is also open-source software. If you run it on your own infrastructur
 **Billing information.** Payments are handled by Stripe. We receive and store your Stripe customer and subscription identifiers, plan status, seat count and billing dates. We never receive or store full card numbers.
 
 **Referral information.** If you use the referral program, we keep your referral code, who signed up or added a workspace through it and when, the referred workspace's identifier, the commissions earned from its paid invoices (Stripe invoice and charge identifiers, amounts, refunds and disputes), and the credits you applied, with the workspace and Stripe customer balance transaction they went to. If you cash out, Stripe collects your identity, tax and bank details directly for your Stripe account; to start that account we send Stripe your verified email address and your OpenReview user ID, and we store only the account's identifier, country and payout status, and the transfers we sent to it.
-- **What a referrer sees:** the GitHub username of each person they referred, or "Email sign-up" for anyone without one, when they signed up, when their workspace subscribed, and what the referrer earned from each of its payments, including any share taken back after a refund or dispute. Referrers never see email addresses, workspace names or workspace content.
-- **What a referred person sees:** the referrer's GitHub username, if they have one, on the referral page.
+- **What a referrer sees:** the GitHub username of each person they referred, or "Email sign-up" for anyone without one, when they signed up, whether they have created a workspace, when it subscribed and when the referrer's commission from it ends, and what the referrer earned from each of its payments, including any share taken back after a refund or dispute. Referrers never see email addresses, workspace names or workspace content.
+- **What a referred workspace sees:** the referrer's GitHub username, if they have one. The referred person sees it on the referral page, and the owners and admins of the referred workspace see it as "Invited by" in **Settings → Billing**, with whether the referral discount applies.
 
 **Technical and usage information.** We record:
 - sign-in sessions, with the sign-in provider, the browser's user-agent string and timestamps;
@@ -37,6 +37,10 @@ OpenReview is also open-source software. If you run it on your own infrastructur
 - API key and webhook activity.
 
 Our hosting providers keep server logs that include IP addresses.
+
+To stop automated abuse of the sign-in and changelog email forms, we count requests per email address and per network. The counters hold only keyed hashes, never the address or the IP itself, and are deleted within two days. Sign-in links are deleted after 30 days.
+
+When the email forms use a bot check, Cloudflare receives your IP address and browser signals to run it.
 
 **Error reports and analytics.** We use Sentry to learn about errors and PostHog to understand how the site is used.
 - **Sentry receives:** error reports with technical details, and performance timings for a sample of page loads.
@@ -59,6 +63,10 @@ Our hosting providers keep server logs that include IP addresses.
 - **Who can see it:** posts, votes and comments on the public boards, with your name and picture, are visible to anyone who visits them.
 - **In your browser:** the UserJot widget keeps its own session in your browser so it remembers you between visits.
 
+**Changelog emails.** If you subscribe on the [changelog](/changelog), we send your email address to our email provider, which keeps the subscriber list and sends the updates.
+- **Confirmation first:** nothing is kept until you click the link in the confirmation email.
+- **Leaving:** every update has an unsubscribe link.
+
 **Cookies.** Most of our cookies are needed for the service to work:
 - your sign-in session;
 - your active workspace and team;
@@ -72,7 +80,11 @@ If you allow it, PostHog also stores a random identifier in a cookie and in your
 - **Remembering your choice:** your choice is kept in a cookie for 180 days.
 - **Changing your mind:** use **Cookie settings** at the bottom of any page.
 
-We do not use advertising cookies, and we do not use cookies to track you across other websites.
+If you allow it, the OpenAI Ads pixel also stores two cookies, so we can tell whether a visit or sign-up came from one of our ads in ChatGPT: `__oppref`, the ad click it came from, for 30 days, and `__obref`, a random identifier for your browser, for a year. It follows the same choice as PostHog; declining removes both and leaves only `__oaiq_consent`, which remembers that you said no.
+
+If you allow it, the Reddit Pixel also stores identifiers in cookies and in your browser's local storage, so we can tell whether a visit or sign-up came from one of our ads on Reddit: `_rdt_cid`, the ad click it came from, and `_rdt_uuid`, a random identifier for your browser, for about 90 days. It follows the same choice as PostHog; declining removes them. Reddit may also link these events to a Reddit account signed in on the same browser, under Reddit's own privacy policy.
+
+Apart from this ad measurement, we do not use advertising cookies, and we do not use cookies to track you across other websites.
 
 ## How we use information
 
@@ -81,10 +93,11 @@ We use the information above to:
 - authenticate you, keep accounts and workspaces secure, and prevent abuse;
 - process subscriptions and enforce plan limits;
 - respond to support requests and send service messages, such as sign-in links, invitations and billing notices;
+- send changelog emails, only if you subscribed to them;
 - keep the service reliable, diagnose problems and understand which features are used;
 - meet legal obligations.
 
-We do not sell personal information, and we do not use it for advertising.
+We do not sell personal information. If you accept cookies, we tell OpenAI and Reddit when a visit or sign-up follows one of our ads, so we can measure them. To match a sign-up to an ad, the pixels may also send a one-way (SHA-256) hash of contact details shown on the page, such as an email address, never the details themselves. We do not otherwise use your information for advertising.
 
 Feedback you give on reviews, such as reactions, replies and approved rules, is used only to tune reviews within your own workspace. It is not shared with other workspaces.
 
@@ -100,15 +113,17 @@ We share information only as needed to run the service, with:
 |---|---|
 | Vercel | Website hosting |
 | Convex | Database and backend processing |
-| OpenAI | AI model processing for reviews and answers |
+| OpenAI | AI model processing for reviews and answers; with your consent, measuring our ads in ChatGPT |
+| Reddit | With your consent, measuring our ads on Reddit |
 | Stripe | Payments, subscriptions and referral payouts |
 | GitHub (and other code hosts you connect) | Sign-in and repository access |
 | OSV.dev | Checking package names and versions from dependency changes for known vulnerabilities (no source code is sent) |
 | Sentry | Error reports and performance monitoring |
 | PostHog | Product analytics |
 | UserJot | Feedback boards, roadmap and the feedback widget |
+| Cloudflare (Turnstile) | The bot check on the sign-in and changelog email forms |
 | Linear, Atlassian, Notion, Slack | Only when your workspace connects them |
-| An email delivery provider | Only when email sign-in or email notifications are turned on |
+| An email delivery provider | Only when email sign-in or email notifications are turned on, or you subscribe to changelog emails |
 
 Information is also shared:
 - **With your workspace:** other members of your workspace can see its repositories, reviews and settings, according to their roles. Comments OpenReview posts on pull requests are visible to anyone who can see those pull requests on your code host.
@@ -126,9 +141,9 @@ Uninstalling the GitHub App or removing a repository stops our access to it. To 
 
 - **Your requests:** you can ask us to access, correct, export or delete your personal information by emailing [mbelenkiy29@gmail.com](mailto:mbelenkiy29@gmail.com). We respond within 30 days.
 - **In the product:** you can sign out of other sessions in **Settings → Account**. Admins can disconnect integrations and remove repositories at any time.
-- **Analytics:** turn analytics off at any time with **Cookie settings** at the bottom of any page, or with your browser's Do Not Track or Global Privacy Control setting.
+- **Analytics and ad measurement:** turn both off at any time with **Cookie settings** at the bottom of any page, or with your browser's Do Not Track or Global Privacy Control setting.
 - **Regional rights:** depending on where you live, for example in the EU, UK or California, you may have additional rights, such as objecting to processing or complaining to a data protection authority. We honor these rights for everyone.
-- **No selling:** we do not sell or share personal information for cross-context behavioral advertising.
+- **No selling:** we do not sell personal information. The only sharing for advertising is the ad measurement above, which runs only if you accept cookies and stays off with Global Privacy Control.
 
 ## Where information is processed
 

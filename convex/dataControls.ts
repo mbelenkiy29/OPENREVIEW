@@ -5,6 +5,7 @@ import type { Doc, Id, TableNames } from "./_generated/dataModel";
 import schema from "./schema";
 import { audit, authorize, service } from "./auth";
 import { openSubscription } from "../src/billing";
+import { disableRepository } from "./repositories";
 
 // Data controls (M3): data sharing (private by default), retention for reviews and transcripts, and
 // owner-only workspace deletion with a grace period followed by a resumable purge of every
@@ -15,7 +16,6 @@ import { openSubscription } from "../src/billing";
 type Step =
   | { table: TableNames; via: "org"; index: string }
   | { table: TableNames; via: "repo"; index: string; field?: "repositoryId" }
-  | { table: TableNames; via: "repoChild"; parent: { table: TableNames; index: string }; index: string; field: string }
   | { table: TableNames; via: "child"; parent: { table: TableNames; index: string }; index: string; field: string }
   | { table: TableNames; via: "scan"; match: "organizationId" | "repositoryOrConnection" }
   | { table: "organizations"; via: "self" };
@@ -32,22 +32,22 @@ export const purgePlan: Step[] = [
   { table: "providerEvents", via: "child", parent: { table: "providerConnections", index: "by_org" }, index: "by_connection_created", field: "connectionId" },
   { table: "providerIdentities", via: "child", parent: { table: "providerConnections", index: "by_org" }, index: "by_connection_user", field: "connectionId" },
   { table: "teamMembers", via: "child", parent: { table: "teams", index: "by_org" }, index: "by_team", field: "teamId" },
-  { table: "indexSkippedFiles", via: "repoChild", parent: { table: "indexJobs", index: "by_repo" }, index: "by_job_path", field: "jobId" },
+  { table: "indexSkippedFiles", via: "child", parent: { table: "indexJobs", index: "by_org" }, index: "by_job_path", field: "jobId" },
   // Per repository.
   ...([["repositorySettings", "by_repo"], ["repositoryFiles", "by_repo"], ["graphModuleReferences", "by_path"], ["symbols", "by_repo"], ["relationships", "by_repo"], ["indexJobs", "by_repo"], ["knowledgeEntries", "by_repo"], ["pullCatalogJobs", "by_repo"], ["codeChunks", "by_file"], ["embeddings", "by_path"], ["chunkEmbeddings", "by_path"], ["conversations", "by_pr"], ["p4Identities", "by_repo_user"]] as const).map(([table, index]) => ({ table, via: "repo" as const, index })),
   // Small tables without a workspace index.
   ...(["providerInstallRequests", "notificationDeliveries", "oauthCodes", "bridgeDevices"] as const).map((table) => ({ table, via: "scan" as const, match: "organizationId" as const })),
   { table: "providerIdentityGrants", via: "scan", match: "repositoryOrConnection" },
   // Workspace-indexed tables; repositories and members near the end, the audit log last.
-  ...([["integrationConnections", "by_org"], ["modelKeys", "by_org"], ["approvalPolicies", "by_org"], ["approvalJobs", "by_org_status"], ["runtimePolicies", "by_org"], ["runtimeWorkers", "by_org"], ["runtimeJobs", "by_org_status"], ["p4Polls", "by_org"], ["providerConnections", "by_org"], ["scopeSettings", "by_org"], ["repositoryClusters", "by_org"], ["clusterSuggestions", "by_org_status"], ["modelCache", "by_key"], ["ssoConnections", "by_org"], ["emailInvitations", "by_org"], ["analyticsDaily", "by_org_day"], ["invitations", "by_org"], ["pullRequests", "by_org"], ["findings", "by_org"], ["reviews", "by_org"], ["billingAccounts", "by_org"], ["billingUsage", "by_org_period"], ["notificationChannels", "by_org"], ["slackInstallations", "by_org"], ["notificationPreferences", "by_org"], ["chatThreads", "by_org_user"], ["learnedRules", "by_org"], ["commentReactions", "by_org_time"], ["findingFeedback", "by_org"], ["findingSignals", "by_org_time"], ["learnedPreferences", "by_org_scope"], ["customRules", "by_org"], ["ruleSuggestions", "by_org_status"], ["ruleAssistantRuns", "by_org_time"], ["usageEvents", "by_org"], ["oauthGrants", "by_org"], ["apiKeys", "by_org"], ["teams", "by_org"], ["githubInstallations", "by_org"], ["repositories", "by_org"], ["organizationMembers", "by_org"], ["auditEvents", "by_org"]] as const).map(([table, index]) => ({ table, via: "org" as const, index })),
+  ...([["conversionEvents", "by_org"], ["fileReviews", "by_org"], ["integrationConnections", "by_org"], ["modelKeys", "by_org"], ["cliReviews", "by_org"], ["approvalPolicies", "by_org"], ["approvalJobs", "by_org_status"], ["runtimePolicies", "by_org"], ["runtimeWorkers", "by_org"], ["runtimeJobs", "by_org_status"], ["p4Polls", "by_org"], ["providerConnections", "by_org"], ["scopeSettings", "by_org"], ["repositoryClusters", "by_org"], ["clusterSuggestions", "by_org_status"], ["modelCache", "by_key"], ["ssoConnections", "by_org"], ["emailInvitations", "by_org"], ["analyticsDaily", "by_org_day"], ["invitations", "by_org"], ["pullRequests", "by_org"], ["findings", "by_org"], ["reviews", "by_org"], ["billingAccounts", "by_org"], ["billingUsage", "by_org_period"], ["billingMeterEvents", "by_org_status"], ["notificationChannels", "by_org"], ["slackInstallations", "by_org"], ["notificationPreferences", "by_org"], ["chatThreads", "by_org_user"], ["learnedRules", "by_org"], ["commentReactions", "by_org_time"], ["findingFeedback", "by_org"], ["findingSignals", "by_org_time"], ["learnedPreferences", "by_org_scope"], ["customRules", "by_org"], ["ruleSuggestions", "by_org_status"], ["ruleAssistantRuns", "by_org_time"], ["usageEvents", "by_org"], ["oauthGrants", "by_org"], ["apiKeys", "by_org"], ["teams", "by_org"], ["githubInstallations", "by_org"], ["repositories", "by_org"], ["organizationMembers", "by_org"], ["auditEvents", "by_org"]] as const).map(([table, index]) => ({ table, via: "org" as const, index })),
   { table: "organizations", via: "self" },
 ];
 // Not owned by a workspace: kept on deletion, with the reason.
 export const sharedTables: Partial<Record<TableNames, string>> = {
   users: "personal account; may belong to other workspaces", identities: "personal sign-in methods", sessions: "personal browser sessions",
-  personalCredentials: "personal agent keys", personalSettings: "personal preferences", cliSessions: "personal CLI sessions", loginTokens: "magic-link tokens keyed by email",
+  personalCredentials: "personal agent keys", personalSettings: "personal preferences", cliSessions: "personal CLI sessions", loginTokens: "magic-link tokens keyed by email; pruned after 30 days",
   inferenceBudgets: "deployment-wide model budget", inferenceReservations: "deployment-wide budget reservations",
-  rateLimits: "short-lived counters", providerReceipts: "one-time install receipts that expire", ssoRequests: "SAML request ids that expire in 10 minutes",
+  rateLimits: "short-lived counters", changelogDigests: "which public changelog entries were last emailed", providerReceipts: "one-time install receipts that expire", ssoRequests: "SAML request ids that expire in 10 minutes",
   oauthClients: "MCP client registry shared by all workspaces", stripeEvents: "Stripe event ids kept for replay protection (no review data)",
   slackEventReceipts: "Slack event-id dedupe", webhookDeliveries: "provider payloads not linked to a workspace; pruned deployment-wide after 14 days",
   workspaceDeletions: "deletion receipts",
@@ -86,14 +86,15 @@ async function runStep(ctx: MutationCtx, organizationId: Id<"organizations">, st
     for (const r of rows) await remove(ctx, step.table, r);
     return { deleted: rows.length, done: rows.length < BATCH };
   }
-  if (step.via === "repo" || step.via === "repoChild") {
-    for (const repo of await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).take(2000)) {
-      let rows: ({ _id: string } & Record<string, unknown>)[] = [];
-      if (step.via === "repo") rows = await byField(ctx, step.table, step.index, "repositoryId", repo._id).take(BATCH);
-      else for (const parent of await byField(ctx, step.parent.table, step.parent.index, "repositoryId", repo._id).take(500)) { rows = await byField(ctx, step.table, step.index, step.field, parent._id).take(BATCH); if (rows.length) break; }
-      if (rows.length) { for (const r of rows) await remove(ctx, step.table, r); return { deleted: rows.length, done: false }; }
+  if (step.via === "repo") {
+    // Repositories a page at a time through the cursor, so every repository is reached and each chunk stays bounded.
+    const page = await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).paginate({ cursor, numItems: 25 });
+    for (const repo of page.page) {
+      const rows = await byField(ctx, step.table, step.index, "repositoryId", repo._id).take(BATCH);
+      for (const r of rows) await remove(ctx, step.table, r);
+      if (rows.length) return { deleted: rows.length, done: false, ...(cursor ? { cursor } : {}) }; // more may remain: revisit this page
     }
-    return { deleted: 0, done: true };
+    return page.isDone ? { deleted: 0, done: true } : { deleted: 0, done: false, cursor: page.continueCursor };
   }
   if (step.via === "child") {
     const page = await byField(ctx, step.parent.table, step.parent.index, "organizationId", organizationId).paginate({ cursor, numItems: 25 });
@@ -108,9 +109,10 @@ async function runStep(ctx: MutationCtx, organizationId: Id<"organizations">, st
   }
   // Bounded scans of small tables.
   const page = await table(ctx, step.table).paginate({ cursor, numItems: BATCH });
-  const repos = step.match === "repositoryOrConnection" ? new Set((await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).take(2000)).map((r) => r._id as string)) : null;
-  const connections = step.match === "repositoryOrConnection" ? new Set((await ctx.db.query("providerConnections").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).take(500)).map((c) => c._id as string)) : null;
-  const mine = page.page.filter((r) => step.match === "organizationId" ? r.organizationId === organizationId : repos!.has(r.repositoryId as string) || connections!.has(r.connectionId as string));
+  // Grants are matched by looking up each row's repository and connection, so no workspace is too big to reach.
+  const ours = async (id: unknown) => (await ctx.db.get(id as Id<"repositories"> | Id<"providerConnections">))?.organizationId === organizationId;
+  const mine = [];
+  for (const r of page.page) if (step.match === "organizationId" ? r.organizationId === organizationId : await ours(r.repositoryId) || await ours(r.connectionId)) mine.push(r);
   for (const r of mine) await remove(ctx, step.table, r);
   return page.isDone ? { deleted: mine.length, done: true } : { deleted: mine.length, done: false, cursor: page.continueCursor };
 }
@@ -128,7 +130,7 @@ export const requestDeletion = mutation({ args: { token: v.string(), organizatio
   if (!org || a.confirmName.trim() !== org.name) throw new Error("Type the workspace name exactly to confirm");
   const pending = await pendingOf(ctx, a.organizationId);
   if (pending && ["scheduled", "purging"].includes(pending.status)) throw new Error("Deletion is already scheduled");
-  if (await subscribed(ctx, a.organizationId)) throw new Error("This workspace has a subscription. Cancel it in Settings → Billing → Manage billing, then delete the workspace once the subscription has ended.");
+  if (await subscribed(ctx, a.organizationId)) throw new Error("This workspace has a subscription. Cancel it in Organization Settings → Billing & Usage → Manage billing, then delete the workspace once the subscription has ended.");
   const scheduledFor = Date.now() + graceDays() * 86_400_000;
   const id = await ctx.db.insert("workspaceDeletions", { organizationId: a.organizationId, name: org.name, requestedBy: user._id, requestedAt: Date.now(), scheduledFor, status: "scheduled", step: 0, counts: {} });
   const scheduledId = await ctx.scheduler.runAt(scheduledFor, internal.dataControls.startPurge, { deletionId: id });
@@ -156,7 +158,21 @@ export const startPurge = internalMutation({ args: { deletionId: v.id("workspace
   }
   await audit(ctx, d.organizationId, undefined, "workspace.purge_started", d._id);
   await ctx.db.patch(d._id, { status: "purging", startedAt: Date.now() });
-  await ctx.scheduler.runAfter(0, internal.dataControls.purge, { deletionId: d._id });
+  await ctx.scheduler.runAfter(0, internal.dataControls.quiesce, { deletionId: d._id });
+} });
+// Before any row goes, stop new work: every writer (webhooks, indexing, reviews) checks repo.enabled, and
+// enableIndexing refuses while the workspace purges. Running jobs get drainMs to finish, so nothing writes
+// into a table the purge has already emptied.
+export const drainMs = 10 * 60000;
+/** Whether the workspace's current deletion (its newest receipt) is purging. */
+export const workspacePurging = async (ctx: { db: MutationCtx["db"] }, organizationId: Id<"organizations">) => (await pendingOf(ctx, organizationId))?.status === "purging";
+export const quiesce = internalMutation({ args: { deletionId: v.id("workspaceDeletions"), cursor: v.optional(v.string()) }, handler: async (ctx, a) => {
+  const d = await ctx.db.get(a.deletionId);
+  if (!d || d.status !== "purging") return;
+  const page = await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", d.organizationId)).paginate({ cursor: a.cursor ?? null, numItems: 100 });
+  for (const repo of page.page) if (repo.enabled) await disableRepository(ctx, repo);
+  if (!page.isDone) await ctx.scheduler.runAfter(0, internal.dataControls.quiesce, { deletionId: d._id, cursor: page.continueCursor });
+  else await ctx.scheduler.runAfter(drainMs, internal.dataControls.purge, { deletionId: d._id });
 } });
 // One bounded chunk per transaction; the receipt holds the step and cursor, so a crash or redeploy
 // resumes where it stopped, and re-running a finished step deletes nothing.
@@ -186,40 +202,66 @@ export const saveSettings = mutation({ args: { token: v.string(), organizationId
   await audit(ctx, a.organizationId, user._id, "workspace.data_settings", `${a.dataSharing};reviews=${a.reviewRetentionDays ?? "unlimited"};transcripts=${a.transcriptRetentionDays ?? "unlimited"}`);
 } });
 
-// ---- Retention: daily sweep; each workspace is processed in bounded steps.
-async function removeReview(ctx: MutationCtx, review: Doc<"reviews">) {
-  for (const t of ["reviewFindings", "reviewRuns", "agentRuns", "modelCalls", "reviewComments", "featureTips", "fixRequests", "runtimeJobs", "approvalJobs"] as const)
-    for (const r of await byField(ctx, t, "by_review", "reviewId", review._id).take(1000)) await remove(ctx, t, r);
-  for (const f of await ctx.db.query("findings").withIndex("by_review", (q) => q.eq("reviewId", review._id)).take(1000)) {
-    for (const t of ["findingFeedback", "commentReactions", "findingSignals"] as const) for (const r of await byField(ctx, t, "by_finding", "findingId", f._id).take(1000)) await remove(ctx, t, r);
-    await remove(ctx, "findings", f as never);
+// ---- Retention: daily sweep; each workspace is processed in bounded steps that reschedule until done.
+// Removes a review's child rows a page at a time; the review itself goes only once nothing points at it.
+async function removeReview(ctx: MutationCtx, review: Doc<"reviews">): Promise<boolean> {
+  let complete = true;
+  for (const t of ["reviewFindings", "reviewRuns", "agentRuns", "modelCalls", "reviewComments", "featureTips", "fixRequests", "runtimeJobs", "approvalJobs"] as const) {
+    const rows = await byField(ctx, t, "by_review", "reviewId", review._id).take(500);
+    for (const r of rows) await remove(ctx, t, r);
+    if (rows.length === 500) complete = false;
   }
-  await remove(ctx, "reviews", review as never);
+  const findings = await ctx.db.query("findings").withIndex("by_review", (q) => q.eq("reviewId", review._id)).take(100);
+  for (const f of findings) {
+    let childrenGone = true;
+    for (const t of ["findingFeedback", "commentReactions", "findingSignals"] as const) {
+      const rows = await byField(ctx, t, "by_finding", "findingId", f._id).take(500);
+      for (const r of rows) await remove(ctx, t, r);
+      if (rows.length === 500) childrenGone = false;
+    }
+    if (childrenGone) await remove(ctx, "findings", f as never); else complete = false;
+  }
+  if (findings.length === 100) complete = false;
+  if (complete) await remove(ctx, "reviews", review as never);
+  return complete;
 }
-export const retentionSweep = internalMutation({ args: {}, handler: async (ctx) => {
+// 25 workspaces per transaction (under 1,000 scheduled functions); the next page starts after this page's staggered runs.
+export const retentionSweep = internalMutation({ args: { cursor: v.optional(v.string()) }, handler: async (ctx, a) => {
+  const page = await ctx.db.query("organizations").paginate({ numItems: 25, cursor: a.cursor ?? null });
   let n = 0;
-  for (const org of await ctx.db.query("organizations").take(5000)) if (org.reviewRetentionDays || org.transcriptRetentionDays) { await ctx.scheduler.runAfter(n++ * 1000, internal.dataControls.retention, { organizationId: org._id }); }
+  for (const org of page.page) if (org.reviewRetentionDays || org.transcriptRetentionDays) { await ctx.scheduler.runAfter(n++ * 1000, internal.dataControls.retention, { organizationId: org._id }); }
+  if (!page.isDone) await ctx.scheduler.runAfter(n * 1000, internal.dataControls.retentionSweep, { cursor: page.continueCursor });
   return n;
 } });
 export const retention = internalMutation({ args: { organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<{ reviews: number; transcripts: number; more: boolean }> => {
   const org = await ctx.db.get(a.organizationId);
   if (!org) return { reviews: 0, transcripts: 0, more: false };
-  let reviewsDeleted = 0, transcripts = 0;
+  let reviewsDeleted = 0, transcripts = 0, more = false;
   if (org.reviewRetentionDays) {
     const cutoff = Date.now() - org.reviewRetentionDays * 86_400_000;
-    for (const r of await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", org._id).lt("createdAt", cutoff)).take(20)) { await removeReview(ctx, r); reviewsDeleted++; }
+    const old = await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", org._id).lt("createdAt", cutoff)).take(20);
+    for (const r of old) { if (!await removeReview(ctx, r)) { more = true; break; } reviewsDeleted++; }
+    if (old.length === 20) more = true;
   }
   if (org.transcriptRetentionDays) {
     const cutoff = Date.now() - org.transcriptRetentionDays * 86_400_000;
-    for (const r of await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", org._id).lt("createdAt", cutoff)).take(500)) if (r.agentStateStorageId) { await ctx.storage.delete(r.agentStateStorageId).catch(() => undefined); await ctx.db.patch(r._id, { agentStateStorageId: undefined }); transcripts++; }
-    for (const thread of (await ctx.db.query("chatThreads").withIndex("by_org_user", (q) => q.eq("organizationId", org._id)).take(500)).filter((t) => t.updatedAt < cutoff).slice(0, 20)) {
-      for (const m of await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", thread._id)).take(1000)) await remove(ctx, "chatMessages", m as never);
-      await remove(ctx, "chatThreads", thread as never); transcripts++;
+    // Agent transcripts: reviews keep their row, so a time cursor on the workspace marks how far the clearing got.
+    const reviews = await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", org._id).gte("createdAt", org.transcriptsClearedBefore ?? 0).lt("createdAt", cutoff)).take(100);
+    for (const r of reviews) if (r.agentStateStorageId) { await ctx.storage.delete(r.agentStateStorageId).catch(() => undefined); await ctx.db.patch(r._id, { agentStateStorageId: undefined }); transcripts++; }
+    if (reviews.length && reviews.at(-1)!.createdAt !== org.transcriptsClearedBefore) await ctx.db.patch(org._id, { transcriptsClearedBefore: reviews.at(-1)!.createdAt });
+    const threads = await ctx.db.query("chatThreads").withIndex("by_org_updated", (q) => q.eq("organizationId", org._id).lt("updatedAt", cutoff)).take(20);
+    for (const thread of threads) {
+      const messages = await ctx.db.query("chatMessages").withIndex("by_thread", (q) => q.eq("threadId", thread._id)).take(500);
+      for (const m of messages) await remove(ctx, "chatMessages", m as never);
+      if (messages.length < 500) { await remove(ctx, "chatThreads", thread as never); transcripts++; }
     }
-    for (const repo of await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", org._id)).take(2000))
-      for (const c of (await ctx.db.query("conversations").withIndex("by_pr", (q) => q.eq("repositoryId", repo._id)).take(500)).filter((c) => (c.updatedAt ?? c.createdAt) < cutoff).slice(0, 50)) { await remove(ctx, "conversations", c as never); transcripts++; }
+    // Conversations expire by last activity: a thread replied to yesterday survives; rows without updatedAt fall back to createdAt.
+    const idle = await ctx.db.query("conversations").withIndex("by_org_updated", (q) => q.eq("organizationId", org._id).gte("updatedAt", 0).lt("updatedAt", cutoff)).take(50);
+    // Undated (legacy) rows come oldest-first by creation time; the row cap keeps a large legacy set from passing the read limit.
+    const undated = (await ctx.db.query("conversations").withIndex("by_org_updated", (q) => q.eq("organizationId", org._id).eq("updatedAt", undefined)).filter((q) => q.lt(q.field("createdAt"), cutoff)).paginate({ numItems: 50, cursor: null, maximumRowsRead: 1000 })).page;
+    for (const c of [...idle, ...undated]) { await remove(ctx, "conversations", c as never); transcripts++; }
+    if (reviews.length === 100 || threads.length === 20 || idle.length === 50 || undated.length === 50) more = true;
   }
-  const more = reviewsDeleted === 20 || transcripts >= 20;
   if (more) await ctx.scheduler.runAfter(0, internal.dataControls.retention, a);
   return { reviews: reviewsDeleted, transcripts, more };
 } });
@@ -227,15 +269,18 @@ export const retention = internalMutation({ args: { organizationId: v.id("organi
 // failed after retries, or abandoned). GitHub deliveries carry no workspace link and are deleted with their
 // payload files. Other providers' events keep their row, which dedupes redeliveries and lists the delivery,
 // and lose the body. Full batches continue right away, so a busy deployment never falls behind.
-export const pruneWebhookPayloads = internalMutation({ args: {}, handler: async (ctx): Promise<{ deliveries: number; events: number }> => {
-  const now = Date.now(), cutoff = now - 14 * 86_400_000;
+export const pruneWebhookPayloads = internalMutation({ args: { cursor: v.optional(v.string()), cutoff: v.optional(v.number()) }, handler: async (ctx, a): Promise<{ deliveries: number; events: number }> => {
+  // A continuation keeps the first run's cutoff: a paging cursor is only valid for the exact same index range.
+  const now = Date.now(), cutoff = a.cutoff ?? now - 14 * 86_400_000;
   const deliveries = await ctx.db.query("webhookDeliveries").withIndex("by_updated", (q) => q.lt("updatedAt", cutoff)).take(200);
   for (const d of deliveries) await remove(ctx, "webhookDeliveries", d as never);
-  // Events retried by an admin since they arrived count from that retry.
-  const scanned = await ctx.db.query("providerEvents").withIndex("by_body_deleted", (q) => q.eq("bodyDeletedAt", undefined).lt("createdAt", cutoff)).take(500);
-  const events = scanned.filter((e) => (e.updatedAt ?? e.createdAt) < cutoff).slice(0, 200);
+  // Event bodies are inline (up to ~1 MB each), so events are read in byte-bounded pages (one .paginate() per function;
+  // delivery rows are small) or a row count alone could pass the 8 MB read limit every run. Events retried by an admin
+  // since they arrived count from that retry; the cursor steps past them.
+  const scanned = await ctx.db.query("providerEvents").withIndex("by_body_deleted", (q) => q.eq("bodyDeletedAt", undefined).lt("createdAt", cutoff)).paginate({ numItems: 200, cursor: a.cursor ?? null, maximumBytesRead: 2_000_000 });
+  const events = scanned.page.filter((e) => (e.updatedAt ?? e.createdAt) < cutoff);
   for (const e of events) await ctx.db.patch(e._id, { body: "", bodyDeletedAt: now });
-  if (deliveries.length === 200 || events.length === 200) await ctx.scheduler.runAfter(0, internal.dataControls.pruneWebhookPayloads, {});
+  if (deliveries.length === 200 || !scanned.isDone) await ctx.scheduler.runAfter(0, internal.dataControls.pruneWebhookPayloads, scanned.isDone ? {} : { cursor: scanned.continueCursor, cutoff });
   return { deliveries: deliveries.length, events: events.length };
 } });
 

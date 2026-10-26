@@ -15,7 +15,7 @@
    - Note the app ARI.
 2. Set `BITBUCKET_FORGE_APP_ID` and `BITBUCKET_FORGE_ENVIRONMENT_ID` on the web server to the exact registered ARIs. See [Bitbucket Cloud](../bitbucket-cloud.md) for the remote endpoint and authentication requirements. Then run `forge deploy -e production`.
 3. Install the app on the workspace with `forge install` (product Bitbucket), and approve the scopes.
-4. In OpenReview, go to **Settings → Code Providers → Bitbucket Cloud**:
+4. In OpenReview, go to **Code Providers → Bitbucket Cloud**:
    1. Create an installation authorization.
    2. Paste the single-use code into the app's settings page in Bitbucket.
    3. Choose **Verify access and activate**.

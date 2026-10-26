@@ -1,4 +1,5 @@
 import { query, mutation, internalQuery, internalMutation } from "./_generated/server";
+import {maxWebhookAttempts,webhookRetryDelay} from "./webhooks";
 import { api,internal } from "./_generated/api";
 import { v } from "convex/values";
 import { authorize,authorizeRepository,service,audit } from "./auth";
@@ -83,7 +84,9 @@ export async function receiveEvent(ctx:MutationCtx,a:{connectionId:Id<"providerC
 }
 export const receive=internalMutation({args:{connectionId:v.id("providerConnections"),externalId:v.string(),body:v.string(),eventType:v.optional(v.string())},handler:receiveEvent});
 export const eventData=internalQuery({args:{id:v.id("providerEvents")},handler:async(ctx,a)=>ctx.db.get(a.id)});
-export const eventState=internalMutation({args:{id:v.id("providerEvents"),status:v.string(),error:v.optional(v.string())},handler:async(ctx,a)=>{const e=await ctx.db.get(a.id);if(!e)return;await ctx.db.patch(e._id,{status:a.status,error:a.error,updatedAt:Date.now(),attempts:e.attempts+(a.status==="processing"?1:0)});if(a.status==="failed"&&e.attempts<3)await ctx.scheduler.runAfter(10000*2**e.attempts,internal.providerJobs.event,{id:e._id});}});
+export const eventState=internalMutation({args:{id:v.id("providerEvents"),status:v.string(),error:v.optional(v.string())},handler:async(ctx,a)=>{const e=await ctx.db.get(a.id);if(!e)return;await ctx.db.patch(e._id,{status:a.status,error:a.error,updatedAt:Date.now(),attempts:e.attempts+(a.status==="processing"?1:0)});if(a.status==="failed"&&e.attempts<maxWebhookAttempts)await ctx.scheduler.runAfter(webhookRetryDelay(e.attempts),internal.providerJobs.event,{id:e._id});}});
+// One event's repository, through the index: a webhook never reads every repository in the workspace.
+export const repository=internalQuery({args:{connectionId:v.id("providerConnections"),externalId:v.string()},handler:async(ctx,a)=>{const c=await ctx.db.get(a.connectionId);if(!c?.active)return null;return ctx.db.query("repositories").withIndex("by_connection",q=>q.eq("connectionId",c._id).eq("externalId",a.externalId)).first();}});
 export const repositories=internalQuery({args:{connectionId:v.id("providerConnections")},handler:async(ctx,a)=>{const c=await ctx.db.get(a.connectionId);if(!c?.active)return [];return (await ctx.db.query("repositories").withIndex("by_org",q=>q.eq("organizationId",c.organizationId)).collect()).filter(r=>r.connectionId===c._id);}});
 export const authorizeAdmin=internalQuery({args:{token:v.string(),connectionId:v.id("providerConnections")},handler:async(ctx,a)=>{const c=await ctx.db.get(a.connectionId);if(!c?.active)throw new Error("Connection unavailable");await authorize(ctx,a.token,c.organizationId,true);return true;}});
 export const reviewAccess=internalQuery({args:{token:v.string(),repositoryId:v.id("repositories")},handler:async(ctx,a)=>{return (await authorizeRepository(ctx,a.token,a.repositoryId,true)).repo;}});
@@ -117,7 +120,7 @@ export const originLifecycle=internalMutation({args:{id:v.id("providerConnection
 export const claimEvent=internalMutation({args:{id:v.id("providerEvents")},handler:async(ctx,a)=>{
  const event=await ctx.db.get(a.id);if(!event||event.status==="completed"||event.bodyDeletedAt)return false;
  if(event.status==="processing"&&(event.updatedAt??event.createdAt)>Date.now()-15*60000)return false;
- if(event.attempts>=3){await ctx.db.patch(event._id,{status:"failed",error:"Provider event recovery exhausted",updatedAt:Date.now()});return false;}
+ if(event.attempts>=maxWebhookAttempts){await ctx.db.patch(event._id,{status:"failed",error:"Provider event recovery exhausted",updatedAt:Date.now()});return false;}
  await ctx.db.patch(event._id,{status:"processing",attempts:event.attempts+1,updatedAt:Date.now()});
  await ctx.scheduler.runAfter(15*60000+1,internal.providerJobs.event,a);
  return true;

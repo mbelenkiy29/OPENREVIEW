@@ -6,12 +6,17 @@ import schema from '../convex/schema';
 import {api,internal} from '../convex/_generated/api';
 import type {Id} from '../convex/_generated/dataModel';
 const modules=import.meta.glob('../convex/**/*.ts');
+// The magic-link route runs against convex-test; Next's request scope and backend() are faked.
+const holder=vi.hoisted(()=>({t:undefined as unknown,jar:new Map<string,string>()}));
+vi.mock('next/headers',()=>({cookies:async()=>({get:(n:string)=>holder.jar.has(n)?{value:holder.jar.get(n)}:undefined,set:(n:string,v:string)=>{holder.jar.set(n,v);},delete:(n:string)=>{holder.jar.delete(n);}}),headers:async()=>new Headers({'user-agent':'vitest'})}));
+vi.mock('../src/server',()=>({backend:()=>holder.t,signSession:async()=>'session-jwt',cookieOptions:{httpOnly:true,secure:false,sameSite:'lax',path:'/'},origin:()=>'https://review.example.com'}));
+import {GET as openMagicLink,POST as confirmMagicLink} from '../app/api/auth/email/verify/route';
 const secret='identity-session-secret-at-least-32-characters',svc='identity-service';
 beforeEach(()=>{vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date']});vi.setSystemTime(Date.UTC(2026,9,14,12));Object.assign(process.env,{SESSION_SECRET:secret,SERVICE_SECRET:svc,APP_URL:'https://review.example.com'});});
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();delete process.env.RESEND_API_KEY;delete process.env.EMAIL_FROM;});
 
 const session=()=>{const sid=randomBytes(32).toString('base64url');return {sid,hash:createHash('sha256').update(sid).digest('hex')};};
-const jwt=(userId:string,sid?:string,issuedAt=Math.floor(Date.now()/1000))=>new SignJWT(sid?{sid}:{}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(userId).setIssuedAt(issuedAt).setExpirationTime('7d').sign(new TextEncoder().encode(secret));
+const jwt=(userId:string,sid?:string,issuedAt=Math.floor(Date.now()/1000),key=secret)=>new SignJWT(sid?{sid}:{}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(userId).setIssuedAt(issuedAt).setExpirationTime('7d').sign(new TextEncoder().encode(key));
 type T=ReturnType<typeof convexTest>;
 async function signIn(t:T,profile:{provider:'github'|'gitlab'|'google';providerUserId:string;login:string;email?:string;emailVerified:boolean},linkToken?:string){
  const s=session();const userId=await t.mutation(api.identity.signIn,{secret:svc,avatar:'',...profile,sessionHash:s.hash,userAgent:'Vitest',...(linkToken?{linkToken}:{})});
@@ -70,6 +75,11 @@ test('server-side sessions: individual revocation, sign out everywhere, expiry, 
  await expect(t.query(api.users.me,{token:phone.token})).rejects.toThrow();
  // A forged session ID is rejected.
  expect(await valid(t,await jwt(laptop.userId,randomBytes(32).toString('base64url')))).toBe(false);
+ // A real session ID under a bad signature can neither list sessions nor sign that session out.
+ const badSignature=await jwt(laptop.userId,laptop.sid,undefined,'not-the-session-secret-but-32-chars-long');
+ await expect(t.query(api.identity.sessions,{token:badSignature})).rejects.toThrow();
+ await t.mutation(api.identity.signOut,{token:badSignature});
+ expect(await valid(t,laptop.token)).toBe(true);
  // Sign out: only this browser.
  const tablet=await signIn(t,{provider:'google',providerUserId:'g-1',login:'dev',email:'dev@example.com',emailVerified:true});
  await t.mutation(api.identity.signOut,{token:laptop.token});
@@ -78,6 +88,9 @@ test('server-side sessions: individual revocation, sign out everywhere, expiry, 
  vi.advanceTimersByTime(2000);
  await t.mutation(api.identity.signOutEverywhere,{token:tablet.token});
  expect([await valid(t,tablet.token),await valid(t,legacyToken)]).toEqual([false,false]);
+ // The cutoff alone ends a session, even one whose row the revoke loop never reached (it stops at 500).
+ await t.run(async ctx=>{const row=await ctx.db.query('sessions').withIndex('by_hash',q=>q.eq('hash',createHash('sha256').update(tablet.sid).digest('hex'))).unique();await ctx.db.patch(row!._id,{revokedAt:undefined});});
+ expect(await valid(t,tablet.token)).toBe(false);
  // Signing in again in the same second still works.
  const again=await signIn(t,{provider:'google',providerUserId:'g-1',login:'dev',email:'dev@example.com',emailVerified:true});
  expect(await valid(t,again.token)).toBe(true);
@@ -153,4 +166,59 @@ test('magic links and email invitations are single use, expire, and never store 
  const fresh=await signIn(t,{provider:'github',providerUserId:'10',login:'late',emailVerified:false});
  await expect(t.mutation(api.identity.acceptEmailInvitation,{token:fresh.token,tokenHash:third})).rejects.toThrow(/invalid or expired/);
  expect(JSON.stringify(await t.run(ctx=>ctx.db.query('emailInvitations').collect()))).not.toContain(invite);
+});
+
+test('a GitHub-login invitation is only shown to and accepted by a user who signed in with that GitHub account',async()=>{
+ const t=convexTest(schema,modules);
+ const owner=await signIn(t,{provider:'github',providerUserId:'501',login:'owner',emailVerified:false});
+ const organizationId=await t.mutation(api.users.createOrganization,{token:owner.token,name:'Acme'});
+ const invitationId=await t.mutation(api.users.invite,{token:owner.token,organizationId,githubLogin:'alice',role:'admin'});
+ // A Google account whose email starts with "alice" gets the login "alice", but it is not GitHub's alice.
+ const impostor=await signIn(t,{provider:'google',providerUserId:'g-1',login:'alice',email:'alice@attacker.example',emailVerified:true});
+ expect((await t.query(api.users.me,{token:impostor.token})).invitations).toEqual([]);
+ await expect(t.mutation(api.users.acceptInvitation,{token:impostor.token,invitationId})).rejects.toThrow('invalid');
+ // Linking a different GitHub account does not make the invitation theirs.
+ await signIn(t,{provider:'github',providerUserId:'502',login:'mallory',emailVerified:false},impostor.token);
+ await expect(t.mutation(api.users.acceptInvitation,{token:impostor.token,invitationId})).rejects.toThrow('invalid');
+ const alice=await signIn(t,{provider:'github',providerUserId:'503',login:'alice',emailVerified:false});
+ expect((await t.query(api.users.me,{token:alice.token})).invitations.map(i=>i._id)).toEqual([invitationId]);
+ expect(await t.mutation(api.users.acceptInvitation,{token:alice.token,invitationId})).toBe(organizationId);
+});
+
+test('opening a magic link only shows a confirm button; the same-origin POST consumes it and starts the session',async()=>{
+ const t=convexTest(schema,modules);holder.t=t;holder.jar.clear();
+ process.env.RESEND_API_KEY='re_fixture';process.env.EMAIL_FROM='OpenReview <noreply@example.com>';
+ let text='';vi.spyOn(globalThis,'fetch').mockImplementation(async(_u:string|URL|Request,init?:RequestInit)=>{text=JSON.parse(String(init?.body)).text;return Response.json({id:'m1'});});
+ await t.action(api.identityJobs.requestMagicLink,{secret:svc,email:'scan@example.com',next:'/settings'});
+ const page=await openMagicLink(new Request(/https:\/\/\S+\/api\/auth\/email\/verify\?\S+/.exec(text)![0]));
+ const html=await page.text(),token=/name="token" value="([^"]+)"/.exec(html)![1];
+ // A prefetch (mail scanner) or a planted link leaves the token unused and signs no one in.
+ expect([page.status,page.headers.get('content-type')]).toEqual([200,'text/html; charset=utf-8']);
+ expect((await t.run(ctx=>ctx.db.query('loginTokens').collect()))[0].usedAt).toBeUndefined();
+ expect(holder.jar.has('openreview_session')).toBe(false);
+ const confirm=(origin:string)=>confirmMagicLink(new Request('https://review.example.com/api/auth/email/verify',{method:'POST',headers:{origin},body:new URLSearchParams({token,next:'/settings'})}));
+ expect((await confirm('https://evil.example')).headers.get('location')).toBe('https://review.example.com/login?error=signin');
+ expect(holder.jar.has('openreview_session')).toBe(false);
+ const ok=await confirm('https://review.example.com');
+ expect([ok.status,ok.headers.get('location'),holder.jar.get('openreview_session')]).toEqual([303,'https://review.example.com/settings','session-jwt']);
+ expect((await t.run(ctx=>ctx.db.query('loginTokens').collect()))[0].usedAt).toBeDefined();
+ expect((await confirm('https://review.example.com')).headers.get('location')).toBe('https://review.example.com/login?error=link');
+});
+
+test('GitHub-login invitations reach only GitHub-created accounts, not a magic-link user who picked the same name',async()=>{
+ const t=convexTest(schema,modules);
+ const owner=await signIn(t,{provider:'github',providerUserId:'901',login:'owner',emailVerified:false});
+ const organizationId=await t.mutation(api.users.createOrganization,{token:owner.token,name:'Invites'});
+ const invitationId=await t.mutation(api.users.invite,{token:owner.token,organizationId,githubLogin:'bob',role:'admin'});
+ // Magic link for bob@attacker.example: the account's login becomes "bob".
+ const raw=randomBytes(32).toString('base64url'),hash=createHash('sha256').update(raw).digest('hex'),s=session();
+ await t.mutation(internal.identity.storeLoginToken,{email:'bob@attacker.example',tokenHash:hash});
+ const emailUser=(await t.mutation(api.identity.consumeLoginToken,{secret:svc,tokenHash:hash,sessionHash:s.hash}))!,emailToken=await jwt(emailUser,s.sid);
+ expect((await t.run(ctx=>ctx.db.get(emailUser)))?.login).toBe('bob');
+ expect((await t.query(api.users.me,{token:emailToken})).invitations).toEqual([]);
+ await expect(t.mutation(api.users.acceptInvitation,{token:emailToken,invitationId})).rejects.toThrow(/invalid or expired/);
+ // GitHub user "bob" sees and accepts it.
+ const bob=await signIn(t,{provider:'github',providerUserId:'902',login:'bob',emailVerified:false});
+ expect((await t.query(api.users.me,{token:bob.token})).invitations.map(i=>i._id)).toEqual([invitationId]);
+ expect(await t.mutation(api.users.acceptInvitation,{token:bob.token,invitationId})).toBe(organizationId);
 });

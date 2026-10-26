@@ -11,9 +11,28 @@ test('GitHub context rejects recycled usernames and legacy receipts, and survive
   const denied=await s.t.query(internal.repositoryContext.select,{repositoryId:s.main._id,actor:'alice',...(id?{authorExternalId:id}:{})});expect(denied.receipt).toBeNull();expect(denied.sources).toEqual([]);
  }
  const legacy={...selected.receipt!};delete legacy.githubActorId;await expect(s.t.query(internal.repositoryContext.validate,{receipt:legacy})).rejects.toThrow('identity changed');
- await s.t.run(ctx=>ctx.db.patch(s.user,{githubId:5101}));await expect(s.t.query(internal.repositoryContext.validate,{receipt:selected.receipt!})).rejects.toThrow('identity changed');expect((await s.select()).receipt).toBeNull();
- await s.t.run(ctx=>ctx.db.patch(s.user,{githubId:5100,login:'renamed'}));await expect(s.t.query(internal.repositoryContext.validate,{receipt:selected.receipt!})).rejects.toThrow('identity changed');
+ const githubRow=await s.t.run(ctx=>ctx.db.query('identities').withIndex('by_user',q=>q.eq('userId',s.user)).filter(q=>q.eq(q.field('provider'),'github')).unique());
+ await s.t.run(async ctx=>{await ctx.db.patch(s.user,{githubId:5101});await ctx.db.patch(githubRow!._id,{providerUserId:'5101'});});await expect(s.t.query(internal.repositoryContext.validate,{receipt:selected.receipt!})).rejects.toThrow('identity changed');expect((await s.select()).receipt).toBeNull();
+ await s.t.run(async ctx=>{await ctx.db.patch(s.user,{githubId:5100,login:'renamed'});await ctx.db.patch(githubRow!._id,{providerUserId:'5100',login:'renamed'});});await expect(s.t.query(internal.repositoryContext.validate,{receipt:selected.receipt!})).rejects.toThrow('identity changed');
  const renamed=await s.t.query(internal.repositoryContext.select,{repositoryId:s.main._id,actor:'renamed',authorExternalId:'5100'});expect(renamed.receipt?.userId).toBe(s.user);expect(renamed.sources).toHaveLength(1);expect(await s.t.query(internal.repositoryContext.validate,{receipt:renamed.receipt!})).toBe(true);
+});
+test('a member who signed up with Google and linked GitHub later gets GitHub context and GitHub-login invitations',async()=>{
+ const s=await setup(),sid='d'.repeat(64);
+ const dana=await s.t.mutation(api.identity.signIn,{secret:'context-service',provider:'google',providerUserId:'g-dana',login:'dana',avatar:'',emailVerified:false,sessionHash:sid});
+ const token=await new SignJWT({}).setSubject(dana).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setIssuedAt().setExpirationTime('1h').sign(new TextEncoder().encode(secret));
+ const invitationId=await s.t.mutation(api.users.invite,{token:s.token,organizationId:s.organizationId,githubLogin:'dana',role:'member'});
+ // The Google login "dana" is self-chosen, so it neither reaches the invitation nor the PR author's context.
+ expect((await s.t.query(api.users.me,{token})).invitations).toEqual([]);
+ await s.t.run(ctx=>ctx.db.insert('organizationMembers',{organizationId:s.organizationId,userId:dana,role:'member'}));
+ const pick=()=>s.t.query(internal.repositoryContext.select,{repositoryId:s.main._id,actor:'dana',authorExternalId:'5105'});
+ expect((await pick()).receipt).toBeNull();
+ await s.t.mutation(api.identity.signIn,{secret:'context-service',provider:'github',providerUserId:'5105',login:'dana',avatar:'',emailVerified:false,sessionHash:'e'.repeat(64),linkToken:token});
+ expect((await s.t.query(api.users.me,{token})).invitations.map(i=>i._id)).toEqual([invitationId]);
+ expect(await s.t.mutation(api.users.acceptInvitation,{token,invitationId})).toBe(s.organizationId);
+ const linked=await pick();expect(linked.receipt?.userId).toBe(dana);expect(linked.sources).toHaveLength(1);
+ expect(await s.t.query(internal.repositoryContext.validate,{receipt:linked.receipt!})).toBe(true);
+ // Same login, different GitHub account: still denied.
+ expect((await s.t.query(internal.repositoryContext.select,{repositoryId:s.main._id,actor:'dana',authorExternalId:'5106'})).receipt).toBeNull();
 });
 async function setup(){
  process.env.SESSION_SECRET=secret;process.env.SERVICE_SECRET='context-service';
@@ -238,7 +257,7 @@ test('Bitbucket personal authorization is single-use, exact-connection bound, ex
  await s.t.run(async ctx=>{const member=await ctx.db.query('organizationMembers').withIndex('by_org_user',q=>q.eq('organizationId',s.organizationId).eq('userId',viewer)).unique();await ctx.db.patch(member!._id,{role:'member'});});
  const viewerHash='f'.repeat(64);await s.t.mutation(api.bitbucketPersonal.begin,{token:viewerToken,repositoryId:s.main._id,tokenHash:viewerHash});await expect(s.t.mutation(api.bitbucketPersonal.save,{...s.proof,tokenHash:viewerHash,invocationId:'other-fit'})).rejects.toThrow('another workspace account');
  const expired='d'.repeat(64);await s.t.mutation(api.bitbucketPersonal.begin,{token:s.token,repositoryId:s.main._id,tokenHash:expired});const grantId=await s.t.run(async ctx=>{const grant=await ctx.db.query('providerIdentityGrants').withIndex('by_hash',q=>q.eq('tokenHash',expired)).unique();await ctx.db.patch(grant!._id,{expiresAt:Date.now()-1});return grant!._id;});await expect(s.t.query(api.bitbucketPersonal.inspect,{secret:'context-service',tokenHash:expired})).rejects.toThrow('expired');await s.t.mutation(internal.bitbucketPersonal.expireGrant,{id:grantId});expect(await s.t.run(ctx=>ctx.db.get(grantId))).toBeNull();
- await s.t.run(ctx=>ctx.db.patch(identityId,{active:true,credentials:'old-fixture',expiresAt:Date.now()-1,generation:3}));await s.t.mutation(internal.bitbucketPersonal.expireIdentity,{id:identityId,generation:3});expect(await s.t.run(ctx=>ctx.db.get(identityId))).toMatchObject({active:false,generation:4});expect((await s.t.run(ctx=>ctx.db.get(identityId)))?.credentials).toBeUndefined();
+ await s.t.run(ctx=>ctx.db.patch(identityId,{active:true,credentials:'old-fixture',expiresAt:Date.now()-1,generation:3}));await s.t.mutation(internal.bitbucketPersonal.expireIdentity,{id:identityId,generation:3});expect(await s.t.run(ctx=>ctx.db.get(identityId))).toMatchObject({active:true,generation:4});expect((await s.t.run(ctx=>ctx.db.get(identityId)))?.credentials).toBeUndefined();
  await s.t.run(ctx=>ctx.db.patch(identityId,{active:true,credentials:s.proof.credentials,expiresAt:s.proof.expiresAt}));
  expect((await s.t.query(api.providerIdentities.list,{token:s.token,organizationId:s.organizationId}))[0].identity?.status).toBe('linked');
  const third='c'.repeat(64);await s.t.mutation(api.bitbucketPersonal.begin,{token:s.token,repositoryId:s.main._id,tokenHash:third});await s.t.run(ctx=>ctx.db.patch(s.connectionId,{credentials:'replaced'}));await expect(s.t.query(api.bitbucketPersonal.inspect,{secret:'context-service',tokenHash:third})).rejects.toThrow('connection changed');
@@ -322,4 +341,19 @@ test('bridge claim rechecks finding evidence access after its source team grant 
  await expect(s.t.mutation(internal.bridge.claimData,{secret:'context-service',hash,requestId})).rejects.toThrow('Team access denied');
  await expect(s.t.mutation(internal.bridge.claim,{secret:'context-service',hash,requestId,current:{headSha:head,state:'open'}})).rejects.toThrow('Team access denied');
  expect(await s.t.run(ctx=>ctx.db.get(requestId))).toMatchObject({status:'pending'});
+});
+
+test('resolving a GitHub author uses indexes instead of scanning every workspace member',async()=>{
+ process.env.SERVICE_SECRET='context-service';
+ const t=convexTest({schema,modules,transactionLimits:{documentsRead:100}}),alice=await t.mutation(api.users.login,{secret:'context-service',githubId:5100,login:'alice',avatar:''});
+ const repositoryId=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Big',createdAt:0}),repo=(fullName:string)=>ctx.db.insert('repositories',{organizationId,fullName,defaultBranch:'main',enabled:true,indexStatus:'ready',indexedSha:'a'.repeat(40),createdAt:0});
+  for(let i=0;i<150;i++)await ctx.db.insert('organizationMembers',{organizationId,userId:await ctx.db.insert('users',{login:'member'+i,avatar:'',createdAt:0}),role:'member'});
+  await ctx.db.insert('organizationMembers',{organizationId,userId:alice,role:'member'});
+  const main=await repo('big/main');await ctx.db.insert('repositoryClusters',{organizationId,name:'Big',repositoryIds:[main,await repo('big/source')],createdAt:0});return main;
+ });
+ expect((await t.query(internal.repositoryContext.select,{repositoryId,actor:'mallory',authorExternalId:'6666'})).coverage.join()).toContain('not linked');
+ expect((await t.query(internal.repositoryContext.select,{repositoryId,actor:'alice',authorExternalId:'5100'})).sources).toHaveLength(1);
+ expect(await t.query(internal.repositoryContext.requirementsAuthor,{repositoryId,actor:'mallory',authorExternalId:'6666'})).toContain('not a linked workspace member');
+ expect(await t.query(internal.repositoryContext.requirementsAuthor,{repositoryId,actor:'alice',authorExternalId:'5100'})).toBeNull();
 });

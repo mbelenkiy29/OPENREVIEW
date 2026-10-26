@@ -2,20 +2,82 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { NextRequest } from "next/server";
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import config from "../next.config";
-import { securityHeaders } from "../src/security-headers";
+import { config as middlewareConfig, middleware } from "../middleware";
+import { contentSecurityPolicy, middlewareSkips, prefetchHeaders, securityHeaders } from "../src/security-headers";
+
+const fetchPolicy = [
+  "style-src 'self' 'unsafe-inline' https://cdn.userjot.com https://fonts.googleapis.com",
+  "img-src 'self' data: blob: https://media.userjot.com https://cdn.userjot.com https://alb.reddit.com https://avatars.githubusercontent.com https://*.googleusercontent.com https://gitlab.com https://secure.gravatar.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "connect-src 'self' https://widget.userjot.com wss://widget.userjot.com https://bzrcdn.openai.com https://bzr.openai.com https://pixel-config.reddit.com https://alb.reddit.com",
+  "frame-src https://challenges.cloudflare.com https://*.userjot.com",
+  "media-src 'self'",
+  "manifest-src 'self'",
+  "worker-src 'self'",
+  "object-src 'none'; base-uri 'self'; form-action 'self' https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'",
+].join("; ");
+const staticPolicy = `default-src 'self'; ${fetchPolicy}`;
 
 test("every route sends nosniff, a referrer policy and refuses to be framed", async () => {
-  const rules = await config.headers!();
-  assert.deepEqual(rules, [{ source: "/:path*", headers: securityHeaders }]);
+  const csp = [{ key: "Content-Security-Policy", value: staticPolicy }];
+  assert.deepEqual(await config.headers!(), [
+    { source: "/:path*", headers: securityHeaders },
+    { source: `/(${middlewareSkips})(.*)`, headers: csp },
+    { source: "/:path*", has: [prefetchHeaders[0]], headers: csp },
+    { source: "/:path*", has: [prefetchHeaders[1]], headers: csp },
+  ]);
   assert.deepEqual(Object.fromEntries(securityHeaders.map((h) => [h.key, h.value])), {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Frame-Options": "DENY",
-    "Content-Security-Policy": "frame-ancestors 'none'",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
   });
-  // Framing protection only: a script policy would block Next.js inline scripts, Sentry and PostHog.
-  assert.doesNotMatch(securityHeaders.map((h) => h.value).join(";"), /script-src|default-src/);
+});
+
+test("pages get a nonce script policy from middleware; everything it skips gets the static one", async () => {
+  // The middleware matcher must be a literal; it mirrors the paths and prefetches next.config.ts covers.
+  assert.deepEqual(middlewareConfig.matcher, [{ source: `/((?!${middlewareSkips}).*)`, missing: prefetchHeaders }]);
+  const runs = (url: string, headers = {}) => unstable_doesMiddlewareMatch({ config: middlewareConfig, url, headers });
+  for (const page of ["/", "/login", "/dashboard", "/docs/quickstart", "/oauth/consent"]) assert.ok(runs(page), page);
+  for (const skipped of ["/api/health", "/_next/static/chunks/main.js", "/_next/image", "/favicon.ico", "/lantern/e/", "/lighthouse"]) assert.ok(!runs(skipped), skipped);
+  assert.ok(!runs("/dashboard", { "next-router-prefetch": "1" }));
+  assert.ok(!runs("/dashboard", { purpose: "prefetch" }));
+
+  const response = middleware(new NextRequest("https://openreview.tech/login"));
+  const policy = response.headers.get("content-security-policy")!;
+  const nonce = /'nonce-([A-Za-z0-9+/=]+)'/.exec(policy)?.[1];
+  assert.ok(nonce && nonce.length >= 32, policy);
+  assert.equal(policy, contentSecurityPolicy(nonce));
+  // Next.js reads the nonce from the forwarded request headers; app/layout.tsx from x-nonce.
+  assert.equal(response.headers.get("x-middleware-request-x-nonce"), nonce);
+  assert.equal(response.headers.get("x-middleware-request-content-security-policy"), policy);
+  assert.notEqual(nonce, /'nonce-([^']+)'/.exec(middleware(new NextRequest("https://openreview.tech/login")).headers.get("content-security-policy")!)?.[1]);
+
+  assert.equal(contentSecurityPolicy("abc", false), `default-src 'self'; script-src 'self' 'nonce-abc' 'strict-dynamic'; ${fetchPolicy}`);
+  assert.equal(contentSecurityPolicy("abc", true), `default-src 'self'; script-src 'self' 'nonce-abc' 'strict-dynamic' 'unsafe-eval'; ${fetchPolicy}`);
+  // Inline styles are allowed (React style attributes); inline scripts and eval never are in production.
+  assert.doesNotMatch(/script-src [^;]*/.exec(contentSecurityPolicy("abc", false))![0], /unsafe-inline|unsafe-eval/);
+  // No directive falls back to "anything": every fetch directive is set, and none is a bare scheme or *.
+  for (const directive of ["style-src", "img-src", "font-src", "connect-src", "frame-src", "media-src", "manifest-src", "worker-src"]) assert.match(staticPolicy, new RegExp(`(^|; )${directive} `), directive);
+  assert.doesNotMatch(staticPolicy.replace(/form-action [^;]*/, ""), /(\s|^)(https:|http:|\*)(\s|;|$)/);
+  assert.equal(contentSecurityPolicy(), staticPolicy);
+});
+
+test("profile pictures from GitHub, Google and GitLab sign-ins are allowed images", () => {
+  // CSP host sources: an exact https origin, or https://*. for any subdomain of the rest.
+  const sources = /img-src ([^;]*)/.exec(contentSecurityPolicy("abc", false))![1].split(" ");
+  const allowed = (url: string) => { const { protocol, host } = new URL(url); return protocol === "https:" && sources.some((s) => s === `https://${host}` || (s.startsWith("https://*.") && host.endsWith(s.slice("https://*".length)))); };
+  for (const avatar of [
+    "https://avatars.githubusercontent.com/u/1?v=4",
+    "https://lh3.googleusercontent.com/a/ACg8ocJ=s96-c",
+    "https://lh6.googleusercontent.com/a/ACg8ocJ=s96-c",
+    "https://gitlab.com/uploads/-/system/user/avatar/1/avatar.png",
+    "https://secure.gravatar.com/avatar/0bc83cb571cd1c50ba6f3e8a78ef1346?s=80&d=identicon",
+  ]) assert.ok(allowed(avatar), avatar);
+  assert.ok(!allowed("https://example.com/avatar.png"));
 });
 
 test("nothing that ships with OpenReview frames its pages", () => {

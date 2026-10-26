@@ -1,7 +1,7 @@
-import {test,expect} from 'vitest';
+import {test,expect,vi} from 'vitest';
 import {convexTest} from 'convex-test';
 import schema from '../convex/schema';
-import {internal} from '../convex/_generated/api';
+import {api,internal} from '../convex/_generated/api';
 const modules=import.meta.glob('../convex/**/*.ts');
 // Above the 32,000 documents-scanned-per-transaction ceiling that the old whole-repository
 // `.collect()` in repositories.data would hit on every review and index batch.
@@ -48,3 +48,156 @@ test('a repository above the old read ceiling is served by bounded, need-based r
  expect(await t.run(ctx=>ctx.db.get(jobId))).toMatchObject({status:'completed',processed:FILES-2});
  expect((await t.query(internal.repositories.filesByPath,{repositoryId,paths:['pkg00/src/file0.ts','pkg01/src/file1.ts']}))).toHaveLength(0);
 },120_000);
+
+test('the recovery sweep finds stuck knowledge past the first 1,000 repositories and clears expired cache in small batches',async()=>{
+ vi.useFakeTimers();
+ const t=convexTest(schema,modules);
+ const stuck=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Hosted',createdAt:Date.now()});
+  for(let i=0;i<1000;i++)await ctx.db.insert('repositories',{organizationId,fullName:`fixture/r${i}`,defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()});
+  for(let i=0;i<60;i++)await ctx.db.insert('modelCache',{organizationId,key:`k${i}`,result:'x',expiresAt:Date.now()-1});
+  return ctx.db.insert('repositories',{organizationId,fullName:'fixture/stuck',defaultBranch:'main',enabled:true,indexStatus:'ready',knowledgeStatus:'queued',knowledgeUpdatedAt:Date.now()-20*60000,createdAt:Date.now()});
+ });
+ await t.mutation(internal.recovery.sweep,{});
+ const scheduled=await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect());
+ expect(scheduled.some(s=>s.name.includes('knowledgeJobs')&&(s.args[0] as {repositoryId:string}).repositoryId===stuck)).toBe(true);
+ expect(scheduled.some(s=>s.name.includes('sweepCache'))).toBe(true);
+ await t.mutation(internal.recovery.sweepCache,{});
+ expect((await t.run(ctx=>ctx.db.query('modelCache').collect())).length).toBe(35);
+ expect((await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).filter(s=>s.name.includes('sweepCache')).length).toBe(2);
+ vi.useRealTimers();
+});
+
+test('a burst of more than 20 webhook reviews in a minute is deferred, not dropped; a manual request still gets the limit error',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(Date.UTC(2026,9,14,12,0,10));
+ const t=convexTest(schema,modules);
+ const repositoryId=await t.run(async ctx=>ctx.db.insert('repositories',{organizationId:await ctx.db.insert('organizations',{name:'Busy',createdAt:Date.now()}),fullName:'fixture/busy',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()}));
+ const enqueue=(pr:number,trigger:'automatic'|'manual')=>t.mutation(internal.reviews.enqueue,{repositoryId,prNumber:pr,headSha:String(pr).padStart(40,'a'),trigger});
+ for(let pr=1;pr<=20;pr++)await enqueue(pr,'automatic');
+ const deferred=await enqueue(21,'automatic');
+ expect((await t.run(ctx=>ctx.db.get(deferred!)))?.status).toBe('queued');
+ const job=(await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).find(s=>(s.args[0] as {reviewId?:string}).reviewId===deferred);
+ expect(job!.scheduledTime).toBe(Date.UTC(2026,9,14,12,1,0)+2000);
+ await expect(enqueue(22,'manual')).rejects.toThrow('Rate limit');
+ vi.useRealTimers();
+});
+
+test('a provider event finds its repository through the connection index, not by reading every repository',async()=>{
+ const t=convexTest(schema,modules);
+ const {connectionId,target}=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'GitLab shop',createdAt:Date.now()});
+  const connectionId=await ctx.db.insert('providerConnections',{organizationId,kind:'gitlab',instance:'https://gitlab.example',name:'GitLab',credentials:'x',webhookSecret:'',active:true,createdAt:Date.now()});
+  const other=await ctx.db.insert('providerConnections',{organizationId,kind:'gitlab',instance:'https://gitlab.other',name:'Other',credentials:'x',webhookSecret:'',active:true,createdAt:Date.now()});
+  for(let i=0;i<300;i++)await ctx.db.insert('repositories',{organizationId,connectionId,externalId:String(i),fullName:`group/r${i}`,defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()});
+  await ctx.db.insert('repositories',{organizationId,connectionId:other,externalId:'42',fullName:'other/r42',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()});
+  return {connectionId,target:(await ctx.db.query('repositories').withIndex('by_connection',q=>q.eq('connectionId',connectionId).eq('externalId','42')).first())!._id};
+ });
+ expect((await t.query(internal.providerConnections.repository,{connectionId,externalId:'42'}))?._id).toBe(target);
+ expect(await t.query(internal.providerConnections.repository,{connectionId,externalId:'missing'})).toBeNull();
+ await t.run(ctx=>ctx.db.patch(connectionId,{active:false}));
+ expect(await t.query(internal.providerConnections.repository,{connectionId,externalId:'42'})).toBeNull();
+});
+
+test('turning off a repository reads only its newest index job, however many old ones it has',async()=>{
+ const t=convexTest({schema,modules,transactionLimits:{documentsRead:50}});
+ const {repositoryId,running}=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Busy',createdAt:Date.now()});
+  const repositoryId=await ctx.db.insert('repositories',{organizationId,fullName:'fixture/busy',defaultBranch:'main',enabled:true,indexStatus:'indexing',createdAt:Date.now()});
+  for(let i=0;i<100;i++)await ctx.db.insert('indexJobs',{organizationId,repositoryId,sha:String(i).padStart(40,'0'),status:'completed',total:1,processed:1,changed:1,attempts:1,createdAt:i,updatedAt:i});
+  return {repositoryId,running:await ctx.db.insert('indexJobs',{organizationId,repositoryId,sha:'f'.repeat(40),status:'running',total:1,processed:0,changed:0,attempts:1,createdAt:Date.now(),updatedAt:Date.now()})};
+ });
+ const {disableRepository}=await import('../convex/repositories');
+ await t.run(async ctx=>disableRepository(ctx as never,(await ctx.db.get(repositoryId))!));
+ expect(await t.run(ctx=>ctx.db.get(running))).toMatchObject({status:'cancelled'});
+ expect(await t.run(ctx=>ctx.db.get(repositoryId))).toMatchObject({enabled:false,indexStatus:'cancelled'});
+});
+
+test('a failed webhook is retried for about half an hour; recovery restarts stuck or never-started deliveries and gives up after six attempts',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(Date.UTC(2026,9,14,12));
+ const t=convexTest(schema,modules);
+ const insert=(status:string,attempts:number,updatedAt=Date.now())=>t.run(async ctx=>ctx.db.insert('webhookDeliveries',{deliveryId:`d-${status}-${attempts}-${updatedAt}`,event:'pull_request',payloadStorageId:await ctx.storage.store(new Blob(['{}'])),status,attempts,createdAt:updatedAt,updatedAt}));
+ const retries=async(id:string)=>(await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).filter(s=>(s.args[0] as {deliveryId?:string}).deliveryId===id).map(s=>Math.round((s.scheduledTime-Date.now())/1000));
+ // The third failure used to be the last; now it waits 4.5 minutes and tries again.
+ const third=await insert('processing',3);await t.mutation(internal.webhooks.mark,{deliveryId:third,status:'failed',error:'GitHub 502'});
+ expect(await retries(third)).toEqual([270]);
+ const sixth=await insert('processing',6);await t.mutation(internal.webhooks.mark,{deliveryId:sixth,status:'failed',error:'GitHub 502'});
+ expect(await retries(sixth)).toEqual([]);
+ const old=Date.now()-20*60000,queued=await insert('queued',0,old),stuck=await insert('processing',2,old),exhausted=await insert('processing',6,old);
+ await t.mutation(internal.recovery.sweep,{});
+ expect(await retries(queued)).toEqual([0]);expect(await retries(stuck)).toEqual([0]);expect(await retries(exhausted)).toEqual([]);
+ expect(await t.run(ctx=>ctx.db.get(exhausted))).toMatchObject({status:'failed',error:'Webhook recovery attempts exhausted'});
+ // A delivery from two days ago is not replayed (it could undo newer state); it is closed as failed.
+ const ancient=await insert('queued',0,Date.now()-2*86400000);await t.mutation(internal.recovery.sweep,{});
+ expect(await retries(ancient)).toEqual([]);expect(await t.run(ctx=>ctx.db.get(ancient))).toMatchObject({status:'failed',error:'Too old to replay'});
+ vi.useRealTimers();
+});
+
+test('recovery restarts stuck or never-started provider events, closes old ones and fails exhausted ones',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(Date.UTC(2026,9,14,12));
+ const t=convexTest(schema,modules);
+ const connectionId=await t.run(async ctx=>ctx.db.insert('providerConnections',{organizationId:await ctx.db.insert('organizations',{name:'GitLab shop',createdAt:Date.now()}),kind:'gitlab',instance:'https://gitlab.example',name:'GitLab',credentials:'x',webhookSecret:'',active:true,createdAt:Date.now()}));
+ const insert=(status:string,attempts:number,at:number)=>t.run(ctx=>ctx.db.insert('providerEvents',{connectionId,externalId:`e-${status}-${attempts}-${at}`,body:'{}',status,attempts,createdAt:at,updatedAt:at}));
+ const retries=async(id:string)=>(await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).filter(s=>(s.args[0] as {id?:string}).id===id).length;
+ const old=Date.now()-20*60000,queued=await insert('queued',0,old),stuck=await insert('processing',2,old),fresh=await insert('processing',1,Date.now()),exhausted=await insert('processing',6,old),ancient=await insert('queued',0,Date.now()-2*86400000);
+ await t.mutation(internal.recovery.sweep,{});
+ expect([await retries(queued),await retries(stuck),await retries(fresh),await retries(exhausted),await retries(ancient)]).toEqual([1,1,0,0,0]);
+ expect(await t.run(ctx=>ctx.db.get(exhausted))).toMatchObject({status:'failed',error:'Provider event recovery attempts exhausted'});
+ expect(await t.run(ctx=>ctx.db.get(ancient))).toMatchObject({status:'failed',error:'Too old to replay'});
+ vi.useRealTimers();
+});
+
+test('device pairing is rate limited per caller, so one caller cannot block pairing for everyone',async()=>{
+ process.env.SERVICE_SECRET='pair-service';
+ const t=convexTest(schema,modules);
+ const pair=(i:number,client:string)=>t.mutation(api.bridge.startPair,{secret:'pair-service',hash:i.toString(16).padStart(64,'0'),code:i.toString(16).padStart(12,'0'),name:'Laptop',client});
+ for(let i=0;i<30;i++)await pair(i,'203.0.113.9');
+ await expect(pair(30,'203.0.113.9')).rejects.toThrow('Rate limit');
+ expect(await pair(31,'198.51.100.7')).toBeTruthy();
+});
+
+test('a long-lived pull request with more findings than one read allows still loads its open findings for review',async()=>{
+ const t=convexTest({schema,modules,transactionLimits:{documentsRead:50}});
+ const reviewId=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Long PR',createdAt:Date.now()});
+  const repositoryId=await ctx.db.insert('repositories',{organizationId,fullName:'fixture/long',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()});
+  const reviewId=await ctx.db.insert('reviews',{organizationId,repositoryId,prNumber:7,headSha:'a'.repeat(40),status:'queued',mode:'standard',attempts:0,createdAt:Date.now(),updatedAt:Date.now()});
+  for(let i=0;i<63;i++)await ctx.db.insert('findings',{organizationId,repositoryId,reviewId,prNumber:7,title:'Finding '+i,description:'d',severity:'medium',confidence:.9,category:'correctness',filePath:'a.ts',startLine:1,endLine:1,commitSha:'b'.repeat(40),evidence:[],impact:'i',suggestedFix:'f',agent:'correctness',symbol:'s',fingerprint:'fp'+i,status:i<3?'open':'resolved',createdAt:Date.now(),updatedAt:Date.now()});
+  return reviewId;
+ });
+ const data=await t.query(internal.reviews.data,{reviewId});
+ expect(data.findings.map(f=>f.fingerprint).sort()).toEqual(['fp0','fp1','fp2']);
+});
+
+test('a review that keeps dying before ingesting is failed after three recoveries, not requeued forever',async()=>{
+ vi.useFakeTimers();vi.setSystemTime(Date.UTC(2026,9,14,12));
+ const t=convexTest(schema,modules);
+ const reviewId=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Stuck',createdAt:Date.now()});
+  const repositoryId=await ctx.db.insert('repositories',{organizationId,fullName:'fixture/stuck-review',defaultBranch:'main',enabled:true,indexStatus:'ready',createdAt:Date.now()});
+  return ctx.db.insert('reviews',{organizationId,repositoryId,prNumber:1,headSha:'a'.repeat(40),status:'queued',mode:'standard',attempts:0,createdAt:Date.now(),updatedAt:Date.now()});
+ });
+ // The requeued job never runs here, standing in for one that throws before "ingesting".
+ for(let i=0;i<4;i++){
+  await t.run(ctx=>ctx.db.patch(reviewId,{updatedAt:Date.now()-20*60000}));
+  await t.mutation(internal.recovery.sweepReviews,{});
+ }
+ expect(await t.run(ctx=>ctx.db.get(reviewId))).toMatchObject({status:'failed',error:'Review recovery attempts exhausted',attempts:3});
+ vi.useRealTimers();
+});
+
+test('knowledge stuck behind 100 repositories whose index failed or was cancelled is still recovered',async()=>{
+ vi.useFakeTimers();
+ const t=convexTest(schema,modules);
+ const stale=Date.now()-20*60000;
+ const recoverable=await t.run(async ctx=>{
+  const organizationId=await ctx.db.insert('organizations',{name:'Many tenants',createdAt:Date.now()});
+  for(let i=0;i<100;i++)await ctx.db.insert('repositories',{organizationId,fullName:`fixture/dead${i}`,defaultBranch:'main',enabled:true,indexStatus:i%2?'failed':'cancelled',knowledgeStatus:'queued',knowledgeUpdatedAt:stale,createdAt:Date.now()});
+  return ctx.db.insert('repositories',{organizationId,fullName:'fixture/live',defaultBranch:'main',enabled:true,indexStatus:'ready',knowledgeStatus:'queued',knowledgeUpdatedAt:stale,createdAt:Date.now()});
+ });
+ await t.mutation(internal.recovery.sweep,{});
+ await t.mutation(internal.recovery.sweep,{});
+ const scheduled=await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect());
+ expect(scheduled.some(s=>s.name.includes('knowledgeJobs')&&(s.args[0] as {repositoryId:string}).repositoryId===recoverable)).toBe(true);
+ expect((await t.run(ctx=>ctx.db.query('repositories').withIndex('by_knowledge_status',q=>q.eq('knowledgeStatus','waiting_for_index')).collect())).length).toBe(100);
+ vi.useRealTimers();
+});

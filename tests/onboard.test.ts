@@ -9,7 +9,7 @@ function fakeApi(overrides: { role?: string; others?: boolean; failEnable?: stri
   const api: OnboardApi = {
     async get(path) {
       calls.push({ method: "GET", path });
-      if (path === "/api/workspace") return { workspace: { id: "w1", name: "Acme", role: overrides.role ?? "admin" }, workspaces: [{ id: "w1", name: "Acme", role: "admin", current: true }, ...(overrides.others ? [{ id: "w2", name: "Side project", role: "owner", current: false }] : [])], installUrl: "https://review.example.com/api/github/install?organization=w1", dashboardUrl: "https://review.example.com/dashboard", keysUrl: "https://review.example.com/dashboard/settings/keys", rulesUrl: "https://review.example.com/dashboard/memory/rules" };
+      if (path === "/api/workspace") return { workspace: { id: "w1", name: "Acme", role: overrides.role ?? "admin" }, workspaces: [{ id: "w1", name: "Acme", role: "admin", current: true }, ...(overrides.others ? [{ id: "w2", name: "Side project", role: "owner", current: false }] : [])], installUrl: "https://review.example.com/api/github/install?organization=w1", dashboardUrl: "https://review.example.com/dashboard", keysUrl: "https://review.example.com/dashboard/organization/api-keys", rulesUrl: "https://review.example.com/dashboard/context" };
       if (path === "/api/repositories") return repos;
       throw new Error("unexpected GET " + path);
     },
@@ -48,7 +48,7 @@ test("workspace step: shows the key's workspace; another or a new workspace stop
   const a = fakeApi({ others: true }), t = io(["n"]);
   const stopped = await onboard(a.api, t.io, files(), options());
   assert.equal(stopped.stopped?.step, "workspace");
-  assert.match(stopped.stopped!.next, /generate an API key at https:\/\/review\.example\.com\/dashboard\/settings\/keys/);
+  assert.match(stopped.stopped!.next, /generate an API key at https:\/\/review\.example\.com\/dashboard\/organization\/api-keys/);
   assert.deepEqual(a.calls.map((c) => c.method + " " + c.path), ["GET /api/workspace"]);
   const other = fakeApi({ others: true });
   assert.match((await onboard(other.api, io().io, files(), options({ yes: true, workspace: "Side project" }))).stopped!.reason, /belongs to Acme, not Side project/);
@@ -94,7 +94,7 @@ test("rules step: discovered files become suggestions scoped to the detected rep
   const post = a.calls.find((c) => c.path === "/api/rules/import")!;
   assert.equal((post.body as { repositoryId: string }).repositoryId, "r1");
   assert.deepEqual((post.body as { rules: { instructions: string; source: { path: string } }[] }).rules.map((r) => [r.instructions, r.source.path]), [["Every new query must include an explicit LIMIT.", "AGENTS.md"], ["Always validate request bodies with zod.", "AGENTS.md"]]);
-  assert.deepEqual([summary.rules.files, summary.rules.candidates, summary.rules.suggested, summary.rules.rejected.length, summary.rules.reviewUrl], [["AGENTS.md"], 2, 1, 1, "https://review.example.com/dashboard/memory/rules"]);
+  assert.deepEqual([summary.rules.files, summary.rules.candidates, summary.rules.suggested, summary.rules.rejected.length, summary.rules.reviewUrl], [["AGENTS.md"], 2, 1, 1, "https://review.example.com/dashboard/context"]);
   const declined = fakeApi();
   assert.equal((await onboard(declined.api, io(["", "n"]).io, files(), options())).rules.skipped, "declined");
   assert.equal(declined.calls.some((c) => c.path === "/api/rules/import"), false);

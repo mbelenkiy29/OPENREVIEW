@@ -3,9 +3,10 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { SiteFooter, SiteHeader, sourceRepository } from "./site-chrome";
 import { AgentReplica, AnalyticsReplica, ChatReplica, FindingReplica, ReviewReplica, SummaryReplica } from "./landing/replicas";
+import { LandingMotion } from "./landing/motion-loader";
 import { Copy } from "./dashboard/live";
 import { ScrollTable } from "./dashboard/scroll-table";
-import { billingConfig } from "../src/billing";
+import { billingConfig, usdText } from "../src/billing";
 import { homeStructuredData, jsonLd } from "../src/structured-data";
 
 export const metadata: Metadata = { alternates: { canonical: "/" } };
@@ -40,33 +41,37 @@ const faq = [
 const commands = ["pnpm install", "CONVEX_AGENT_MODE=anonymous pnpm exec convex dev --once", "pnpm setup:local", "pnpm backend", "pnpm dev"];
 
 // Prerendered at build time, so billing values come from the build environment. Old sign-in result
-// links (/?error=…) are redirected to /login in next.config.ts.
+// links (/?error=…) are redirected to /login in next.config.ts. Motion (DESIGN.md, "Landing motion"):
+// the hero's entrance is CSS, and LandingMotion adds smooth scrolling and the scroll choreography
+// after hydration through the data-* hooks below: data-split headings reveal line by line, data-reveal
+// items rise in, data-stagger lists bring their children in turn, and data-speed sets parallax.
 export default function Home() {
   const billing = billingConfig();
-  const structured = homeStructuredData({ url: process.env.APP_URL ?? "http://localhost:3000", repository: sourceRepository, billing, priceLabel: process.env.BILLING_SEAT_PRICE_LABEL });
+  const structured = homeStructuredData({ url: process.env.APP_URL ?? "http://localhost:3000", repository: sourceRepository, billing, priceLabel: process.env.BILLING_SEAT_PRICE_LABEL, proPriceLabel: process.env.BILLING_PRO_PRICE_LABEL });
   return <div className="landing">
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(structured) }} />
     <SiteHeader home />
+    <div id="smooth-wrapper"><div id="smooth-content">
     <main>
-      <section className="hero" aria-labelledby="hero-heading">
-        <h1 id="hero-heading">Review the change.<br />Understand the codebase.</h1>
+      <section className="hero" aria-labelledby="hero-heading" data-speed="0.92">
+        <h1 id="hero-heading"><span className="line"><span>Review the change.</span></span> <span className="line"><span>Understand the codebase.</span></span></h1>
         <p className="lede">OpenReview reviews pull requests using your whole repository, not only the diff. Every finding quotes the code it depends on, and nothing is posted until it has been verified.</p>
         <div className="hero-actions">
           <Link className="button primary large" href="/signup">Get started</Link>
           <Link className="button large" href="/login">Sign in</Link>
         </div>
-        {billing.enabled && <p className="hero-note">{billing.trialDays} days free. Cancel anytime before the trial ends.</p>}
+        {billing.enabled && <p className="hero-note">Free plan, no card. Paid plans start with {billing.trialDays} days free.</p>}
         <p className="hero-links"><Link href="/docs/quickstart">Read the quickstart →</Link><Link href="/docs/self-hosting">Self-host it →</Link></p>
       </section>
-      <div className="stage"><ReviewReplica /><p className="stage-hint">Live demo with sample data. Click around.</p></div>
+      <div className="stage hero-stage"><ReviewReplica /><p className="stage-hint">Live demo with sample data. Click around.</p></div>
 
       <section className="hosts" aria-labelledby="hosts-heading">
-        <h2 id="hosts-heading">Reviews pull requests on</h2>
-        <ul className="host-grid">{hosts.map((h) => <li key={h}>{h}</li>)}</ul>
+        <h2 id="hosts-heading" data-reveal>Reviews pull requests on</h2>
+        <ul className="host-grid" data-stagger>{hosts.map((h) => <li key={h}>{h}</li>)}</ul>
       </section>
 
       {features.map((f, i) => <section key={f.id} id={i === 0 ? "features" : undefined} className={`feature${i % 2 ? " reverse" : ""}`} aria-labelledby={`${f.id}-heading`}>
-        <div className="feature-copy">
+        <div className="feature-copy" data-speed="0.95">
           <span className="eyebrow">{f.eyebrow}</span>
           <h2 id={`${f.id}-heading`}>{f.title}</h2>
           <p>{f.body}</p>
@@ -76,31 +81,36 @@ export default function Home() {
       </section>)}
 
       <section className="more" aria-labelledby="more-heading">
-        <h2 id="more-heading">Built for reviews you can trust</h2>
-        <div className="feature-grid">{more.map(([title, body]) => <article key={title} className="feature-card"><h3>{title}</h3><p>{body}</p></article>)}</div>
+        <h2 id="more-heading" data-split>Built for reviews you can trust</h2>
+        <div className="feature-grid" data-stagger>{more.map(([title, body]) => <article key={title} className="feature-card"><h3>{title}</h3><p>{body}</p></article>)}</div>
       </section>
 
       <section id="how" className="how" aria-labelledby="how-heading">
-        <h2 id="how-heading">How it works</h2>
-        <ol className="steps">{steps.map(([title, body], i) => <li key={title}><span className="step-number">{String(i + 1).padStart(2, "0")}</span><h3>{title}</h3><p>{body}</p></li>)}</ol>
+        <div className="how-inner">
+          <h2 id="how-heading" data-split>How it works</h2>
+          <div className="steps-rail">
+            <span className="steps-track" aria-hidden="true" />
+            <ol className="steps">{steps.map(([title, body], i) => <li key={title}><span className="step-number">{String(i + 1).padStart(2, "0")}</span><h3>{title}</h3><p>{body}</p></li>)}</ol>
+          </div>
+        </div>
       </section>
 
       <section className="run" aria-labelledby="run-heading">
         <div className="feature-copy">
-          <h2 id="run-heading">Run it on your infrastructure</h2>
-          <p>Your Next.js host, your Convex backend and your model provider. Code goes only to the model you configure, and secret-looking values are redacted first.</p>
-          <Link href="/docs/self-hosting">Read the self-hosting guide →</Link>
-          <a href={sourceRepository}>Star it on GitHub →</a>
+          <h2 id="run-heading" data-split>Run it on your infrastructure</h2>
+          <p data-reveal>Your Next.js host, your Convex backend and your model provider. Code goes only to the model you configure, and secret-looking values are redacted first.</p>
+          <Link href="/docs/self-hosting" data-reveal>Read the self-hosting guide →</Link>
+          <a href={sourceRepository} data-reveal>Star it on GitHub →</a>
         </div>
         <div className="terminal">
           <div className="terminal-bar"><span>Terminal</span><Copy value={commands.join("\n")} label="Copy" /></div>
-          <pre tabIndex={0} aria-label="Commands to run OpenReview locally">{commands.map((c) => <code key={c}><span>$ </span>{c}{"\n"}</code>)}</pre>
+          <pre tabIndex={0} aria-label="Commands to run OpenReview locally">{commands.map((c) => <code key={c}><span>$ </span><span className="cmd">{c}</span>{"\n"}</code>)}<i className="caret" aria-hidden="true" /></pre>
         </div>
       </section>
 
       <section className="compare-band" aria-labelledby="deploy-heading">
-        <h2 id="deploy-heading">Self-hosted or cloud</h2>
-        <ScrollTable label="Self-hosted or cloud comparison" className="table-scroll"><table className="compare"><thead><tr><th><span className="sr-only">Aspect</span></th><th>Self-hosted</th><th>Cloud</th></tr></thead><tbody>
+        <h2 id="deploy-heading" data-split>Self-hosted or cloud</h2>
+        <ScrollTable label="Self-hosted or cloud comparison" className="table-scroll"><table className="compare"><thead><tr><th><span className="sr-only">Aspect</span></th><th>Self-hosted</th><th>Cloud</th></tr></thead><tbody data-stagger>
           <tr><th scope="row">Where it runs</th><td>Your Next.js host and Convex backend</td><td>A hosted OpenReview deployment</td></tr>
           <tr><th scope="row">Model and keys</th><td>Yours, with your own budget</td><td>Provided by the operator</td></tr>
           <tr><th scope="row">Review limits</th><td>None</td><td>Plan quota per seat</td></tr>
@@ -109,26 +119,30 @@ export default function Home() {
       </section>
 
       {billing.enabled && <section id="pricing" className="pricing" aria-labelledby="pricing-heading">
-        <h2 id="pricing-heading">Pricing</h2>
-        <div className="feature-grid two">
-          <article className="feature-card"><h3>Free trial</h3><p className="price">Free for {billing.trialDays} days</p><p>Everything in Starter. Add a card when you set up your workspace; nothing is charged until the trial ends, and you can cancel before then.</p><p className="pricing-action"><Link className="button primary" href="/signup">Start free trial</Link></p></article>
-          <article className="feature-card"><h3>Starter</h3><p className="price">{process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>Unlimited reviews, with a fair-use limit of {billing.reviewsPerSeat} per seat each month. Owners, admins and members are seats; viewers are free.</p><p className="pricing-action"><Link className="button" href="/signup">Choose Starter</Link></p></article>
+        <h2 id="pricing-heading" data-split>Pricing</h2>
+        <div className="feature-grid" data-stagger>
+          <article className="feature-card"><h3>Free</h3><p className="price">$0</p><p>{usdText(billing.freeUsageMicros)} of model usage per workspace each month. Fast and standard reviews with security checks, every provider, and the CLI and MCP with browser sign-in. No card.</p><p className="pricing-action"><Link className="button" href="/signup">Start free</Link></p></article>
+          <article className="feature-card"><h3>Starter</h3><p className="price">{process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.usagePerSeatMicros)} of model usage per seat each month, pooled across the workspace, then optional pay-as-you-go extra usage up to a cap you set. Owners, admins and members are seats; viewers are free.</p><p className="pricing-action"><Link className="button" href="/signup">Choose Starter</Link></p></article>
+          <article className="feature-card"><h3>Pro</h3><p className="price">{process.env.BILLING_PRO_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.proUsagePerSeatMicros)} of model usage per seat each month, plus deep reviews, generated reproduction tests, fix pull requests, requirements checks, SSO, the audit log and API keys. {billing.trialDays} days free.</p><p className="pricing-action"><Link className="button primary" href="/signup">Start Pro trial</Link></p></article>
         </div>
+        <p className="muted" data-reveal>Self-hosting is free and unlimited: <Link href="/docs/self-hosting">self-hosting guide</Link>.</p>
       </section>}
 
       <section className="faq-band" aria-labelledby="faq-heading">
-        <h2 id="faq-heading">Questions</h2>
-        <div className="faq">{faq.map(([q, a], i) => <details key={q} open={i === 0}><summary>{q}</summary><p>{a}</p></details>)}</div>
+        <h2 id="faq-heading" data-split>Questions</h2>
+        <div className="faq" data-stagger>{faq.map(([q, a], i) => <details key={q} open={i === 0}><summary>{q}</summary><p>{a}</p></details>)}</div>
       </section>
 
       <section className="cta" aria-labelledby="cta-heading">
-        <h2 id="cta-heading">Try OpenReview now.</h2>
-        <div className="cta-actions">
+        <h2 id="cta-heading">Try OpenReview now<span className="cta-dot">.</span></h2>
+        <div className="cta-actions" data-reveal>
           <Link className="button primary large" href="/signup">Get started</Link>
           <Link className="button large" href="/docs/quickstart">Read the quickstart →</Link>
         </div>
       </section>
     </main>
     <SiteFooter home />
+    </div></div>
+    <LandingMotion />
   </div>;
 }

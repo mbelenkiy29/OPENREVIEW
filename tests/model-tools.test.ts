@@ -109,7 +109,7 @@ test("native structured output: Anthropic output_config strips unsupported bound
   assert.equal(props.tags.maxItems, undefined);
   assert.equal((structuredSchema(schema, "openai")!.properties as Record<string, Record<string, unknown>>).title.maxLength, 20);
   assert.equal(structuredSchema(z.unknown(), "anthropic"), undefined);
-  assert.equal(structuredSchema(z.object({ meta: z.record(z.string()) }), "anthropic"), undefined);
+  assert.equal(structuredSchema(z.object({ meta: z.record(z.string(), z.string()) }), "anthropic"), undefined);
   assert.ok(structuredSchema(z.object({ a: z.string() }).superRefine(() => {}), "anthropic"));
   const bodies: Record<string, unknown>[] = [];
   t.mock.method(globalThis, "fetch", async (_url: string, options: RequestInit) => {

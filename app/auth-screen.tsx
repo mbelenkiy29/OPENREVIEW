@@ -1,4 +1,4 @@
-// Sign-in and sign-up screens: the choices on the left, a code-graph drawing on the right (hidden on
+// Sign-in and sign-up screens: the choices on the left, an animated drawing on the right (hidden on
 // small screens). Both pages use the same sign-in flows; only the wording differs.
 import Link from "next/link";
 import { cookies } from "next/headers";
@@ -9,7 +9,6 @@ import { safeNext } from "../src/identity";
 import { backend } from "../src/server";
 import { authMessage, authQuery, keepsAuthPage, type AuthMode } from "../src/auth-pages";
 import { normalizeReferralCode, referralConfig, referralDisclosure, referralInvite } from "../src/referrals";
-import { IndexGraph } from "./dashboard/onboarding/art";
 import { SignInOptions } from "./sign-in";
 import { Mark } from "./ui/logo";
 
@@ -26,29 +25,45 @@ export async function referrerFor(code: string | null) {
   return code && referralConfig().enabled ? backend().query(api.referrals.preview, { secret: process.env.SERVICE_SECRET ?? "", code }).catch(() => null) : null;
 }
 
-// A small, fixed sample of a repository so the drawing reads as real files and references.
-const sample = [{ repository: "acme/shop", files: ["src/cart.ts", "src/billing.ts", "src/checkout.ts", "src/tax.ts", "src/api/orders.ts", "src/api/refunds.ts", "lib/money.ts", "lib/currency.ts", "test/cart.test.ts", "test/billing.test.ts", "app/page.tsx", "app/checkout/page.tsx"], edges: [["src/checkout.ts", "src/cart.ts"], ["src/checkout.ts", "src/billing.ts"], ["src/billing.ts", "lib/money.ts"], ["src/tax.ts", "lib/money.ts"], ["lib/money.ts", "lib/currency.ts"], ["src/api/orders.ts", "src/checkout.ts"], ["src/api/refunds.ts", "src/billing.ts"], ["test/cart.test.ts", "src/cart.ts"], ["test/billing.test.ts", "src/billing.ts"], ["app/checkout/page.tsx", "src/api/orders.ts"], ["app/page.tsx", "src/cart.ts"]] as [string, string][] }];
+// The right panel: a pull request under review. Diff lines scroll past while a scan band reads them;
+// where it finds a problem the line's gutter lights the logo's ember dot and a finding card slides in.
+// [indent, width %, kind] per line; kind marks added or removed lines.
+const diff: [number, number, ("add" | "del")?][] = [[0, 44], [1, 62], [1, 38, "del"], [1, 56, "add"], [0, 0], [0, 50], [1, 70], [2, 46, "add"], [2, 58, "add"], [1, 30], [0, 0], [0, 64], [1, 52, "add"], [1, 40], [0, 22]];
+// [line index, priority, title]: lines the scan reaches at about 20%, 55% and 85% of its pass.
+const findings: [number, string, string][] = [[3, "P1", "Workspace membership is not checked before the read"], [8, "P2", "The retry loop never awaits its promise"], [12, "P3", "One query runs per repository in this loop"]];
+
+/** Decorative and CSS-only; reduced motion shows the finished review. */
+function AuthArt() {
+  return <aside className="auth-art" aria-hidden="true">
+    <div className="auth-diff">
+      <div className="auth-diff-head"><i /><i /><i /><code>src/routes/workspace.ts</code></div>
+      <div className="auth-diff-body">
+        <span className="auth-scan" />
+        {diff.map(([indent, width, kind], i) => <div key={i} className={`auth-line${kind ? " " + kind : ""}`} style={{ ["--indent" as string]: indent, ["--w" as string]: `${width}%` }}><b>{i + 41}</b><i /></div>)}
+        {findings.map(([line, priority, title], i) => <div key={line} className={`auth-finding f${i}`} style={{ ["--line" as string]: line, ["--n" as string]: i }}><span className="auth-dot" /><div><strong>{priority}</strong><p>{title}</p></div></div>)}
+      </div>
+    </div>
+    <p>Reviews that read<br />the whole repository</p>
+  </aside>;
+}
 
 export async function AuthScreen({ mode, query }: { mode: AuthMode; query: AuthQuery }) {
   const next = query.next ? safeNext(query.next) : undefined, message = authMessage(query), referral = normalizeReferralCode(query.referral);
   const carry = authQuery({ next, referral }), billing = billingConfig(), referrer = await referrerFor(referral), discount = referralConfig().discountLabel;
   return <div className="auth">
     <main className="auth-panel">
-      <Link className="brand" href="/"><Mark /> OpenReview</Link>
       <div className="auth-card">
-        <h1>{mode === "login" ? "Sign in to OpenReview" : "Create your account"}</h1>
+        <Link className="auth-logo" href="/" aria-label="OpenReview home"><Mark /></Link>
+        <h1>{mode === "login" ? "Log into your account" : "Create an account"}</h1>
         <p className="auth-switch">{mode === "login"
-          ? <>New to OpenReview? <Link href={`/signup${carry}`}>Create an account</Link></>
-          : <>Already have an account? <Link href={`/login${carry}`}>Sign in</Link></>}</p>
+          ? <>Don’t have an account? <Link href={`/signup${carry}`}>Sign up</Link></>
+          : <>Already have an account? <Link href={`/login${carry}`}>Login</Link></>}</p>
         {referrer && <p className="auth-note">{referralInvite(referrer.login, discount)} {referralDisclosure(referrer.login)}</p>}
-        {mode === "signup" && billing.enabled && <p className="auth-note">Free for {billing.trialDays} days. You add a card when you set up your workspace, and nothing is charged until the trial ends.</p>}
+        {mode === "signup" && billing.enabled && <p className="auth-note">Start on the Free plan with no card. Starter and Pro come with {billing.trialDays} days free.</p>}
         {message && <p role={message.tone} className={message.tone === "alert" ? "error" : "auth-status"}>{message.text}</p>}
         <SignInOptions next={next} mode={mode} referral={referral} />
       </div>
     </main>
-    <aside className="auth-art" aria-hidden="true">
-      <figure><IndexGraph samples={sample} processed={1} total={1} complete /></figure>
-      <p>Reviews that read the whole repository</p>
-    </aside>
+    <AuthArt />
   </div>;
 }

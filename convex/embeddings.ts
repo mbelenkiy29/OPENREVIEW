@@ -68,8 +68,9 @@ export const status = query({
     const { repo } = await authorizeRepository(ctx, args.token, args.repositoryId);
     const model = process.env.EMBEDDING_MODEL || undefined;
     if (!model) return { configured: false as const };
-    const chunks = await ctx.db.query("chunkEmbeddings").withIndex("by_path", (q) => q.eq("repositoryId", repo._id)).take(1001);
-    const current = chunks.filter((c) => c.model === model);
-    return { configured: true as const, model, chunks: Math.min(current.length, 1000), more: current.length > 1000, files: new Set(current.map((c) => c.path)).size, stale: chunks.length - current.length };
+    // Each row carries a 1,536-number vector (~14KB): 500 rows stay under Convex's 8MB per-function read limit.
+    const read = await ctx.db.query("chunkEmbeddings").withIndex("by_path", (q) => q.eq("repositoryId", repo._id)).take(501);
+    const chunks = read.slice(0, 500), current = chunks.filter((c) => c.model === model);
+    return { configured: true as const, model, chunks: current.length, more: read.length > 500, files: new Set(current.map((c) => c.path)).size, stale: chunks.length - current.length };
   },
 });

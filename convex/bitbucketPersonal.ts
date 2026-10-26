@@ -28,7 +28,7 @@ export const inspect=query({args:{secret:v.string(),tokenHash:v.string()},handle
 }});
 export const save=mutation({args:{secret:v.string(),tokenHash:v.string(),digest:v.string(),installationId:v.string(),workspaceId:v.string(),externalId:v.string(),username:v.string(),credentials:v.string(),expiresAt:v.number(),invocationId:v.string(),invocationExpiresAt:v.number()},handler:async(ctx,a)=>{
  service(a.secret);const {repo,user,c,g}=await grant(ctx,a.tokenHash),now=Date.now();
- z.string().uuid().parse(a.externalId);
+ z.guid().parse(a.externalId);
  if(a.digest!==g.digest||a.installationId!==c.installationId||a.workspaceId!==c.namespaceId||a.username!=='{'+a.externalId+'}'||!a.credentials||a.credentials.length>40000||a.expiresAt<=now||a.expiresAt>now+60*60000||!a.invocationId||a.invocationId.length>200||a.invocationExpiresAt<=now||a.invocationExpiresAt>now+300000)throw new Error('Verified personal Forge proof required');
  const jti='bitbucket:'+a.invocationId;
  if(await ctx.db.query('providerReceipts').withIndex('by_jti',q=>q.eq('jti',jti)).unique())throw new Error('Forge invocation already consumed');
@@ -43,4 +43,5 @@ export const save=mutation({args:{secret:v.string(),tokenHash:v.string(),digest:
  await audit(ctx,repo.organizationId,user._id,'provider.identity.linked',c._id);return {expiresAt:a.expiresAt};
 }});
 export const expireGrant=internalMutation({args:{id:v.id('providerIdentityGrants')},handler:async(ctx,a)=>{const g=await ctx.db.get(a.id);if(g&&g.expiresAt<=Date.now())await ctx.db.delete(g._id);}});
-export const expireIdentity=internalMutation({args:{id:v.id('providerIdentities'),generation:v.number()},handler:async(ctx,a)=>{const i=await ctx.db.get(a.id);if(i&&i.generation===a.generation&&i.expiresAt<=Date.now())await ctx.db.patch(i._id,{active:false,credentials:undefined,generation:i.generation+1,updatedAt:Date.now()});}});
+// Expiry drops only the credentials: the link stays active (as for other providers) so requirements still see a linked member.
+export const expireIdentity=internalMutation({args:{id:v.id('providerIdentities'),generation:v.number()},handler:async(ctx,a)=>{const i=await ctx.db.get(a.id);if(i&&i.generation===a.generation&&i.expiresAt<=Date.now())await ctx.db.patch(i._id,{credentials:undefined,generation:i.generation+1,updatedAt:Date.now()});}});

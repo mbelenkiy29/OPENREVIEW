@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applySuggestion, fixBranchName, fixCommand, fixHandoffLink, fixHandoffUrl, fixReplyBody, safeFixBranch } from "../src/fix-command";
+import { applySuggestion, fixBranchName, fixCommand, fixAgentButtons, fixHandoffLink, fixHandoffUrl, fixReplyBody, safeFixBranch } from "../src/fix-command";
 import { readFileSync } from "node:fs";
 import { Github } from "../src/github";
 
@@ -113,11 +113,14 @@ test("every provider's inline Fix link comes from one builder that checks APP_UR
   assert.equal(fixHandoffLink("https://review.example.com/", "rev 1", "fp1"), "\n\n[Fix with your agent](https://review.example.com/fix/rev%201?finding=fp1)");
   assert.equal(fixHandoffLink("https://review.example.com", "rev1", "fp1", "Fix with [Claude]\n"), "\n\n[Fix with Claude](https://review.example.com/fix/rev1?finding=fp1)");
   for (const bad of [undefined, "", "not a url", "javascript:alert(1)", "https://user:pass@review.example.com"]) assert.equal(fixHandoffLink(bad, "rev1", "fp1"), "", String(bad));
+  // GitHub shows one https button per local agent (Greptile's "Fix in …" row); each opens the Fix page with it selected.
+  assert.equal(fixAgentButtons("https://review.example.com", "rev1", "fp1"), "\n\n[Fix in Claude Code](https://review.example.com/fix/rev1?finding=fp1&agent=claude) · [Fix in Codex](https://review.example.com/fix/rev1?finding=fp1&agent=codex) · [Fix in Cursor Agent](https://review.example.com/fix/rev1?finding=fp1&agent=cursor)");
+  assert.equal(fixAgentButtons("javascript:alert(1)", "rev1", "fp1"), "");
   // No publisher joins APP_URL into a /fix/ link by hand any more.
   for (const file of ["github", "gitlab", "gitea", "origin", "azure-devops", "bitbucket-dc"]) {
     const source = readFileSync(new URL(`../src/${file}.ts`, import.meta.url), "utf8");
     assert.doesNotMatch(source, /APP_URL[^\n]{0,80}\/fix\//, file);
-    assert.match(source, /fixHandoffLink\(/, file);
+    assert.match(source, file === "github" ? /fixAgentButtons\(/ : /fixHandoffLink\(/, file);
   }
 });
 

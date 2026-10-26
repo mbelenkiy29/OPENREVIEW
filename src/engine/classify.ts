@@ -44,6 +44,6 @@ export function riskScore(file: ChangedFile): number {
   if (/\.(md|mdx|txt|rst|adoc)$/i.test(file.path)) score -= 30;
   if (/(^|\/)(tests?|__tests__)\/|\.(test|spec)\.[^/]+$/.test(file.path)) score -= 10;
   if (file.status === "removed") score -= 20;
-  const changed = (file.patch.match(/^[+-](?![+-]{2})/gm) ?? []).length;
-  return score + Math.min(20, Math.log2(1 + changed) * 2);
+  return score + Math.min(20, Math.log2(1 + changedLines(file)) * 2);
 }
+export const changedLines = (file: ChangedFile) => (file.patch.match(/^[+-](?![+-]{2})/gm) ?? []).length;

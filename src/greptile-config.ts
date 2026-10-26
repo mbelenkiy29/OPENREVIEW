@@ -7,7 +7,7 @@ import type { RepoConfig } from "./repo-config";
 type Section = { included?: boolean; collapsible?: boolean; defaultOpen?: boolean };
 const sectionKeys: Record<string, (typeof layoutSections)[number] | "score"> = { summarySection: "overview", issuesTableSection: "findings", confidenceScoreSection: "score", sequenceDiagramSection: "diagram" };
 const legacySections: Record<string, "findings" | "score" | "diagram"> = { includeIssuesTable: "findings", includeConfidenceScore: "score", includeSequenceDiagram: "diagram" };
-const tiers: Record<string, string> = { base: "fast", plus: "standard", apex: "deep" };
+const tiers: Record<string, string> = { base: "fast", plus: "standard", apex: "deep", auto: "auto" };
 const logic = ["correctness", "security", "data", "compatibility", "testing", "performance", "rules"];
 const dashboardOnly = ["labels", "disabledLabels", "includeAuthors", "excludeAuthors", "includeBranches", "excludeBranches", "includeKeywords", "ignoreKeywords", "autoReview", "triggerOnUpdates", "skipReview", "triggerOnDrafts", "statusCheck", "statusCommentsEnabled", "shouldUpdateDescription", "updateSummaryOnly", "fixWithAI", "autoApprove", "context", "patternRepositories"];
 

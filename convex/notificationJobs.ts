@@ -36,7 +36,7 @@ async function deliver(ctx: ActionCtx, organizationId: Id<"organizations">, key:
 }
 
 // Fan-out for a completed review: each (event, target) is delivered at most once.
-export const reviewCompleted = internalAction({ args: { reviewId: v.id("reviews") }, handler: async (ctx, a): Promise<Record<string, string>> => {
+export const reviewCompleted = internalAction({ args: { reviewId: v.id("reviews"), attempt: v.optional(v.number()) }, handler: async (ctx, a): Promise<Record<string, string>> => {
   const targets = await ctx.runQuery(internal.notifications.reviewTargets, { reviewId: a.reviewId });
   if (!targets) return {};
   const origin = appOrigin(), notice = { ...targets.notice, ...(origin ? { reviewUrl: `${origin}/dashboard/pulls/${a.reviewId}` } : {}) };
@@ -51,6 +51,22 @@ export const reviewCompleted = internalAction({ args: { reviewId: v.id("reviews"
     if (!appliesTo(event, notice)) continue;
     const key = `${event}:${a.reviewId}:email:${recipient.userId}`;
     outcome[key] = await deliver(ctx, targets.organizationId, key, "email", () => sendEmail({ to: recipient.email, ...emailReview(event, notice) }));
+  }
+  // A failed send (Resend or Slack rate limit, a brief outage) is tried again with backoff; sent ones are skipped.
+  // shortcut: each retry resends the failed ones at once, so a team far above the provider's per-second limit may
+  // still lose some after the last retry; pace the sends if that shows up.
+  const attempt = a.attempt ?? 0;
+  if (Object.values(outcome).includes("failed") && attempt < 5) await ctx.scheduler.runAfter(30000 * 2 ** attempt, internal.notificationJobs.reviewCompleted, { reviewId: a.reviewId, attempt: attempt + 1 });
+  return outcome;
+} });
+
+// Monthly usage alert (80% / 100%): convex/billing.ts records the threshold first, so this runs once per threshold per period.
+export const usageAlert = internalAction({ args: { usageId: v.id("billingUsage"), threshold: v.number() }, handler: async (ctx, a): Promise<Record<string, string>> => {
+  const alert = await ctx.runQuery(internal.notifications.usageAlertTargets, { ...a, origin: appOrigin() });
+  const outcome: Record<string, string> = {};
+  for (const recipient of alert?.recipients ?? []) {
+    const key = `usage.${a.threshold}:${a.usageId}:email:${recipient.userId}`;
+    outcome[key] = await deliver(ctx, alert!.organizationId, key, "email", () => sendEmail({ to: recipient.email, subject: alert!.subject, text: alert!.text }));
   }
   return outcome;
 } });

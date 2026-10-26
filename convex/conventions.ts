@@ -62,10 +62,14 @@ export const decide = mutation({ args: { token: v.string(), ruleId: v.id("learne
   await ctx.db.patch(rule._id, { status: a.decision, decidedBy: user._id, updatedAt: Date.now() });
   await audit(ctx, rule.organizationId, user._id, "learned_rule." + a.decision, rule._id);
 } });
-// Enabled GitHub repositories whose review comments were least recently ingested.
-export const due = internalQuery({ args: { limit: v.number() }, handler: async (ctx, a) => {
-  const out: { repositoryId: Id<"repositories">; cursor: number }[] = [];
-  for (const repo of await ctx.db.query("repositories").take(2000))
-    if (repo.enabled && repo.installationId !== undefined && !repo.connectionId && (repo.conventionsSyncedAt ?? 0) < Date.now() - 20 * 3600000) out.push({ repositoryId: repo._id, cursor: repo.conventionsCursor ?? 0 });
-  return out.sort((x, y) => x.cursor - y.cursor).slice(0, Math.min(20, a.limit));
+// Enabled GitHub repositories whose review comments were least recently ingested (never first).
+// Stamps each repository it examines so ineligible ones and failed runs go to the back of the queue.
+export const due = internalMutation({ args: { limit: v.number() }, handler: async (ctx, a) => {
+  const now = Date.now(), out: { repositoryId: Id<"repositories">; cursor: number }[] = [];
+  for (const repo of await ctx.db.query("repositories").withIndex("by_conventions_synced").take(1000)) {
+    if ((repo.conventionsSyncedAt ?? 0) >= now - 20 * 3600000 || out.length >= Math.min(20, a.limit)) break;
+    await ctx.db.patch(repo._id, { conventionsSyncedAt: now });
+    if (repo.enabled && repo.installationId !== undefined && !repo.connectionId) out.push({ repositoryId: repo._id, cursor: repo.conventionsCursor ?? 0 });
+  }
+  return out;
 } });

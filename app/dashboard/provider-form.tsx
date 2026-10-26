@@ -1,5 +1,7 @@
 "use client";
-import { useActionState,useState,startTransition } from "react";
+import { useActionState,useEffect,useRef,useState,startTransition,type ReactNode } from "react";
+import { Dialog,useCloseDialog } from "../ui/dialog";
+import { Icon,type IconName } from "../ui/icons";
 import { connectProvider,refreshP4Ticket,replaceGitCredentials,activateBitbucket,authorizeBitbucket,revokeBitbucketAuthorization,updateProviderNetwork } from "./actions";
 const permissions:Record<string,string>={
  gitlab:"Use a dedicated bot token with api scope and Developer-or-higher project access. Enable merge request, push, and comment webhooks for reviews and follow-ups.",
@@ -26,19 +28,21 @@ export function GitlabNetworkForm({connectionId,apiUrl,proxyUrl,caCertificates}:
  const [state,action,pending]=useActionState(updateProviderNetwork,{});
  return <details><summary>Network settings</summary><p>{apiUrl?"API URL "+apiUrl:"API calls use the instance URL"} · {caCertificates?caCertificates+" custom CA certificate"+(caCertificates===1?"":"s"):"Public certificate authorities only"} · {proxyUrl?"Proxy "+proxyUrl:"No proxy"}</p><form action={action} className="form-grid policy-form"><input type="hidden" name="connectionId" value={connectionId}/><NetworkFields apiUrl={apiUrl} proxyUrl={proxyUrl}/><p className="muted">Saving replaces all three settings; paste the CA certificates again to keep them. OpenReview checks every selected repository with the new settings first.</p><button disabled={pending}>{pending?"Checking repositories…":"Save network settings"}</button>{state.error&&<p role="alert">{state.error}</p>}{state.saved&&<p role="status">Network settings saved.</p>}</form></details>;
 }
-export function ProviderForm({organizationId}:{organizationId:string}){
+export function ProviderForm({organizationId,kind}:{organizationId:string;kind:string}){
  const [state,action,pending]=useActionState(connectProvider,{});
- const [kind,setKind]=useState("gitlab");
+ // Close the Add Provider dialog once a submission finishes without an error.
+ const close=useCloseDialog(),sent=useRef(false);
+ useEffect(()=>{if(pending)sent.current=true;else if(sent.current){sent.current=false;if(!state.error)close();}},[pending,state,close]);
  return <form action={action} onSubmit={e=>{e.preventDefault();const data=new FormData(e.currentTarget);startTransition(()=>action(data));}} className="form-grid policy-form">
   <input type="hidden" name="organizationId" value={organizationId}/>
-  <label>Provider<select name="kind" value={kind} onChange={e=>setKind(e.target.value)}><option value="gitlab">GitLab Cloud / self-managed</option><option value="gitea">Gitea</option><option value="bitbucket-dc">Bitbucket Data Center</option><option value="github-enterprise">GitHub Enterprise / data residency</option><option value="azure-devops">Azure DevOps</option><option value="perforce">Perforce / P4 Code Review</option></select></label>
+  <input type="hidden" name="kind" value={kind}/>
   <label>Connection name<input name="name" maxLength={100} required/></label>
   <label>Instance URL<input name="instance" type="url" placeholder={kind==="gitlab"?"https://gitlab.com":kind==="bitbucket-dc"?"https://bitbucket.example/bitbucket":kind==="azure-devops"?"https://dev.azure.com/your-organization":"https://git.example"} required/></label>
   <p className="muted" id="provider-permissions">{permissions[kind]} Credentials are encrypted on the server. Self-managed hosts must be authorized by the operator in SCM_ALLOWED_HOSTS.</p>
   <label>Credential<textarea name="credential" required autoComplete="off" spellCheck={false} aria-describedby="provider-permissions"/></label>
   {kind==="gitlab"&&<details><summary>Network: internal API URL, CA certificates, proxy</summary><NetworkFields/></details>}
   {kind!=="perforce"&&<label>Webhook secret (keep a copy for provider setup)<input name="webhookSecret" type="password" minLength={32} required autoComplete="new-password"/></label>}
-  <button disabled={pending}>{pending?"Checking provider…":"Connect provider"}</button>
+  <button className="primary" disabled={pending}>{pending?"Checking provider…":"Connect provider"}</button>
   {state.error&&<p role="alert">{state.error}</p>}
  </form>;
 }
@@ -58,4 +62,23 @@ export function BitbucketActivationForm({connectionId,ready}:{connectionId:strin
 export function P4TicketRefreshForm({connectionId}:{connectionId:string}){
  const [state,action,pending]=useActionState(refreshP4Ticket,{});
  return <details><summary>Renew existing P4 bot ticket</summary><p>Generate a new P4 login ticket for the same bot account, then enter it here. OpenReview verifies that account and every selected project before replacing its encrypted ticket. Renewal stops review polling and requires a fresh submitted baseline; re-enable polling after indexing completes.</p><form action={action}><input type="hidden" name="connectionId" value={connectionId}/><label>Renewed P4 bot ticket<input name="ticket" type="password" autoComplete="off" required minLength={10} maxLength={10000}/></label><button disabled={pending}>{pending?"Verifying ticket…":"Verify and renew bot ticket"}</button></form>{state.error&&<p role="alert">{state.error}</p>}{state.saved&&<p role="status">Bot ticket verified. Upload a current submitted baseline before reviewing; existing native permission limits still apply.</p>}</details>;
+}
+
+const providers:{kind:string;label:string;icon:IconName}[]=[
+ {kind:"github",label:"GitHub",icon:"githubLogo"},{kind:"gitlab",label:"GitLab",icon:"gitlabLogo"},{kind:"bitbucket-cloud",label:"Bitbucket Cloud",icon:"gitBranch"},
+ {kind:"bitbucket-dc",label:"Bitbucket Data Center",icon:"gitBranch"},{kind:"azure-devops",label:"Azure DevOps",icon:"gitBranch"},{kind:"github-enterprise",label:"GitHub Enterprise",icon:"githubLogo"},
+ {kind:"gitea",label:"Gitea",icon:"gitBranch"},{kind:"perforce",label:"Perforce",icon:"database"},{kind:"origin",label:"Cursor Origin",icon:"code"},
+];
+// Add Provider: every provider OpenReview supports, and the selected one's connect form.
+export function AddProvider({organizationId,githubHref,linkHref,bitbucket,origin,initial="github",trigger,triggerClassName}:{organizationId:string;githubHref:string;linkHref:string;bitbucket:boolean;origin:boolean;initial?:string;trigger:ReactNode;triggerClassName?:string}){
+ const [kind,setKind]=useState(initial);
+ return <Dialog trigger={trigger} triggerClassName={triggerClassName} size="wide" title="Add Provider" description="Choose where your code lives, then connect it.">
+  <div className="modal-body add-provider">
+   <div className="provider-picker" role="group" aria-label="Provider">{providers.map(p=><button key={p.kind} type="button" aria-pressed={kind===p.kind} onClick={()=>setKind(p.kind)}><Icon name={p.icon}/>{p.label}</button>)}</div>
+   {kind==="github"?<div className="provider-connect"><p>Install the OpenReview GitHub App and choose which repositories it can access.</p><p className="row-start"><a className="button primary" href={githubHref}><Icon name="githubLogo"/>Install GitHub App</a><a href={linkHref}>Link an existing installation</a></p></div>
+   :kind==="bitbucket-cloud"?<div className="provider-connect"><p>Connect the OpenReview Forge installation from a Bitbucket workspace you own. Automatic reviews require verified event delivery and token refresh.</p>{bitbucket?<BitbucketAuthorizationForm organizationId={organizationId}/>:<p role="status" className="muted">Ask your operator to register and deploy the OpenReview Forge app before connecting.</p>}</div>
+   :kind==="origin"?<div className="provider-connect"><p>Install the OpenReview Origin App, approve repository contents, pull requests, reviews, and checks, then choose repositories. Mirrored repositories permit indexing but Origin rejects pull request access and writes.</p>{origin?<><p className="row-start"><a className="button primary" href={"/api/origin/install?organization="+organizationId}>Connect Cursor Origin</a></p><p className="muted">Origin installation requests namespace:user_tokens:write for verified personal author links. This lets the app mint user tokens for active namespace members. OpenReview mints read-only, repository-limited tokens after personal confirmation; native admin consent is required.</p></>:<p role="status" className="muted">Origin setup is required before connecting. Ask your OpenReview administrator to register the app. <a href="https://cursor.com/docs/api/origin" target="_blank" rel="noreferrer">Origin App setup instructions</a></p>}</div>
+   :<ProviderForm key={kind} organizationId={organizationId} kind={kind}/>}
+  </div>
+ </Dialog>;
 }

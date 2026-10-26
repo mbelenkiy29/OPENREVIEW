@@ -20,8 +20,8 @@ test('offline mode: review-time requirements lookups make no requests, leave con
  const requests:string[]=[];
  vi.stubGlobal('fetch',async(input:string|URL)=>{requests.push(String(input));return Response.json({});});
  process.env.OPENREVIEW_OFFLINE='true';
- expect(await t.action(internal.integrationJobs.requirements,{repositoryId:connected,references:'PAY-1 https://fixture.atlassian.net/wiki/spaces/SPEC/pages/40/Money'})).toEqual({files:[],scopes:[],coverage:['Offline mode (OPENREVIEW_OFFLINE=true): linked tickets and documents were not fetched.']});
- expect(await t.action(internal.integrationJobs.requirements,{repositoryId:bare,references:'PAY-1'})).toEqual({files:[],scopes:[],coverage:[]});
+ expect(await t.action(internal.integrationJobs.requirements,{actor:'author',repositoryId:connected,references:'PAY-1 https://fixture.atlassian.net/wiki/spaces/SPEC/pages/40/Money'})).toEqual({files:[],scopes:[],coverage:['Offline mode (OPENREVIEW_OFFLINE=true): linked tickets and documents were not fetched.']});
+ expect(await t.action(internal.integrationJobs.requirements,{actor:'author',repositoryId:bare,references:'PAY-1'})).toEqual({files:[],scopes:[],coverage:[]});
  expect(requests).toEqual([]);
  const connections=await t.run(ctx=>ctx.db.query('integrationConnections').collect());
  expect(connections.map(c=>[c.active,c.error??null,c.generation])).toEqual([[true,null,1],[true,null,1]]);

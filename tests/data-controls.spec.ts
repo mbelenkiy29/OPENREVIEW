@@ -23,11 +23,11 @@ test("every table is either purged with a workspace or explicitly shared, throug
   for (const step of purgePlan) {
     if (step.via === "org") expect(indexFirst(step.table, step.index), step.table).toBe("organizationId");
     if (step.via === "repo") expect(indexFirst(step.table, step.index), step.table).toBe("repositoryId");
-    if (step.via === "child" || step.via === "repoChild") { expect(indexFirst(step.table, step.index), step.table).toBe(step.field); expect(indexFirst(step.parent.table, step.parent.index), step.parent.table).toBe(step.via === "child" ? "organizationId" : "repositoryId"); }
+    if (step.via === "child") { expect(indexFirst(step.table, step.index), step.table).toBe(step.field); expect(indexFirst(step.parent.table, step.parent.index), step.parent.table).toBe("organizationId"); }
   }
   // Children are purged before their parents are.
   const position = (t: string) => purgePlan.findIndex((s) => s.table === t);
-  for (const step of purgePlan) if (step.via === "child" || step.via === "repoChild") expect(position(step.table)).toBeLessThan(position(step.parent.table));
+  for (const step of purgePlan) if (step.via === "child") expect(position(step.table)).toBeLessThan(position(step.parent.table));
   expect(position("indexJobs")).toBeLessThan(position("repositories"));
 });
 
@@ -135,7 +135,7 @@ test("a workspace with a subscription that has not ended cannot be deleted, even
   const accountId = await t.run((ctx) => ctx.db.insert("billingAccounts", { organizationId: acme.organizationId, customerId: "cus_1", subscriptionId: "sub_1", status: "active", seats: 1, trialEndsAt: Date.now(), updatedAt: Date.now() }));
   const request = () => t.mutation(api.dataControls.requestDeletion, { token: acme.token, organizationId: acme.organizationId, confirmName: "Acme" });
   // Active, and still active while a cancellation waits for the period end.
-  await expect(request()).rejects.toThrow(/Cancel it in Settings → Billing → Manage billing/);
+  await expect(request()).rejects.toThrow(/Cancel it in Organization Settings → Billing & Usage → Manage billing/);
   await t.run((ctx) => ctx.db.patch(accountId, { status: "past_due" }));
   await expect(request()).rejects.toThrow(/subscription/);
   // Once Stripe has ended it, deletion can be scheduled.
@@ -169,6 +169,54 @@ test("the purge resumes after an interruption: each chunk is a separate transact
   expect((await t.run((ctx) => ctx.db.get(deletion._id)))?.status).toBe("done");
   expect(await owned(t, acme.organizationId, acme.repo._id)).toEqual({});
   expect(await owned(t, rival.organizationId, rival.repo._id)).toEqual(rivalBefore);
+});
+
+test("the purge reaches every repository's rows, paging repositories across chunks", async () => {
+  process.env.WORKSPACE_DELETION_GRACE_DAYS = "0";
+  const t = convexTest(schema, modules);
+  const acme = await workspace(t, 521, "Acme");
+  // 60 repositories span several repository pages, each with stored source.
+  await t.run(async (ctx) => {
+    const storageId = await ctx.storage.store(new Blob(["source"]));
+    for (let i = 0; i < 60; i++) {
+      const repositoryId = await ctx.db.insert("repositories", { organizationId: acme.organizationId, fullName: `acme/r${i}`, defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: Date.now() });
+      await ctx.db.insert("repositoryFiles", { organizationId: acme.organizationId, repositoryId, path: "a.ts", sha: "s", storageId, language: "typescript", updatedAt: Date.now() });
+    }
+  });
+  await t.mutation(api.dataControls.requestDeletion, { token: acme.token, organizationId: acme.organizationId, confirmName: "Acme" });
+  await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
+  expect((await t.run((ctx) => ctx.db.query("workspaceDeletions").collect()))[0]).toMatchObject({ status: "done", counts: { repositoryFiles: 61, repositories: 61 } });
+  expect(await t.run((ctx) => ctx.db.query("repositoryFiles").collect())).toEqual([]);
+});
+
+test("a workspace with many index runs across many repositories purges to completion, under the 4,096 queries per transaction", async () => {
+  process.env.WORKSPACE_DELETION_GRACE_DAYS = "0";
+  const t = convexTest({ schema, modules, transactionLimits: true });
+  const acme = await workspace(t, 541, "Acme");
+  // 50 repositories × 100 index runs: walking every repository's runs for skipped files took 5,000+ queries.
+  await t.run(async (ctx) => {
+    const now = Date.now();
+    for (let r = 0; r < 50; r++) {
+      const repositoryId = r ? await ctx.db.insert("repositories", { organizationId: acme.organizationId, fullName: `acme/r${r}`, defaultBranch: "main", enabled: true, indexStatus: "indexed", createdAt: now }) : acme.repo._id;
+      for (let j = 0; j < 100; j++) { const jobId = await ctx.db.insert("indexJobs", { organizationId: acme.organizationId, repositoryId, sha: "a".repeat(40), status: "done", attempts: 1, processed: 1, total: 1, changed: 1, createdAt: now, updatedAt: now }); if (j % 25 === 0) await ctx.db.insert("indexSkippedFiles", { jobId, path: "big.bin" }); }
+    }
+  });
+  await t.mutation(api.dataControls.requestDeletion, { token: acme.token, organizationId: acme.organizationId, confirmName: "Acme" });
+  const [deletion] = await t.run((ctx) => ctx.db.query("workspaceDeletions").collect());
+  await t.mutation(internal.dataControls.startPurge, { deletionId: deletion._id });
+  for (let i = 0; i < 1000 && (await t.run((ctx) => ctx.db.get(deletion._id)))?.status !== "done"; i++) await t.mutation(internal.dataControls.purge, { deletionId: deletion._id });
+  expect((await t.run((ctx) => ctx.db.get(deletion._id)))).toMatchObject({ status: "done", counts: { indexJobs: 5001, indexSkippedFiles: 201, repositories: 50 } });
+  expect(await owned(t, acme.organizationId, acme.repo._id)).toEqual({});
+  expect(await t.run((ctx) => ctx.db.query("indexSkippedFiles").collect())).toEqual([]);
+}, 60_000);
+
+test("the retention sweep pages through workspaces, staying under 1,000 scheduled functions per transaction", async () => {
+  const t = convexTest({ schema, modules, transactionLimits: true });
+  await t.run(async (ctx) => { for (let i = 0; i < 1001; i++) await ctx.db.insert("organizations", { name: "Org" + i, createdAt: 0, reviewRetentionDays: 30 }); });
+  await t.mutation(internal.dataControls.retentionSweep, {});
+  await t.finishAllScheduledFunctions(vi.runAllTimers, 1000);
+  const runs = (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).filter((j) => j.name.includes("dataControls:retention") && !j.name.includes("Sweep"));
+  expect([runs.length, runs.every((j) => j.state.kind === "success")]).toEqual([1001, true]);
 });
 
 test("retention, data sharing and webhook pruning", async () => {
@@ -246,4 +294,164 @@ test("webhook pruning continues in further batches until the backlog is cleared"
   expect(await t.mutation(internal.dataControls.pruneWebhookPayloads, {})).toEqual({ deliveries: 200, events: 0 });
   await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
   expect(await t.run(async (ctx) => (await ctx.db.query("webhookDeliveries").collect()).length)).toBe(0);
+});
+
+test("transcript retention reaches old threads and conversations behind hundreds of recent ones, and pages through workspaces", async () => {
+  const t = convexTest(schema, modules);
+  const day = 86_400_000, now = Date.now(), old = now - 30 * day;
+  const ids = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Busy", transcriptRetentionDays: 14, createdAt: now });
+    const [alice, bob] = [await ctx.db.insert("users", { login: "alice", avatar: "", createdAt: now }), await ctx.db.insert("users", { login: "bob", avatar: "", createdAt: now })];
+    const repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: "busy/app", defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: now });
+    // The old code read 500 threads in user order and 500 conversations in pull request order, so these were never reached.
+    for (let i = 0; i < 500; i++) await ctx.db.insert("chatThreads", { organizationId, userId: alice, title: "recent", repositoryIds: [], createdAt: now, updatedAt: now });
+    const oldThread = await ctx.db.insert("chatThreads", { organizationId, userId: bob, title: "old", repositoryIds: [], createdAt: old, updatedAt: old });
+    for (let i = 0; i < 500; i++) await ctx.db.insert("conversations", { organizationId, repositoryId, prNumber: 1, githubCommentId: i, author: "a", question: "q", status: "completed", createdAt: now });
+    const oldConversation = await ctx.db.insert("conversations", { organizationId, repositoryId, prNumber: 2, githubCommentId: 9999, author: "a", question: "q", status: "completed", createdAt: old });
+    return { organizationId, oldThread, oldConversation };
+  });
+  await t.mutation(internal.dataControls.retention, { organizationId: ids.organizationId });
+  expect(await t.run(async (ctx) => [await ctx.db.get(ids.oldThread), await ctx.db.get(ids.oldConversation)])).toEqual([null, null]);
+  expect((await t.run((ctx) => ctx.db.query("chatThreads").collect())).length).toBe(500);
+  // More than one page of workspaces: the sweep continues with a cursor instead of stopping at a fixed count.
+  await t.run(async (ctx) => { for (let i = 0; i < 600; i++) await ctx.db.insert("organizations", { name: `w${i}`, createdAt: now }); });
+  await t.mutation(internal.dataControls.retentionSweep, {});
+  const next = (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).filter((s) => s.name.includes("retentionSweep"));
+  expect(next).toHaveLength(1);expect((next[0].args[0] as { cursor?: string }).cursor).toBeTruthy();
+});
+
+test("conversation retention counts from the last reply, so an old thread replied to yesterday survives", async () => {
+  const t = convexTest(schema, modules);
+  const day = 86_400_000, now = Date.now();
+  const ids = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Threads", transcriptRetentionDays: 30, createdAt: now });
+    const repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: "threads/app", defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: now });
+    const row = (githubCommentId: number, createdAt: number, updatedAt: number) => ctx.db.insert("conversations", { organizationId, repositoryId, prNumber: 1, githubCommentId, author: "a", question: "q", status: "completed", createdAt, updatedAt });
+    return { organizationId, active: await row(1, now - 31 * day, now - day), idle: await row(2, now - 40 * day, now - 35 * day) };
+  });
+  await t.mutation(internal.dataControls.retention, { organizationId: ids.organizationId });
+  expect(await t.run(async (ctx) => [(await ctx.db.get(ids.active))?._id, await ctx.db.get(ids.idle)])).toEqual([ids.active, null]);
+});
+
+test("review retention deletes a review's children 500 at a time and the review only once none are left", async () => {
+  const t = convexTest(schema, modules);
+  const now = Date.now(), old = now - 60 * 86_400_000;
+  const { organizationId, reviewId } = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Old", reviewRetentionDays: 30, createdAt: now });
+    const repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: "old/app", defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: now });
+    const reviewId = await ctx.db.insert("reviews", { organizationId, repositoryId, prNumber: 1, headSha: "a".repeat(40), status: "completed", mode: "standard", attempts: 1, createdAt: old, updatedAt: old });
+    for (let i = 0; i < 501; i++) await ctx.db.insert("modelCalls", { organizationId, reviewId, task: "review", provider: "p", model: "m", inputTokens: 1, outputTokens: 1, latencyMs: 1, estimatedCost: 0, cached: false, createdAt: old });
+    return { organizationId, reviewId };
+  });
+  const state = () => t.run(async (ctx) => [!!(await ctx.db.get(reviewId)), (await ctx.db.query("modelCalls").withIndex("by_review", (q) => q.eq("reviewId", reviewId)).collect()).length]);
+  // Fake timers keep the self-rescheduled run from firing between these calls.
+  expect(await t.mutation(internal.dataControls.retention, { organizationId })).toMatchObject({ reviews: 0, more: true });
+  expect(await state()).toEqual([true, 1]);
+  expect(await t.mutation(internal.dataControls.retention, { organizationId })).toMatchObject({ reviews: 1, more: false });
+  expect(await state()).toEqual([false, 0]);
+});
+
+// Runs one purge step by hand from a receipt parked on it, until the purge moves to the next step.
+async function purgeStep(t: ReturnType<typeof convexTest>, organizationId: Id<"organizations">, requestedBy: Id<"users">, table: TableNames) {
+  const step = purgePlan.findIndex((s) => s.table === table), now = Date.now();
+  const deletionId = await t.run((ctx) => ctx.db.insert("workspaceDeletions", { organizationId, name: "Big", requestedBy, requestedAt: now, scheduledFor: now, status: "purging", step, counts: {} }));
+  for (let i = 0; i < 100 && (await t.run((ctx) => ctx.db.get(deletionId)))!.step === step; i++) await t.mutation(internal.dataControls.purge, { deletionId });
+  expect((await t.run((ctx) => ctx.db.get(deletionId)))!.step).toBe(step + 1);
+}
+
+test("the purge deletes identity grants of every repository, however many the workspace has", async () => {
+  const t = convexTest(schema, modules);
+  const userId = await t.mutation(api.users.login, { secret: "data-service", githubId: 531, login: "u531", avatar: "" }), now = Date.now();
+  const { organizationId, grantId } = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Big", createdAt: now }), other = await ctx.db.insert("organizations", { name: "Other", createdAt: now });
+    const connectionId = await ctx.db.insert("providerConnections", { organizationId: other, kind: "gitlab", instance: "https://gitlab.com", name: "g", credentials: "c", webhookSecret: "w", active: true, createdAt: now });
+    let repositoryId!: Id<"repositories">;
+    for (let i = 0; i < 2001; i++) repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: `big/r${i}`, defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: now });
+    const grantId = await ctx.db.insert("providerIdentityGrants", { repositoryId, connectionId, userId, digest: "d", tokenHash: "h", expiresAt: now, consumed: false });
+    return { organizationId, grantId };
+  });
+  await purgeStep(t, organizationId, userId, "providerIdentityGrants");
+  expect(await t.run((ctx) => ctx.db.get(grantId))).toBeNull();
+});
+
+test("the purge deletes skipped-file rows of every index job, not only a repository's first 500", async () => {
+  const t = convexTest(schema, modules);
+  const userId = await t.mutation(api.users.login, { secret: "data-service", githubId: 532, login: "u532", avatar: "" }), now = Date.now();
+  const organizationId = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Big", createdAt: now });
+    const repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: "big/app", defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: now });
+    for (let i = 0; i < 501; i++) {
+      const jobId = await ctx.db.insert("indexJobs", { organizationId, repositoryId, sha: "a".repeat(40), status: "done", attempts: 1, processed: 1, total: 1, changed: 1, createdAt: now, updatedAt: now });
+      if (i === 500) await ctx.db.insert("indexSkippedFiles", { jobId, path: "big.bin" });
+    }
+    return organizationId;
+  });
+  await purgeStep(t, organizationId, userId, "indexSkippedFiles");
+  expect(await t.run((ctx) => ctx.db.query("indexSkippedFiles").collect())).toEqual([]);
+});
+
+test("webhook pruning reads byte-bounded pages, so large inline event bodies never stop it", async () => {
+  const t = convexTest({ schema, modules, transactionLimits: { bytesRead: 8_000_000 } });
+  const day = 86_400_000, now = Date.now(), old = now - 20 * day, body = "x".repeat(400_000);
+  await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Big bodies", createdAt: now });
+    const connectionId = await ctx.db.insert("providerConnections", { organizationId, kind: "gitlab", instance: "https://gitlab.example", name: "GitLab", credentials: "encrypted", webhookSecret: "encrypted", active: true, createdAt: now });
+    // A retried event at the head of the index keeps its body; the next pages step past it instead of rereading it.
+    await ctx.db.insert("providerEvents", { connectionId, externalId: "retried", body, status: "failed", attempts: 2, createdAt: old - day, updatedAt: now - day });
+    for (let i = 0; i < 30; i++) await ctx.db.insert("providerEvents", { connectionId, externalId: "e" + i, body, status: "completed", attempts: 1, createdAt: old });
+    await ctx.db.insert("webhookDeliveries", { deliveryId: "old", event: "push", payloadStorageId: await ctx.storage.store(new Blob(["{}"])), status: "completed", attempts: 1, createdAt: old, updatedAt: old });
+  });
+  await t.mutation(internal.dataControls.pruneWebhookPayloads, {});
+  // The continuation reuses this run's cutoff: Convex rejects a cursor on a query whose range changed.
+  const next = (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).find((s) => s.name.includes("pruneWebhookPayloads"));
+  expect(next?.args[0]).toMatchObject({ cursor: expect.any(String), cutoff: now - 14 * day });
+  await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
+  const events = await t.run(async (ctx) => (await ctx.db.query("providerEvents").collect()).filter((e) => e.body !== "").map((e) => e.externalId));
+  expect(events).toEqual(["retried"]);
+  expect(await t.run(async (ctx) => (await ctx.db.query("webhookDeliveries").collect()).length)).toBe(0);
+});
+
+test("an undated old conversation expires even behind 100 older conversations that are still active", async () => {
+  const t = convexTest(schema, modules);
+  const day = 86_400_000, now = Date.now();
+  const ids = await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", { name: "Legacy", transcriptRetentionDays: 14, createdAt: now });
+    const repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: "legacy/app", defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: now });
+    for (let i = 0; i < 100; i++) await ctx.db.insert("conversations", { organizationId, repositoryId, prNumber: 1, githubCommentId: i, author: "a", question: "q", status: "completed", createdAt: now - 40 * day, updatedAt: now - day });
+    return { organizationId, undated: await ctx.db.insert("conversations", { organizationId, repositoryId, prNumber: 2, githubCommentId: 999, author: "a", question: "q", status: "completed", createdAt: now - 30 * day }) };
+  });
+  await t.mutation(internal.dataControls.retention, { organizationId: ids.organizationId });
+  expect(await t.run((ctx) => ctx.db.get(ids.undated))).toBeNull();
+  expect((await t.run((ctx) => ctx.db.query("conversations").collect())).length).toBe(100);
+});
+
+test("the purge first stops new work: repositories are disabled, re-enabling is refused, and pushes and reviews during the drain write nothing", async () => {
+  process.env.WORKSPACE_DELETION_GRACE_DAYS = "0";
+  const t = convexTest(schema, modules);
+  const acme = await workspace(t, 551, "Acme");
+  // Twenty earlier requests the owner cancelled: the current deletion is the newest receipt, not the first ones.
+  const waiting = await t.run(async (ctx) => {
+    await ctx.db.patch(acme.repo._id, { enabled: true });
+    for (let i = 0; i < 20; i++) await ctx.db.insert("workspaceDeletions", { organizationId: acme.organizationId, name: "Acme", requestedBy: acme.userId, requestedAt: i, scheduledFor: i, status: "cancelled", step: 0, counts: {} });
+    // A review parked on a long runtime test job, which can outlast the drain.
+    return ctx.db.insert("reviews", { organizationId: acme.organizationId, repositoryId: acme.repo._id, prNumber: 3, headSha: "e".repeat(40), status: "waiting_runtime", mode: "standard", attempts: 1, createdAt: Date.now(), updatedAt: Date.now() });
+  });
+  await t.mutation(api.dataControls.requestDeletion, { token: acme.token, organizationId: acme.organizationId, confirmName: "Acme" });
+  const deletion = (await t.run((ctx) => ctx.db.query("workspaceDeletions").collect())).find((d) => d.status === "scheduled")!;
+  await t.mutation(internal.dataControls.startPurge, { deletionId: deletion._id });
+  await t.mutation(internal.dataControls.quiesce, { deletionId: deletion._id });
+  expect((await t.run((ctx) => ctx.db.get(acme.repo._id)))?.enabled).toBe(false);
+  // While the purge runs, a webhook push and a pull request event are turned away, and nobody can switch the repository back on.
+  expect(await t.mutation(internal.repositories.indexing, { repositoryId: acme.repo._id, sha: "c".repeat(40), total: 1 })).toBeNull();
+  expect(await t.mutation(internal.reviews.enqueue, { repositoryId: acme.repo._id, prNumber: 9, headSha: "d".repeat(40), trigger: "automatic" })).toBeNull();
+  await expect(t.mutation(api.repositories.configure, { token: acme.token, repositoryId: acme.repo._id, enabled: true })).rejects.toThrow(/being deleted/);
+  // When its job finishes, the parked review does not start again or log a stage.
+  const runs = async () => (await t.run((ctx) => ctx.db.query("reviewRuns").collect())).filter((r) => r.reviewId === waiting).length;
+  const before = await runs();
+  expect(await t.mutation(internal.reviews.stage, { reviewId: waiting, status: "ingesting" })).toBe(false);
+  expect(await runs()).toBe(before);
+  // The purge itself waits for jobs already running, then removes everything.
+  await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
+  expect((await t.run((ctx) => ctx.db.get(deletion._id)))?.status).toBe("done");
+  expect(await owned(t, acme.organizationId, acme.repo._id)).toEqual({});
 });

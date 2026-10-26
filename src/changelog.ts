@@ -1,4 +1,4 @@
-// CHANGELOG.md as data for the changelog page and its RSS feed. The file has one `## Month YYYY`
+// CHANGELOG.md as data for the changelog page, its RSS feed and the email digest. The file has one `## Month YYYY`
 // heading per month and `### Area` sections of bullets under it.
 import { createHash } from "node:crypto";
 
@@ -61,4 +61,40 @@ ${items.join("\n")}
   </channel>
 </rss>
 `;
+}
+
+export type DigestSection = { title: string; link: string; entries: string[] };
+const unescapeXml = (text: string) => text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&amp;/g, "&");
+
+/**
+ * The email digest's view of the live feed: entries (one per bullet line) whose key is not in `seen`,
+ * by section, and the keys of every entry in the feed, to remember once the digest is sent. A key is
+ * a hash of the section link and the line, so an edited entry counts as new.
+ */
+export function feedDigest(feed: string, seen: ReadonlySet<string>) {
+  const sections: DigestSection[] = [], keys: string[] = [];
+  for (const [, item] of feed.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+    const field = (name: string) => unescapeXml(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`).exec(item)?.[1] ?? "");
+    const link = field("link"), entries: string[] = [];
+    for (const line of field("description").split("\n").map((l) => l.trim()).filter(Boolean)) {
+      const key = createHash("sha256").update(`${link}\n${line}`).digest("hex").slice(0, 16);
+      keys.push(key);
+      if (!seen.has(key)) entries.push(line);
+    }
+    if (entries.length) sections.push({ title: field("title"), link, entries });
+  }
+  return { sections, keys };
+}
+
+/** A digest for a Resend broadcast, in plain text and HTML; Resend fills in the unsubscribe link. */
+export function digestEmail(sections: DigestSection[], origin: string) {
+  const areas = [...new Set(sections.map((s) => s.title.split(" · ")[0]))].join(", ");
+  const body = sections.map((s) => `${s.title}\n${s.entries.join("\n")}\n${s.link}`).join("\n\n");
+  const html = sections.map((s) => `<h3><a href="${escapeXml(s.link)}">${escapeXml(s.title)}</a></h3><p>${s.entries.map(escapeXml).join("<br>")}</p>`).join("");
+  return {
+    subject: `What's new in OpenReview: ${areas}`.slice(0, 200),
+    text: `New in OpenReview since the last update:\n\n${body}\n\nThe full changelog: ${origin}/changelog\n\nUnsubscribe: {{{RESEND_UNSUBSCRIBE_URL}}}`,
+    // Resend documents the unsubscribe placeholder for HTML, so the link is sure to be filled in here.
+    html: `<p>New in OpenReview since the last update:</p>${html}<p><a href="${escapeXml(origin)}/changelog">The full changelog</a></p><p><a href="{{{RESEND_UNSUBSCRIBE_URL}}}">Unsubscribe</a></p>`,
+  };
 }

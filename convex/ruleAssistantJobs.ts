@@ -10,7 +10,8 @@ import { ModelFailure } from "../src/engine/model";
 // Runs one rule-assistant request: one model call (inference budget enforced by budgetModel), output
 // validated by schema and guard in runRuleAssistant, usage recorded, suggestions stored for approval.
 export const run = internalAction({ args: { runId: v.id("ruleAssistantRuns") }, handler: async (ctx, a): Promise<void> => {
-  const job = await ctx.runQuery(internal.ruleAssistant.context, a);
+  // A context read that fails (e.g. over the read limit) must fail the run, or it stays pending and holds the pending cap.
+  const job = await ctx.runQuery(internal.ruleAssistant.context, a).catch(async () => { await ctx.runMutation(internal.ruleAssistant.fail, { runId: a.runId, error: "The workspace history could not be read; nothing was suggested." }); return null; });
   if (!job) return;
   const { run } = job;
   const input: AssistantJob = run.kind === "draft"

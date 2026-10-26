@@ -1,5 +1,6 @@
 import {executionExplanation} from "../src/execution-claims";
 import { notificationsEnabled } from "./notifications";
+import { lifecycleEmail } from "./lifecycleEmails";
 import { reviewAllowance } from "./billing";
 import {
   internalMutation,
@@ -12,11 +13,13 @@ import { v } from "convex/values";
 import { authorize, authorizeRepository, visibleRepositories } from "./auth";
 import type { Doc, Id } from "./_generated/dataModel";
 import { recordSignals } from "./commitSignals";
-import {p4FixAuthority} from "./p4FixAuthority";
+import {p4FixMetadata} from "./p4FixAuthority";
 import { eligibleFixFinding } from "../src/fix-prompt";
 import { effectiveSettings } from "./scopes";
 import { scheduleIndexIfIdle } from "./repositories";
 import { rateLimit } from "./rateLimit";
+import { workspacePurging } from "./dataControls";
+import { queueReactions } from "./reactions";
 import {repositoryContextValidator,validateRepositoryContext,requireContextReader,contextReadable,requireFindingReader} from "./repositoryContext";
 import {validateIntegrationScopes} from "./integrations";
 import { runtimeEvidenceValidator, findingValidator } from "./schema";
@@ -24,8 +27,9 @@ import { redact } from "../src/redact";
 import { runtimeEvidenceSchema, approvalAssessmentSchema, reviewScoreSchema } from "../src/engine/types";
 import {p4AutomaticAuthority} from "./p4Polling";
 import {cancelReview,requireP4Worker} from "./reviewLifecycle";
-import {p4Baseline} from "./p4Index";
-import {findingTags,priorityOf} from "../src/priority";
+import {p4BaselineMetadata} from "./p4Index";
+import {findingTags,priorityOf,findingCounts} from "../src/priority";
+import { maxAgentResumes } from "../src/engine/types";
 
 const usageValidator = v.object({
   task: v.string(),
@@ -81,11 +85,21 @@ export const enqueue = internalMutation({
       previous &&
       previous.revisionKey === args.revisionKey &&
       !args.force &&
-      previous.status !== "failed" &&
-      previous.status !== "cancelled"
+      !["failed", "cancelled", "skipped"].includes(previous.status)
     )
       return previous._id;
-    await rateLimit(ctx, `review:${repo.organizationId}`, 20);
+    // A burst of webhook reviews waits for the next minute instead of failing its delivery for good;
+    // a person who asked for a review gets the error.
+    // shortcut: a deferred review is not counted against the next minute; count it there if bursts get abused.
+    const deferMs = await rateLimit(ctx, `review:${repo.organizationId}`, 20).then(() => 0, (error) => { if (args.trigger === "manual") throw error; return 60000 - (Date.now() % 60000); });
+    const config = await effectiveSettings(ctx,repo);
+    // Cloud billing quota (no-op when BILLING_ENABLED is unset): a blocked review is recorded
+    // as failed with the billing reason instead of running, and leaves the running review alone.
+    const allowance = await reviewAllowance(ctx, repo.organizationId);
+    if (!allowance.allowed) {
+      if (args.trigger && args.trigger !== "manual") await ctx.scheduler.runAfter(0, internal.jobs.billingNotice, { repositoryId: repo._id, prNumber: args.prNumber });
+      return ctx.db.insert("reviews", { organizationId: repo.organizationId, repositoryId: repo._id, prNumber: args.prNumber, headSha: args.headSha, revisionKey: args.revisionKey, status: "failed", error: allowance.reason, mode: config.mode, ...(args.trigger ? { trigger: args.trigger } : {}), attempts: 0, createdAt: Date.now(), updatedAt: Date.now(), finishedAt: Date.now() });
+    }
     const pending = await ctx.db
       .query("reviews")
       .withIndex("by_pr", (q) =>
@@ -94,16 +108,8 @@ export const enqueue = internalMutation({
       .order("desc")
       .take(100);
     for (const r of pending)
-      if (!["completed", "failed", "cancelled"].includes(r.status))
+      if (!["completed", "failed", "cancelled", "skipped"].includes(r.status))
         await cancelReview(ctx,r);
-    const config = await effectiveSettings(ctx,repo);
-    // Cloud billing quota (no-op when BILLING_ENABLED is unset): a blocked review is recorded
-    // as failed with the billing reason instead of running.
-    const allowance = await reviewAllowance(ctx, repo.organizationId);
-    if (!allowance.allowed) {
-      if (args.trigger && args.trigger !== "manual") await ctx.scheduler.runAfter(0, internal.jobs.billingNotice, { repositoryId: repo._id, prNumber: args.prNumber });
-      return ctx.db.insert("reviews", { organizationId: repo.organizationId, repositoryId: repo._id, prNumber: args.prNumber, headSha: args.headSha, revisionKey: args.revisionKey, status: "failed", error: allowance.reason, mode: config.mode, ...(args.trigger ? { trigger: args.trigger } : {}), attempts: 0, createdAt: Date.now(), updatedAt: Date.now(), finishedAt: Date.now() });
-    }
     const reviewId = await ctx.db.insert("reviews", {
       organizationId: repo.organizationId,
       repositoryId: repo._id,
@@ -121,7 +127,7 @@ export const enqueue = internalMutation({
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
-    await ctx.scheduler.runAfter(2000, internal.jobs.review, { reviewId });
+    await ctx.scheduler.runAfter(2000 + deferMs, internal.jobs.review, { reviewId });
     return reviewId;
   },
 });
@@ -171,11 +177,14 @@ export const stage = internalMutation({
       !["queued", "failed", "waiting_runtime", "waiting_agent"].includes(review.status)
     )
       return false;
+    // A review that resumes while its workspace is purged (one waiting on a long runtime job outlives the
+    // purge's drain) starts nothing and writes nothing the purge has already cleared.
+    if (args.status === "ingesting" && await workspacePurging(ctx, review.organizationId)) return false;
     if(args.status==="ingesting"&&review.retryScheduledId){
       const retry=await ctx.db.system.get(review.retryScheduledId);
       if(retry?.state.kind==="pending")await ctx.scheduler.cancel(retry._id);
     }
-    if(args.status === "cancelled")await cancelReview(ctx,review);
+    if(args.status === "cancelled"||args.status === "skipped")await cancelReview(ctx,review,args.status);
     else await ctx.db.patch(review._id, {
       status: args.status,
       updatedAt: Date.now(),
@@ -206,15 +215,18 @@ export const data = internalQuery({
   handler: async (ctx, args) => {
     const review = await ctx.db.get(args.reviewId);
     if (!review) throw new Error("Review not found");
+    // Only open findings: a long-lived PR's resolved history can pass a function's read limit.
+    // shortcut: at most 1000 open findings are deduped/carried forward, page them if a PR ever exceeds that.
     const findings = await ctx.db
       .query("findings")
-      .withIndex("by_pr", (q) =>
+      .withIndex("by_pr_status", (q) =>
         q
           .eq("repositoryId", review.repositoryId)
-          .eq("prNumber", review.prNumber),
+          .eq("prNumber", review.prNumber)
+          .eq("status", "open"),
       )
-      .collect();
-    return { review, findings: findings.filter((f) => f.status === "open") };
+      .take(1000);
+    return { review, findings };
   },
 });
 export const history = internalQuery({
@@ -262,7 +274,7 @@ export const recordPr = internalMutation({
       state: args.state,
       updatedAt: Date.now(),
     };
-    const prId = existing?._id ?? (await ctx.db.insert("pullRequests", data));
+    const prId = existing?._id ?? (await ctx.db.insert("pullRequests", { ...data, ...(args.state === "open" ? { openedAt: Date.now() } : {}) }));
     // Native intake owns current metadata; a delayed review only owns its revision.
     if (existing?.nativeObservedAt === undefined) {
       if (existing) await ctx.db.patch(existing._id, data);
@@ -317,7 +329,7 @@ export const save = internalMutation({
       throw new Error("Review cancelled");
     requireP4Worker(review,args.workerLease);
     if(review.nativeP4?.polling)await p4AutomaticAuthority(ctx,review.repositoryId,review.nativeP4.polling);
-    if(review.nativeP4)await p4Baseline(ctx,{repositoryId:review.repositoryId,requestedBy:review.nativeP4.requestedBy,baselineJobId:review.nativeP4.baselineJobId});
+    if(review.nativeP4)await p4BaselineMetadata(ctx,{repositoryId:review.repositoryId,requestedBy:review.nativeP4.requestedBy,baselineJobId:review.nativeP4.baselineJobId});
     if(review.resultStorageId)throw new Error("Review result already saved; create a new review instead");
     if(args.findings.some(f=>f.commitSha!==review.headSha)||new Set(args.findings.map(f=>f.fingerprint)).size!==args.findings.length)
       throw new Error("Finding snapshots must be unique and belong to the reviewed revision");
@@ -337,6 +349,7 @@ export const save = internalMutation({
       findingSeverity: ["critical", "high", "medium", "low"].find((severity) =>
         args.findings.some((finding) => finding.severity === severity),
       ),
+      findingCounts: findingCounts(args.findings),
       models: [...new Set(args.usage.map((usage) => usage.model))].join(", "),
       resultStorageId: args.storageId,
       findingsRecorded:true,
@@ -427,7 +440,7 @@ export const checkRun = internalQuery({args:{reviewId:v.id("reviews")},handler:a
 export const setCheckRun = internalMutation({args:{reviewId:v.id("reviews"),checkRunId:v.number(),checkRunHead:v.string()},handler:async(ctx,a)=>{const r=await ctx.db.get(a.reviewId);if(r)await ctx.db.patch(r._id,{checkRunId:a.checkRunId,checkRunHead:a.checkRunHead});}});
 export const agentStatus = internalQuery({args:{reviewId:v.id("reviews")},handler:async(ctx,a)=>{
   const review=await ctx.db.get(a.reviewId);
-  return review?{status:review.status,headSha:review.headSha,agentStateStorageId:review.agentStateStorageId,agentStateHead:review.agentStateHead}:null;
+  return review?{status:review.status,headSha:review.headSha,agentStateStorageId:review.agentStateStorageId,agentStateHead:review.agentStateHead,agentResumes:review.agentResumes??0}:null;
 }});
 export const saveAgentState = internalMutation({args:{reviewId:v.id("reviews"),storageId:v.id("_storage"),headSha:v.string()},handler:async(ctx,a)=>{
   const review=await ctx.db.get(a.reviewId);
@@ -441,7 +454,10 @@ export const saveAgentState = internalMutation({args:{reviewId:v.id("reviews"),s
 export const suspendAgent = internalMutation({args:{reviewId:v.id("reviews")},handler:async(ctx,a)=>{
   const review=await ctx.db.get(a.reviewId);
   if(!review||!["ingesting","retrieving_context","reviewing"].includes(review.status)||!review.agentStateStorageId)return false;
-  await ctx.db.patch(review._id,{status:"waiting_agent",updatedAt:Date.now()});
+  // Counted here, not only in the saved state: a lost state would otherwise restart every budget forever.
+  const agentResumes=(review.agentResumes??0)+1;
+  if(agentResumes>maxAgentResumes)return false;
+  await ctx.db.patch(review._id,{status:"waiting_agent",agentResumes,updatedAt:Date.now()});
   await ctx.db.insert("reviewRuns",{organizationId:review.organizationId,reviewId:review._id,stage:"waiting_agent",detail:"Agentic investigation continues in a new step",createdAt:Date.now()});
   await ctx.scheduler.runAfter(0,internal.jobs.review,{reviewId:review._id});
   return true;
@@ -529,7 +545,10 @@ export const finished = internalMutation({
         });
     }
     if(!args.error&&!review.nativeP4)await ctx.scheduler.runAfter(0,internal.approvals.request,{reviewId:review._id});
+    // GitHub has no reaction webhooks: queue this PR for the hourly reaction poll.
+    if(!args.error&&!review.nativeP4)await queueReactions(ctx,review.repositoryId,review.prNumber);
     if(!args.error&&await notificationsEnabled(ctx,review.organizationId))await ctx.scheduler.runAfter(0,internal.notificationJobs.reviewCompleted,{reviewId:review._id});
+    if(!args.error)await lifecycleEmail(ctx,"first_review_completed",{organizationId:review.organizationId});
   },
 });
 export const list = query({
@@ -567,7 +586,7 @@ export const detail = query({
     const latestReadable=latest?await contextReadable(ctx,viewer._id,latest):false;
     const retry=review.retryScheduledId?await ctx.db.system.get(review.retryScheduledId):null;
     let fixReady=repo.enabled;
-    if(review.nativeP4){try{await p4FixAuthority(ctx,review);fixReady=true;}catch{fixReady=false;}}
+    if(review.nativeP4){try{await p4FixMetadata(ctx,review);fixReady=true;}catch{fixReady=false;}}
     const executionEvidence=review.runtimeEvidence?.headSha===review.headSha?review.runtimeEvidence:undefined;
     const findings=await Promise.all(snapshots.map(async s=>{
       await requireFindingReader(ctx,viewer._id,s.snapshot);
@@ -604,7 +623,7 @@ export const cancel = mutation({
     const review = await ctx.db.get(args.reviewId);
     if (!review) throw new Error("Review not found");
     await authorizeRepository(ctx, args.token, review.repositoryId, true);
-    if (!["completed", "failed", "cancelled"].includes(review.status))
+    if (!["completed", "failed", "cancelled", "skipped"].includes(review.status))
       await cancelReview(ctx,review);
   },
 });

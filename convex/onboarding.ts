@@ -1,11 +1,13 @@
-import { choosePlanMessage, planMissing } from "./billing";
-import {query,mutation} from "./_generated/server";
+import { choosePlanMessage, hasEntitlement, planMissing } from "./billing";
+import {upgradeNote} from "../src/plans";
+import {query,mutation,internalMutation} from "./_generated/server";
+import {internal} from "./_generated/api";
 import {v} from "convex/values";
 import {authorize,visibleRepositories,audit} from "./auth";
 import {indexingAccess,enableIndexing} from "./repositories";
 import {connectionDigest} from "./indexAuthority";
 import type {QueryCtx,MutationCtx} from "./_generated/server";
-import type {Doc} from "./_generated/dataModel";
+import type {Doc,Id} from "./_generated/dataModel";
 import {repositoryIdentity} from "./repositoryIdentity";
 import {settingsValidator} from "./schema";
 import {assertValidSettings} from "./scopes";
@@ -18,6 +20,14 @@ async function setupAccess(ctx:QueryCtx|MutationCtx,repo:Doc<"repositories">){
  const connection=repo.connectionId?await ctx.db.get(repo.connectionId):null;
  if(connection?.kind!=="perforce")return {nativeIndex:false,setupError:await indexingAccess(ctx,repo)};
  return {nativeIndex:true,setupError:connection.organizationId!==repo.organizationId||!connection.active||connection.suspended?"Provider access is disconnected or suspended":!repo.externalId?"Native project identity is unavailable":null};
+}
+// Setup can finish once a selected repository is indexing (enabled) or uses native Perforce indexing: the rule
+// the wizard's step guards apply (indexingStarted in app/dashboard/onboarding/setup.ts).
+async function setupReady(ctx:QueryCtx,organization:Doc<"organizations">){
+ const repos=await ctx.db.query("repositories").withIndex("by_org",q=>q.eq("organizationId",organization._id)).collect();
+ const selected=organization.onboardingRepositoryIds?repos.filter(r=>organization.onboardingRepositoryIds!.includes(r._id)):repos.filter(r=>r.enabled);
+ for(const r of selected)if(r.enabled||(r.connectionId&&(await ctx.db.get(r.connectionId))?.kind==="perforce"))return true;
+ return false;
 }
 
 export const status=query({args:{token:v.string(),organizationId:v.id("organizations")},handler:async(ctx,a)=>{
@@ -72,11 +82,18 @@ export const start=mutation({args:{token:v.string(),organizationId:v.id("organiz
  }
  const repos=await visibleRepositories(ctx,a.token,a.organizationId),ids=organization?.onboardingRepositoryIds??repos.filter(r=>r.enabled).map(r=>r._id);
  if(!ids.length)throw new Error("Select repositories before indexing");
- let started=false;
- for(const id of ids){const r=repos.find(r=>r._id===id);if(!r)throw new Error("Selected repository is unavailable");const access=await setupAccess(ctx,r);if(access.setupError)throw new Error(access.setupError);if(!access.nativeIndex){await enableIndexing(ctx,r);started=true;}}
- if(!started)throw new Error("Use native Perforce indexing setup for the selected repositories");
+ const enable:Id<"repositories">[]=[];
+ for(const id of ids){const r=repos.find(r=>r._id===id);if(!r)throw new Error("Selected repository is unavailable");const access=await setupAccess(ctx,r);if(access.setupError)throw new Error(access.setupError);if(!access.nativeIndex)enable.push(id);}
+ if(!enable.length)throw new Error("Use native Perforce indexing setup for the selected repositories");
+ await enableRepositories(ctx,a.organizationId,enable);
  await audit(ctx,a.organizationId,user._id,"onboarding.indexing_started",a.organizationId);
 }});
+// A new repository schedules a catalog and an index job and Convex allows 1,000 scheduled functions per mutation, so enable 100 per transaction and continue with the rest.
+async function enableRepositories(ctx:MutationCtx,organizationId:Id<"organizations">,ids:Id<"repositories">[]){
+ for(const id of ids.slice(0,100)){const r=await ctx.db.get(id);if(r?.organizationId===organizationId&&!(await setupAccess(ctx,r)).setupError)await enableIndexing(ctx,r);}
+ if(ids.length>100)await ctx.scheduler.runAfter(0,internal.onboarding.enableBatch,{organizationId,repositoryIds:ids.slice(100)});
+}
+export const enableBatch=internalMutation({args:{organizationId:v.id("organizations"),repositoryIds:v.array(v.id("repositories"))},handler:(ctx,a)=>enableRepositories(ctx,a.organizationId,a.repositoryIds)});
 
 // Guided setup: each configuration step writes only its own workspace defaults.
 export const saveDefaults=mutation({args:{token:v.string(),organizationId:v.id("organizations"),step:v.string(),settings:settingsValidator},handler:async(ctx,a)=>{
@@ -84,6 +101,9 @@ export const saveDefaults=mutation({args:{token:v.string(),organizationId:v.id("
  if(!isConfigureStep(a.step))throw new Error("Unknown setup step");
  const allowed=stepKeys[a.step],rows=await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect(),row=rows.find(s=>!s.teamId);
  const changes=Object.fromEntries(allowed.map(key=>[key,(a.settings as Record<string,unknown>)[key]]).filter(([,value])=>value!==undefined));
+ // The tools step offers Pro options disabled on lower plans; refuse them here too.
+ if(changes.fixPullRequests===true&&!await hasEntitlement(ctx,a.organizationId,"fix.pullRequests"))throw new Error(upgradeNote["fix.pullRequests"]);
+ if(changes.mode==="deep"&&!await hasEntitlement(ctx,a.organizationId,"review.deep"))throw new Error("Deep reviews are on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage.");
  const merged={...(row?.settings??{...deploymentDefaults(),...newWorkspaceDefaults}),...changes} as Infer<typeof settingsValidator>,overrideKeys=[...new Set([...(row?.overrideKeys??Object.keys(newWorkspaceDefaults)),...allowed])];
  assertValidSettings(merged,overrideKeys);
  if(row)await ctx.db.patch(row._id,{settings:merged,overrideKeys});else await ctx.db.insert("scopeSettings",{organizationId:a.organizationId,settings:merged,overrideKeys});
@@ -102,16 +122,33 @@ export const advance=mutation({args:{token:v.string(),organizationId:v.id("organ
  // The step to show next; the plan step only exists where this deployment bills workspaces.
  return nextStep(a.step,billingConfig().enabled)??"done";
 }});
-export const complete=mutation({args:{token:v.string(),organizationId:v.id("organizations"),skipped:v.optional(v.boolean())},handler:async(ctx,a)=>{
+// Setup is only ever finished from its last step; there is no skipping it, so an unfinished workspace keeps its
+// setup prompt (the dashboard banner and the landing redirect) until then.
+export const complete=mutation({args:{token:v.string(),organizationId:v.id("organizations")},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true),organization=await ctx.db.get(a.organizationId);
  if(await planMissing(ctx,a.organizationId))throw new Error(choosePlanMessage);
- const onboarding=organization?.onboarding??{startedAt:Date.now()};
+ if(!organization||!await setupReady(ctx,organization))throw new Error("Select a repository and start indexing before finishing setup");
+ const onboarding=organization.onboarding??{startedAt:Date.now()};
  if(onboarding.reviewsPaused){
-  // Setup ended before the triggers step: release the hold so automatic reviews follow the defaults.
+  // Finished without saving the triggers step (the last step opens once indexing starts): release the hold so
+  // automatic reviews follow the defaults.
   const row=(await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect()).find(s=>!s.teamId);
   if(row)await ctx.db.patch(row._id,{settings:{...row.settings,automatic:true},overrideKeys:row.overrideKeys.filter(k=>k!=="automatic")});
   await audit(ctx,a.organizationId,user._id,"onboarding.reviews_resumed",a.organizationId);
  }
- await ctx.db.patch(a.organizationId,{onboarding:{...onboarding,step:"done",reviewsPaused:false,completedAt:Date.now(),completedBy:user._id,skipped:a.skipped===true}});
- await audit(ctx,a.organizationId,user._id,a.skipped?"onboarding.skipped":"onboarding.completed",a.organizationId);
+ await ctx.db.patch(a.organizationId,{onboarding:{...onboarding,step:"done",reviewsPaused:false,completedAt:Date.now(),completedBy:user._id,skipped:false}});
+ await audit(ctx,a.organizationId,user._id,"onboarding.completed",a.organizationId);
+}});
+// Workspaces that left setup with the old Exit setup before any repository was indexing count as unfinished
+// again, so they are prompted until they finish; those already reviewing stay done. Run once per deployment:
+// `npx convex run onboarding:reopenSkippedSetups '{"confirm":"reopen-skipped-setups"}' --prod`.
+export const reopenSkippedSetups=internalMutation({args:{confirm:v.literal("reopen-skipped-setups")},handler:async(ctx):Promise<number>=>{
+ let reopened=0;
+ for(const organization of await ctx.db.query("organizations").collect()){
+  const onboarding=organization.onboarding;
+  if(!onboarding?.skipped||!onboarding.completedAt||await setupReady(ctx,organization))continue;
+  await ctx.db.patch(organization._id,{onboarding:{startedAt:onboarding.startedAt,reviewsPaused:false,skipped:false}});
+  reopened++;
+ }
+ return reopened;
 }});

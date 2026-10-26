@@ -10,7 +10,7 @@
 
 ## Steps
 
-1. Connect the project. In **Settings → Code Providers → Connect provider → GitLab**:
+1. Connect the project. In **Code Providers → Connect provider → GitLab**:
    - **Instance:** `https://gitlab.com`.
    - **Credential:** the bot token.
    - **Webhook secret:** 32+ random characters.

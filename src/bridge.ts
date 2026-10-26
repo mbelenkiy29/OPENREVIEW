@@ -10,7 +10,7 @@ import { installProtocol } from "./bridge-install";
 import {p4CheckoutSchema,p4CheckoutKey,registerP4Checkout,verifyP4Checkout,p4FixFileSchema,p4CheckoutEnvironment} from "./bridge-p4";
 const execute=promisify(execFile);
 const directory=process.env.OPENREVIEW_BRIDGE_HOME??path.join(homedir(),".config","openreview","bridge");
-const configSchema=z.object({url:z.string().url(),token:z.string().regex(/^obr_[a-f0-9]{64}$/),repositories:z.record(z.string()).default({}),p4Repositories:z.record(p4CheckoutSchema).default({})});
+const configSchema=z.object({url:z.string().url(),token:z.string().regex(/^obr_[a-f0-9]{64}$/),repositories:z.record(z.string(),z.string()).default({}),p4Repositories:z.record(z.string(),p4CheckoutSchema).default({})});
 type Config=z.infer<typeof configSchema>;
 export function bridgeUrl(raw:string) {
  const u=new URL(raw);if(u.protocol!=="https:"&&!(u.protocol==="http:"&&["localhost","127.0.0.1"].includes(u.hostname)))throw new Error("Bridge server requires HTTPS or local development HTTP");
@@ -70,9 +70,10 @@ export async function bridgeMain(args:string[]) {
  if(command==="pair"){
   const c:Config={url:bridgeUrl(values.url??""),token:"obr_"+randomBytes(32).toString("hex"),repositories:{},p4Repositories:{}};const code=randomBytes(6).toString("hex");
   await call(c,"pair",{code,name:values.name??hostname()});await save(c);
-  console.log(`Open ${c.url}/dashboard/settings/agents and approve pairing code ${code}. Then run openreview bridge status. Credentials expire after 90 days and can be revoked there.`);return;
+  console.log(`Open ${c.url}/dashboard/account/review and approve pairing code ${code}. Then run openreview bridge status. Credentials expire after 90 days and can be revoked there.`);return;
  }
- if(command==="install"){await installProtocol(directory,fileURLToPath(new URL("../bin/openreview.mjs",import.meta.url)),process.execPath);console.log("OpenReview protocol installed. Pair the bridge and register your repository before clicking Fix.");return;}
+ if(command==="install"){// The npm package (built with OPENREVIEW_CLI_VERSION defined) is a single file that launches itself.
+ await installProtocol(directory,fileURLToPath(new URL(process.env.OPENREVIEW_CLI_VERSION?import.meta.url:"../bin/openreview.mjs",import.meta.url)),process.execPath);console.log("OpenReview protocol installed. Pair the bridge and register your repository before clicking Fix.");return;}
  if(command==="status") {
   // Local setup diagnostics must work even before pairing or during an outage.
   for(const agent of ["codex","claude","cursor"]){try {if(agent==="cursor")await resolveCursorAgent();else if(agent==="codex"){const resolved=await resolveCodexAgent();await execute(resolved.file,[...resolved.prefix,"--help"],{timeout:10000});}else await execute(agent,["--help"],{timeout:10000});console.log(`${agent}: available`);}catch{console.log(`${agent}: unavailable`);}}

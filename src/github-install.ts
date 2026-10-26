@@ -1,7 +1,7 @@
 import { safeNext } from "./identity";
 
 // Where the GitHub App installation flow may return to after GitHub redirects back.
-const returnPaths = ["/dashboard/onboarding/connect", "/dashboard/settings/providers", "/dashboard/repositories"] as const;
+const returnPaths = ["/dashboard/onboarding/connect", "/dashboard/providers", "/dashboard/repositories"] as const;
 export const defaultInstallReturn = "/dashboard/repositories";
 /** The sealed install state lives this long, so a slow install on GitHub can still finish. */
 export const installStateMaxAge = 1800;

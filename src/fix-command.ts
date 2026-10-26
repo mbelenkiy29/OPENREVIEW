@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Suggestion } from "./suggestions";
+import { localAgentLabels, localAgents } from "./fix-agents";
 
 // `@openreview fix this` in a finding thread: reply with a validated committable suggestion and
 // the Fix handoff link. Asking for a pull request ("fix this in a new PR") additionally opens a fix
@@ -41,6 +42,12 @@ export function fixHandoffUrl(appUrl: string | undefined, reviewId: string, fing
   return `${origin.origin}/fix/${encodeURIComponent(reviewId)}?finding=${encodeURIComponent(fingerprint)}`;
 }
 /** The "Fix with …" link under an inline finding, or "" when APP_URL is unset or not a plain web origin. */
+/** Greptile-style "Fix in …" row under an inline finding: each opens the finding's Fix page with that agent
+ * selected (GitHub keeps only https links in comments, so agent deep links are offered from that page). */
+export function fixAgentButtons(appUrl: string | undefined, reviewId: string, fingerprint: string) {
+  const url = fixHandoffUrl(appUrl, reviewId, fingerprint);
+  return url ? "\n\n" + localAgents.map((agent) => `[Fix in ${localAgentLabels[agent]}](${url}&agent=${agent})`).join(" · ") : "";
+}
 export function fixHandoffLink(appUrl: string | undefined, reviewId: string, fingerprint: string, label = "Fix with your agent") {
   const url = fixHandoffUrl(appUrl, reviewId, fingerprint);
   return url ? `\n\n[${label.replace(/[[\]\r\n]/g, "")}](${url})` : "";

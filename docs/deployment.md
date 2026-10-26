@@ -6,23 +6,23 @@ For Kubernetes (Helm), AWS (Terraform), offline mode and the list of outbound ho
 
 ## Vercel and Convex Free
 
-The hosted deployment runs on Vercel **Pro** in team `michael-belenkiys-projects`, with Convex **Free** at `tidy-ocelot-457`.
-- **Hosting history:** the deployment was verified on the `open-review-free` Hobby team on 2026-10-04 and moved back to the Pro team on 2026-10-15. The move used Vercel's zero-downtime project transfer, so the project ID `prj_jMAK4u6yVJUfW2atnWbiZnF8F7b9`, deployments, environment variables, domains and the Git link are unchanged.
-- **Older URLs:** deployment URLs created before the move keep their `-open-review-free` suffix.
-- **Canonical URL:** https://openreview.tech (since 2026-10-15). The original https://openreview-flame-two.vercel.app and https://www.openreview.tech redirect to it with a 308.
+The hosted deployment runs on Vercel **Pro** in team `<vercel-team>`, with Convex **Free** at `<prod-deployment>`. Real resource names are kept out of this public repo; look them up in the Vercel and Convex dashboards.
+- **Hosting history:** the deployment was verified on the `<hobby-team>` Hobby team on 2026-10-04 and moved back to the Pro team on 2026-10-15. The move used Vercel's zero-downtime project transfer, so the project ID `<vercel-project-id>`, deployments, environment variables, domains and the Git link are unchanged.
+- **Older URLs:** deployment URLs created before the move keep their `-<hobby-team>` suffix.
+- **Canonical URL:** https://openreview.tech (since 2026-10-15). The original `<vercel-url>` and https://www.openreview.tech redirect to it with a 308.
 - **Convex resource:** it is managed by the Convex Marketplace integration in the same Pro team. Do not remove that integration: it owns the live backend.
 - **Local CLI:** the link (`.vercel/project.json`) and the CLI's default team target the Pro team.
 - **Evidence:** full evidence and acceptance boundaries are in [acceptance-matrix.md](acceptance-matrix.md).
 
 ### Custom domain and Git deployments (October 15, 2026)
 
-- **Domain.** `openreview.tech` is registered through Vercel in the team `michael-belenkiys-projects`. That team also hosts its DNS, pays its renewal and, since 2026-10-15, owns the `openreview` project. `www.openreview.tech` and the `.vercel.app` alias redirect to the apex.
-  - The `_vercel` TXT records added while the project lived in `open-review-free` are no longer needed, but they are harmless.
+- **Domain.** `openreview.tech` is registered through Vercel in the team `<vercel-team>`. That team also hosts its DNS, pays its renewal and, since 2026-10-15, owns the `openreview` project. `www.openreview.tech` and the `.vercel.app` alias redirect to the apex.
+  - The `_vercel` TXT records added while the project lived in `<hobby-team>` are no longer needed, but they are harmless.
 - **Origins.**
-  - `APP_URL` is `https://openreview.tech` in Vercel Production and in Convex `tidy-ocelot-457`.
+  - `APP_URL` is `https://openreview.tech` in Vercel Production and in Convex `<prod-deployment>`.
   - The GitHub App's callback URLs include `https://openreview.tech/api/auth/callback`; the earlier callbacks are kept.
   - The App's setup URL is `https://openreview.tech/api/github/callback`.
-  - The webhook is unchanged at `https://tidy-ocelot-457.convex.site/github/webhook`.
+  - The webhook is unchanged at `https://<prod-deployment>.convex.site/github/webhook`.
 - **Git.** The project deploys from `mbelenkiy29/OPENREVIEW` (named `GREPTILE` until 2026-10-16; the old URL redirects, and Vercel follows the repository by ID) with production branch `main`, so merges to `main` deploy automatically.
   - The Ignored Build Step (`if [ "$VERCEL_ENV" = "production" ]; then exit 1; else exit 0; fi`) builds production only, and branch pushes are skipped. This is because the Preview-scoped `CONVEX_DEPLOY_KEY` could not be confirmed to be a Convex preview key. A production key there would deploy unmerged branches to the production backend.
   - Before enabling previews, set a Convex preview deploy key for Preview and clear the ignore command.
@@ -45,6 +45,24 @@ Before migrating existing data, export a snapshot with file storage and preserve
 Use an explicit cloud deployment reference for every migration command, for example `--deployment <team-slug>:<project-slug>:prod`; do not rely on the local project's default deployment. Verify the target's dashboard identity and empty Data/Files views before importing. Import the snapshot without `--replace`, `--replace-all` or `--yes`, so unexpected existing data cannot be silently erased. Retain the existing credential encryption key when importing encrypted provider records, and use matching session/service secrets on web and backend. Check provider instance allowlists before enabling cloud jobs: local-only provider URLs cannot be reached from the cloud. Review default-off automation policies and terminal job states before import; preserve the local backup until hosted sign-in, stored file access and webhook processing pass.
 
 The local coding agent still runs on the paired user's machine. Docker runtime validation requires its [separately deployed worker](runtime-worker.md); Vercel and Convex do not provide a Docker daemon.
+
+### Sign-in email abuse protection
+
+Turn this on before the emailed sign-in link gets traffic. Details and defaults are in [identity.md](identity.md#abuse-protection-for-emailed-links).
+
+1. **Cloudflare Turnstile.** Create a widget in Managed mode for `openreview.tech`, then set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` on the web app (Production).
+   - Start with `TURNSTILE_MODE=monitor`.
+   - Monitor mode refuses nothing on the check's result but records it on each `auth.magic_link` line as `turnstile.outcome`; the form waits for the token just as it does when enforcing. After a few days with few `"outcome":"fail"` among real users, remove it (enforce is the default).
+   - `TURNSTILE_MODE=off` is the kill switch.
+2. **Caps.** Set `AUTH_EMAIL_HOURLY`, `AUTH_EMAIL_DAILY` and `USER_EMAIL_DAILY` on Convex so that together they stay below the Resend plan's daily quota.
+3. **Internal accounts.** Set `ANALYTICS_INTERNAL_EMAIL_DOMAINS`, `ANALYTICS_INTERNAL_EMAILS` or `ANALYTICS_INTERNAL_GITHUB_LOGINS` on Convex.
+4. **Old counters.** After the deploy, run `npx convex run authHygiene:dropUnexpiringCounters --prod` once.
+5. **Vercel Firewall (optional).** Add a rate-limit rule as an outer layer before functions run: per IP, about 20 a minute on `POST /api/auth/email`, `POST /api/changelog/subscribe` and `/sso/start`.
+6. **Self-hosted.** Set `CLIENT_IP_SOURCE` to your proxy's header:
+   - nginx: `header:x-real-ip` with `proxy_set_header X-Real-IP $remote_addr`.
+   - AWS ALB: `xff-rightmost`.
+
+   The bridge pairing route (`app/api/bridge/[action]/route.ts`) still reads `x-real-ip` or the first `x-forwarded-for` itself, bounded by its global cap.
 
 See [Convex's Vercel deployment guide](https://docs.convex.dev/production/hosting/vercel), [Convex limits](https://docs.convex.dev/production/state/limits), and [Vercel Hobby eligibility](https://vercel.com/docs/plans/hobby).
 
@@ -94,7 +112,7 @@ Docker build/Compose execution require a functioning Docker daemon. Real deploym
 
 Enterprise Server connections accept the instance root or its `/api/v3` API root. API requests use `/api/v3`; source and clone links use the actual server hostname, including servers whose hostname starts with `api.`. Dedicated GHE.com connections use `api.SUBDOMAIN.ghe.com` for API calls and `SUBDOMAIN.ghe.com` for source/clone links. Add the input instance host to `SCM_ALLOWED_HOSTS`; when entering its web host, also explicitly authorize the derived API host. Credentials are never forwarded through redirects.
 
-After installing the OpenReview GitHub App, authors link an existing personal account token in Settings → Personal agents. The authenticated profile and PR author must have the same immutable native user ID on that connection. This link is separate from the installation key and from GitHub.com sign-in. Links expire after 24 hours, can be revoked, and require re-linking after their instance/kind/credential authority changes. Legacy personal links created before instance-bound authority also require re-linking; GitHub.com sign-in and native P4 links are unaffected. Enterprise Server/GHE.com live acceptance requires a real Enterprise installation and author account; contract coverage alone does not establish it.
+After installing the OpenReview GitHub App, authors link an existing personal account token in Personal Settings → Review Settings. The authenticated profile and PR author must have the same immutable native user ID on that connection. This link is separate from the installation key and from GitHub.com sign-in. Links expire after 24 hours, can be revoked, and require re-linking after their instance/kind/credential authority changes. Legacy personal links created before instance-bound authority also require re-linking; GitHub.com sign-in and native P4 links are unaffected. Enterprise Server/GHE.com live acceptance requires a real Enterprise installation and author account; contract coverage alone does not establish it.
 
 ### Bitbucket Data Center author identities
 

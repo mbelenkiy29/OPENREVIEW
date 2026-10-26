@@ -5,9 +5,11 @@ import {createHmac} from 'node:crypto';
 import schema from '../convex/schema';
 import {api,internal} from '../convex/_generated/api';
 import type {Id} from '../convex/_generated/dataModel';
+import {STALE_RESERVATION_MS} from '../convex/inferenceBudget';
+import {entitlements} from '../src/plans';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='billing-session-secret-at-least-32-characters',whsec='whsec_billing_fixture';
-const env={SESSION_SECRET:secret,SERVICE_SECRET:'billing-service',BILLING_ENABLED:'true',BILLING_TRIAL_REVIEWS:'2',BILLING_REVIEWS_PER_SEAT:'2',BILLING_GRACE_DAYS:'7',STRIPE_WEBHOOK_SECRET:whsec,STRIPE_SECRET_KEY:'sk_test_fixture',STRIPE_SEAT_PRICE_ID:'price_seat',APP_URL:'https://review.example.com'};
+const env={SESSION_SECRET:secret,SERVICE_SECRET:'billing-service',BILLING_ENABLED:'true',BILLING_FREE_USAGE_USD:'0.02',BILLING_USAGE_PER_SEAT_USD:'0.01',BILLING_PRO_USAGE_PER_SEAT_USD:'0.02',BILLING_GRACE_DAYS:'7',STRIPE_WEBHOOK_SECRET:whsec,STRIPE_SECRET_KEY:'sk_test_fixture',STRIPE_SEAT_PRICE_ID:'price_seat',STRIPE_PRO_PRICE_ID:'price_pro',APP_URL:'https://review.example.com'};
 beforeEach(()=>{vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date']});vi.setSystemTime(Date.UTC(2026,9,14,12));Object.assign(process.env,env);});
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();for(const k of [...Object.keys(env),'BILLING_TRIAL_DAYS'])if(!['SESSION_SECRET','SERVICE_SECRET'].includes(k))delete process.env[k];});
 
@@ -24,45 +26,62 @@ async function setup(){
  const members=await t.run(async ctx=>{await ctx.db.patch(repo._id,{enabled:true});return {bob:await ctx.db.insert('organizationMembers',{organizationId:org,userId:bob.id,role:'member'}),vera:await ctx.db.insert('organizationMembers',{organizationId:org,userId:vera.id,role:'viewer'})};});
  return {t,alice,bob,vera,org,repo,members};
 }
+// One model call: gpt-4.1 at $2/$8 per million reserves $0.01 for 1000 + 1000 tokens and settles what was used.
+const quote={provider:'openai',model:'gpt-4.1',baseUrl:'https://api.openai.com/v1',inputTokenCeiling:1000,outputTokenCeiling:1000};
+const reserve=(t:Awaited<ReturnType<typeof setup>>['t'],organizationId:Id<'organizations'>)=>t.mutation(internal.inferenceBudget.reserve,{...quote,organizationId});
+async function spend(t:Awaited<ReturnType<typeof setup>>['t'],organizationId:Id<'organizations'>,tokens=1000){const id=await reserve(t,organizationId);if(!id)throw Error('No reservation');await t.mutation(internal.inferenceBudget.settle,{id,inputTokens:tokens,outputTokens:tokens});}
 const enqueue=(t:Awaited<ReturnType<typeof setup>>['t'],repositoryId:Id<'repositories'>,pr:number)=>t.mutation(internal.reviews.enqueue,{repositoryId,prNumber:pr,headSha:String(pr).padStart(40,'a'),trigger:'automatic'});
 const reviewOf=(t:Awaited<ReturnType<typeof setup>>['t'],id:Id<'reviews'>|null)=>t.run(ctx=>ctx.db.get(id!));
 function signed(event:Record<string,unknown>,key=whsec){const body=JSON.stringify(event),ts=Math.floor(Date.now()/1000);return {body,headers:{'content-type':'application/json','stripe-signature':`t=${ts},v1=${createHmac('sha256',key).update(`${ts}.${body}`).digest('hex')}`}};}
 const deliver=(t:Awaited<ReturnType<typeof setup>>['t'],event:Record<string,unknown>,key?:string)=>{const {body,headers}=signed(event,key);return t.fetch('/stripe/webhook',{method:'POST',headers,body});};
-const subscription=(id:string,type:string,status:string,quantity:number,created:number,org?:string)=>({id,type,created,data:{object:{id:'sub_1',customer:'cus_1',status,metadata:org?{organizationId:org}:{},items:{data:[{id:'si_1',quantity,current_period_end:created+30*86400}]}}}});
+const subscription=(id:string,type:string,status:string,quantity:number,created:number,org?:string,sub='sub_1')=>({id,type,created,data:{object:{id:sub,customer:'cus_1',status,metadata:org?{organizationId:org}:{},items:{data:[{id:'si_1',quantity,current_period_end:created+30*86400}]}}}});
 
-test('trial quota is enforced at enqueue; blocked reviews are recorded with the billing reason and counted',async()=>{
+test('Free usage is enforced on every model call and at enqueue; blocked reviews are recorded with the billing reason and counted',async()=>{
  process.env.BILLING_TRIAL_DAYS='60';
  const {t,alice,vera,org,repo}=await setup();
- const first=await enqueue(t,repo._id,1),second=await enqueue(t,repo._id,2),third=await enqueue(t,repo._id,3);
- expect((await reviewOf(t,first))?.status).toBe('queued');expect((await reviewOf(t,second))?.status).toBe('queued');
- expect(await reviewOf(t,third)).toMatchObject({status:'failed',error:'Billing: The trial includes 2 reviews per month. Subscribe in Settings → Billing for more.'});
+ const first=await enqueue(t,repo._id,1);
+ expect((await reviewOf(t,first))?.status).toBe('queued');
+ // Free includes $0.02 a month here: one call fits, two concurrent ones cannot both reserve, and the
+ // refusal comes before anything is sent.
+ await spend(t,org);
+ const racing=await Promise.allSettled([reserve(t,org),reserve(t,org)]);
+ expect(racing.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+ expect(String((racing.find(r=>r.status==='rejected') as PromiseRejectedResult).reason)).toMatch(/Free plan's \$0\.02 of usage for this month/);
+ const held=(racing.find(r=>r.status==='fulfilled') as PromiseFulfilledResult<Id<'inferenceReservations'>|null>).value!;
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({used:10000,reserved:10000,allowed:false});
+ await t.mutation(internal.inferenceBudget.settle,{id:held,inputTokens:1000,outputTokens:1000});
+ const blocked=await enqueue(t,repo._id,2);
+ expect(await reviewOf(t,blocked)).toMatchObject({status:'failed',error:"Billing: This workspace used the Free plan's $0.02 of usage for this month. Usage resets on November 1; a workspace admin can upgrade in Organization Settings → Billing & Usage."});
  // Re-requesting an existing queued head does not count again.
  expect(await enqueue(t,repo._id,1)).toBe(first);
  const status=await t.query(api.billing.status,{token:alice.token,organizationId:org});
- expect(status).toMatchObject({enabled:true,plan:'trial',allowed:false,used:2,limit:2,blocked:1,activeSeats:2,referral:null});
+ expect(status).toMatchObject({enabled:true,plan:'free',planName:'Free',entitlements:[],allowed:false,used:20000,reserved:0,limit:20000,reviews:1,blocked:1,activeSeats:2,referral:null,resetsAt:Date.UTC(2026,10,1)});
  // The referral program is off by default (REFERRALS_ENABLED unset); a viewer never sees it either.
  expect((await t.query(api.billing.status,{token:vera.token,organizationId:org})).referral).toBeNull();
- // A new month resets the counter; an expired trial blocks regardless.
+ // A new month resets the counter, and Free never expires.
  vi.setSystemTime(Date.UTC(2026,10,1,0,0,1));
  expect((await reviewOf(t,await enqueue(t,repo._id,4)))?.status).toBe('queued');
- vi.setSystemTime(Date.UTC(2026,11,14));
- expect((await reviewOf(t,await enqueue(t,repo._id,5)))?.error).toMatch(/free trial has ended/);
+ vi.setSystemTime(Date.UTC(2027,5,14));
+ expect((await reviewOf(t,await enqueue(t,repo._id,5)))?.status).toBe('queued');
 });
 
-test('the trial starts with the first review, so workspaces created before billing get the full trial',async()=>{
+test('the paid-plan trial starts at the first Checkout, however long the workspace was on Free',async()=>{
  const {t,alice,org,repo}=await setup();
- // A month after the workspace was created, nothing has been billed yet: the trial has not started.
  vi.setSystemTime(Date.UTC(2026,10,14,12));
- const before=await t.query(api.billing.status,{token:alice.token,organizationId:org});
- expect(before).toMatchObject({plan:'trial',allowed:true,trialStarted:false,trialDays:14,trialEndsAt:Date.now()+14*86400000});
  expect((await reviewOf(t,await enqueue(t,repo._id,1)))?.status).toBe('queued');
- const started=await t.query(api.billing.status,{token:alice.token,organizationId:org});
- expect(started).toMatchObject({trialStarted:true,trialEndsAt:Date.UTC(2026,10,28,12),used:1});
- vi.setSystemTime(Date.UTC(2026,10,28,12));
- expect((await reviewOf(t,await enqueue(t,repo._id,2)))?.error).toMatch(/free trial has ended/);
+ // Weeks of Free reviews later, the trial has not started and is still a full one.
+ vi.setSystemTime(Date.UTC(2026,11,20,12));
+ expect((await reviewOf(t,await enqueue(t,repo._id,2)))?.status).toBe('queued');
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'free',allowed:true,trialStarted:false,trialDays:14,trialEndsAt:Date.now()+14*86400000});
+ // The first Checkout links a customer and starts the clock; a later Checkout does not restart it.
+ await t.mutation(internal.billing.linkCustomer,{organizationId:org,customerId:'cus_trial'});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({trialStarted:true,trialEndsAt:Date.UTC(2027,0,3,12)});
+ vi.setSystemTime(Date.UTC(2026,11,25,12));
+ await t.mutation(internal.billing.linkCustomer,{organizationId:org,customerId:'cus_trial'});
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).trialEndsAt).toBe(Date.UTC(2027,0,3,12));
 });
 
-test('switching Stripe modes drops test customers and subscriptions but keeps the trial',async()=>{
+test('switching Stripe modes drops test customers and subscriptions and returns workspaces to Free',async()=>{
  const {t,alice,org,repo}=await setup();
  const created=Math.floor(Date.now()/1000);
  await deliver(t,{id:'evt_link',type:'checkout.session.completed',created,data:{object:{mode:'subscription',client_reference_id:org,customer:'cus_test',subscription:'sub_1'}}});
@@ -74,7 +93,7 @@ test('switching Stripe modes drops test customers and subscriptions but keeps th
  const after=(await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0];
  expect(after).toMatchObject({status:'trial',seats:2,trialEndsAt:before.trialEndsAt});
  for(const key of ['customerId','subscriptionId','subscriptionItemId','currentPeriodEnd','lastEventCreated'] as const)expect(after[key]).toBeUndefined();
- expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'trial',allowed:true,hasCustomer:false,trialStarted:true});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'free',allowed:true,hasCustomer:false,trialStarted:false});
  // A live Checkout now creates a new customer instead of reusing the test one.
  vi.spyOn(globalThis,'fetch').mockImplementation(async(input:string|URL|Request)=>String(input).endsWith('/v1/customers')?Response.json({id:'cus_live'}):Response.json({id:'cs_1',url:'https://checkout.stripe.com/c/pay/cs_1'}));
  await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org});
@@ -87,6 +106,7 @@ test('without BILLING_ENABLED nothing is enforced and the webhook endpoint does 
  const {t,alice,org,repo}=await setup();
  for(let pr=1;pr<=4;pr++)expect((await reviewOf(t,await enqueue(t,repo._id,pr)))?.status).toBe('queued');
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toEqual({enabled:false});
+ expect(await t.query(internal.billing.entitlement,{organizationId:org,key:'fix.pullRequests'})).toBe(true);
  expect((await deliver(t,subscription('evt_off','customer.subscription.updated','active',1,1))).status).toBe(404);
  expect(await t.run(ctx=>ctx.db.query('billingAccounts').collect())).toEqual([]);
 });
@@ -107,27 +127,78 @@ test('signed Stripe webhooks link the workspace, apply once, and ignore replays 
  await deliver(t,subscription('evt_sub_new','customer.subscription.updated','active',3,created+20,org));
  expect(await outcomes()).toEqual([['evt_checkout','linked'],['evt_sub_new','active'],['evt_sub_old','stale']]);
  expect(await t.run(ctx=>ctx.db.query('billingAccounts').collect())).toEqual([expect.objectContaining({organizationId:org,customerId:'cus_1',subscriptionId:'sub_1',subscriptionItemId:'si_1',status:'active',seats:3})]);
- // Starter plan: unlimited under a fair-use limit of 3 seats × 2 reviews.
- for(let pr=1;pr<=6;pr++)expect((await reviewOf(t,await enqueue(t,repo._id,pr)))?.status).toBe('queued');
- expect((await reviewOf(t,await enqueue(t,repo._id,7)))?.error).toMatch(/fair-use limit of 6 reviews this month \(2 per seat\)/);
- expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'starter',limit:6,used:6});
+ // Starter plan: 3 seats × $0.01 of included usage a month.
+ for(let pr=1;pr<=3;pr++){expect((await reviewOf(t,await enqueue(t,repo._id,pr)))?.status).toBe('queued');await spend(t,org);}
+ expect((await reviewOf(t,await enqueue(t,repo._id,4)))?.error).toMatch(/used its included usage for this month\. Usage resets on November 1/);
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'starter',limit:30000,used:30000,reviews:3});
+ // Starter has no deep reviews; switching the seat price to Pro (Customer Portal) raises the allowance and unlocks them.
+ const deep=()=>t.query(internal.billing.entitlement,{organizationId:org,key:'review.deep'});
+ expect(await deep()).toBe(false);
+ const proItem=(id:string,price:string,at:number)=>({id,type:'customer.subscription.updated',created:at,data:{object:{id:'sub_1',customer:'cus_1',status:'active',metadata:{organizationId:org},items:{data:[{id:'si_1',quantity:3,current_period_end:at+30*86400,price:{id:price}}]}}}});
+ await deliver(t,proItem('evt_pro','price_pro',created+25));
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'pro',planName:'Pro',limit:3*20000,entitlements:[...entitlements]});
+ expect(await deep()).toBe(true);
+ // An unknown price keeps the plan.
+ await deliver(t,proItem('evt_unknown_price','price_other',created+26));
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).plan).toBe('pro');
  // A subscription for another workspace cannot hijack this customer.
  await deliver(t,subscription('evt_spoof','customer.subscription.updated','active',99,created+30,'k57abc0000000000000000organizations'));
  expect((await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0].seats).toBe(3);
- // Payment failure: reviews continue through the grace period, then pause; payment restores them.
+ // Payment failure (Stripe marks the subscription past due): reviews continue through the grace period, then pause; payment restores them.
  vi.setSystemTime(Date.UTC(2026,10,2));
- // Current API versions put the invoice's subscription under parent.subscription_details.
- await deliver(t,{id:'evt_failed',type:'invoice.payment_failed',created:Math.floor(Date.now()/1000),data:{object:{customer:'cus_1',parent:{subscription_details:{subscription:'sub_1'}}}}});
+ const failedAt=Math.floor(Date.now()/1000);
+ await deliver(t,subscription('evt_past_due','customer.subscription.updated','past_due',3,failedAt,org));
  expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).status).toBe('past_due');
  vi.setSystemTime(Date.UTC(2026,10,8));
  expect((await reviewOf(t,await enqueue(t,repo._id,8)))?.status).toBe('queued');
  vi.setSystemTime(Date.UTC(2026,10,9,1));
  expect((await reviewOf(t,await enqueue(t,repo._id,9)))?.error).toMatch(/past due and the grace period has ended/);
- await deliver(t,{id:'evt_paid',type:'invoice.paid',created:Math.floor(Date.now()/1000),data:{object:{customer:'cus_1',subscription:'sub_1'}}});
+ await deliver(t,subscription('evt_recovered','customer.subscription.updated','active',3,Math.floor(Date.now()/1000),org));
  expect((await reviewOf(t,await enqueue(t,repo._id,10)))?.status).toBe('queued');
- // Cancellation falls back to the (expired) trial.
+ // Invoice events never set the status, so a late or redelivered payment failure cannot block the paid workspace.
+ // Current API versions put the invoice's subscription under parent.subscription_details.
+ const lateFailure=(id:string)=>({id,type:'invoice.payment_failed',created:failedAt,data:{object:{customer:'cus_1',parent:{subscription_details:{subscription:'sub_1'}}}}});
+ await deliver(t,{id:'evt_paid',type:'invoice.paid',created:Math.floor(Date.now()/1000),data:{object:{customer:'cus_1',subscription:'sub_1'}}});
+ await deliver(t,lateFailure('evt_failed_late'));
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).status).toBe('active');
+ expect((await reviewOf(t,await enqueue(t,repo._id,11)))?.status).toBe('queued');
+ // Cancellation falls back to Free; a late payment failure does not revive it as past due.
  await deliver(t,subscription('evt_cancel','customer.subscription.deleted','canceled',3,Math.floor(Date.now()/1000),org));
- expect((await reviewOf(t,await enqueue(t,repo._id,11)))?.error).toMatch(/free trial has ended/);
+ await deliver(t,lateFailure('evt_failed_after_cancel'));
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).status).toBe('canceled');
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).plan).toBe('free');
+});
+
+test('events from the same second never move a subscription back: active stays active, canceled stays canceled',async()=>{
+ const {t,org}=await setup();
+ const created=Math.floor(Date.now()/1000);
+ await deliver(t,{id:'evt_checkout',type:'checkout.session.completed',created,data:{object:{mode:'subscription',client_reference_id:org,customer:'cus_1',subscription:'sub_1'}}});
+ const status=async()=>(await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0].status;
+ // Stripe creates the subscription incomplete and activates it within a second; the update arrives first.
+ await deliver(t,subscription('evt_active','customer.subscription.updated','active',1,created+5,org));
+ await deliver(t,subscription('evt_created','customer.subscription.created','incomplete',1,created+5,org));
+ expect(await status()).toBe('active');
+ // A cancellation that shares its second with a last update stays canceled.
+ await deliver(t,subscription('evt_deleted','customer.subscription.deleted','canceled',1,created+9,org));
+ await deliver(t,subscription('evt_late_update','customer.subscription.updated','active',1,created+9,org));
+ expect(await status()).toBe('canceled');
+ const outcomes=(await t.run(ctx=>ctx.db.query('stripeEvents').collect())).map(e=>[e.eventId,e.outcome]);
+ expect(outcomes.slice(1)).toEqual([['evt_active','active'],['evt_created','stale'],['evt_deleted','canceled'],['evt_late_update','stale']]);
+});
+
+test('a second subscription from another open Checkout neither replaces nor, once cancelled, ends the first',async()=>{
+ const {t,org}=await setup();
+ const created=Math.floor(Date.now()/1000),log=vi.spyOn(console,'error').mockImplementation(()=>{});
+ await deliver(t,{id:'evt_c1',type:'checkout.session.completed',created,data:{object:{mode:'subscription',client_reference_id:org,customer:'cus_1',subscription:'sub_1'}}});
+ await deliver(t,subscription('evt_s1','customer.subscription.created','active',2,created+1,org));
+ await deliver(t,{id:'evt_c2',type:'checkout.session.completed',created:created+2,data:{object:{mode:'subscription',client_reference_id:org,customer:'cus_1',subscription:'sub_2'}}});
+ await deliver(t,subscription('evt_s2','customer.subscription.created','active',2,created+3,org,'sub_2'));
+ const account=async()=>(await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0];
+ expect(await account()).toMatchObject({subscriptionId:'sub_1',status:'active'});
+ expect((await t.run(ctx=>ctx.db.query('stripeEvents').collect())).filter(e=>['evt_c2','evt_s2'].includes(e.eventId)).map(e=>e.outcome)).toEqual(['other subscription','other subscription']);
+ expect(log).toHaveBeenCalledWith(expect.stringContaining('"event":"billing.duplicate_subscription"'));
+ await deliver(t,subscription('evt_d2','customer.subscription.deleted','canceled',2,created+4,org,'sub_2'));
+ expect(await account()).toMatchObject({subscriptionId:'sub_1',status:'active'});
 });
 
 test('seats follow membership: viewers are free and changes resync the subscription quantity',async()=>{
@@ -143,7 +214,7 @@ test('seats follow membership: viewers are free and changes resync the subscript
  expect(await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org})).toBe('https://checkout.stripe.com/c/pay/cs_1');
  const session=new URLSearchParams(calls[1].body);
  // The untouched 14-day trial carries into the subscription, so the card is not charged until it ends.
- expect(Object.fromEntries(session)).toMatchObject({mode:'subscription',customer:'cus_1',client_reference_id:org,integration_identifier:expect.stringMatching(/^openreview-starter-seats-[a-z]{8}$/),allow_promotion_codes:'true','line_items[0][price]':'price_seat','line_items[0][quantity]':'2','subscription_data[metadata][organizationId]':org,'subscription_data[trial_end]':String(Math.floor((Date.now()+14*86400000)/1000)),success_url:'https://review.example.com/dashboard/settings/billing?checkout=success',cancel_url:'https://review.example.com/dashboard/settings/billing?checkout=cancelled'});
+ expect(Object.fromEntries(session)).toMatchObject({mode:'subscription',customer:'cus_1',client_reference_id:org,integration_identifier:expect.stringMatching(/^openreview-starter-seats-[a-z]{8}$/),allow_promotion_codes:'true','line_items[0][price]':'price_seat','line_items[0][quantity]':'2','subscription_data[metadata][organizationId]':org,'subscription_data[trial_end]':String(Math.floor((Date.now()+14*86400000)/1000)),success_url:'https://review.example.com/dashboard/organization/billing?checkout=success',cancel_url:'https://review.example.com/dashboard/organization/billing?checkout=cancelled'});
  expect(session.has('payment_method_types')).toBe(false);
  expect(session.get('payment_method_collection')).toBe('always');
  // With the referral program off (the default) the request has exactly these fields: no discounts, no referral metadata.
@@ -151,6 +222,9 @@ test('seats follow membership: viewers are free and changes resync the subscript
  // From guided setup, Checkout returns to the plan step.
  await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org,returnTo:'onboarding'});
  expect(Object.fromEntries(new URLSearchParams(calls.at(-1)!.body))).toMatchObject({success_url:'https://review.example.com/dashboard/onboarding/plan?checkout=success',cancel_url:'https://review.example.com/dashboard/onboarding/plan?checkout=cancelled'});
+ // Pro uses its own seat price.
+ await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org,plan:'pro'});
+ expect(new URLSearchParams(calls.at(-1)!.body).get('line_items[0][price]')).toBe('price_pro');
  expect(calls[0].key).toBe(`customer:${org}`);
  expect(await t.action(api.billingJobs.portal,{token:alice.token,organizationId:org})).toBe('https://billing.stripe.com/p/session_1');
  await deliver(t,subscription('evt_sub','customer.subscription.created','active',2,Math.floor(Date.now()/1000),org));
@@ -161,7 +235,11 @@ test('seats follow membership: viewers are free and changes resync the subscript
  expect(await t.action(internal.billingJobs.syncSeats,{organizationId:org})).toBe('updated');
  const update=calls.at(-1)!;
  expect(update.url).toBe('https://api.stripe.com/v1/subscriptions/sub_1');
+ // No idempotency key: a key made of the seat counts repeats (3→4→3→4) and Stripe would replay the old answer.
+ expect(update.key).toBeNull();
  expect(Object.fromEntries(new URLSearchParams(update.body))).toEqual({'items[0][id]':'si_1','items[0][quantity]':'3',proration_behavior:'create_prorations'});
+ // No idempotency key: within Stripe's 24h key window a later 2→3 change (after 3→2) would otherwise replay this one.
+ expect(update.key).toBeNull();
  expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).activeSeats).toBe(3);
  await expect(t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org})).rejects.toThrow(/already has a subscription/);
  // Live keys are refused unless explicitly allowed.
@@ -169,8 +247,39 @@ test('seats follow membership: viewers are free and changes resync the subscript
  await expect(t.action(api.billingJobs.portal,{token:alice.token,organizationId:org})).rejects.toThrow(/test-mode key/);
 });
 
-test('a new workspace must choose a plan: nothing indexes, reviews or finishes setup until Stripe confirms the trial',async()=>{
- const {t,alice,repo}=await setup();
+test('an admin switches plans in the app: the seat price is swapped with prorations and the webhook records the plan',async()=>{
+ const {t,alice,bob,org}=await setup();
+ const calls:{url:string;body:string;key:string|null}[]=[];
+ vi.spyOn(globalThis,'fetch').mockImplementation(async(input:string|URL|Request,init?:RequestInit)=>{calls.push({url:String(input),body:String(init?.body),key:new Headers(init?.headers).get('idempotency-key')});return Response.json({id:'sub_1'});});
+ await expect(t.action(api.billingJobs.changePlan,{token:alice.token,organizationId:org,plan:'pro'})).rejects.toThrow(/Start a subscription/);
+ const created=Math.floor(Date.now()/1000),priced=(id:string,price:string,at:number)=>{const e=subscription(id,'customer.subscription.updated','active',2,at,org);e.data.object.items.data[0]={...e.data.object.items.data[0],price:{id:price}} as never;return e;};
+ await t.mutation(internal.billing.linkCustomer,{organizationId:org,customerId:'cus_1'});
+ await deliver(t,subscription('evt_sub','customer.subscription.created','active',2,created,org));
+ // A grandfathered Starter subscription (legacy) keeps that flag through a round trip to Pro.
+ await t.run(async ctx=>{const account=(await ctx.db.query('billingAccounts').collect())[0];await ctx.db.patch(account._id,{legacy:true});});
+ await expect(t.action(api.billingJobs.changePlan,{token:bob.token,organizationId:org,plan:'pro'})).rejects.toThrow(/Forbidden/);
+ await expect(t.action(api.billingJobs.changePlan,{token:alice.token,organizationId:org,plan:'starter'})).rejects.toThrow(/already on Starter/);
+ expect(calls).toHaveLength(0);
+ expect(await t.action(api.billingJobs.changePlan,{token:alice.token,organizationId:org,plan:'pro'})).toBe('requested');
+ expect(calls[0].url).toBe('https://api.stripe.com/v1/subscriptions/sub_1');
+ expect(Object.fromEntries(new URLSearchParams(calls[0].body))).toEqual({'items[0][id]':'si_1','items[0][price]':'price_pro',proration_behavior:'create_prorations'});
+ expect(calls[0].key).toBe(`plan:${org}:pro:${Math.floor(Date.now()/60000)}`);
+ expect((await t.run(ctx=>ctx.db.query('auditEvents').collect())).filter(e=>e.action==='billing.plan_change_requested').map(e=>[e.userId,e.target])).toEqual([[alice.id,'pro']]);
+ // The plan changes only when Stripe confirms it.
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).plan).toBe('starter');
+ await deliver(t,priced('evt_pro','price_pro',created+1));
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'pro',legacy:false});
+ await expect(t.action(api.billingJobs.changePlan,{token:alice.token,organizationId:org,plan:'pro'})).rejects.toThrow(/already on Pro/);
+ await t.action(api.billingJobs.changePlan,{token:alice.token,organizationId:org,plan:'starter'});
+ expect(new URLSearchParams(calls.at(-1)!.body).get('items[0][price]')).toBe('price_seat');
+ await deliver(t,priced('evt_starter','price_seat',created+2));
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'starter',legacy:true});
+});
+
+test('a second workspace must choose a plan: nothing indexes, reviews or finishes setup until Stripe confirms the trial',async()=>{
+ const {t,alice,bob,org,repo}=await setup();
+ // Alice's first workspace (Acme) started on Free when she created it, so this one has no Free allowance.
+ expect((await t.run(ctx=>ctx.db.get(org)))?.plan).toBe('free');
  const fresh=await t.mutation(api.users.createOrganization,{token:alice.token,name:'New customer'});
  expect((await t.run(ctx=>ctx.db.get(fresh)))?.planRequired).toBe(true);
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:fresh})).toMatchObject({planRequired:true,planSelected:false,planMissing:true});
@@ -178,7 +287,7 @@ test('a new workspace must choose a plan: nothing indexes, reviews or finishes s
  const newRepo=(await t.run(ctx=>ctx.db.query('repositories').withIndex('by_github',q=>q.eq('githubId',7701)).unique()))!;
  await expect(t.mutation(api.repositories.configure,{token:alice.token,repositoryId:newRepo._id,enabled:true})).rejects.toThrow(/Choose a plan/);
  await expect(t.mutation(api.onboarding.advance,{token:alice.token,organizationId:fresh,step:'plan'})).rejects.toThrow(/Choose a plan/);
- await expect(t.mutation(api.onboarding.complete,{token:alice.token,organizationId:fresh,skipped:true})).rejects.toThrow(/Choose a plan/);
+ await expect(t.mutation(api.onboarding.complete,{token:alice.token,organizationId:fresh})).rejects.toThrow(/Choose a plan/);
  await t.run(ctx=>ctx.db.patch(newRepo._id,{enabled:true}));
  const blocked=await reviewOf(t,await enqueue(t,newRepo._id,1));
  expect([blocked?.status,blocked?.error]).toEqual(['failed',expect.stringMatching(/^Billing: Choose a plan/)]);
@@ -187,14 +296,236 @@ test('a new workspace must choose a plan: nothing indexes, reviews or finishes s
  await t.mutation(internal.billing.linkCustomer,{organizationId:fresh,customerId:'cus_new'});
  await deliver(t,{id:'evt_incomplete',type:'customer.subscription.created',created,data:{object:{id:'sub_new',customer:'cus_new',status:'incomplete',metadata:{organizationId:fresh},items:{data:[{id:'si_new',quantity:1,current_period_end:created+14*86400}]}}}});
  expect((await t.run(ctx=>ctx.db.get(fresh)))?.planSelectedAt).toBeUndefined();
- // Stripe confirms the trial subscription (card collected): the choice is recorded once and everything opens up.
+ // Stripe confirms the trial subscription (card collected): everything opens up, and the subscription
+ // event names the plan from its price.
  await deliver(t,{id:'evt_new_checkout',type:'checkout.session.completed',created:created+1,data:{object:{mode:'subscription',client_reference_id:fresh,customer:'cus_new',subscription:'sub_new'}}});
- const chosen=(await t.run(ctx=>ctx.db.get(fresh)))!;
- expect([chosen.plan,typeof chosen.planSelectedAt]).toEqual(['starter','number']);
- expect((await t.run(ctx=>ctx.db.query('auditEvents').collect())).filter(e=>e.action==='billing.plan_selected').map(e=>e.organizationId)).toEqual([fresh]);
+ expect(typeof (await t.run(ctx=>ctx.db.get(fresh)))?.planSelectedAt).toBe('number');
+ await deliver(t,{id:'evt_new_trialing',type:'customer.subscription.updated',created:created+2,data:{object:{id:'sub_new',customer:'cus_new',status:'trialing',metadata:{organizationId:fresh},items:{data:[{id:'si_new',quantity:1,current_period_end:created+14*86400,price:{id:'price_pro'}}]}}}});
+ expect((await t.run(ctx=>ctx.db.get(fresh)))?.plan).toBe('pro');
+ expect((await t.run(ctx=>ctx.db.query('auditEvents').collect())).filter(e=>e.action==='billing.plan_selected').map(e=>[e.organizationId,e.target])).toEqual([[org,'free'],[fresh,'pro']]);
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:fresh})).toMatchObject({planSelected:true,planMissing:false});
  await t.mutation(api.repositories.configure,{token:alice.token,repositoryId:newRepo._id,enabled:true});
  expect(await t.mutation(api.onboarding.advance,{token:alice.token,organizationId:fresh,step:'plan'})).toBe('connect');
+ // An owner's first workspace needs no choice: it starts on Free and setup goes on to connect (bob owns none yet).
+ const freeOrg=await t.mutation(api.users.createOrganization,{token:bob.token,name:'Free customer'});
+ expect((await t.run(ctx=>ctx.db.get(freeOrg)))?.plan).toBe('free');
+ await t.mutation(api.billing.chooseFreePlan,{token:bob.token,organizationId:freeOrg});
+ expect(await t.query(api.billing.status,{token:bob.token,organizationId:freeOrg})).toMatchObject({plan:'free',planSelected:true,planMissing:false,freeElsewhere:null});
+ expect(await t.mutation(api.onboarding.advance,{token:bob.token,organizationId:freeOrg,step:'plan'})).toBe('connect');
+ expect((await t.run(ctx=>ctx.db.query('auditEvents').collect())).filter(e=>e.action==='billing.plan_selected').map(e=>[e.organizationId,e.target])).toEqual([[org,'free'],[fresh,'pro'],[freeOrg,'free']]);
  // Workspaces from before plans were required are untouched.
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:repo.organizationId})).toMatchObject({planRequired:false,planMissing:false});
+});
+
+test('a push cancels and refunds a review that never ran; a blocked push leaves the running review alone',async()=>{
+ process.env.BILLING_TRIAL_DAYS='60';
+ const {t,org,repo}=await setup();
+ const push=(pr:number,sha:string)=>t.mutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:pr,headSha:sha.repeat(40),trigger:'automatic'});
+ const used=async()=>(await t.run(ctx=>ctx.db.query('billingUsage').withIndex('by_org_period',q=>q.eq('organizationId',org)).collect()))[0]?.reviews;
+ const first=await push(1,'a');await push(1,'b');
+ expect((await reviewOf(t,first))?.status).toBe('cancelled');
+ expect(await used()).toBe(1);
+ const running=await push(2,'c');
+ expect(await used()).toBe(2);
+ // Free's $0.02 is spent, so the next push is blocked.
+ await spend(t,org);await spend(t,org);
+ const blocked=await push(2,'d');
+ expect((await reviewOf(t,blocked))?.status).toBe('failed');
+ expect((await reviewOf(t,running))?.status).toBe('queued');
+});
+
+test('Free is one workspace per owner: a second one gets no allowance until it subscribes, and billing off is unlimited',async()=>{
+ const {t,alice}=await setup();
+ const workspace=async(name:string)=>{vi.advanceTimersByTime(1000);return t.mutation(api.users.createOrganization,{token:alice.token,name});};
+ const reason='Free is one workspace per owner, and an owner of this workspace already has "Acme" on Free. A workspace admin can choose Starter or Pro in Organization Settings → Billing & Usage, or use "Acme" for free reviews.';
+ // Alice's first workspace (Acme, from setup) keeps its Free allowance.
+ const [acme]=(await t.run(ctx=>ctx.db.query('organizations').collect())).map(o=>o._id);
+ await spend(t,acme);
+ // A second one cannot choose Free: onboarding names the Free workspace and offers Starter or Pro.
+ const second=await workspace('Side project');
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:second})).toMatchObject({plan:'free',freeElsewhere:'Acme',allowed:false,limit:0,reason});
+ await expect(t.mutation(api.billing.chooseFreePlan,{token:alice.token,organizationId:second})).rejects.toThrow(reason);
+ // Even with a plan recorded some other way (a lapsed subscription), it gets a $0 limit with the reason.
+ await t.run(ctx=>ctx.db.patch(second,{planSelectedAt:Date.now(),plan:'free'}));
+ await expect(reserve(t,second)).rejects.toThrow('Billing: '+reason);
+ await spend(t,acme);
+ // Subscribing the second workspace gives it its plan's usage.
+ const created=Math.floor(Date.now()/1000);
+ await deliver(t,{id:'evt_side',type:'checkout.session.completed',created,data:{object:{mode:'subscription',client_reference_id:second,customer:'cus_side',subscription:'sub_side'}}});
+ await deliver(t,{id:'evt_side_sub',type:'customer.subscription.updated',created:created+1,data:{object:{id:'sub_side',customer:'cus_side',status:'active',metadata:{organizationId:second},items:{data:[{id:'si_side',quantity:1,current_period_end:created+30*86400,price:{id:'price_seat'}}]}}}});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:second})).toMatchObject({plan:'starter',freeElsewhere:null,allowed:true});
+ await spend(t,second);
+ // Once Acme is paid too, the next workspace starts on Free.
+ await t.run(async ctx=>{const account=(await ctx.db.query('billingAccounts').withIndex('by_org',q=>q.eq('organizationId',acme)).unique())!;await ctx.db.patch(account._id,{subscriptionId:'sub_acme',status:'active',seats:1});});
+ const third=await workspace('Third');
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:third})).toMatchObject({plan:'free',planSelected:true,planMissing:false,freeElsewhere:null});
+ await spend(t,third);
+ // With billing off (self-hosted) there is no Free plan to share.
+ delete process.env.BILLING_ENABLED;
+ const fourth=await workspace('Self-hosted');
+ expect((await t.run(ctx=>ctx.db.get(fourth)))?.planSelectedAt).toBeUndefined();
+ for(let i=0;i<5;i++)await reserve(t,fourth);
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:fourth})).toEqual({enabled:false});
+});
+
+test('subscriptions from before plans keep every Pro feature while they stay on Starter',async()=>{
+ const {t,alice,org}=await setup();
+ const other=await t.mutation(api.users.createOrganization,{token:alice.token,name:'Already Pro'});
+ const lapsed=await t.mutation(api.users.createOrganization,{token:alice.token,name:'Lapsed'});
+ const account=(organizationId:Id<'organizations'>,extra:Record<string,unknown>)=>t.run(ctx=>ctx.db.insert('billingAccounts',{organizationId,status:'active',seats:1,trialEndsAt:Date.now(),updatedAt:Date.now(),...extra}));
+ const starterId=await account(org,{customerId:'cus_1',subscriptionId:'sub_1'});
+ await account(other,{customerId:'cus_2',subscriptionId:'sub_2',plan:'pro'});
+ await account(lapsed,{customerId:'cus_3',subscriptionId:'sub_3',status:'canceled'});
+ const deep=(organizationId:Id<'organizations'>)=>t.query(internal.billing.entitlement,{organizationId,key:'review.deep'});
+ expect(await deep(org)).toBe(false);
+ await expect(t.mutation(internal.billing.grandfatherSubscriptions,{confirm:'nope' as 'grandfather-pre-plan-subscriptions'})).rejects.toThrow();
+ expect(await t.mutation(internal.billing.grandfatherSubscriptions,{confirm:'grandfather-pre-plan-subscriptions'})).toBe(1);
+ expect(await t.mutation(internal.billing.grandfatherSubscriptions,{confirm:'grandfather-pre-plan-subscriptions'})).toBe(0);
+ expect([await deep(org),await deep(other),await deep(lapsed)]).toEqual([true,true,false]);
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'starter',legacy:true,entitlements:[...entitlements]});
+ // Renewals keep it; cancelling ends it.
+ await deliver(t,subscription('evt_renew','customer.subscription.updated','active',1,Math.floor(Date.now()/1000),org));
+ expect(await deep(org)).toBe(true);
+ await t.run(ctx=>ctx.db.patch(starterId,{status:'canceled'}));
+ expect(await deep(org)).toBe(false);
+});
+
+test('extra usage runs past the included amount up to the admin cap and is metered to Stripe once',async()=>{
+ const {t,alice,bob,org}=await setup();
+ await t.run(ctx=>ctx.db.insert('billingAccounts',{organizationId:org,customerId:'cus_1',subscriptionId:'sub_1',status:'active',seats:1,trialEndsAt:Date.now(),updatedAt:Date.now()}));
+ // 1 seat includes $0.01: a half-size call leaves $0.005, and the next full call does not fit without extra usage.
+ await spend(t,org,500);
+ await expect(reserve(t,org)).rejects.toThrow(/turn on extra usage in Organization Settings → Billing & Usage/);
+ await expect(t.mutation(api.billing.setSpendingCap,{token:bob.token,organizationId:org,capUsd:1})).rejects.toThrow();
+ await expect(t.mutation(api.billing.setSpendingCap,{token:alice.token,organizationId:org,capUsd:-1})).rejects.toThrow(/between/);
+ await t.mutation(api.billing.setSpendingCap,{token:alice.token,organizationId:org,capUsd:0.01});
+ // Only the part past the included usage is extra: $0.005 of this $0.01 call.
+ await spend(t,org);
+ await expect(reserve(t,org)).rejects.toThrow(/extra usage cap of \$0\.01 this month/);
+ const [event]=await t.run(ctx=>ctx.db.query('billingMeterEvents').collect());
+ expect(event).toMatchObject({organizationId:org,period:'2026-10',micros:5000,status:'pending'});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({used:15000,limit:10000,overage:5000,capUsd:0.01});
+ expect(await t.run(ctx=>ctx.db.query('auditEvents').filter(q=>q.eq(q.field('action'),'billing.spending_cap')).collect())).toHaveLength(1);
+ const bodies:string[]=[];vi.spyOn(globalThis,'fetch').mockImplementation(async(_url,init)=>{bodies.push(String(init?.body));return Response.json({});});
+ expect(await t.action(internal.billingJobs.reportUsage,{id:event._id})).toBe('reported');
+ expect(await t.action(internal.billingJobs.reportUsage,{id:event._id})).toBe('done');
+ expect(bodies).toHaveLength(1);
+ expect(bodies[0]).toContain(`identifier=${event._id}`);expect(bodies[0]).toContain('payload%5Bvalue%5D=5000');expect(bodies[0]).toContain('payload%5Bstripe_customer_id%5D=cus_1');
+ // A new month starts from zero.
+ vi.setSystemTime(Date.UTC(2026,10,1,0,0,1));
+ expect(await reserve(t,org)).toBeTruthy();
+});
+
+test('workspaces pick models from the operator price list',async()=>{
+ const {t,alice,bob,org,repo}=await setup();
+ process.env.LLM_PROVIDER='openrouter';process.env.INFERENCE_PRICES=JSON.stringify({'openrouter:openai/gpt-4.1':{input:2,output:8},'openrouter:anthropic/claude-sonnet-5-5':{input:3,output:15},'openai:gpt-4.1':{input:2,output:8}});
+ try{
+  expect((await t.query(api.scopes.list,{token:alice.token,organizationId:org})).models.map(m=>m.model)).toEqual(['openai/gpt-4.1','anthropic/claude-sonnet-5-5']);
+  const current=await t.query(api.settings.repository,{token:alice.token,repositoryId:repo._id});
+  expect(current.models).toHaveLength(2);
+  await expect(t.mutation(api.scopes.save,{token:alice.token,organizationId:org,settings:{...current.settings,model:'meta/unpriced'},overrideKeys:['model']})).rejects.toThrow(/model from this deployment's list/);
+  await expect(t.mutation(api.repositories.configure,{token:alice.token,repositoryId:repo._id,enabled:true,settings:{...current.settings,aiAuthoredModel:'meta/unpriced'}})).rejects.toThrow(/model from this deployment's list/);
+  expect(await t.query(internal.scopes.workspaceModel,{organizationId:org})).toBeNull();
+  await t.mutation(api.scopes.save,{token:alice.token,organizationId:org,settings:{...current.settings,model:'anthropic/claude-sonnet-5-5'},overrideKeys:['model']});
+  expect(await t.query(internal.scopes.workspaceModel,{organizationId:org})).toBe('anthropic/claude-sonnet-5-5');
+  // Code Review Settings → AI Model: admins pick or reset; members only see it; other scope overrides are kept.
+  await expect(t.mutation(api.scopes.setWorkspaceModel,{token:bob.token,organizationId:org,model:'openai/gpt-4.1'})).rejects.toThrow();
+  await expect(t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:'meta/unpriced'})).rejects.toThrow(/model from this deployment's list/);
+  await t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:'openai/gpt-4.1'});
+  expect(await t.query(api.scopes.modelChoice,{token:bob.token,organizationId:org})).toMatchObject({model:'openai/gpt-4.1',ownKey:false,models:[{model:'openai/gpt-4.1'},{model:'anthropic/claude-sonnet-5-5'}]});
+  await t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:''});
+  expect(await t.query(internal.scopes.workspaceModel,{organizationId:org})).toBeNull();
+ }finally{delete process.env.LLM_PROVIDER;delete process.env.INFERENCE_PRICES;}
+});
+
+test('a workspace without saved scope settings gets one holding only the model override',async()=>{
+ const {t,alice,org}=await setup();
+ await t.run(async ctx=>{for(const s of await ctx.db.query('scopeSettings').collect())await ctx.db.delete(s._id);});
+ await t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:'gpt-4.1-mini'});
+ expect(await t.run(ctx=>ctx.db.query('scopeSettings').collect())).toEqual([expect.objectContaining({organizationId:org,overrideKeys:['model'],settings:expect.objectContaining({model:'gpt-4.1-mini'})})]);
+});
+
+test('a workspace reservation that is never settled stops counting after expiry and is not billed',async()=>{
+ const {t,alice,org}=await setup();
+ // Free's $0.02 holds two calls in flight; neither reports usage.
+ const old=await reserve(t,org),fresh=await reserve(t,org);
+ await expect(reserve(t,org)).rejects.toThrow(/Free plan's/);
+ await t.run(ctx=>ctx.db.patch(old!,{createdAt:Date.now()-STALE_RESERVATION_MS-1}));
+ await t.mutation(internal.inferenceBudget.expireStale,{});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({used:0,reserved:10000,allowed:true});
+ expect(await t.run(async ctx=>(await ctx.db.get(fresh!))!.status)).toBe('reserved');
+ expect(await reserve(t,org)).toBeTruthy();
+});
+
+// Usage alerts: each $0.005 call below is 10% of a $0.05 allowance.
+const halfCent={...quote,inputTokenCeiling:500,outputTokenCeiling:500};
+async function use(t:Awaited<ReturnType<typeof setup>>['t'],organizationId:Id<'organizations'>,calls:number){for(let i=0;i<calls;i++){const id=await t.mutation(internal.inferenceBudget.reserve,{...halfCent,organizationId});if(!id)throw Error('No reservation');await t.mutation(internal.inferenceBudget.settle,{id,inputTokens:500,outputTokens:500});}await t.finishAllScheduledFunctions(vi.runAllTimers);}
+function fakeEmail(){
+ Object.assign(process.env,{RESEND_API_KEY:'re_fixture',EMAIL_FROM:'OpenReview <alerts@example.com>'});
+ const sent:{to:string[];subject:string;text:string}[]=[];
+ vi.spyOn(globalThis,'fetch').mockImplementation(async(input,init)=>{if(String(input)!=='https://api.resend.com/emails')return new Response('unexpected',{status:500});sent.push(JSON.parse(String(init?.body)));return Response.json({id:'email_'+sent.length});});
+ return sent;
+}
+async function alertSetup(){
+ const s=await setup(),{t,org,alice,bob,vera,members}=s;
+ // Every member has a verified email; only the owner (alice) and the admin (bob) may get alerts.
+ await t.run(async ctx=>{await ctx.db.patch(members.bob,{role:'admin'});for(const [u,email] of [[alice.id,'alice@acme.test'],[bob.id,'bob@acme.test'],[vera.id,'vera@acme.test']] as const)await ctx.db.insert('notificationPreferences',{organizationId:org,userId:u,email,emailVerifiedAt:1,reviewCompleted:'off',highSeverity:'off',updatedAt:0});});
+ return s;
+}
+const recipients=(mail:{to:string[]}[])=>mail.flatMap(m=>m.to).sort();
+
+test('Free usage alerts email owners and admins once at 80% and once at 100% each month, never viewers',async()=>{
+ process.env.BILLING_FREE_USAGE_USD='0.05';
+ const sent=fakeEmail(),{t,org}=await alertSetup();
+ await use(t,org,7);
+ expect(sent).toHaveLength(0);
+ await use(t,org,1);
+ expect(recipients(sent)).toEqual(['alice@acme.test','bob@acme.test']);
+ expect(sent[0]).toMatchObject({subject:"Acme used 80% of this month's included OpenReview usage",text:expect.stringContaining('Reviews pause when it runs out.')});
+ // 90% sends nothing; 100% sends the paused email once, and a repeated alert job does not resend it.
+ await use(t,org,1);
+ expect(sent).toHaveLength(2);
+ await use(t,org,1);
+ expect(sent).toHaveLength(4);
+ expect(sent[2]).toMatchObject({subject:"Acme used all of this month's included OpenReview usage",text:"Acme has used $0.05 of its $0.05 of included model usage this month. Usage resets on November 1.\n\nReviews are paused until November 1. A workspace admin can upgrade to Starter or Pro in Organization Settings → Billing & Usage for more usage.\n\nhttps://review.example.com/dashboard/organization/billing"});
+ const usage=await t.run(ctx=>ctx.db.query('billingUsage').first());
+ expect(usage?.alertsSent).toEqual([80,100]);
+ await t.action(internal.notificationJobs.usageAlert,{usageId:usage!._id,threshold:100});
+ expect(sent).toHaveLength(4);
+ // The next month starts over.
+ vi.setSystemTime(Date.UTC(2026,10,2,12));
+ await use(t,org,8);
+ expect(sent).toHaveLength(6);
+ expect(recipients(sent.slice(4))).toEqual(['alice@acme.test','bob@acme.test']);
+});
+
+test('paid usage alerts say how much of the extra usage cap is left, or that extra usage is off',async()=>{
+ const sent=fakeEmail(),{t,org}=await alertSetup();
+ await t.run(ctx=>ctx.db.insert('billingAccounts',{organizationId:org,customerId:'cus_1',subscriptionId:'sub_1',status:'active',seats:5,spendCapUsd:0.02,trialEndsAt:Date.now(),updatedAt:Date.now()}));
+ // Starter includes $0.01 per seat here: $0.05 for five seats.
+ await use(t,org,8);
+ await use(t,org,2);
+ expect(sent.map(m=>m.subject)).toEqual(Array(2).fill("Acme used 80% of this month's included OpenReview usage").concat(Array(2).fill("Acme used all of this month's included OpenReview usage")));
+ expect(sent[2].text).toContain('Extra usage is on: $0.02 of the $0.02 monthly cap is left.');
+ // Extra usage past 100% sends nothing more.
+ await use(t,org,1);
+ expect(sent).toHaveLength(4);
+ const usage=await t.run(ctx=>ctx.db.query('billingUsage').first());
+ await t.run(ctx=>ctx.db.patch(usage!._id,{overageMicros:10000}));
+ expect((await t.query(internal.notifications.usageAlertTargets,{usageId:usage!._id,threshold:100}))?.text).toContain('Extra usage is on: $0.01 of the $0.02 monthly cap is left.');
+ const account=await t.run(ctx=>ctx.db.query('billingAccounts').first());
+ await t.run(ctx=>ctx.db.patch(account!._id,{spendCapUsd:0}));
+ expect((await t.query(internal.notifications.usageAlertTargets,{usageId:usage!._id,threshold:100}))?.text).toContain('Extra usage is off, so reviews are paused until November 1.');
+});
+
+test('no usage alert is sent with billing off',async()=>{
+ const sent=fakeEmail(),{t,org}=await alertSetup();
+ // A reservation made while billing was on settles after it is switched off: no alert.
+ process.env.BILLING_FREE_USAGE_USD='0.005';
+ const id=await t.mutation(internal.inferenceBudget.reserve,{...halfCent,organizationId:org});
+ delete process.env.BILLING_ENABLED;
+ await t.mutation(internal.inferenceBudget.settle,{id:id!,inputTokens:500,outputTokens:500});
+ await t.finishAllScheduledFunctions(vi.runAllTimers);
+ expect((await t.run(ctx=>ctx.db.query('billingUsage').first()))?.alertsSent).toBeUndefined();
+ expect(sent).toHaveLength(0);
 });

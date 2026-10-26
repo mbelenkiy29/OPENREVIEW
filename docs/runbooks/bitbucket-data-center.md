@@ -10,7 +10,7 @@
 
 ## Steps
 
-1. Connect via **Settings → Code Providers → Bitbucket Data Center**:
+1. Connect via **Code Providers → Bitbucket Data Center**:
    - **Instance:** the base URL.
    - **Credential:** `{"token":"…","username":"…"}`.
    - **Webhook secret:** 32+ characters.

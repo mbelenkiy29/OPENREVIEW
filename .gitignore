@@ -13,3 +13,7 @@ output/
 .vercel
 forge/bitbucket/static/build/
 deploy/grammars/
+packages/cli/dist/
+packages/cli/LICENSE
+# graphify knowledge graph, rebuilt locally by git hooks (see CLAUDE.md)
+graphify-out/

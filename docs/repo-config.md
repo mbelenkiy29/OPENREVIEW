@@ -38,13 +38,15 @@ OpenReview reads review configuration from the repository. Server reviews always
 }
 ```
 
-`hideFooter` leaves out the review number, re-run command and tip. `sectionLayout` sets how a summary section appears on GitHub: `plain` (always shown), `open` (expanded) or `collapsed`. Unlisted sections keep the default layout. Rule globs may start with `!` to exclude paths.
+`commentStyle` is `concise`, `detailed` or `compact`. `compact` keeps inline comments to the badge, title, prose, suggestion and a folded "Prompt To Fix With AI". On GitHub it also lays out the summary as: summary, confidence score, important files, sequence diagram, then every other section collapsed, the fix-all prompt, and a one-line footer. Collapsed sections with nothing to report (no findings, nothing resolved or skipped, no test source, no risk assessment, tests not executed) are left out; Coverage is always shown. Compact summaries have no fixed section list, so a tool that reads them should look sections up by heading and treat a missing one as empty. The `concise` and `detailed` styles still show every selected section.
+
+`hideFooter` leaves out the review number, re-run command and tip. `sectionLayout` sets how a summary section appears on GitHub with the `concise` and `detailed` styles: `plain` (always shown), `open` (expanded) or `collapsed`. Unlisted sections keep the default layout. Rule globs may start with `!` to exclude paths.
 
 ## Directory cascade
 
 `.openreview/` folders can sit at any depth. Each one applies to the files under its parent directory, read from the base revision like everything else:
 - **Per file:** `categories`, `strictness`, `severityThreshold` and `minimumConfidence` from a folder's `config.json` apply to that folder's files; a deeper folder overrides a shallower one field by field. `files.json` ignore globs (relative to the folder's directory) skip files, and a deeper `include` re-admits a file a shallower folder ignored. The review checks each finding against its own file's values; files ignored this way are listed as skipped with the folder that excluded them.
-- **Per pull request:** the review tier (`mode`) and `maxComments` use the highest value among the root and the folders a change touches. A folder can raise them, never lower them.
+- **Per pull request:** the review tier (`mode`) and `maxComments` use the highest value among the root and the folders a change touches. A folder can raise them, never lower them. `"mode": "auto"` counts as no tier, so any folder with an explicit tier replaces it ([how auto picks](public/reviews.md#review-tier-per-pull-request)).
 - **Rules and instructions:** a folder's `rules.md` and `config.json` rules are scoped to its directory, and its `instructions` are added as scoped text.
 - **Disabling rules:** a folder's `config.json` (or a nested `.openreview.json`) can list `"disabledRules": ["cents"]` to turn off rules with those ids from the root or a parent folder, for files under that folder only. Use the id as written in its file; for a `rules.md` rule that is its heading in lowercase with dashes (`## Integer cents` → `integer-cents`). A finding that cites a rule on a file the rule does not apply to is dropped.
 - **Locks:** keys an admin locked in the dashboard never change at any level (a locked `ignoredPaths` also disables folder ignores).
@@ -77,7 +79,7 @@ A repository moving from Greptile keeps its files. OpenReview reads `.greptile/c
 | --- | --- |
 | `strictness` 1–3 | `strictness`, reversed: Greptile's 3 (fewest comments) is OpenReview's 1 |
 | `commentTypes` | `logic` → the default categories; `style` and `syntax` → those opt-in categories. Security and custom rules are always kept |
-| `effort` `base` / `plus` / `apex` | `mode` `fast` / `standard` / `deep` (`auto` is not supported) |
+| `effort` `base` / `plus` / `apex` / `auto` | `mode` `fast` / `standard` / `deep` / `auto` |
 | `ignorePatterns` (gitignore syntax) | Ignore globs for that folder; `!` negation is not supported |
 | `instructions`, `customContext.other`, `rules.md` | Instructions (scoped to the folder for nested files) |
 | `rules[]` (`rule`, `id`, `scope`, `severity`, `enabled`), `customContext.rules` | Rules in the `rules` category |

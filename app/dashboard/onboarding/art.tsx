@@ -5,8 +5,10 @@ import type { ReactNode } from "react";
 import { basename, graphLayout, litCount } from "../../../src/onboarding-graph";
 
 const SIZE = 320;
-export function Stage({ caption, children }: { caption: string; children: ReactNode }) {
+// fig: an optional plate label above the drawing, as Greptile's "FIG.1 CODEGRAPH FOR …" (decorative).
+export function Stage({ caption, fig, children }: { caption: string; fig?: ReactNode; children: ReactNode }) {
   return <div className="wizard-stage">
+    {fig && <p className="wizard-fig" aria-hidden="true">{fig}</p>}
     <figure className="wizard-art" aria-hidden="true">{children}</figure>
     <p className="wizard-caption" aria-live="polite">{caption}</p>
   </div>;
@@ -92,8 +94,6 @@ export function TeamArt({ invited }: { invited: number }) {
   const seats = 8;
   return <svg viewBox={`0 0 ${SIZE} ${SIZE}`}>
     <Grid />
-    <rect className="art-node" x="124" y="124" width="72" height="72" rx="4" />
-    <MarkGlyph x={142} y={146} />
     {Array.from({ length: seats }, (_, i) => {
       const angle = (i / seats) * Math.PI * 2 - Math.PI / 2, x = 160 + Math.cos(angle) * 108, y = 160 + Math.sin(angle) * 108;
       return <g key={i} className={`art-seat${i < invited ? " filled" : ""}`} style={{ ["--i" as string]: i }}>
@@ -102,6 +102,9 @@ export function TeamArt({ invited }: { invited: number }) {
         <circle className="art-head" cx={x} cy={y - 4} r="5" /><path className="art-head" d={`M${x - 8} ${y + 9} a8 7 0 0 1 16 0`} />
       </g>;
     })}
+    {/* The workspace sits over the spokes. */}
+    <rect className="art-node" x="124" y="124" width="72" height="72" rx="4" />
+    <MarkGlyph x={142} y={146} />
   </svg>;
 }
 

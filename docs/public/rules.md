@@ -8,7 +8,7 @@ Rules describe what reviewers on your team always look for. Each rule has:
 
 Rules can live in three places. Later sources add to earlier ones:
 
-1. **Dashboard rules,** in Memory → Custom rules, with a scope:
+1. **Dashboard rules,** in Custom Context, with a scope:
    - the **entire workspace**;
    - one **team** (every repository assigned to the team);
    - **repositories matching a pattern** on the full name, such as `acme/*-service` or `acme/{api,web}`;

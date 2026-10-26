@@ -58,7 +58,7 @@ test("a magic-link request stores the referral code on the login token and keeps
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ id: "email_1" }), { status: 200, headers: { "content-type": "application/json" } }));
   const form = new FormData();
   form.set("email", "new@example.com"); form.set("from", "signup"); form.set("referral", "abcd-2345");
-  const response = await requestMagicLink(new Request(`${base}/api/auth/email`, { method: "POST", body: form }));
+  const response = await requestMagicLink(new Request(`${base}/api/auth/email`, { method: "POST", headers: { origin: base }, body: form }));
   expect(response.headers.get("location")).toBe(`${base}/signup?email=sent&referral=ABCD2345`);
   expect((await t.run((ctx) => ctx.db.query("loginTokens").collect())).map((token) => token.referralCode)).toEqual(["ABCD2345"]);
 });
@@ -71,9 +71,20 @@ test("a refused or cancelled account link returns to the page it started from, n
   await t.run(async (ctx) => { for (const s of await ctx.db.query("sessions").collect()) await ctx.db.patch(s._id, { createdAt: Date.now() - 20 * 60000 }); });
   holder.jar.set("openreview_session", await new SignJWT({ sid }).setProtectedHeader({ alg: "HS256" }).setIssuer("openreview").setAudience("openreview").setSubject(carol).setIssuedAt().setExpirationTime("1h").sign(new TextEncoder().encode(env.SESSION_SECRET)));
   const users = async () => (await t.run((ctx) => ctx.db.query("users").collect())).length, before = await users();
-  expect((await finish(await begin("link=1&next=/dashboard/settings/account"))).headers.get("location")).toBe(`${base}/dashboard/settings/account`);
-  expect(JSON.parse(decodeURIComponent(holder.jar.get("openreview_toast")!))).toMatchObject({ tone: "error" });
-  const state = await begin("link=1&next=/dashboard/settings/account");
-  expect((await finishOAuth(new Request(`${base}/api/auth/callback?error=access_denied&state=${state}`), "github", async () => { throw new Error("unused"); })).headers.get("location")).toBe(`${base}/dashboard/settings/account`);
+  expect((await finish(await begin("link=1&next=/dashboard/account"))).headers.get("location")).toBe(`${base}/dashboard/account`);
+  expect(JSON.parse(holder.jar.get("openreview_toast")!)).toMatchObject({ tone: "error" });
+  const state = await begin("link=1&next=/dashboard/account");
+  expect((await finishOAuth(new Request(`${base}/api/auth/callback?error=access_denied&state=${state}`), "github", async () => { throw new Error("unused"); })).headers.get("location")).toBe(`${base}/dashboard/account`);
   expect(await users()).toBe(before);
+});
+
+test("a new sign-in drops the previous user's GitHub setup token; a GitHub sign-in sets its own afterwards", async () => {
+  await setup();
+  holder.jar.set("openreview_github_setup", "previous-users-token");
+  await finish(await begin(""));
+  expect(holder.jar.has("openreview_github_setup")).toBe(false);
+  holder.jar.set("openreview_github_setup", "previous-users-token");
+  const state = await begin("");
+  await finishOAuth(new Request(`${base}/api/auth/callback?code=c1&state=${state}`), "github", async () => ({ providerUserId: "7002", login: "newbie", avatar: "", emailVerified: false }), async () => { holder.jar.set("openreview_github_setup", "fresh-token"); });
+  expect(holder.jar.get("openreview_github_setup")).toBe("fresh-token");
 });

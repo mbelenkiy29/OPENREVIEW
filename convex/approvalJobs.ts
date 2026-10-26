@@ -9,11 +9,14 @@ import {provider} from "./scm";
 import type {FunctionReturnType} from "convex/server";
 import type {Scm,ScmApprovalSnapshot} from "../src/gitlab";
 type State=FunctionReturnType<typeof internal.approvals.data>;
+// Rate limits, provider 5xx and network failures say nothing about the gates: keep the approval and mark it due,
+// so the next 5-minute sweep checks again instead of revoking now or waiting an hour.
+const transient=(e:unknown)=>{const s=(e as {status?:unknown}|null)?.status;return (e as {rateLimited?:unknown}|null)?.rateLimited===true||s===429||typeof s==="number"&&s>=500||e instanceof TypeError&&e.message==="fetch failed"||e instanceof Error&&e.name==="TimeoutError";};
 function gates(state:State,snapshot:ScmApprovalSnapshot):ApprovalState{
  return {supported:true,open:snapshot.pr.state==="open",draft:snapshot.pr.draft,head:snapshot.pr.head.sha,reviewedHead:state.review.headSha,revisionKey:snapshot.pr.revisionKey,reviewedRevisionKey:state.review.revisionKey,latest:state.latest&&state.repo.enabled,completed:state.review.status==="completed",coverageLimits:state.review.coverageLimits,unresolved:state.unresolved,assessment:state.review.approvalAssessment,author:snapshot.pr.user.login,changedPaths:snapshot.pr.diff.map(f=>f.path),humanChangeRequested:snapshot.humanChangeRequested,requiredChecksKnown:true,checks:snapshot.checks,nativeRequiredChecks:snapshot.nativeRequiredChecks,runtimeRequired:state.runtimeRequired,runtimePassed:state.runtimePassed,requirementsNotMet:state.review.requirementsNotMet??0,labels:snapshot.pr.labels};
 }
 export const process=internalAction({args:{id:v.id("approvalJobs")},handler:async(ctx,a)=>{
- const lease=randomUUID();if(!await ctx.runMutation(internal.approvals.claim,{...a,lease}))return;
+ const lease=randomUUID(),prior=await ctx.runMutation(internal.approvals.claim,{...a,lease});if(!prior)return;
  let providerReviewId:string|number|undefined,scm:Scm|undefined,target:State|undefined,withdrawalAttempted=false,publicationAttempted=false;
  const marker="<!-- openreview:approval:"+a.id+" -->";
  const recoverReceipt=async()=>{
@@ -62,6 +65,7 @@ export const process=internalAction({args:{id:v.id("approvalJobs")},handler:asyn
   }
   await ctx.runMutation(internal.approvals.finish,{...a,lease,status:"approved",reasons:[],providerReviewId});
  }catch(error){
+  if(transient(error)&&providerReviewId!==undefined&&target&&target.job.status!=="revocation_pending"&&!publicationAttempted&&!withdrawalAttempted){await ctx.runMutation(internal.approvals.finish,{...a,lease,status:prior,reasons:target.job.reasons,providerReviewId,updatedAt:Date.now()-3600000});return;}
   const reasons=[redact(error instanceof Error?error.message:"Approval verification failed").slice(0,1000)];
   let status="failed";
   if(providerReviewId!==undefined||publicationAttempted||target?.job.status==="revocation_pending"){

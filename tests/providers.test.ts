@@ -5,6 +5,9 @@ import { encryptCredential,decryptCredential,providerOrigin } from "../src/crede
 import { Gitlab } from "../src/gitlab";
 import type { Finding } from "../src/engine/types";
 import { Gitea } from "../src/gitea";
+import { BitbucketDC } from "../src/bitbucket-dc";
+import { BitbucketCloud } from "../src/bitbucket-cloud";
+import { AzureDevOps } from "../src/azure-devops";
 test("GitLab runtime archives require immutable revisions and bound authenticated same-origin downloads",async t=>{
  const sha="a".repeat(40),gzip=new Uint8Array([0x1f,0x8b,8,0]);let calls=0,mode="ok",cancelled=false;
  t.mock.method(globalThis,"fetch",async(input:string,options:RequestInit)=>{
@@ -241,4 +244,32 @@ test("Origin follow-ups require the exact active user to hold repository write p
  assert.equal(await client.canReply("acme/repo","user_fixture"),false);
  permission="write";assert.equal(await client.canReply("acme/repo","user_fixture"),true);
  id="user_other";assert.equal(await client.canReply("acme/repo","user_fixture"),false);
+});
+test("GitLab, Bitbucket and Azure DevOps retry rate-limited GETs honoring retry-after but never repeat writes",async t=>{
+ const calls=new Map<string,number>();
+ t.mock.method(globalThis,"fetch",async(input:string|URL,options:RequestInit)=>{
+  const key=(options.method??"GET")+" "+String(input),n=(calls.get(key)??0)+1;calls.set(key,n);
+  return options.method==="POST"||n===1?new Response(null,{status:429,headers:{"retry-after":"0"}}):Response.json({ok:true});
+ });
+ const ws="11111111-1111-4111-8111-111111111111",rid="22222222-2222-4222-8222-222222222222",cloudPath="/2.0/repositories/"+encodeURIComponent("{"+ws+"}")+"/"+encodeURIComponent("{"+rid+"}")+"/x";
+ const gitlab=new Gitlab("https://gitlab.com","fixture-token","123"),dc=new BitbucketDC("https://bitbucket.example","fixture-token");
+ const cloud=new BitbucketCloud("fixture-system-token",ws,rid) as unknown as {request(e:string,s:z.ZodTypeAny,b?:unknown):Promise<unknown>};
+ const azure=new AzureDevOps("https://dev.azure.com/org","fixture-pat");
+ const schema=z.object({ok:z.literal(true)});
+ for(const get of [gitlab.request("/x",schema),dc.request("/x",schema),cloud.request(cloudPath,schema),azure.request("_apis/x",schema)])assert.deepEqual(await get,{ok:true});
+ for(const post of [gitlab.request("/x",schema,{}),dc.request("/x",schema,{}),cloud.request(cloudPath,schema,{}),azure.request("_apis/x",schema,"POST",{})])await assert.rejects(post,/429/);
+ assert.deepEqual([...calls.entries()].map(([k,n])=>k.split(" ")[0]+n).sort(),["GET2","GET2","GET2","GET2","POST1","POST1","POST1","POST1"]);
+});
+test("GitLab blob stops reading the raw file past the 200 KB review limit",async t=>{
+ let pulled=0,cancelled=false,small=true;
+ t.mock.method(globalThis,"fetch",async(input:string)=>{
+  assert.equal(new URL(input).pathname,"/api/v4/projects/123/repository/blobs/"+"b".repeat(40)+"/raw");
+  if(small)return new Response("small file");
+  return new Response(new ReadableStream({pull(c){pulled++;c.enqueue(new Uint8Array(100000));},cancel(){cancelled=true;}},{highWaterMark:0}));
+ });
+ const client=new Gitlab("https://gitlab.com","fixture-token","123");
+ assert.equal((await client.blob("group/repo","a.ts","b".repeat(40))).content,"small file");small=false;
+ const file=await client.blob("group/repo","big.bin","b".repeat(40));
+ assert.deepEqual({content:file.content,over:(file.size??0)>200000},{content:"",over:true});
+ assert.ok(pulled<=4,"read "+pulled+" chunks");assert.equal(cancelled,true);
 });

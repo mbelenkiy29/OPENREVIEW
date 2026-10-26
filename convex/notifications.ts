@@ -4,11 +4,13 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authorize, repositoryAccess } from "./auth";
-import { rateLimit } from "./rateLimit";
+import { otherUserEmailLimit, rateLimit } from "./rateLimit";
 import { emailAddress, emailConfigured } from "../src/email";
+import { billingConfig, billingDecision, usageAlertEmail } from "../src/billing";
 import { notificationEvents } from "../src/notifications";
 import { mentionQuestion, slackChannelId } from "../src/slack";
 import { egressAllowed, offline } from "../src/egress";
+import { contextReadable } from "./repositoryContext";
 
 // Notifications: Slack channels (admin-linked) and per-member email. Everything is inert until a
 // Slack workspace is installed or a member verifies an email address.
@@ -79,7 +81,11 @@ export const savePreferences = mutation({ args: { token: v.string(), organizatio
 export const setEmail = mutation({ args: { token: v.string(), organizationId: v.id("organizations"), email: v.string() }, handler: async (ctx, a) => {
   const { user } = await authorize(ctx, a.token, a.organizationId);
   const email = emailAddress.parse(a.email);
+  // The verification email goes to any address the member types, so it is capped per day and, with
+  // invitations, deployment-wide (otherUserEmailLimit) as well as per minute.
   await rateLimit(ctx, `email-verify:${user._id}`, 3);
+  await rateLimit(ctx, `email-verify-day:${user._id}`, 10, 86_400_000);
+  await otherUserEmailLimit(ctx);
   const own = await ownPreferences(ctx, user._id, a.organizationId);
   const data = { email, emailVerifiedAt: undefined, verificationHash: undefined, verificationExpiresAt: undefined, updatedAt: Date.now() };
   const id = own ? own._id : await ctx.db.insert("notificationPreferences", { organizationId: a.organizationId, userId: user._id, ...preferenceDefaults, ...data });
@@ -124,11 +130,29 @@ export const reviewTargets = internalQuery({ args: { reviewId: v.id("reviews") }
     if (!p.email || !p.emailVerifiedAt) continue;
     const user = await ctx.db.get(p.userId);
     try { await repositoryAccess(ctx, p.userId, repo._id); } catch { continue; }
+    // As on the dashboard: a review that used context from a repository this member can't read stays hidden.
+    if (!await contextReadable(ctx, p.userId, review)) continue;
     const mine = Boolean(user && pr && user.login.toLowerCase() === pr.author.toLowerCase());
     const events = ([["review.completed", p.reviewCompleted], ["finding.high", p.highSeverity]] as const).filter(([, l]) => l === "all" || (l === "mine" && mine)).map(([e]) => e);
     if (events.length) recipients.push({ userId: p.userId, email: p.email, events });
   }
   return { organizationId: repo.organizationId, installationId: slack?._id ?? null, notice: { repository: repo.fullName, prNumber: review.prNumber, prTitle: pr?.title, prUrl: pr?.url, headSha: review.headSha, findings }, channels, recipients };
+} });
+// Usage alert (settleUsage in convex/billing.ts): owners and admins with a verified email, never members or viewers.
+export const usageAlertTargets = internalQuery({ args: { usageId: v.id("billingUsage"), threshold: v.number(), origin: v.optional(v.string()) }, handler: async (ctx, a) => {
+  const usage = await ctx.db.get(a.usageId);
+  const account = usage && await ctx.db.query("billingAccounts").withIndex("by_org", (q) => q.eq("organizationId", usage.organizationId)).unique();
+  const organization = usage && await ctx.db.get(usage.organizationId);
+  if (!usage || !account || !organization) return null;
+  const decision = billingDecision(account, usage.usedMicros ?? 0, Date.now(), billingConfig());
+  if (!decision.limit) return null;
+  const recipients: { userId: Id<"users">; email: string }[] = [];
+  for (const m of await ctx.db.query("organizationMembers").withIndex("by_org", (q) => q.eq("organizationId", usage.organizationId)).take(1000)) {
+    if (m.role !== "owner" && m.role !== "admin") continue;
+    const p = await ownPreferences(ctx, m.userId, usage.organizationId);
+    if (p?.email && p.emailVerifiedAt) recipients.push({ userId: m.userId, email: p.email });
+  }
+  return { organizationId: usage.organizationId, recipients, ...usageAlertEmail(organization.name, a.threshold, decision, usage.overageMicros ?? 0, Date.parse(`${usage.period}-01`), a.origin && `${a.origin}/dashboard/organization/billing`) };
 } });
 // Claims a delivery once; a failed delivery may be retried, a sent or skipped one never repeats.
 export const claimDelivery = internalMutation({ args: { organizationId: v.id("organizations"), key: v.string(), channel: v.string() }, handler: async (ctx, a) => {
@@ -177,7 +201,7 @@ export const enqueueMention = internalMutation({ args: { eventId: v.string(), te
   const channel = await ctx.db.query("notificationChannels").withIndex("by_channel", (q) => q.eq("installationId", installation._id).eq("channelId", a.channelId)).unique();
   const question = mentionQuestion(a.text, installation.botUserId);
   const threadTs = a.threadTs ?? a.ts;
-  if (!channel?.qa || !channel.repositoryIds.length) { await ctx.scheduler.runAfter(0, internal.notificationJobs.slackReply, { installationId: installation._id, channelId: a.channelId, threadTs, text: "No repositories are linked to this channel for questions. A workspace admin can link up to five in OpenReview → Settings → Notifications." }); return "unlinked"; }
+  if (!channel?.qa || !channel.repositoryIds.length) { await ctx.scheduler.runAfter(0, internal.notificationJobs.slackReply, { installationId: installation._id, channelId: a.channelId, threadTs, text: "No repositories are linked to this channel for questions. A workspace admin can link up to five in OpenReview → Organization Settings → Notifications." }); return "unlinked"; }
   if (question.length < 2) { await ctx.scheduler.runAfter(0, internal.notificationJobs.slackReply, { installationId: installation._id, channelId: a.channelId, threadTs, text: "Ask me a question about the linked repositories, for example: @OpenReview where is the checkout total computed?" }); return "help"; }
   try { await rateLimit(ctx, `slack:${a.teamId}`, 20); } catch { return "rate limited"; }
   await ctx.scheduler.runAfter(0, internal.notificationJobs.slackAnswer, { installationId: installation._id, channelId: a.channelId, threadTs, question, repositoryIds: channel.repositoryIds });
@@ -205,7 +229,7 @@ export const commandStatus = internalQuery({ args: { teamId: v.string(), channel
   const command = a.text.trim().toLowerCase();
   if (command && command !== "status") return "Usage: `/openreview status` shows the repositories linked to this channel. Mention @OpenReview with a question to ask about their code.";
   const channel = await ctx.db.query("notificationChannels").withIndex("by_channel", (q) => q.eq("installationId", installation._id).eq("channelId", a.channelId)).unique();
-  if (!channel) return "This channel is not linked to OpenReview. A workspace admin can link it in OpenReview → Settings → Notifications.";
+  if (!channel) return "This channel is not linked to OpenReview. A workspace admin can link it in OpenReview → Organization Settings → Notifications.";
   const lines = [`Notifications: ${channel.events.length ? channel.events.join(", ") : "none"} · Q&A: ${channel.qa ? "on" : "off"}`];
   const ids = channel.repositoryIds.length ? channel.repositoryIds : [];
   for (const id of ids.slice(0, 10)) {

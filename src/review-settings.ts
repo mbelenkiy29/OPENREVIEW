@@ -1,3 +1,4 @@
+import { modelAllowed } from "./inference-billing";
 export const summarySections=["overview","affectedAreas","diagram","findings","agentPrompt","requirements","score","risk","resolved","skipped","testSource","tips"] as const;
 export const summaryLabels:Record<(typeof summarySections)[number],string>={overview:"Overview",affectedAreas:"Files changed",diagram:"Sequence diagram",findings:"Issues",agentPrompt:"Prompt for your coding agent",requirements:"Requirements",score:"Confidence score",risk:"Risk assessment",resolved:"Resolved findings",skipped:"Skipped files",testSource:"Test source",tips:"Feature tips"};
 // Feature tips (a footer line, not a section) are off by default; the hosted cloud turns them on
@@ -106,6 +107,8 @@ export function effectiveThresholds(settings: { strictness?: number; minimumConf
   return preset ? { ...preset } : { minimumConfidence: settings.minimumConfidence, severityThreshold: settings.severityThreshold };
 }
 export const checkFailureSeverities=["off","critical","high","medium","low"] as const;
+// An empty model uses the operator's; otherwise it must be on the operator's priced list (when there is one).
+export const validModelSettings=(s:{model:string;aiAuthoredModel?:string})=>[s.model,s.aiAuthoredModel].every(m=>!m||(m.length<=200&&modelAllowed(m)));
 export const validCheckFailureSeverity=(value:string|undefined)=>value===undefined||(checkFailureSeverities as readonly string[]).includes(value);
 export const summaryPlacements=["description","comment"] as const;
 // Publication settings are optional (older saved settings have neither).

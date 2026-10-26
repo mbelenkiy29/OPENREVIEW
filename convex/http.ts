@@ -68,7 +68,7 @@ const defined = <T extends Record<string, unknown>>(o: T) => Object.fromEntries(
 const idOf = (value: unknown) => { const id = typeof value === "string" ? value : (value as { id?: unknown } | null | undefined)?.id; return typeof id === "string" && /^[a-z]{2,8}_[A-Za-z0-9]{1,250}$/.test(id) ? id : undefined; };
 // shortcut: radar.early_fraud_warning.created is not handled; an early fraud warning would hold the referral here.
 const chargeEvents = new Map<string, "refund" | "dispute">([["charge.refunded", "refund"], ["charge.dispute.created", "dispute"], ["charge.dispute.closed", "dispute"]]);
-const stripeObject = z.object({ charge: z.unknown(), payment_intent: z.unknown(), amount_paid: lenientInt, amount_overpaid: lenientInt, total: lenientInt, total_excluding_tax: lenientInt, currency: z.string().max(10).nullish().catch(undefined), created: lenientInt, status_transitions: z.object({ paid_at: lenientInt }).nullish().catch(undefined), id: z.string().max(255).optional(), customer: z.string().max(255).nullish(), subscription: z.string().max(255).nullish(), status: z.string().max(40).optional(), client_reference_id: z.string().max(255).nullish(), mode: z.string().optional(), metadata: z.record(z.string()).nullish(), current_period_end: z.number().optional(), parent: z.object({ subscription_details: z.object({ subscription: z.string().max(255).nullish() }).nullish() }).nullish(), items: z.object({ data: z.array(z.object({ id: z.string(), quantity: z.number().int().nonnegative().optional(), current_period_end: z.number().optional() })).max(20) }).optional() }).passthrough();
+const stripeObject = z.object({ charge: z.unknown().optional(), payment_intent: z.unknown().optional(), amount_paid: lenientInt, amount_overpaid: lenientInt, total: lenientInt, total_excluding_tax: lenientInt, currency: z.string().max(10).nullish().catch(undefined), created: lenientInt, status_transitions: z.object({ paid_at: lenientInt }).nullish().catch(undefined), id: z.string().max(255).optional(), customer: z.string().max(255).nullish(), subscription: z.string().max(255).nullish(), status: z.string().max(40).optional(), client_reference_id: z.string().max(255).nullish(), mode: z.string().optional(), metadata: z.record(z.string(), z.string()).nullish(), current_period_end: z.number().optional(), parent: z.object({ subscription_details: z.object({ subscription: z.string().max(255).nullish() }).nullish() }).nullish(), items: z.object({ data: z.array(z.object({ id: z.string(), quantity: z.number().int().nonnegative().optional(), current_period_end: z.number().optional(), price: z.object({ id: z.string() }).nullish().catch(undefined) })).max(20) }).optional() }).passthrough();
 const stripeEvent = z.object({ id: z.string().regex(/^evt_[A-Za-z0-9_]{1,250}$/), type: z.string().max(100), created: z.number().int().positive(), data: z.object({ object: stripeObject }) }).passthrough();
 http.route({
   path: "/stripe/webhook",
@@ -83,8 +83,9 @@ http.route({
     const o = event.data.object, created = event.created * 1000, base = { eventId: event.id, type: event.type, created };
     if (event.type === "checkout.session.completed" && o.mode === "subscription" && o.client_reference_id && o.customer) await ctx.runMutation(internal.billing.applyStripeEvent, { ...base, checkout: { organizationId: o.client_reference_id, customer: o.customer, ...(o.subscription ? { subscription: o.subscription } : {}) } });
     else if (event.type.startsWith("customer.subscription.") && o.id && o.customer && o.status) {
-      const item = o.items?.data[0];
-      await ctx.runMutation(internal.billing.applyStripeEvent, { ...base, subscription: { id: o.id, customer: o.customer, status: o.status, quantity: item?.quantity ?? 1, ...(item ? { itemId: item.id } : {}), ...((item?.current_period_end ?? o.current_period_end) ? { currentPeriodEnd: (item?.current_period_end ?? o.current_period_end)! * 1000 } : {}), ...(o.metadata?.organizationId ? { organizationId: o.metadata.organizationId } : {}) } });
+      // The seat item: a subscription can also carry the metered extra-usage price.
+      const item = o.items?.data.find((i) => i.price?.id !== process.env.STRIPE_USAGE_PRICE_ID) ?? o.items?.data[0];
+      await ctx.runMutation(internal.billing.applyStripeEvent, { ...base, subscription: { id: o.id, customer: o.customer, status: o.status, quantity: item?.quantity ?? 1, ...(item ? { itemId: item.id } : {}), ...(item?.price?.id ? { price: item.price.id } : {}), ...((item?.current_period_end ?? o.current_period_end) ? { currentPeriodEnd: (item?.current_period_end ?? o.current_period_end)! * 1000 } : {}), ...(o.metadata?.organizationId ? { organizationId: o.metadata.organizationId } : {}) } });
     } else if ((event.type === "invoice.payment_failed" || event.type === "invoice.paid") && o.customer) {
       // Newer API versions move an invoice's subscription under parent.subscription_details.
       const subscription = o.parent?.subscription_details?.subscription ?? o.subscription;
@@ -99,14 +100,14 @@ http.route({
   }),
 });
 // Slack events and slash commands: signed requests only (SLACK_SIGNING_SECRET), answered fast;
-// questions are queued as jobs.
+// questions are queued as jobs. Mentions from other workspaces (Slack Connect) are ignored: answers use the installer's access.
 async function slackRequest(request: Request) {
   if (Number(request.headers.get("content-length") ?? 0) > 1_000_000) return null;
   const body = await request.text();
   if (body.length > 1_000_000) return null;
   return await verifySlackSignature(body, request.headers.get("x-slack-request-timestamp"), request.headers.get("x-slack-signature"), process.env.SLACK_SIGNING_SECRET) ? body : null;
 }
-const slackEvent = z.object({ type: z.string(), challenge: z.string().max(200).optional(), team_id: z.string().max(40).optional(), event_id: z.string().max(100).optional(), event: z.object({ type: z.string(), text: z.string().max(40000).optional(), channel: z.string().max(40).optional(), ts: z.string().max(40).optional(), thread_ts: z.string().max(40).optional(), bot_id: z.string().optional(), subtype: z.string().optional() }).passthrough().optional() }).passthrough();
+const slackEvent = z.object({ type: z.string(), challenge: z.string().max(200).optional(), team_id: z.string().max(40).optional(), event_id: z.string().max(100).optional(), event: z.object({ type: z.string(), text: z.string().max(40000).optional(), channel: z.string().max(40).optional(), ts: z.string().max(40).optional(), thread_ts: z.string().max(40).optional(), user_team: z.string().max(40).optional(), bot_id: z.string().optional(), subtype: z.string().optional() }).passthrough().optional() }).passthrough();
 http.route({
   path: "/slack/events",
   method: "POST",
@@ -117,7 +118,7 @@ http.route({
     try { payload = slackEvent.parse(JSON.parse(body)); } catch { return new Response("Invalid payload", { status: 400 }); }
     if (payload.type === "url_verification") return Response.json({ challenge: payload.challenge ?? "" });
     const event = payload.event;
-    if (payload.type === "event_callback" && event?.type === "app_mention" && !event.bot_id && !event.subtype && payload.team_id && payload.event_id && event.channel && event.ts)
+    if (payload.type === "event_callback" && event?.type === "app_mention" && !event.bot_id && !event.subtype && payload.team_id && (event.user_team ?? payload.team_id) === payload.team_id && payload.event_id && event.channel && event.ts)
       await ctx.runMutation(internal.notifications.enqueueMention, { eventId: payload.event_id, teamId: payload.team_id, channelId: event.channel, text: event.text ?? "", ts: event.ts, ...(event.thread_ts ? { threadTs: event.thread_ts } : {}) });
     return new Response("ok", { status: 200 });
   }),
@@ -153,8 +154,8 @@ for(const operation of ["claim","heartbeat","snapshot","report"]){
    const digest=new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(credential))),hash=Array.from(digest,b=>b.toString(16).padStart(2,"0")).join("");
    const text=await request.text();if(new TextEncoder().encode(text).length>128000)return new Response("Too large",{status:413});
    const body=JSON.parse(text);
-   if(operation==="claim")return Response.json(await ctx.runMutation(internal.runtime.claim,{hash,lease:z.string().uuid().parse(body.lease)}));
-   const a=z.object({id:z.string(),lease:z.string().uuid()}).parse(body),id=a.id as Id<"runtimeJobs">;
+   if(operation==="claim")return Response.json(await ctx.runMutation(internal.runtime.claim,{hash,lease:z.guid().parse(body.lease)}));
+   const a=z.object({id:z.string(),lease:z.guid()}).parse(body),id=a.id as Id<"runtimeJobs">;
    if(operation==="heartbeat"){await ctx.runMutation(internal.runtime.heartbeat,{hash,id,lease:a.lease});return Response.json({ok:true});}
    if(operation==="snapshot"){
     const job=await ctx.runQuery(internal.runtime.authenticatedJob,{hash,id,lease:a.lease,source:true});

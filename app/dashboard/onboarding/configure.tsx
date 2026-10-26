@@ -10,6 +10,9 @@ import { example, exampleSummary } from "../summary-example";
 import { Stage } from "./art";
 import { cloudAgentIds, cloudAgents, defaultLocalAgent, isCloudAgent, localAgentLabels, localAgents, type CloudAgent } from "../../../src/fix-agents";
 import { StepForm } from "./wizard-client";
+import { Icon, type IconName } from "../../ui/icons";
+import { Locked } from "../locked";
+import type { Entitlement } from "../../../src/plans";
 
 type Settings = { summarySections?: string[]; commentStyle: string; severityThreshold: string; minimumConfidence: number; maxComments: number; strictness?: number; categories: string[];
   automatic: boolean; drafts: boolean; rereview: boolean; triggerLabels?: string[]; threadReplies?: boolean; securityScan?: boolean; fixPullRequests?: boolean; mode: string };
@@ -21,9 +24,10 @@ function Shell({ action, organizationId, admin, progress, heading, step, childre
     <StepForm action={action} disabled={!admin}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="step" value={step} />{children}</StepForm>
   </div>;
 }
+// Greptile's SettingItem: icon, title and description, and a switch on the right.
 // value: what a checked switch submits (a list entry such as a summary section); plain flags send "on".
-function Toggle({ name, value, label, hint, checked, onChange }: { name: string; value?: string; label: string; hint: string; checked: boolean; onChange: (on: boolean) => void }) {
-  return <li className="wizard-toggle"><label><span><strong>{label}</strong><span className="muted">{hint}</span></span>
+function Toggle({ name, value, label, hint, icon, checked, onChange }: { name: string; value?: string; label: string; hint?: string; icon: IconName; checked: boolean; onChange: (on: boolean) => void }) {
+  return <li className="wizard-toggle"><label><span className="wizard-icon"><Icon name={icon} /></span><span><strong>{label}</strong>{hint && <span className="muted">{hint}</span>}</span>
     <input type="checkbox" role="switch" className="switch" name={name} value={value} checked={checked} onChange={(e) => onChange(e.target.checked)} /></label></li>;
 }
 function Window({ title, children }: { title: string; children: ReactNode }) {
@@ -43,6 +47,10 @@ const sectionSketch: Record<string, ReactNode> = {
   resolved: <Bars widths={[48]} />, skipped: <p className="mono muted">package-lock.json · lower risk</p>, testSource: <Bars widths={[58]} />, tips: <Bars widths={[36]} />,
 };
 
+const sectionIcons: Record<string, IconName> = {
+  overview: "fileText", affectedAreas: "folders", diagram: "graph", findings: "bug", agentPrompt: "robot", requirements: "listChecks",
+  score: "chartBar", risk: "gauge", resolved: "checkCircle", skipped: "eyeSlash", testSource: "code", tips: "lightbulb",
+};
 const sectionHints: Record<string, string> = {
   overview: "What the change does, in a few sentences.",
   affectedAreas: "Each changed file with a one-line summary.",
@@ -62,10 +70,10 @@ export function SummaryStep(props: Props) {
   const [exact, setExact] = useState(false);
   return <>
     <Shell {...props} step="summary">
-      <ul className="wizard-toggles">{summarySections.map((s) => <Toggle key={s} name="summarySections" value={s} label={summaryLabels[s]} hint={sectionHints[s]}
+      <ul className="wizard-toggles">{summarySections.map((s) => <Toggle key={s} name="summarySections" value={s} label={summaryLabels[s]} hint={sectionHints[s]} icon={sectionIcons[s] ?? "fileText"}
         checked={sections.includes(s)} onChange={(on) => setSections(summarySections.filter((x) => x === s ? on : sections.includes(x)))} />)}</ul>
       <fieldset className="wizard-choice"><legend>Inline comment style</legend>
-        {["concise", "detailed"].map((v) => <label key={v} className="check"><input type="radio" name="commentStyle" value={v} checked={style === v} onChange={() => setStyle(v)} />{v === "concise" ? "Concise: the problem and the fix" : "Detailed: adds impact and evidence"}</label>)}
+        {["concise", "detailed", "compact"].map((v) => <label key={v} className="check"><input type="radio" name="commentStyle" value={v} checked={style === v} onChange={() => setStyle(v)} />{v === "concise" ? "Concise: the problem and the fix" : v === "detailed" ? "Detailed: adds impact and evidence" : "Compact: summary-first layout, plain prose and fix prompts"}</label>)}
       </fieldset>
       <details className="wizard-exact" open={exact} onToggle={(e) => setExact((e.target as HTMLDetailsElement).open)}><summary>Exact comment text for this example</summary>
         {exact && <div aria-live="polite"><ReviewMarkdown>{exampleSummary(sections)}</ReviewMarkdown><ReviewMarkdown>{findingComment(example, style)}</ReviewMarkdown></div>}</details>
@@ -90,18 +98,25 @@ export function CommentsStep(props: Props) {
   const posted = outcomes.filter((o) => o.outcome === "posted").length;
   return <>
     <Shell {...props} step="comments">
-      <fieldset className="wizard-segments"><legend>How much to flag</legend>
-        {presets.map((p) => <label key={p.value} className={strictness === p.value ? "active" : undefined}><input type="radio" name="strictness" value={p.value} checked={strictness === p.value} onChange={() => setStrictness(p.value)} /><strong>{p.label}</strong><span className="muted">{p.hint}</span></label>)}
-      </fieldset>
+      {/* Greptile's sensitivity slider: the three presets sit on a track; Custom opens the thresholds. */}
+      <div className="wizard-setting">
+        <span className="wizard-icon"><Icon name="chatCircleText" /></span>
+        <span><strong>Comment sensitivity</strong><span className="muted">How much reaches the pull request</span></span>
+        <fieldset className="wizard-scale" data-at={strictness}><legend className="sr-only">How much to flag</legend>
+          {presets.map((p) => <label key={p.value} title={p.hint} className={strictness === p.value ? "active" : undefined}><input type="radio" name="strictness" value={p.value} checked={strictness === p.value} onChange={() => setStrictness(p.value)} /><strong>{p.label}</strong></label>)}
+        </fieldset>
+        <p className="wizard-hint">{strictness === 0 ? "Set the lowest severity and confidence yourself."
+          : `${presets.find((p) => p.value === strictness)?.label}: ${strictnessPresets[strictness as 1 | 2 | 3].severityThreshold} severity and up, confidence ${strictnessPresets[strictness as 1 | 2 | 3].minimumConfidence} or more.`}</p>
+      </div>
       {strictness === 0 ? <div className="form-grid">
         <label>Lowest severity<select name="severityThreshold" value={severity} onChange={(e) => setSeverity(e.target.value)}>{severities.map((s) => <option key={s}>{s}</option>)}</select></label>
         <label>Minimum confidence<input type="number" name="minimumConfidence" min={0.5} max={1} step={0.05} value={confidence} onChange={(e) => setConfidence(Number(e.target.value))} /></label>
-      </div> : <><input type="hidden" name="severityThreshold" value={severity} /><input type="hidden" name="minimumConfidence" value={confidence} />
-        <p className="muted">{presets.find((p) => p.value === strictness)?.label}: {strictnessPresets[strictness as 1 | 2 | 3].severityThreshold} severity and up, confidence {strictnessPresets[strictness as 1 | 2 | 3].minimumConfidence} or more.</p></>}
+      </div> : <><input type="hidden" name="severityThreshold" value={severity} /><input type="hidden" name="minimumConfidence" value={confidence} /></>}
       <fieldset className="wizard-categories"><legend>Categories</legend>
         {categories.map((c) => <label key={c} className="check"><input type="checkbox" name="categories" value={c} checked={chosen.includes(c)} onChange={(e) => setChosen(categories.filter((x) => x === c ? e.target.checked : chosen.includes(x)))} />{c}</label>)}
       </fieldset>
-      <label>Most inline comments per review<input type="number" name="maxComments" min={0} max={30} value={max} onChange={(e) => setMax(Math.max(0, Math.min(30, Number(e.target.value) || 0)))} /></label>
+      <label className="wizard-setting"><span className="wizard-icon"><Icon name="listChecks" /></span><span><strong>Most inline comments per review</strong><span className="muted">Between 0 and 30</span></span>
+        <input type="number" name="maxComments" min={0} max={30} value={max} onChange={(e) => setMax(Math.max(0, Math.min(30, Number(e.target.value) || 0)))} /></label>
     </Shell>
     <Stage caption={`${posted} of ${outcomes.length} example findings would post inline`}>
       <Window title="example change · 6 verified findings">
@@ -122,10 +137,10 @@ export function TriggersStep(props: Props) {
   return <>
     <Shell {...props} step="triggers">
       <ul className="wizard-toggles">
-        <Toggle name="automatic" label="Review new pull requests" hint="Review automatically when a pull request opens or is marked ready." checked={s.automatic} onChange={set("automatic")} />
-        <Toggle name="rereview" label="Re-review new commits" hint="Review again when new commits are pushed." checked={s.rereview} onChange={set("rereview")} />
-        <Toggle name="drafts" label="Include drafts" hint="Also review draft pull requests." checked={s.drafts} onChange={set("drafts")} />
-        <Toggle name="threadReplies" label="Answer replies" hint="Reply in OpenReview threads without needing an @openreview mention." checked={s.threadReplies} onChange={set("threadReplies")} />
+        <Toggle name="automatic" icon="gitPullRequest" label="Review new pull requests" hint="Review automatically when a pull request opens or is marked ready." checked={s.automatic} onChange={set("automatic")} />
+        <Toggle name="rereview" icon="arrowsClockwise" label="Re-review new commits" hint="Review again when new commits are pushed." checked={s.rereview} onChange={set("rereview")} />
+        <Toggle name="drafts" icon="pencilSimple" label="Include drafts" hint="Also review draft pull requests." checked={s.drafts} onChange={set("drafts")} />
+        <Toggle name="threadReplies" icon="chatCircleText" label="Answer replies" hint="Reply in OpenReview threads without needing an @openreview mention." checked={s.threadReplies} onChange={set("threadReplies")} />
       </ul>
       <label>Trigger labels <span className="muted">Comma-separated; adding one starts a review even when automatic reviews are off.</span>
         <input name="triggerLabels" value={s.labels} onChange={(e) => setS({ ...s, labels: e.target.value })} placeholder="needs-review" /></label>
@@ -140,9 +155,10 @@ export function TriggersStep(props: Props) {
 }
 
 const agents = localAgents.map((a) => [a, localAgentLabels[a]] as const);
-export function ToolsStep(props: Props & { agent?: string; handoff?: string; cloudAgent?: string }) {
-  const d = props.defaults;
-  const [security, setSecurity] = useState(d.securityScan ?? true), [fixPrs, setFixPrs] = useState(d.fixPullRequests ?? false), [agent, setAgent] = useState(props.agent ?? defaultLocalAgent), [mode, setMode] = useState(d.mode);
+// `locked` is billing.locked: Pro options stay visible but disabled on lower plans (none with billing off).
+export function ToolsStep(props: Props & { agent?: string; handoff?: string; cloudAgent?: string; locked: readonly Entitlement[] }) {
+  const d = props.defaults, fixLocked = props.locked.includes("fix.pullRequests"), deepLocked = props.locked.includes("review.deep");
+  const [security, setSecurity] = useState(d.securityScan ?? true), [fixPrs, setFixPrs] = useState(!fixLocked && (d.fixPullRequests ?? false)), [agent, setAgent] = useState(props.agent ?? defaultLocalAgent), [mode, setMode] = useState(deepLocked && d.mode === "deep" ? "standard" : d.mode);
   const [handoff, setHandoff] = useState(props.handoff === "cloud" ? "cloud" : "bridge"), [cloud, setCloud] = useState<CloudAgent>(isCloudAgent(props.cloudAgent) ? props.cloudAgent : "claude");
   const agentName = handoff === "cloud" ? cloudAgents[cloud].label : agents.find(([v]) => v === agent)?.[1] ?? "your agent";
   return <>
@@ -153,10 +169,13 @@ export function ToolsStep(props: Props & { agent?: string; handoff?: string; clo
         : <input type="hidden" name="cloudAgent" value={cloud} />}
       <label>Default local agent<select name="agent" value={agent} onChange={(e) => setAgent(e.target.value)}>{agents.map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select></label>
       <ul className="wizard-toggles">
-        <Toggle name="securityScan" label="Security checks" hint="Pattern checks on added lines and advisory lookups for changed dependencies." checked={security} onChange={setSecurity} />
-        <Toggle name="fixPullRequests" label="Fix pull requests" hint="OpenReview opens a fix pull request on a new branch, from a finding’s Fix page or “@openreview fix this in a new PR”. Needs the App’s Contents: write permission." checked={fixPrs} onChange={setFixPrs} />
+        <Toggle name="securityScan" icon="shieldCheck" label="Security checks" hint="Pattern checks on added lines and advisory lookups for changed dependencies." checked={security} onChange={setSecurity} />
       </ul>
-      <label>Review depth<select name="mode" value={mode} onChange={(e) => setMode(e.target.value)}><option value="fast">Fast</option><option value="standard">Standard</option><option value="deep">Deep</option></select></label>
+      <Locked feature="fix.pullRequests" locked={props.locked}><ul className="wizard-toggles">
+        <Toggle name="fixPullRequests" icon="gitBranch" label="Fix pull requests" hint="OpenReview opens a fix pull request on a new branch, from a finding’s Fix page or “@openreview fix this in a new PR”. Needs the App’s Contents: write permission." checked={fixPrs} onChange={setFixPrs} />
+      </ul></Locked>
+      <label>Review depth<select name="mode" value={mode} onChange={(e) => setMode(e.target.value)}><option value="fast">Fast</option><option value="standard">Standard</option><option value="deep" disabled={deepLocked}>Deep</option></select></label>
+      <Locked feature="review.deep" locked={props.locked} note="Deep reviews are on the Pro plan; fast and standard reviews are on every plan." />
     </Shell>
     <Stage caption={`fix with ${agentName}${security ? " · security checks on" : ""}${fixPrs ? " · fix pull requests on" : ""}`}>
       <Window title="src/total.ts · finding">

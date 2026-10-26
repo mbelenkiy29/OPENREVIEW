@@ -45,7 +45,7 @@ test("onboarding API: the key's workspace and links, and AI rule files imported 
   expect(info.workspaces.map((w: { name: string; current: boolean }) => [w.name, w.current]).sort()).toEqual([["Acme", true], ["Side project", false]]);
   expect(info.workspaces.some((w: { id: string }) => w.id === rival)).toBe(false);
   expect(side).toBeTruthy();
-  expect([info.installUrl, info.keysUrl, info.rulesUrl]).toEqual([`https://review.example.com/api/github/install?organization=${org}`, "https://review.example.com/dashboard/settings/keys", "https://review.example.com/dashboard/memory/rules"]);
+  expect([info.installUrl, info.keysUrl, info.rulesUrl]).toEqual([`https://review.example.com/api/github/install?organization=${org}`, "https://review.example.com/dashboard/organization/api-keys", "https://review.example.com/dashboard/context"]);
 
   // POST /api/rules/import: admin scope only, strict body, tenant-isolated repository scope.
   const rules = [

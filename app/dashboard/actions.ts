@@ -2,6 +2,11 @@
 import {scopeSettingsFromForm} from "../../src/scope-settings-form";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { fixPrompt } from "../../src/fix-prompt";
+import { pullActionSchema } from "../../src/pull-actions";
+import { pullChatReturn, withSelectedContext } from "../../src/pull-chat";
+import { actionError, performPullAction, pullIntentCookie } from "../../src/pull-actions-server";
+import { findingSchema } from "../../src/engine/types";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { randomBytes, createHash } from "node:crypto";
@@ -19,6 +24,7 @@ import {approvalPolicySchema} from "../../src/approval";
 import {runtimePolicySchema} from "../../src/runtime-policy";
 import {approvalDefaults,runtimeDefaults,sectionLayoutFromForm} from "../../src/review-settings";
 import { REFERRAL_PAYOUT_REVIEW_CENTS, formatMoney, parseMoneyInput, stripeHostedUrl } from "../../src/referrals";
+import { safeNext } from "../../src/identity";
 
 const text = (f: FormData, key: string) => z.string().parse(f.get(key) ?? "");
 export async function saveApprovalPolicy(_state:{error?:string;saved?:boolean},form:FormData):Promise<{error?:string;saved?:boolean}>{
@@ -31,7 +37,7 @@ export async function saveApprovalPolicy(_state:{error?:string;saved?:boolean},f
   if(!policy.success)return {error:policy.error.issues.map(i=>i.path.includes("appId")?"Required check App IDs must be positive integers.":i.message).join("; ")};
   await backend().mutation(api.approvals.save,{token,organizationId:text(form,"organizationId") as Id<"organizations">,...(scope.startsWith("team:")?{teamId:scope.slice(5) as Id<"teams">}:{}),...(scope.startsWith("repository:")?{repositoryId:scope.slice(11) as Id<"repositories">}:{}),inherit:form.get("inherit")==="true",policy:policy.data});
   revalidatePath("/dashboard");return {saved:true};
- }catch(e){return {error:e instanceof Error?e.message:"Could not save approval policy"};}
+ }catch(e){return {error:userMessage(e,"Could not save approval policy")};}
 }
 export async function saveRuntimePolicy(_state:{error?:string;saved?:boolean},form:FormData):Promise<{error?:string;saved?:boolean}>{
  try{
@@ -41,14 +47,14 @@ export async function saveRuntimePolicy(_state:{error?:string;saved?:boolean},fo
   if(!policy.success)return {error:policy.error.issues.map(i=>i.message).join("; ")};
   await backend().mutation(api.runtime.save,{token,organizationId:text(form,"organizationId") as Id<"organizations">,...(scope.startsWith("team:")?{teamId:scope.slice(5) as Id<"teams">}:{}),...(scope.startsWith("repository:")?{repositoryId:scope.slice(11) as Id<"repositories">}:{}),inherit:form.get("inherit")==="true",policy:policy.data});
   revalidatePath("/dashboard");return {saved:true};
- }catch(e){return {error:e instanceof Error?e.message:"Could not save runtime policy"};}
+ }catch(e){return {error:userMessage(e,"Could not save runtime policy")};}
 }
 export async function createRuntimeWorker(_state:{error?:string;credential?:string;url?:string},form:FormData):Promise<{error?:string;credential?:string;url?:string}>{
  try{
   const {token}=await current(),credential="orw_"+randomBytes(32).toString("hex");
   await backend().mutation(api.runtime.worker,{token,organizationId:text(form,"organizationId") as Id<"organizations">,name:text(form,"name"),hash:createHash("sha256").update(credential).digest("hex")});
   revalidatePath("/dashboard");return {credential,url:process.env.NEXT_PUBLIC_CONVEX_SITE_URL??""};
- }catch(e){return {error:e instanceof Error?e.message:"Could not create worker"};}
+ }catch(e){return {error:userMessage(e,"Could not create worker")};}
 }
 export async function revokeRuntimeWorker(form:FormData){const {token}=await current();await backend().mutation(api.runtime.revoke,{token,workerId:text(form,"workerId") as Id<"runtimeWorkers">});revalidatePath("/dashboard");}
 export async function createWorkspace(form: FormData) {
@@ -88,7 +94,7 @@ export async function switchTeam(form:FormData){
  if(teamId&&!scopes.teams.some(t=>t._id===teamId))throw new Error("Team not accessible");
  if(teamId)jar.set("openreview_team",teamId,{httpOnly:true,sameSite:"lax",secure:process.env.NODE_ENV==="production",path:"/"});else jar.delete("openreview_team");
  revalidatePath("/dashboard","layout");
- const returnTo=text(form,"returnTo");redirect(/^\/dashboard\/(analytics|memory|pulls|settings)(\/([a-z-]+))?$/.test(returnTo)?returnTo:"/dashboard/analytics");
+ const returnTo=text(form,"returnTo");redirect(/^\/dashboard\/(analytics|repositories|code-review|context|pulls|providers|integrations|organization|account|chat)(\/([a-z-]+))?$/.test(returnTo)?returnTo:"/dashboard/analytics");
 }
 // "Link an existing installation": the same verified linking path the install callback uses.
 export async function linkGithubInstallation(form: FormData) {
@@ -101,7 +107,7 @@ export async function linkGithubInstallation(form: FormData) {
     const linked = await linkInstallation({ token, organizationId, installationId, credentials, legacyGithubId: user.githubId });
     await notify(`Connected ${linked.account} (${linked.repositories} ${linked.repositories === 1 ? "repository" : "repositories"})`);
   } catch (error) {
-    await notify(`Couldn’t link the installation: ${error instanceof Error ? error.message : "please try again"}`, "error");
+    await notify(`Couldn’t link the installation: ${userMessage(error, "please try again")}`, "error");
     redirect(linkHref(organizationId, returnTo));
   }
   revalidatePath("/dashboard");
@@ -152,8 +158,14 @@ export async function saveRule(form: FormData) {
     enabled: text(form, "enabled") !== "false",
     ...ruleScopeArgs(text(form, "scope"), text(form, "repositoryId"), text(form, "repositoryPattern")),
   });
-  await notify("Rule saved.");
+  await notify(text(form, "remove") === "true" ? "Rule deleted." : text(form, "id") ? "Rule updated successfully" : "Rule created successfully");
   revalidatePath("/dashboard", "layout");
+  closeMemoryDialog(form);
+}
+// Forms in the Custom Context modal and drawer return to the list with the dialog closed (same-page paths only).
+function closeMemoryDialog(form: FormData) {
+  const back = text(form, "returnTo");
+  if (/^\/dashboard\/(memory\/rules|context)(\?[\w=&%.:+~-]*)?$/.test(back)) redirect(back);
 }
 export async function feedback(form: FormData) {
   const { token } = await current();
@@ -207,13 +219,16 @@ async function endSession(to: string): Promise<never> {
   const jar = await cookies(), token = jar.get("openreview_session")?.value;
   if (token) await backend().mutation(api.identity.signOut, { token }).catch(() => undefined);
   jar.delete("openreview_session");
-  redirect(to);
+  jar.delete("openreview_github_setup");
+  redirect(safeNext(to));
 }
 export async function logout() { await endSession("/"); }
 export async function signOutEverywhere() {
   const { token } = await current();
   await backend().mutation(api.identity.signOutEverywhere, { token });
-  (await cookies()).delete("openreview_session");
+  const jar = await cookies();
+  jar.delete("openreview_session");
+  jar.delete("openreview_github_setup");
   redirect("/login?signedout=1");
 }
 export async function revokeSession(form: FormData) {
@@ -228,7 +243,7 @@ export async function inviteByEmail(form: FormData) {
   try { outcome = await backend().action(api.identityJobs.inviteByEmail, { token, organizationId: text(form, "organizationId") as Id<"organizations">, email: text(form, "email"), role: z.enum(["admin", "member", "viewer"]).parse(text(form, "role")) }); }
   catch { outcome = "error"; }
   revalidatePath("/dashboard", "layout");
-  redirect(`/dashboard/settings/people?emailInvite=${outcome}`);
+  redirect(`/dashboard/organization/people?emailInvite=${outcome}`);
 }
 export async function revokeEmailInvitation(form: FormData) {
   const { token } = await current();
@@ -317,9 +332,15 @@ export async function setMinutesPerFinding(form: FormData) {
 export async function startCheckout(form: FormData) {
   const { token } = await current();
   let url: string;
-  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: text(form, "organizationId") as Id<"organizations"> }); }
-  catch { redirect("/dashboard/settings/billing?billing=error"); }
+  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: text(form, "organizationId") as Id<"organizations">, plan: z.enum(["starter", "pro"]).catch("starter").parse(text(form, "plan")) }); }
+  catch { redirect("/dashboard/organization/billing?billing=error"); }
   redirect(url);
+}
+export async function changePlan(form: FormData) {
+  const { token } = await current();
+  try { await backend().action(api.billingJobs.changePlan, { token, organizationId: text(form, "organizationId") as Id<"organizations">, plan: z.enum(["starter", "pro"]).parse(text(form, "plan")) }); await notify("Plan change requested. It shows here once Stripe confirms it."); }
+  catch (e) { await notify(backendMessage(e, "Could not change the plan."), "error"); }
+  revalidatePath("/dashboard/organization/billing");
 }
 export async function applyReferralCode(form: FormData) {
   const { token } = await current();
@@ -363,8 +384,20 @@ export async function openBillingPortal(form: FormData) {
   const { token } = await current();
   let url: string;
   try { url = await backend().action(api.billingJobs.portal, { token, organizationId: text(form, "organizationId") as Id<"organizations"> }); }
-  catch { redirect("/dashboard/settings/billing?billing=error"); }
+  catch { redirect("/dashboard/organization/billing?billing=error"); }
   redirect(url);
+}
+export async function setSpendingCap(form: FormData) {
+  const { token } = await current();
+  try { await backend().mutation(api.billing.setSpendingCap, { token, organizationId: text(form, "organizationId") as Id<"organizations">, capUsd: Number(text(form, "capUsd")) }); await notify("Extra usage cap saved."); }
+  catch { await notify("Could not save the extra usage cap.", "error"); }
+  revalidatePath("/dashboard/organization/billing");
+}
+export async function setWorkspaceModel(form: FormData) {
+  const { token } = await current();
+  try { await backend().mutation(api.scopes.setWorkspaceModel, { token, organizationId: text(form, "organizationId") as Id<"organizations">, model: text(form, "model") }); await notify("Model saved."); }
+  catch { await notify("Could not save the model.", "error"); }
+  revalidatePath("/dashboard/code-review/model");
 }
 export async function saveSlackChannel(form: FormData) {
   const { token } = await current();
@@ -396,9 +429,11 @@ export async function setNotificationEmail(form: FormData) {
 }
 export async function askChat(form: FormData) {
   const { token } = await current();
-  const threadId = text(form, "threadId");
-  const result = await backend().mutation(api.chat.ask, { token, organizationId: text(form, "organizationId") as Id<"organizations">, ...(threadId ? { threadId: threadId as Id<"chatThreads"> } : {}), repositoryIds: form.getAll("repositoryIds").map(String).slice(0, 5) as Id<"repositories">[], question: text(form, "question") });
-  redirect(`/dashboard/chat?thread=${result.threadId}`);
+  const threadId = text(form, "threadId"), pullRequestId = text(form, "pullRequestId"), back = pullChatReturn(text(form, "return"));
+  const result = await backend().mutation(api.chat.ask, { token, organizationId: text(form, "organizationId") as Id<"organizations">, ...(threadId ? { threadId: threadId as Id<"chatThreads"> } : {}), ...(pullRequestId && !threadId ? { pullRequestId: pullRequestId as Id<"pullRequests"> } : {}), repositoryIds: form.getAll("repositoryIds").map(String).slice(0, 5) as Id<"repositories">[], question: withSelectedContext(text(form, "question"), text(form, "context")) });
+  // Chat with PR answers in the panel beside the pull request it was asked from.
+  const tab = ["review", "discussion", "code"].includes(text(form, "tab")) ? `&tab=${text(form, "tab")}` : "";
+  redirect(back ? `${back}?chat=1&chatThread=${result.threadId}${tab}` : `/dashboard/chat?thread=${result.threadId}`);
 }
 export async function deleteChatThread(form: FormData) {
   const { token } = await current();
@@ -414,6 +449,8 @@ export async function editPreference(form: FormData) {
 }
 // Rule assistant: requests run in the background; every suggestion waits for an admin decision.
 const backendMessage = (e: unknown, fallback: string) => /Uncaught Error: ([^\n]+?)(?:\s+at |\n|$)/.exec(e instanceof Error ? e.message : "")?.[1] ?? fallback;
+// Local checks read well as they are; Convex errors carry request IDs and stack frames, so only their message is shown.
+const userMessage = (e: unknown, fallback: string) => e instanceof Error && !/\[Request ID/.test(e.message) ? e.message : backendMessage(e, fallback);
 export async function requestRuleAssistant(form: FormData) {
   const { token } = await current();
   const kind = z.enum(["draft", "refine", "suggest"]).parse(text(form, "kind"));
@@ -422,6 +459,7 @@ export async function requestRuleAssistant(form: FormData) {
     await notify("The rule assistant is working. Refresh in a moment to review its suggestions.");
   } catch (e) { await notify(backendMessage(e, "The rule assistant could not start."), "error"); }
   revalidatePath("/dashboard", "layout");
+  closeMemoryDialog(form);
 }
 export async function decideRuleSuggestion(form: FormData) {
   const { token } = await current();
@@ -469,15 +507,21 @@ export async function createApiKey(
 ): Promise<string> {
   const { token } = await current();
   const key = "or_" + randomBytes(32).toString("hex");
-  await backend().mutation(api.apiKeys.create, {
-    token,
-    organizationId: text(form, "organizationId") as Id<"organizations">,
-    name: text(form, "name"),
-    hash: createHash("sha256").update(key).digest("hex"),
-    prefix: key.slice(0, 11),
-    scopes: [z.enum(["read", "write", "admin"]).parse(text(form, "scope") || "read")],
-  });
-  revalidatePath("/dashboard/settings/keys");
+  try {
+    await backend().mutation(api.apiKeys.create, {
+      token,
+      organizationId: text(form, "organizationId") as Id<"organizations">,
+      name: text(form, "name"),
+      hash: createHash("sha256").update(key).digest("hex"),
+      prefix: key.slice(0, 11),
+      ...(text(form, "scope") === "perforce" ? { perforce: true } : { scopes: [z.enum(["read", "write", "admin"]).parse(text(form, "scope") || "read")] }),
+    });
+  } catch (e) {
+    // The form shows any returned string as the new key, so report refusals (e.g. the key cap) as a toast.
+    await notify(userMessage(e, "Could not create the API key."), "error");
+    return "";
+  }
+  revalidatePath("/dashboard/organization/api-keys");
   return key;
 }
 export async function saveModelKey(form: FormData) {
@@ -487,13 +531,13 @@ export async function saveModelKey(form: FormData) {
     await backend().action(api.modelKeyJobs.save, { token, organizationId: text(form, "organizationId") as Id<"organizations">, provider: z.enum(["anthropic", "openai", "openrouter"]).parse(form.get("provider")), key: text(form, "key"), ...(model ? { model } : {}) });
     await notify("Model key saved. This workspace now runs on it.");
   } catch (e) { await notify(backendMessage(e, "Could not save the model key."), "error"); }
-  revalidatePath("/dashboard/settings/keys");
+  revalidatePath("/dashboard/organization/api-keys");
 }
 export async function removeModelKey(form: FormData) {
   const { token } = await current();
   await backend().mutation(api.modelKeys.remove, { token, organizationId: text(form, "organizationId") as Id<"organizations"> });
   await notify("Model key removed. This workspace uses OpenReview's model again.");
-  revalidatePath("/dashboard/settings/keys");
+  revalidatePath("/dashboard/organization/api-keys");
 }
 export async function revokeApiKey(form: FormData) {
   const { token } = await current();
@@ -502,13 +546,13 @@ export async function revokeApiKey(form: FormData) {
     keyId: text(form, "keyId") as Id<"apiKeys">,
   });
   await notify("API key revoked.");
-  revalidatePath("/dashboard/settings/keys");
+  revalidatePath("/dashboard/organization/api-keys");
 }
 export async function revokeMcpConnection(form: FormData) {
   const { token } = await current();
   try { await backend().mutation(api.oauth.revoke, { token, grantId: text(form, "grantId") as Id<"oauthGrants"> }); await notify("Connection revoked."); }
   catch { await notify("Could not revoke this connection.", "error"); }
-  revalidatePath("/dashboard/settings/keys");
+  revalidatePath("/dashboard/organization/api-keys");
 }
 // Devin (opt-in): the developer's own API key, encrypted before it reaches the backend, used only when
 // they send a finding to Devin. Hidden everywhere until a key is saved.
@@ -521,13 +565,13 @@ export async function saveDevinKey(form: FormData) {
     await backend().mutation(api.personalCredentials.set, { token, kind: "devin", ciphertext: encryptCredential(key, `${userId}:devin`) });
     await notify("Devin API key saved.");
   } catch { await notify("Could not save the key. The server needs CREDENTIAL_ENCRYPTION_KEY.", "error"); }
-  revalidatePath("/dashboard/settings/agents");
+  revalidatePath("/dashboard/account/review");
 }
 export async function removeDevinKey() {
   const { token } = await current();
   await backend().mutation(api.personalCredentials.set, { token, kind: "devin" });
   await notify("Devin API key removed.");
-  revalidatePath("/dashboard/settings/agents");
+  revalidatePath("/dashboard/account/review");
 }
 export async function sendToDevin(form: FormData) {
   const { token } = await current();
@@ -554,31 +598,31 @@ export async function saveSsoConnection(form: FormData) {
         : { oidcIssuer: text(form, "oidcIssuer").trim(), oidcClientId: text(form, "oidcClientId").trim(), ...(secret ? { oidcClientSecret: encryptCredential(secret, `${organizationId}:sso`) } : {}) }) });
     await notify("SSO connection saved.");
   } catch (e) { await notify(backendMessage(e, "Could not save the SSO connection."), "error"); }
-  revalidatePath("/dashboard/settings/people");
+  revalidatePath("/dashboard/organization/people");
 }
 export async function addSsoDomain(form: FormData) {
   const { token } = await current();
   try { await backend().mutation(api.sso.addDomain, { token, organizationId: text(form, "organizationId") as Id<"organizations">, domain: text(form, "domain") }); await notify("Domain added. Publish the TXT record, then check DNS."); }
   catch (e) { await notify(backendMessage(e, "Could not add that domain."), "error"); }
-  revalidatePath("/dashboard/settings/people");
+  revalidatePath("/dashboard/organization/people");
 }
 export async function verifySsoDomain(form: FormData) {
   const { token } = await current();
   const ok = await backend().action(api.ssoJobs.verifyDomain, { token, domainId: text(form, "domainId") as Id<"ssoDomains"> }).catch(() => false);
   await notify(ok ? "Domain verified." : "The TXT record was not found yet. DNS changes can take a while to appear.", ok ? "success" : "error");
-  revalidatePath("/dashboard/settings/people");
+  revalidatePath("/dashboard/organization/people");
 }
 export async function removeSsoDomain(form: FormData) {
   const { token } = await current();
   await backend().mutation(api.sso.removeDomain, { token, domainId: text(form, "domainId") as Id<"ssoDomains"> });
   await notify("Domain removed.");
-  revalidatePath("/dashboard/settings/people");
+  revalidatePath("/dashboard/organization/people");
 }
 export async function setSsoEnforcement(form: FormData) {
   const { token } = await current();
   try { await backend().mutation(api.sso.setEnforcement, { token, organizationId: text(form, "organizationId") as Id<"organizations">, enforce: text(form, "enforce") === "true" }); await notify("SSO requirement updated."); }
   catch (e) { await notify(backendMessage(e, "Could not change the SSO requirement."), "error"); }
-  revalidatePath("/dashboard/settings/people");
+  revalidatePath("/dashboard/organization/people");
 }
 // Data controls: sharing, retention and owner-only workspace deletion (with a grace period).
 export async function saveDataSettings(form: FormData) {
@@ -586,19 +630,19 @@ export async function saveDataSettings(form: FormData) {
   const days = (key: string) => text(form, key).trim() ? Number(text(form, key)) : null;
   try { await backend().mutation(api.dataControls.saveSettings, { token, organizationId: text(form, "organizationId") as Id<"organizations">, dataSharing: z.enum(["private", "aggregate"]).parse(text(form, "dataSharing")), reviewRetentionDays: days("reviewRetentionDays"), transcriptRetentionDays: days("transcriptRetentionDays") }); await notify("Data settings saved."); }
   catch (e) { await notify(backendMessage(e, "Could not save data settings."), "error"); }
-  revalidatePath("/dashboard/settings/data");
+  revalidatePath("/dashboard/organization");
 }
 export async function requestWorkspaceDeletion(form: FormData) {
   const { token } = await current();
   try { const { scheduledFor } = await backend().mutation(api.dataControls.requestDeletion, { token, organizationId: text(form, "organizationId") as Id<"organizations">, confirmName: text(form, "confirmName") }); await notify(`Deletion scheduled for ${new Date(scheduledFor).toUTCString()}. You can cancel until then.`); }
   catch (e) { await notify(backendMessage(e, "Could not schedule deletion."), "error"); }
-  revalidatePath("/dashboard/settings/data");
+  revalidatePath("/dashboard/organization");
 }
 export async function cancelWorkspaceDeletion(form: FormData) {
   const { token } = await current();
   try { await backend().mutation(api.dataControls.cancelDeletion, { token, organizationId: text(form, "organizationId") as Id<"organizations"> }); await notify("Deletion cancelled."); }
   catch (e) { await notify(backendMessage(e, "Could not cancel deletion."), "error"); }
-  revalidatePath("/dashboard/settings/data");
+  revalidatePath("/dashboard/organization");
 }
 export async function updateMember(form: FormData) {
   const { token } = await current();
@@ -612,7 +656,7 @@ export async function updateMember(form: FormData) {
   revalidatePath("/dashboard", "layout");
 }
 export async function approveBridge(form: FormData) {
- const {token}=await current(); await backend().mutation(api.bridge.approvePair,{token,organizationId:text(form,"organizationId") as Id<"organizations">,code:text(form,"code")});revalidatePath("/dashboard/settings/agents");
+ const {token}=await current(); await backend().mutation(api.bridge.approvePair,{token,organizationId:text(form,"organizationId") as Id<"organizations">,code:text(form,"code")});revalidatePath("/dashboard/account/review");
 }
 export async function reviewBridgePair(_state:{error?:string;code?:string;saved?:boolean;preview?:{deviceId:Id<"bridgeDevices">;name:string;expiresAt:number;account:string;userId:Id<"users">;organizationId:Id<"organizations">;workspace:string}},form:FormData):Promise<{error?:string;code?:string;saved?:boolean;preview?:{deviceId:Id<"bridgeDevices">;name:string;expiresAt:number;account:string;userId:Id<"users">;organizationId:Id<"organizations">;workspace:string}}>{
  const code=text(form,"code").trim().replaceAll("-","").toLowerCase();
@@ -628,20 +672,20 @@ export async function reviewBridgePair(_state:{error?:string;code?:string;saved?
 const handoffChoice=(f:FormData)=>{const handoff=text(f,"handoff"),cloudAgent=text(f,"cloudAgent");return {...(handoff?{handoff:z.enum(["bridge","cloud"]).parse(handoff)}:{}),...(cloudAgent?{cloudAgent:z.string().refine(isCloudAgent).parse(cloudAgent)}:{})};};
 export async function saveAgent(form:FormData) {
  try{const {token}=await current();const agent=text(form,"agent");await backend().mutation(api.bridge.savePersonal,{token,...(agent?{agent:z.enum(localAgents).parse(agent)}:{}),...handoffChoice(form)});await notify("Fix agent saved");}
- catch(error){await notify(`Couldn’t save your agent: ${error instanceof Error?error.message:"please try again"}`,"error");}
+ catch(error){await notify(`Couldn’t save your agent: ${userMessage(error,"please try again")}`,"error");}
  revalidatePath("/dashboard", "layout");
 }
 export async function saveWorkspaceAgent(form:FormData){
  try{const {token}=await current();await backend().mutation(api.bridge.saveWorkspaceAgent,{token,organizationId:text(form,"organizationId") as Id<"organizations">,agent:z.enum(localAgents).parse(text(form,"agent")),...handoffChoice(form)});await notify("Workspace fix agent saved");}
- catch(error){await notify(`Couldn’t save the workspace agent: ${error instanceof Error?error.message:"please try again"}`,"error");}
+ catch(error){await notify(`Couldn’t save the workspace agent: ${userMessage(error,"please try again")}`,"error");}
  revalidatePath("/dashboard", "layout");
 }
 export async function revokeBridge(form:FormData) {
- const {token}=await current();await backend().mutation(api.bridge.revoke,{token,deviceId:text(form,"deviceId") as Id<"bridgeDevices">});revalidatePath("/dashboard/settings/agents");
+ const {token}=await current();await backend().mutation(api.bridge.revoke,{token,deviceId:text(form,"deviceId") as Id<"bridgeDevices">});revalidatePath("/dashboard/account/review");
 }
 export async function launchFix(_previous:{url?:string;error?:string},form:FormData):Promise<{url?:string;error?:string}> {
  try {const {token}=await current(); const id=await backend().mutation(api.bridge.createFix,{token,reviewId:text(form,"reviewId") as Id<"reviews">,...(text(form,"findingId")?{findingId:text(form,"findingId") as Id<"findings">}:{}),agent:z.enum(localAgents).parse(text(form,"agent"))});return {url:`openreview://fix?request=${id}`};}
- catch(error){return {error:error instanceof Error ? error.message.slice(0,500):"Unable to create fix request"};}
+ catch(error){return {error:backendMessage(error,"Unable to create fix request")};}
 }
 // Cloud agents: prepare the hand-off, bind it to this browser, then post the comment as the user
 // (app/api/fixes/agent), re-authorizing GitHub first when no fresh token is at hand.
@@ -663,7 +707,11 @@ export async function openFixPullRequest(_previous:{url?:string;reused?:boolean;
 export async function reviewAgain(form:FormData) {
  const {token}=await current();const review=await backend().query(api.reviews.detail,{token,reviewId:text(form,"reviewId") as Id<"reviews">});
  if(review.review.nativeP4&&review.review.status==="failed"&&review.review.resultStorageId&&text(form,"fresh")!=="true"){await backend().mutation(api.p4Reviews.retryPublication,{token,reviewId:review.review._id});revalidatePath("/dashboard","layout");redirect("/dashboard/pulls/"+review.review._id);}
- const id=review.review.nativeP4?await backend().action(api.p4ReviewJobs.request,{token,organizationId:review.review.organizationId,repositoryId:review.review.repositoryId,nativeNumber:review.review.prNumber,force:true}):await backend().action(api.providerJobs.rereview,{token,repositoryId:review.review.repositoryId,prNumber:review.review.prNumber});revalidatePath("/dashboard", "layout");if(id)redirect("/dashboard/pulls/"+id);
+ // Closed changes, lost access, rate limits and provider errors become a toast instead of the dashboard error page.
+ let id:Id<"reviews">|null|undefined;
+ try{id=review.review.nativeP4?await backend().action(api.p4ReviewJobs.request,{token,organizationId:review.review.organizationId,repositoryId:review.review.repositoryId,nativeNumber:review.review.prNumber,force:true}):await backend().action(api.providerJobs.rereview,{token,repositoryId:review.review.repositoryId,prNumber:review.review.prNumber});}
+ catch(error){await notify(`Couldn’t re-review: ${userMessage(error,"the pull request may be closed, rate-limited, or you lack write access")}`,"error");}
+ revalidatePath("/dashboard", "layout");if(id)redirect("/dashboard/pulls/"+id);
 }
 export async function createTeam(form:FormData) {
  const {token}=await current();await backend().mutation(api.scopes.createTeam,{token,organizationId:text(form,"organizationId") as Id<"organizations">,name:text(form,"name")});revalidatePath("/dashboard","layout");
@@ -732,7 +780,7 @@ export async function connectProvider(_previous:{error?:string},form:FormData):P
   else{const {Github}=await import("../../src/github");const c=z.object({appId:z.string(),privateKey:z.string(),installationId:z.number().int().positive()}).safeParse(config);if(!c.success)throw new Error("Enterprise credential requires appId, privateKey, and a positive installationId");await (await Github.installation(c.data.installationId,{appId:c.data.appId,privateKey:c.data.privateKey,base:instance+(new URL(instance).hostname.endsWith(".ghe.com")?"":"/api/v3")})).repositories();}
   await backend().mutation(api.providerConnections.save,{token,secret:process.env.SERVICE_SECRET??"",organizationId,kind,instance,...network,name:text(form,"name"),credentials:encryptCredential(credential,organizationId+":"+kind),webhookSecret:kind==="perforce"?"":encryptCredential(webhook,organizationId+":"+kind+":webhook")});
   revalidatePath("/dashboard","layout");return {};
- }catch(error){return {error:error instanceof Error?error.message:"Connection failed"};}
+ }catch(error){return {error:userMessage(error,"Connection failed")};}
 }
 export async function authorizeBitbucket(_previous:{error?:string;code?:string;id?:string;expiresAt?:number},form:FormData):Promise<{error?:string;code?:string;id?:string;expiresAt?:number}>{
  try{
@@ -744,7 +792,7 @@ export async function authorizeBitbucket(_previous:{error?:string;code?:string;i
  }catch{return {error:"Could not authorize installation. Check workspace admin access and Forge registration."};}
 }
 export async function revokeBitbucketAuthorization(form:FormData){
- const {token}=await current();await backend().mutation(api.providerInstalls.revoke,{token,id:text(form,"id") as Id<"providerInstallRequests">});revalidatePath("/dashboard/settings/providers");
+ const {token}=await current();await backend().mutation(api.providerInstalls.revoke,{token,id:text(form,"id") as Id<"providerInstallRequests">});revalidatePath("/dashboard/providers");
 }
 export async function selectProviderRepos(form:FormData) {
  const {token}=await current();await backend().action(api.providerJobs.select,{token,connectionId:text(form,"connectionId") as Id<"providerConnections">,externalIds:form.getAll("externalIds").map(String)});revalidatePath("/dashboard","layout");
@@ -766,38 +814,39 @@ export async function updateProviderNetwork(_state:{error?:string;saved?:boolean
  catch{return {error:"Network settings were not saved. Check workspace admin permission, and that every selected repository is reachable through this API URL, CA bundle and proxy."};}
 }
 export async function disconnectProvider(form:FormData) {
- const {token}=await current();await backend().mutation(api.providerConnections.disconnect,{token,id:text(form,"connectionId") as Id<"providerConnections">});revalidatePath("/dashboard","layout");
+ const {token}=await current();await backend().mutation(api.providerConnections.disconnect,{token,id:text(form,"connectionId") as Id<"providerConnections">});
+ await notify(`Disconnected ${text(form,"name")||"the provider"} successfully.`);revalidatePath("/dashboard","layout");
 }
 export async function configureLinear(form:FormData) {
  const {token}=await current(),id=text(form,"integrationId") as Id<"integrationConnections">;
  try {await backend().action(api.integrationJobs.configure,{token,id,teamIds:form.getAll("teamIds").map(String),projectIds:form.getAll("projectIds").map(String),repositoryIds:form.getAll("repositoryIds").map(String) as Id<"repositories">[]});}
- catch {redirect("/dashboard/memory/integrations?error=linear-scope&integration="+encodeURIComponent(id));}
- revalidatePath("/dashboard","layout");redirect("/dashboard/memory/integrations?saved=true&integration="+encodeURIComponent(id));
+ catch {redirect("/dashboard/integrations?error=linear-scope&integration="+encodeURIComponent(id));}
+ revalidatePath("/dashboard","layout");redirect("/dashboard/integrations?saved=true&integration="+encodeURIComponent(id));
 }
 export async function disconnectLinear(form:FormData) {
  const {token}=await current(),id=text(form,"integrationId") as Id<"integrationConnections">;
  try {await backend().mutation(api.integrations.disconnect,{token,id});}
- catch {redirect("/dashboard/memory/integrations?error=disconnect");}
- revalidatePath("/dashboard","layout");redirect("/dashboard/memory/integrations?saved=disconnected");
+ catch {redirect("/dashboard/integrations?error=disconnect");}
+ revalidatePath("/dashboard","layout");redirect("/dashboard/integrations?saved=disconnected");
 }
 export async function configureNotion(form:FormData) {
  const {token}=await current(),id=text(form,"integrationId") as Id<"integrationConnections">;
  try {await backend().action(api.notionJobs.configure,{token,id,repositoryIds:form.getAll("repositoryIds").map(String) as Id<"repositories">[]});}
- catch {redirect("/dashboard/memory/integrations?error=notion-scope&integration="+encodeURIComponent(id));}
- revalidatePath("/dashboard","layout");redirect("/dashboard/memory/integrations?saved=true&integration="+encodeURIComponent(id));
+ catch {redirect("/dashboard/integrations?error=notion-scope&integration="+encodeURIComponent(id));}
+ revalidatePath("/dashboard","layout");redirect("/dashboard/integrations?saved=true&integration="+encodeURIComponent(id));
 }
 export async function refreshLinear(form:FormData) {
  const {token}=await current(),id=text(form,"integrationId") as Id<"integrationConnections">;
  try {await backend().action(api.integrationJobs.refresh,{token,id});}
- catch {redirect("/dashboard/memory/integrations?error=linear-refresh&integration="+encodeURIComponent(id));}
- revalidatePath("/dashboard","layout");redirect("/dashboard/memory/integrations?saved=linear-refresh&integration="+encodeURIComponent(id));
+ catch {redirect("/dashboard/integrations?error=linear-refresh&integration="+encodeURIComponent(id));}
+ revalidatePath("/dashboard","layout");redirect("/dashboard/integrations?saved=linear-refresh&integration="+encodeURIComponent(id));
 }
 
 export async function configureAtlassian(form:FormData) {
  const {token}=await current(),id=text(form,"integrationId") as Id<"integrationConnections">;
  try {await backend().action(api.atlassianJobs.configure,{token,id,jiraProjectIds:form.getAll("jiraProjectIds").map(String),confluenceSpaceIds:form.getAll("confluenceSpaceIds").map(String),repositoryIds:form.getAll("repositoryIds").map(String) as Id<"repositories">[]});}
- catch {redirect("/dashboard/memory/integrations?error=atlassian-scope&integration="+encodeURIComponent(id));}
- revalidatePath("/dashboard","layout");redirect("/dashboard/memory/integrations?saved=true&integration="+encodeURIComponent(id));
+ catch {redirect("/dashboard/integrations?error=atlassian-scope&integration="+encodeURIComponent(id));}
+ revalidatePath("/dashboard","layout");redirect("/dashboard/integrations?saved=true&integration="+encodeURIComponent(id));
 }
 
 export async function activateBitbucket(_state:{error?:string},form:FormData):Promise<{error?:string}>{
@@ -817,32 +866,74 @@ export async function connectP4Identity(_state:{error?:string;saved?:boolean},fo
  try{
   const {token}=await current();
   await backend().action(api.p4IdentityJobs.connect,{token,repositoryId:text(form,"repositoryId") as Id<"repositories">,username:text(form,"username").trim(),ticket:text(form,"ticket").trim()});
-  revalidatePath("/dashboard/settings/agents");return {saved:true};
- }catch(error){return {error:error instanceof Error?error.message:"Could not link native identity"};}
+  revalidatePath("/dashboard/account/review");return {saved:true};
+ }catch(error){return {error:backendMessage(error,"Could not link native identity")};}
 }
-export async function revokeP4Identity(form:FormData){const {token}=await current();await backend().mutation(api.p4Identities.revoke,{token,identityId:text(form,"identityId") as Id<"p4Identities">});revalidatePath("/dashboard/settings/agents");}
+export async function revokeP4Identity(form:FormData){const {token}=await current();await backend().mutation(api.p4Identities.revoke,{token,identityId:text(form,"identityId") as Id<"p4Identities">});revalidatePath("/dashboard/account/review");}
 
 export async function retryP4Answer(form:FormData){const {token}=await current();await backend().mutation(api.p4Conversations.retry,{token,conversationId:text(form,"conversationId") as Id<"conversations">});revalidatePath("/dashboard/pulls");}
 
 export async function connectProviderIdentity(_state:{error?:string;saved?:boolean},form:FormData):Promise<{error?:string;saved?:boolean}>{
- try{const {token}=await current();await backend().action(api.providerIdentityJobs.connect,{token,repositoryId:text(form,"repositoryId") as Id<"repositories">,personalToken:text(form,"personalToken").trim()});revalidatePath("/dashboard/settings/agents");return {saved:true};}catch{return {error:"Could not verify your provider account. Check your token, profile permission and repository access."};}
+ try{const {token}=await current();await backend().action(api.providerIdentityJobs.connect,{token,repositoryId:text(form,"repositoryId") as Id<"repositories">,personalToken:text(form,"personalToken").trim()});revalidatePath("/dashboard/account/review");return {saved:true};}catch{return {error:"Could not verify your provider account. Check your token, profile permission and repository access."};}
 }
-export async function revokeProviderIdentity(form:FormData){const {token}=await current();await backend().mutation(api.providerIdentities.revoke,{token,id:text(form,"identityId") as Id<"providerIdentities">});revalidatePath("/dashboard/settings/agents");}
+export async function revokeProviderIdentity(form:FormData){const {token}=await current();await backend().mutation(api.providerIdentities.revoke,{token,id:text(form,"identityId") as Id<"providerIdentities">});revalidatePath("/dashboard/account/review");}
 
 export async function beginBitbucketIdentity(_state:{error?:string;code?:string;expiresAt?:number},form:FormData):Promise<{error?:string;code?:string;expiresAt?:number}>{
  try{const {token}=await current(),code=randomBytes(32).toString("hex"),result=await backend().mutation(api.bitbucketPersonal.begin,{token,repositoryId:text(form,"repositoryId") as Id<"repositories">,tokenHash:createHash("sha256").update(code).digest("hex")});return {code,expiresAt:result.expiresAt};}catch{return {error:"Could not authorize Bitbucket identity. Check your repository access and active installation."};}
 }
 
 export async function retryProviderEvent(form:FormData){
- const {token}=await current();await backend().mutation(api.providerConnections.retryEvent,{token,id:text(form,"eventId") as Id<"providerEvents">});revalidatePath("/dashboard/settings/providers");
+ const {token}=await current();await backend().mutation(api.providerConnections.retryEvent,{token,id:text(form,"eventId") as Id<"providerEvents">});revalidatePath("/dashboard/providers");
 }
 
 export async function syncPullCatalog(_state:{error?:string;saved?:boolean},form:FormData):Promise<{error?:string;saved?:boolean}>{
- try{const {token}=await current();await backend().mutation(api.pullCatalogs.sync,{token,repositoryId:text(form,"repositoryId") as Id<"repositories">});revalidatePath("/dashboard/pulls");return {saved:true};}catch(e){return {error:e instanceof Error?e.message:"Could not import pull requests"};}
+ try{const {token}=await current();await backend().mutation(api.pullCatalogs.sync,{token,repositoryId:text(form,"repositoryId") as Id<"repositories">});revalidatePath("/dashboard/pulls");return {saved:true};}catch(e){return {error:backendMessage(e,"Could not import pull requests")};}
 }
 
 export async function requestCatalogReview(_state:{error?:string},form:FormData):Promise<{error?:string}>{
  let id:Id<"reviews">|null=null;
  try{const {token}=await current();id=await backend().action(api.pullReviewJobs.request,{token,repositoryId:text(form,"repositoryId") as Id<"repositories">,prNumber:Number(text(form,"prNumber")),expectedRevision:text(form,"expectedRevision"),expectedBaseRevision:text(form,"expectedBaseRevision")});revalidatePath("/dashboard/pulls");}catch{return {error:"Could not start this review. Refresh the list and check repository access, indexing, and whether the change is still open."};}
  if(id)redirect("/dashboard/pulls/"+id);return {error:"Review could not be queued. Check repository access and current revision."};
+}
+
+// Bulk actions from the pull request list. Each row value is "repositoryId|number|reviewId".
+const bulkRows = (form: FormData) => form.getAll("pr").map(String).map((row) => { const [repositoryId, number, reviewId] = row.split("|"); return { repositoryId: repositoryId as Id<"repositories">, prNumber: Number(number), reviewId: (reviewId || undefined) as Id<"reviews"> | undefined }; });
+export async function bulkReview(_state: { error?: string; saved?: string }, form: FormData): Promise<{ error?: string; saved?: string }> {
+ const { token } = await current(), rows = bulkRows(form);
+ // Reviews are rate limited to 20 per minute per workspace (convex/reviews.ts), so never ask for more at once.
+ if (!rows.length || rows.length > 20) return { error: "Select between 1 and 20 pull requests to re-review." };
+ const results = await Promise.allSettled(rows.map((r) => backend().action(api.providerJobs.rereview, { token, repositoryId: r.repositoryId, prNumber: r.prNumber })));
+ revalidatePath("/dashboard/pulls");
+ const started = results.filter((r) => r.status === "fulfilled" && r.value).length;
+ return started === rows.length ? { saved: `Started ${started} ${started === 1 ? "review" : "reviews"}.` } : { error: `Started ${started} of ${rows.length} reviews. The rest are closed, changed, rate limited or not accessible.` };
+}
+export async function bulkFixPrompt(reviewIds: string[]): Promise<string> {
+ const { token } = await current();
+ const details = await Promise.all(reviewIds.slice(0, 20).map((reviewId) => backend().query(api.reviews.detail, { token, reviewId: reviewId as Id<"reviews"> })));
+ const repos = await backend().query(api.repositories.list, { token, organizationId: details[0]?.review.organizationId ?? ("" as Id<"organizations">) }).catch(() => []);
+ return details.filter((d) => d.findings.some((f) => f.canFix)).map((d) => fixPrompt(repos.find((r) => r._id === d.review.repositoryId)?.fullName ?? "repository", `PR #${d.review.prNumber}`, d.findings.filter((f) => f.canFix).map((f) => ({ ...findingSchema.parse(f), agent: f.agent, fingerprint: f.fingerprint, commitSha: f.commitSha })), d.review.runtimeEvidence)).join("\n\n---\n\n");
+}
+// Merge, review, close and other pull request actions, sent as the developer. Without a fresh GitHub
+// user token the action waits in a sealed cookie while GitHub re-authorizes (silent once authorized).
+export async function pullAction(_state: { error?: string; saved?: string }, form: FormData): Promise<{ error?: string; saved?: string }> {
+ const { token, user } = await current(), pullRequestId = text(form, "pullRequestId");
+ const parsed = pullActionSchema.safeParse({ action: text(form, "action"), method: form.get("method") ?? undefined, head: form.get("head") ?? undefined, body: form.get("body") ?? undefined, commentId: form.get("commentId") ?? undefined, threadId: form.get("threadId") ?? undefined });
+ if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid action" };
+ const credentials = await githubCredentials();
+ if (!credentials) {
+  (await cookies()).set(pullIntentCookie, await seal({ userId: user._id, pullRequestId, request: parsed.data }), { ...cookieOptions, maxAge: 600 });
+  redirect(`/api/auth/login?purpose=github-act&next=${encodeURIComponent("/api/pulls/act")}`);
+ }
+ try { const saved = await performPullAction(token, pullRequestId, credentials, parsed.data); revalidatePath("/dashboard/pulls", "layout"); return { saved }; }
+ catch (error) { return { error: actionError(error) }; }
+}
+export async function markFileReviewed(reviewId: string, path: string, reviewed: boolean) {
+ const { token } = await current();
+ await backend().mutation(api.fileReviews.mark, { token, reviewId: reviewId as Id<"reviews">, path, reviewed });
+}
+export async function generateTour(form: FormData) {
+ const { token } = await current(), reviewId = text(form, "reviewId") as Id<"reviews">;
+ let error = "";
+ try { await backend().action(api.tourJobs.generate, { token, reviewId }); } catch (e) { error = e instanceof Error ? e.message.replace(/^.*Uncaught Error: /s, "").split("\n")[0].slice(0, 300) : "Tour failed"; }
+ redirect(`/dashboard/pulls/${reviewId}?tab=code&view=tour${error ? "&tourError=" + encodeURIComponent(error) : ""}`);
 }

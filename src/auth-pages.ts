@@ -33,8 +33,11 @@ export function authMessage(query: { error?: string; email?: string; signedout?:
   if (query.error === "sso") return { tone: "alert", text: "Single sign-on isn’t set up for that email domain, or the sign-in couldn’t be verified. Ask your workspace admin." };
   if (query.error === "link") return { tone: "alert", text: "That sign-in link is invalid, expired or already used. Request a new one below." };
   if (query.error) return { tone: "alert", text: "Sign-in didn’t finish. Try again, or choose another sign-in method." };
-  if (query.email === "sent") return { tone: "status", text: "Check your inbox. The sign-in link expires in 15 minutes." };
+  // A request held back because one was sent a moment ago also shows "sent": the earlier email is on its way.
+  if (query.email === "sent") return { tone: "status", text: "Check your inbox. The sign-in link expires in 15 minutes; if you asked more than once, use the newest email." };
   if (query.email === "error") return { tone: "alert", text: "We couldn’t send a sign-in link. Check the address, or try again in a few minutes." };
+  if (query.email === "busy") return { tone: "alert", text: "Too many sign-in emails were requested. Try again later, or use another sign-in method." };
+  if (query.email === "challenge") return { tone: "alert", text: "We couldn’t verify this browser. Try again, or use another sign-in method." };
   if (query.reauth) return { tone: "status", text: "For your security, sign in again to continue." };
   if (query.signedout) return { tone: "status", text: "You’ve been signed out." };
   return null;

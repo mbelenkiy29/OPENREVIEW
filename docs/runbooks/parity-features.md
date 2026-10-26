@@ -85,7 +85,7 @@ Requires Checks: Read and write (Needs human #11).
 
 ## C3 Memory management
 
-1. In Memory → Learned preferences, edit a preference and set its scope to Workspace.
+1. In Custom Context → Learned preferences, edit a preference and set its scope to Workspace.
 2. Confirm:
    - [ ] It applies to a second repository.
    - [ ] The audit log has one event per change.

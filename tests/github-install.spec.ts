@@ -118,10 +118,10 @@ test("installs without state, from another user, for owner approval or without a
   const mismatch = await callback(new Request(callbackUrl("b".repeat(64))));
   expect(location(mismatch)).toMatch(/^\/dashboard\/onboarding\/connect\?error=github-install&message=Installation%20state%20mismatch/);
   // Another user's state.
-  holder.jar.set("openreview_install_state", seal({ state, organizationId, userId: "someone-else", returnTo: "/dashboard/settings/providers" }));
+  holder.jar.set("openreview_install_state", seal({ state, organizationId, userId: "someone-else", returnTo: "/dashboard/providers" }));
   const other = await callback(new Request(callbackUrl(state)));
-  expect(location(other)).toBe("/dashboard/settings/providers");
-  expect(JSON.parse(decodeURIComponent(holder.jar.get("openreview_toast") ?? ""))).toMatchObject({ tone: "error", text: expect.stringMatching(/another session/) });
+  expect(location(other)).toBe("/dashboard/providers");
+  expect(JSON.parse(holder.jar.get("openreview_toast") ?? "")).toMatchObject({ tone: "error", text: expect.stringMatching(/another session/) });
   // An organization owner must approve the install first.
   holder.jar.set("openreview_install_state", seal({ state, organizationId, userId: (await t.run((ctx) => ctx.db.query("users").first()))!._id, returnTo: "/dashboard/onboarding/connect" }));
   const request = await callback(new Request(`${base}/api/github/callback?setup_action=request&state=${state}`));
@@ -166,15 +166,17 @@ test("Link an existing installation uses the same verified path, and refuses ins
   expect(await t.run((ctx) => ctx.db.query("githubInstallations").collect())).toHaveLength(1);
   // An installation this GitHub user cannot see is refused.
   await expect(linkGithubInstallation(form(999))).rejects.toMatchObject({ url: `/dashboard/github-link?organization=${organizationId}&returnTo=%2Fdashboard%2Fonboarding%2Fconnect` });
-  expect(JSON.parse(decodeURIComponent(holder.jar.get("openreview_toast") ?? "")).text).toMatch(/not accessible/);
+  expect(JSON.parse(holder.jar.get("openreview_toast") ?? "").text).toMatch(/not accessible/);
   // Another workspace cannot take it over.
   const rival = await t.mutation(api.users.login, { secret: "install-service-secret", githubId: 33, login: "mallory", avatar: "" });
   holder.session = await new SignJWT({}).setProtectedHeader({ alg: "HS256" }).setSubject(rival).setIssuer("openreview").setAudience("openreview").setExpirationTime("1h").sign(new TextEncoder().encode(process.env.SESSION_SECRET));
   const rivalOrg = await t.mutation(api.users.createOrganization, { token: holder.session, name: "Rival" });
   const f = form(501); f.set("organizationId", rivalOrg);
   await expect(linkGithubInstallation(f)).rejects.toMatchObject({ url: expect.stringMatching(/^\/dashboard\/github-link/) });
-  expect(JSON.parse(decodeURIComponent(holder.jar.get("openreview_toast") ?? "")).text).toMatch(/already installed on acme for another OpenReview workspace/);
-  expect(await t.query(api.repositories.installationOwnership, { token: holder.session, organizationId: rivalOrg, installationIds: [501, 777] })).toEqual({ "501": "elsewhere", "777": "none" });
+  expect(JSON.parse(holder.jar.get("openreview_toast") ?? "").text).toMatch(/already installed on acme for another OpenReview workspace/);
+  expect(await t.query(api.repositories.installationOwnership, { token: holder.session, secret: process.env.SERVICE_SECRET!, organizationId: rivalOrg, installationIds: [501, 777] })).toEqual({ "501": "elsewhere", "777": "none" });
+  // Without the web server's secret a workspace owner cannot probe installation ids directly.
+  await expect(t.query(api.repositories.installationOwnership, { token: holder.session, secret: "guess", organizationId: rivalOrg, installationIds: [501] })).rejects.toThrow("Unauthorized");
   // Without a fresh GitHub token the action re-authorizes first.
   holder.jar.delete("openreview_github_setup");
   await expect(linkGithubInstallation(f)).rejects.toMatchObject({ url: expect.stringMatching(/^\/api\/auth\/login\?purpose=github-install&next=%2Fdashboard%2Fgithub-link/) });

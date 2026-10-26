@@ -13,4 +13,4 @@ Evidence (ignored local acceptance artifacts):
 - output/setup/github-catalog-hosted-desktop.png
 - output/setup/github-catalog-hosted-filter.png
 
-Production remains https://openreview-flame-two.vercel.app, Convex tidy-ocelot-457 and READY frontend dpl_H36rc5GUTYskJdSDyvRiwt85C8Uk. No application code, schema, environment or deployment changed. Last full software regression remains 299 tests, lint, typecheck and build passing; it was not repeated for documentation-only changes.
+Production remains `<vercel-url>`, Convex `<prod-deployment>` and READY frontend `<deployment-id>`. No application code, schema, environment or deployment changed. Last full software regression remains 299 tests, lint, typecheck and build passing; it was not repeated for documentation-only changes.

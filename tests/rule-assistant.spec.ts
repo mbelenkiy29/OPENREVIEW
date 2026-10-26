@@ -115,3 +115,32 @@ test("rule assistant: admins request, review and approve or reject suggestions; 
   const usage = await t.run((ctx) => ctx.db.query("usageEvents").collect());
   expect(usage.filter((u) => u.kind === "rule-assistant")).toHaveLength(4);
 });
+
+test("suggest runs read a bounded slice of a busy workspace's findings, and a context read that fails marks the run failed", async () => {
+  process.env.SERVICE_SECRET = "assistant-service";
+  process.env.SESSION_SECRET = "assistant-session-secret-at-least-32-characters";
+  const t = convexTest({ schema, modules, transactionLimits: { documentsRead: 16384, bytesRead: 8 * 1024 * 1024 } });
+  const tasks: string[] = [];
+  vi.spyOn(HttpModel.prototype, "generate").mockImplementation(async (request: ModelRequest) => { tasks.push(request.task); throw new Error("no answer"); });
+  const id = await t.mutation(api.users.login, { secret: "assistant-service", githubId: 9, login: "u9", avatar: "" });
+  const token = await new SignJWT({}).setSubject(id).setProtectedHeader({ alg: "HS256" }).setIssuer("openreview").setAudience("openreview").setExpirationTime("1h").sign(new TextEncoder().encode(process.env.SESSION_SECRET));
+  const organizationId = await t.mutation(api.users.createOrganization, { token, name: "Busy" });
+  const { repositoryId, reviewId } = await t.run(async (ctx) => {
+    const repositoryId = await ctx.db.insert("repositories", { organizationId, fullName: "busy/app", defaultBranch: "main", enabled: true, indexStatus: "ready", createdAt: 1 });
+    return { repositoryId, reviewId: await ctx.db.insert("reviews", { organizationId, repositoryId, prNumber: 1, headSha: "a".repeat(40), status: "completed", mode: "standard", attempts: 1, createdAt: 1, updatedAt: 1 }) };
+  });
+  // ~10KB per finding: the old 2,000-row read passed 8MB and threw before the try, leaving the run pending.
+  await t.run(async (ctx) => { for (let i = 0; i < 1000; i++) await ctx.db.insert("findings", { organizationId, repositoryId, reviewId, prNumber: 1 + (i % 5), title: "Preserve integer cents in totals", description: "d".repeat(10000), severity: "high", confidence: 1, category: "correctness", filePath: "a.ts", startLine: 1, endLine: 1, commitSha: "a".repeat(40), evidence: [], impact: "i", suggestedFix: "f", agent: "correctness", symbol: "s", fingerprint: "fp" + i, status: "resolved", createdAt: i, updatedAt: i }); });
+  const run = async () => { vi.useFakeTimers(); await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync()); vi.useRealTimers(); };
+  const latest = async () => (await t.query(api.ruleAssistant.page, { token, organizationId })).runs[0];
+  await t.mutation(api.ruleAssistant.request, { token, organizationId, kind: "suggest" });
+  await run();
+  expect(tasks).toEqual(["rules:suggest"]);
+  expect([(await latest()).status, (await latest()).error]).toEqual(["failed", "The model did not return a usable answer; nothing was suggested."]);
+  // Conventions too large to read: the run fails instead of staying pending and holding the pending cap.
+  await t.run(async (ctx) => { for (let i = 0; i < 500; i++) await ctx.db.insert("learnedRules", { organizationId, repositoryId, text: "x".repeat(20000), category: "style", status: "approved", frequency: 1, evidence: [], createdAt: 1, updatedAt: 1 }); });
+  await t.mutation(api.ruleAssistant.request, { token, organizationId, kind: "suggest" });
+  await run();
+  expect([(await latest()).status, (await latest()).error]).toEqual(["failed", "The workspace history could not be read; nothing was suggested."]);
+  expect(tasks).toHaveLength(1);
+});

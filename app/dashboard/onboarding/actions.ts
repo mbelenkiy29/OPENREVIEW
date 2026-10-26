@@ -63,18 +63,19 @@ export async function advanceSetup(_state: Result, form: FormData): Promise<Resu
   redirect(`/dashboard/onboarding/${next}`);
 }
 
-// The plan step's secondary choice: keep the trial and subscribe later in Settings → Billing.
-export async function continueOnTrial(form: FormData) {
+// The plan step's Free choice: no card; upgrade later in Organization Settings → Billing & Usage.
+export async function continueOnFree(form: FormData) {
   const { token } = await current();
+  await backend().mutation(api.billing.chooseFreePlan, { token, organizationId: organizationOf(form) });
   const next = await backend().mutation(api.onboarding.advance, { token, organizationId: organizationOf(form), step: "plan" });
   redirect(`/dashboard/onboarding/${next}`);
 }
 
-// Stripe Checkout from setup: collects a card for the Starter plan; the remaining trial carries over.
+// Stripe Checkout from setup: collects a card for Starter or Pro; the remaining trial carries over.
 export async function checkoutFromSetup(form: FormData) {
   const { token } = await current();
   let url: string;
-  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: organizationOf(form), returnTo: "onboarding" }); }
+  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: organizationOf(form), returnTo: "onboarding", plan: z.enum(["starter", "pro"]).catch("pro").parse(form.get("plan")) }); }
   catch { redirect("/dashboard/onboarding/plan?billing=error"); }
   redirect(url);
 }
@@ -91,8 +92,16 @@ export async function inviteFromSetup(_state: Result, form: FormData): Promise<R
 }
 
 export async function finishSetup(form: FormData) {
-  const { token } = await current();
-  await backend().mutation(api.onboarding.complete, { token, organizationId: organizationOf(form), skipped: form.get("skipped") === "true" });
+  // Exit setup is gone; a page opened before that can still post it, and it leaves setup unfinished.
+  if (form.get("skipped") === "true") redirect("/dashboard/analytics");
+  const { token } = await current(), organizationId = organizationOf(form);
+  try { await backend().mutation(api.onboarding.complete, { token, organizationId }); }
+  catch (error) {
+    // complete refuses until a plan is chosen; production redacts its message, so check the plan itself.
+    const billing = await backend().query(api.billing.status, { token, organizationId });
+    if (billing.enabled && billing.planMissing) redirect("/dashboard/onboarding/plan");
+    throw error;
+  }
   revalidatePath("/dashboard", "layout");
   redirect("/dashboard/analytics");
 }

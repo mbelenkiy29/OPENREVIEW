@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     connection = await backend().action(api.notionJobs.connect, {token:identity.token, secret:process.env.SERVICE_SECRET??"", organizationId:saved.organizationId as Id<"organizations">, code, redirectUri:origin()+"/api/integrations/notion/callback", jti:"notion:"+saved.state, expiresAt:saved.expiresAt});
   } catch {
     // OAuth responses may contain credentials or private provider data; never echo them.
-    return NextResponse.redirect(origin()+"/dashboard/memory/integrations?error=notion-connect");
+    return NextResponse.redirect(origin()+"/dashboard/integrations?error=notion-connect");
   }
-  return NextResponse.redirect(origin()+"/dashboard/memory/integrations?integration="+connection);
+  return NextResponse.redirect(origin()+"/dashboard/integrations?integration="+connection);
 }

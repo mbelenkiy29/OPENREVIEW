@@ -39,7 +39,7 @@ test("a review of an unindexed repository starts indexing once and keeps a singl
   expect((await t.run((ctx) => ctx.db.get(repo._id)))!.indexScheduledId).toEqual(queued.indexScheduledId);
   // The recovery sweep skips a review whose check is pending, even when it looks stale.
   await t.run((ctx) => ctx.db.patch(reviewId, { updatedAt: Date.now() - 20 * 60000 }));
-  await t.mutation(internal.recovery.sweep, {});
+  await t.mutation(internal.recovery.sweepReviews, {});
   expect(await pendingReviewChecks()).toBe(1);
   expect((await t.run((ctx) => ctx.db.get(reviewId)))!.status).toBe("queued");
 });

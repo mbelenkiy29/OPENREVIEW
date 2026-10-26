@@ -6,6 +6,7 @@ import schema from "../convex/schema";
 import { api, internal } from "../convex/_generated/api";
 import { Github } from "../src/github";
 import { HttpModel } from "../src/engine/model";
+import { encryptCredential } from "../src/credentials";
 import { defaults } from "../src/review-settings";
 import type { ModelRequest } from "../src/engine/types";
 
@@ -44,11 +45,12 @@ test("agent-authored pull requests are reviewed with the configured model and th
   vi.useFakeTimers();
   await t.mutation(api.repositories.configure, { token, repositoryId: repo._id, enabled: true, settings: { ...defaults, aiAuthoredModel: "claude-sonnet-5-5", summarySections: ["overview", "findings"] } });
   await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
-  for (const n of [1, 2]) {
+  const open = async (n: number) => {
     const payloadStorageId = await t.run((ctx) => ctx.storage.store(new Blob([JSON.stringify({ action: "opened", installation: { id: -300 }, repository: { id: -300 }, pull_request: { number: n, draft: false, state: "open", head: { sha: heads[n].sha, ref: heads[n].ref }, base: { ref: "main" }, user: { login: "author" } } })])));
     await t.mutation(internal.webhooks.receive, { deliveryId: "ai-" + n, event: "pull_request", payloadStorageId });
     await t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
-  }
+  };
+  for (const n of [1, 2]) await open(n);
   const reviewCalls = (head: string) => served.filter((s) => s.task.startsWith("review:") && s.head === head);
   expect(reviewCalls(heads[1].sha).length).toBeGreaterThan(0);
   expect(new Set(reviewCalls(heads[1].sha).map((s) => s.model))).toEqual(new Set(["claude-sonnet-5-5"]));
@@ -62,4 +64,12 @@ test("agent-authored pull requests are reviewed with the configured model and th
   // K2: the job records the tier it used and why (here: the configured tier, no request, no cap).
   expect(agent.modeDecision).toEqual({ mode: "standard", source: "settings", capped: false, requested: "standard" });
   expect((await t.query(api.reviews.detail, { token, reviewId: agent._id })).review.aiAuthored?.agent).toBe("Claude Code");
+  // With the workspace's own model key, its model runs whatever the routing asked for, and that is the model recorded.
+  process.env.CREDENTIAL_ENCRYPTION_KEY = "ai-credential-key-at-least-32-characters";
+  await t.run((ctx) => ctx.db.insert("modelKeys", { organizationId, provider: "anthropic", credentials: encryptCredential("sk-ant-fixture", `${organizationId}:model`), model: "claude-opus-5-5", updatedBy: userId, updatedAt: Date.now() }));
+  heads[3] = { ...heads[1], sha: "d".repeat(40), ref: "feature/totals-3" };
+  await open(3);
+  expect(new Set(reviewCalls(heads[3].sha).map((s) => s.model))).toEqual(new Set(["claude-opus-5-5"]));
+  expect((await t.run((ctx) => ctx.db.query("reviews").collect())).find((r) => r.prNumber === 3)?.aiAuthored?.model).toBe("claude-opus-5-5");
+  delete process.env.CREDENTIAL_ENCRYPTION_KEY;
 });
