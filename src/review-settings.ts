@@ -24,7 +24,8 @@ export const defaults = {
   ],
   model: "",
   instructions: "",
-  rereview: true,
+  // New pushes are not re-reviewed unless enabled (matches Greptile's default of reviewing when a PR opens).
+  rereview: false,
   mode: "standard",
   // "agentic" uses the tool-calling investigator and "hypotheses" plans bug hypotheses investigated in
   // parallel; the default stays on the fixed pipeline until an approved live comparison says otherwise.
@@ -33,8 +34,9 @@ export const defaults = {
   checkFailureSeverity: "off",
   // Triggers and filters (GitHub webhooks): labels that start a review, excluded author globs,
   // size limits for automatic reviews (0 = none) and a strictness preset (0 = custom thresholds).
+  // Dependency bots are excluded by default; an explicit @openreview request still reviews their PRs.
   triggerLabels: [] as string[],
-  excludedAuthors: [] as string[],
+  excludedAuthors: ["dependabot[bot]", "renovate[bot]"] as string[],
   maxFiles: 0,
   maxChangedLines: 0,
   strictness: 0,
@@ -64,10 +66,15 @@ export const defaults = {
   summaryPlacement: "description",
   // GitHub check run: fail when the confidence score is below this (1–5; 0 = off).
   checkMinimumScore: 0,
+  // Leave out the footer (review number, re-run command and any feature tip).
+  hideFooter: false,
+  // GitHub disclosure layout per summary section ("plain", "open" or "collapsed"); unset sections keep the default.
+  sectionLayout: {} as Record<string, string>,
 };
 /** Defaults for this deployment: the hosted cloud (BILLING_ENABLED=true) also shows feature tips. */
 export const deploymentDefaults=(env:Record<string,string|undefined>=process.env)=>env.BILLING_ENABLED==="true"?{...defaults,summarySections:[...defaultSummarySections,"tips"]}:defaults;
-type ScopeReviewSettings = Omit<typeof defaults,"targetBranches"|"ignoredBranches"|"ignoredPaths"|"summarySections"|"triggerLabels"|"excludedAuthors"|"lockedKeys"> & {
+type ScopeReviewSettings = Omit<typeof defaults,"targetBranches"|"ignoredBranches"|"ignoredPaths"|"summarySections"|"triggerLabels"|"excludedAuthors"|"lockedKeys"|"sectionLayout"> & {
+  sectionLayout?:Record<string,string>;
   targetBranches:string[]; ignoredBranches:string[]; ignoredPaths:string[]; summarySections?:string[]; triggerLabels:string[]; excludedAuthors:string[]; lockedKeys:string[];
 };
 /** Only explicitly selected keys participate; dormant saved values never mask a parent. */
@@ -81,7 +88,7 @@ export function scopeDefaults(scopes:readonly {teamId?:string;settings:Partial<S
 export const reviewEngines=["pipeline","agentic","hypotheses"] as const;
 export const validReviewEngine=(value:string|undefined)=>value===undefined||(reviewEngines as readonly string[]).includes(value);
 // Optional trigger/limit settings stay valid when absent (older saved settings).
-export const lockableKeys=["mode","minimumConfidence","severityThreshold","maxComments","categories","ignoredPaths","instructions","commentStyle","summarySections","strictness","reviewEngine"] as const;
+export const lockableKeys=["mode","minimumConfidence","severityThreshold","maxComments","categories","ignoredPaths","instructions","commentStyle","summarySections","strictness","reviewEngine","hideFooter","sectionLayout"] as const;
 export const validTriggerSettings=(s:{triggerLabels?:string[];excludedAuthors?:string[];maxFiles?:number;maxChangedLines?:number;strictness?:number;lockedKeys?:string[];agentTurns?:number;agentToolCalls?:number;hypothesisTurns?:number;hypothesisToolCalls?:number})=>
  [s.agentTurns??0,s.agentToolCalls??0,s.hypothesisTurns??0,s.hypothesisToolCalls??0].every(n=>Number.isInteger(n)&&n>=0&&n<=1000)&&
  (s.lockedKeys??[]).every(k=>(lockableKeys as readonly string[]).includes(k))&&
@@ -98,7 +105,12 @@ export const checkFailureSeverities=["off","critical","high","medium","low"] as 
 export const validCheckFailureSeverity=(value:string|undefined)=>value===undefined||(checkFailureSeverities as readonly string[]).includes(value);
 export const summaryPlacements=["description","comment"] as const;
 // Publication settings are optional (older saved settings have neither).
-export const validPublicationSettings=(s:{summaryPlacement?:string;checkMinimumScore?:number})=>(s.summaryPlacement===undefined||(summaryPlacements as readonly string[]).includes(s.summaryPlacement))&&(s.checkMinimumScore===undefined||Number.isInteger(s.checkMinimumScore)&&s.checkMinimumScore>=0&&s.checkMinimumScore<=5);
+export const sectionLayouts=["plain","open","collapsed"] as const;
+// The score's reason moves under the verdict and tips are a footer line, so neither has a layout.
+export const layoutSections=summarySections.filter(s=>s!=="score"&&s!=="tips");
+export const validSectionLayout=(value:Record<string,string>|undefined)=>value===undefined||Object.entries(value).every(([k,v])=>(layoutSections as readonly string[]).includes(k)&&(sectionLayouts as readonly string[]).includes(v));
+export const sectionLayoutFromForm=(form:FormData)=>Object.fromEntries(layoutSections.flatMap(s=>{const v=String(form.get("layout:"+s)??"");return v?[[s,v]]:[];}));
+export const validPublicationSettings=(s:{summaryPlacement?:string;checkMinimumScore?:number;sectionLayout?:Record<string,string>})=>validSectionLayout(s.sectionLayout)&&(s.summaryPlacement===undefined||(summaryPlacements as readonly string[]).includes(s.summaryPlacement))&&(s.checkMinimumScore===undefined||Number.isInteger(s.checkMinimumScore)&&s.checkMinimumScore>=0&&s.checkMinimumScore<=5);
 // generatedTests: opt-in reproduction tests for verified findings, run with testCommand ("{test}" is the
 // generated file's path) in the same approved image and sandbox.
 export const runtimeDefaults={enabled:false,image:"",command:"",timeout:120,requiredForApproval:false,generatedTests:false,testCommand:""};

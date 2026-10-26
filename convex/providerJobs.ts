@@ -222,7 +222,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
       await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
       const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
       await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:number});
-      if(pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(payload.eventType==="avi:bitbucket:created:pullrequest"||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches)(pr.base.ref))&&!picomatch(settings.ignoredBranches)(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
+      if(pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(payload.eventType==="avi:bitbucket:created:pullrequest"||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches,{nocase:true})(pr.base.ref))&&!picomatch(settings.ignoredBranches,{nocase:true})(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
      }
      }
     }
@@ -269,7 +269,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
      await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
      const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
      // Updates also fire for votes and descriptions; enqueue de-duplicates an already-reviewed head.
-     if(pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(payload.eventType==="git.pullrequest.created"||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches)(pr.base.ref))&&!picomatch(settings.ignoredBranches)(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
+     if(pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(payload.eventType==="git.pullrequest.created"||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches,{nocase:true})(pr.base.ref))&&!picomatch(settings.ignoredBranches,{nocase:true})(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
     }
    }
   }else if(c.kind==="github-enterprise"){
@@ -286,7 +286,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
      await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
      await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
      const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
-     if(["opened","synchronize","reopened","ready_for_review"].includes(payload.action??"")&&pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(payload.action!=="synchronize"||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches)(pr.base.ref))&&!picomatch(settings.ignoredBranches)(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
+     if(["opened","synchronize","reopened","ready_for_review"].includes(payload.action??"")&&pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(payload.action!=="synchronize"||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches,{nocase:true})(pr.base.ref))&&!picomatch(settings.ignoredBranches,{nocase:true})(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
     }
     const comment=payload.comment??(event.eventType==="pull_request_review"&&payload.review?.body?{id:-payload.review.id,body:payload.review.body,user:payload.review.user,in_reply_to_id:undefined}:undefined);
     if(number&&["issue_comment","pull_request_review_comment","pull_request_review"].includes(event.eventType??"")&&["created","submitted"].includes(payload.action??"")&&comment?.user.type==="User"&&/@openreview\b/i.test(comment.body)){
@@ -312,7 +312,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
      await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
      await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
      const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
-     if(["opened","reopened","synchronized"].includes(payload.action??"")&&pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(payload.action!=="synchronized"||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches)(pr.base.ref))&&!picomatch(settings.ignoredBranches)(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
+     if(["opened","reopened","synchronized"].includes(payload.action??"")&&pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(payload.action!=="synchronized"||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches,{nocase:true})(pr.base.ref))&&!picomatch(settings.ignoredBranches,{nocase:true})(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
     }
     const timelineComment=["issue_comment","pull_request_comment"].includes(event.eventType??"")&&payload.action==="created"&&payload.is_pull===true&&payload.issue&&payload.pull_request?.number===payload.issue.number&&payload.comment&&payload.sender?.login===payload.comment.user.login&&/@openreview\b/i.test(payload.comment.body);
     const reviewType=payload.review?.type;
@@ -362,7 +362,7 @@ export const event=internalAction({args:{id:v.id("providerEvents")},handler:asyn
     await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,revisionKey:pr.revisionKey,observedAt});
     await ctx.runMutation(internal.webhooks.lifecycle,{repositoryId:repo._id,prNumber:pr.number,action:pr.state==="open"?"updated":"closed",state:pr.state,observedAt});
     const {settings}=await ctx.runQuery(internal.repositories.data,{repositoryId:repo._id});
-    if(["open","reopen","update"].includes(attributes.action)&&pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(!attributes.oldrev||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches)(pr.base.ref))&&!picomatch(settings.ignoredBranches)(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:pr.number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
+    if(["open","reopen","update"].includes(attributes.action)&&pr.state==="open"&&settings.automatic&&(!pr.draft||settings.drafts)&&(!attributes.oldrev||settings.rereview)&&(!settings.targetBranches.length||picomatch(settings.targetBranches,{nocase:true})(pr.base.ref))&&!picomatch(settings.ignoredBranches,{nocase:true})(pr.head.ref))await ctx.runMutation(internal.reviews.enqueue,{repositoryId:repo._id,prNumber:pr.number,headSha:pr.head.sha,revisionKey:pr.revisionKey});
    }
   }
   }

@@ -144,7 +144,7 @@ export class Gitea extends Github {
  }
  override async pullRequest(repo:string,number:number){
   const prefix="/repos/"+repo;
-  const pr=await this.request(prefix+"/pulls/"+number,z.object({number:z.number(),title:z.string(),body:z.string().nullable(),draft:z.boolean().default(false),state:z.string(),html_url:z.string(),user:z.object({id:z.number().int().positive().optional(),login:z.string()}),head:z.object({sha:z.string(),ref:z.string()}),base:z.object({sha:z.string(),ref:z.string()}),changed_files:z.number()}));
+  const pr=await this.request(prefix+"/pulls/"+number,z.object({number:z.number(),title:z.string(),body:z.string().nullable(),draft:z.boolean().default(false),state:z.string(),html_url:z.string(),user:z.object({id:z.number().int().positive().optional(),login:z.string()}),head:z.object({sha:z.string(),ref:z.string()}),base:z.object({sha:z.string(),ref:z.string()}),changed_files:z.number(),labels:z.array(z.object({name:z.string()})).nullish()}));
   const [patch,reviews,comments,commits,statuses]=await Promise.all([
    this.request(prefix+"/pulls/"+number+".diff",z.string()),
    this.paginate(prefix+"/pulls/"+number+"/reviews",z.object({id:z.number(),body:z.string().nullable(),commit_id:z.string(),state:z.string()})),
@@ -153,7 +153,8 @@ export class Gitea extends Github {
    this.latestStatuses(repo,pr.head.sha)
   ]);
   const diff=parseDiff(patch);if(diff.length!==pr.changed_files)throw new Error("Gitea diff coverage incomplete; binary/unsupported paths require a smaller review");
-  return {...pr,...(pr.user.id?{authorExternalId:String(pr.user.id)}:{}),draft:pr.draft??false,diff,reviews,comments:comments.map(c=>({...c,path:"",line:null})),commits,checks:statuses.map(s=>({name:s.context,status:s.status==="pending"?"in_progress":"completed",conclusion:s.status}))};
+  const {labels,...fields}=pr;
+  return {...fields,...(labels?.length?{labels:labels.map(l=>l.name)}:{}),...(pr.user.id?{authorExternalId:String(pr.user.id)}:{}),draft:pr.draft??false,diff,reviews,comments:comments.map(c=>({...c,path:"",line:null})),commits,checks:statuses.map(s=>({name:s.context,status:s.status==="pending"?"in_progress":"completed",conclusion:s.status}))};
  }
  override async publish(repo:string,number:number,sha:string,summary:string,findings:Finding[],marker:string,style="detailed",_revisionKey?:string,unresolvedCount=findings.length,options:import("./github").PublishOptions={}){
   const prefix="/repos/"+repo+"/pulls/"+number;

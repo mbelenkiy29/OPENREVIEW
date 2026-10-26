@@ -19,7 +19,7 @@ function escapeDisclosure(body: string) {
   }).join("\n");
 }
 
-export function disclosureLayout(summary: string) {
+export function disclosureLayout(summary: string, layout: Record<string, string> = {}) {
   const tail = summary.match(footer)?.[0] ?? "";
   const [verdict, ...chunks] = summary.slice(0, summary.length - tail.length).split(/\n\n(?=### )/);
   let head = verdict;
@@ -35,11 +35,13 @@ export function disclosureLayout(summary: string) {
       else blocks.push(chunk);
       continue;
     }
-    const widget = `<details${open.has(label) ? " open" : ""}><summary><strong>${label}</strong></summary>\n\n${escapeDisclosure(body)}\n\n</details>`;
-    if (open.has(label)) shown.push(widget);
+    const key = (Object.keys(summaryLabels) as (keyof typeof summaryLabels)[]).find((k) => summaryLabels[k] === label);
+    const state = (key && layout[key]) || (open.has(label) ? "open" : collapsed.has(label) ? "collapsed" : "plain");
+    if (state === "plain") { blocks.push(chunk); continue; }
+    const widget = `<details${state === "open" ? " open" : ""}><summary><strong>${label}</strong></summary>\n\n${escapeDisclosure(body)}\n\n</details>`;
+    if (state === "open") shown.push(widget);
     else if (label === summaryLabels.agentPrompt) folded.unshift(widget);
-    else if (collapsed.has(label)) folded.push(widget);
-    else blocks.push(chunk);
+    else folded.push(widget);
   }
   return [head, ...blocks, ...shown, ...folded].join("\n\n") + tail;
 }

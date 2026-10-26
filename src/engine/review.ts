@@ -125,6 +125,11 @@ export function groundedOutside(finding: Candidate, input: ReviewInput): boolean
     return false;
   });
 }
+// Rule globs: a leading "!" excludes paths (a nested folder's disabledRules adds these).
+export function ruleApplies(globs: string[], path: string) {
+  const include = globs.filter((g) => !g.startsWith("!")), exclude = globs.filter((g) => g.startsWith("!")).map((g) => g.slice(1));
+  return (!include.length || picomatch(include)(path)) && !(exclude.length && picomatch(exclude)(path));
+}
 export async function reviewChange(
   input: ReviewInput,
   model: ModelProvider,
@@ -182,7 +187,7 @@ export async function reviewChange(
   const rules = input.rules.filter(
     (r) =>
       r.enabled &&
-      (!r.globs.length || diff.some((f) => picomatch(r.globs)(f.path))),
+      (!r.globs.length || diff.some((f) => ruleApplies(r.globs, f.path))),
   );
   const buildPayload = () => ({
     classification: classifyChanges(diff),

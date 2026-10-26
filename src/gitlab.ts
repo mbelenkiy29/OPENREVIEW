@@ -10,7 +10,7 @@ import { scmFetch, type ScmNetwork, type TransportDeps } from "./scm-transport";
 type ExternalId = string | number;
 type GithubChange = Awaited<ReturnType<Github["pullRequest"]>>;
 type WithId<T> = Omit<T,"id"> & {id:ExternalId};
-export type ScmChange = Omit<GithubChange,"comments"|"reviews"> & {revisionKey?:string;authorExternalId?:string;comments:WithId<GithubChange["comments"][number]>[];reviews:WithId<GithubChange["reviews"][number]>[]};
+export type ScmChange = Omit<GithubChange,"comments"|"reviews"|"labels"> & {labels?:string[];revisionKey?:string;authorExternalId?:string;comments:WithId<GithubChange["comments"][number]>[];reviews:WithId<GithubChange["reviews"][number]>[]};
 type GithubApprovalSnapshot=Awaited<ReturnType<Github["approvalSnapshot"]>>;
 export type ScmApprovalSnapshot = Omit<GithubApprovalSnapshot, "pr"|"reviews"> & {pr:ScmChange;reviews:WithId<GithubApprovalSnapshot["reviews"][number]>[]};
 export type Scm = Pick<Github,"tree"|"blob"|"branches"|"sourceUrl"> & {
@@ -36,11 +36,11 @@ export type Scm = Pick<Github,"tree"|"blob"|"branches"|"sourceUrl"> & {
   // Azure DevOps pull request statuses (other providers use check runs).
   reportStatus?(repository:string,number:number,state:"pending"|"succeeded"|"failed"|"notApplicable"|"error",description:string,targetUrl?:string):Promise<void>;
   // GitHub comment reactions: 👀 when a request is picked up, 👍 when it is done or acknowledged.
-  react?(repository:string,commentId:number,inline:boolean,content:"eyes"|"+1"):Promise<void>;
+  react?(repository:string,commentId:number,inline:boolean,content:"eyes"|"+1"|"confused"):Promise<void>;
   completeCheckRun?(repository:string,id:number,result:{conclusion:"success"|"failure"|"neutral"|"cancelled";title:string;summary:string;detailsUrl?:string}):Promise<void>;
 };
 const note=z.object({id:z.number(),body:z.string(),author:z.object({username:z.string()}),position:z.object({new_path:z.string(),new_line:z.number().nullable(),head_sha:z.string().optional()}).nullish()});
-const prSchema=z.object({iid:z.number(),title:z.string(),description:z.string().nullable(),draft:z.boolean(),state:z.string(),web_url:z.string(),author:z.object({id:z.number().int().positive().optional(),username:z.string()}),source_branch:z.string(),target_branch:z.string(),diff_refs:z.object({base_sha:z.string(),head_sha:z.string(),start_sha:z.string()})});
+const prSchema=z.object({iid:z.number(),title:z.string(),description:z.string().nullable(),draft:z.boolean(),state:z.string(),web_url:z.string(),author:z.object({id:z.number().int().positive().optional(),username:z.string()}),source_branch:z.string(),target_branch:z.string(),diff_refs:z.object({base_sha:z.string(),head_sha:z.string(),start_sha:z.string()}),labels:z.array(z.string()).optional()});
 const approvalUser=z.object({id:z.number().int().positive(),username:z.string().min(1)});
 const approvalState=z.object({approved_by:z.array(z.object({user:approvalUser,approved_at:z.string().datetime({offset:true}).optional()})),user_can_approve:z.boolean().optional()});
 const approvalNote=z.object({id:z.number().int().positive(),body:z.string(),author:approvalUser,system:z.boolean(),noteable_iid:z.number().int().positive(),noteable_type:z.literal("MergeRequest")});
@@ -197,7 +197,7 @@ export class Gitlab implements Scm {
   if(files.some(f=>f.too_large||f.collapsed))throw new Error("GitLab omitted diffs; complete review unavailable");
   const latest=await this.request(prefix,prSchema);
   if(latest.state!==pr.state||latest.diff_refs.head_sha!==pr.diff_refs.head_sha||latest.diff_refs.base_sha!==pr.diff_refs.base_sha||latest.diff_refs.start_sha!==pr.diff_refs.start_sha)throw new Error("GitLab revision changed during ingestion");
-  return {number:pr.iid,title:pr.title,body:pr.description,draft:pr.draft,state:pr.state==="opened"?"open":"closed",html_url:pr.web_url,user:{login:pr.author.username},...(pr.author.id?{authorExternalId:String(pr.author.id)}:{}),head:{sha:pr.diff_refs.head_sha,ref:pr.source_branch},base:{sha:pr.diff_refs.base_sha,ref:pr.target_branch},revisionKey:pr.diff_refs.base_sha+":"+pr.diff_refs.start_sha,diff:files.map(f=>({path:f.new_path,previousPath:f.renamed_file?f.old_path:undefined,status:f.deleted_file?"removed":f.new_file?"added":f.renamed_file?"renamed":"modified",patch:f.diff})),comments:notes.map(n=>({id:n.id,body:n.body,path:n.position?.new_path??"",line:n.position?.new_line??null,user:{login:n.author.username}})),reviews:[],commits:commits.map(c=>({sha:c.id})),checks:pipelines.filter(p=>p.sha===pr.diff_refs.head_sha).map(p=>({name:"GitLab pipeline #"+p.id,status:["success","failed","canceled","skipped"].includes(p.status)?"completed":"in_progress",conclusion:p.status==="success"?"success":p.status}))};
+  return {number:pr.iid,title:pr.title,body:pr.description,...(pr.labels?.length?{labels:pr.labels}:{}),draft:pr.draft,state:pr.state==="opened"?"open":"closed",html_url:pr.web_url,user:{login:pr.author.username},...(pr.author.id?{authorExternalId:String(pr.author.id)}:{}),head:{sha:pr.diff_refs.head_sha,ref:pr.source_branch},base:{sha:pr.diff_refs.base_sha,ref:pr.target_branch},revisionKey:pr.diff_refs.base_sha+":"+pr.diff_refs.start_sha,diff:files.map(f=>({path:f.new_path,previousPath:f.renamed_file?f.old_path:undefined,status:f.deleted_file?"removed":f.new_file?"added":f.renamed_file?"renamed":"modified",patch:f.diff})),comments:notes.map(n=>({id:n.id,body:n.body,path:n.position?.new_path??"",line:n.position?.new_line??null,user:{login:n.author.username}})),reviews:[],commits:commits.map(c=>({sha:c.id})),checks:pipelines.filter(p=>p.sha===pr.diff_refs.head_sha).map(p=>({name:"GitLab pipeline #"+p.id,status:["success","failed","canceled","skipped"].includes(p.status)?"completed":"in_progress",conclusion:p.status==="success"?"success":p.status}))};
  }
  async publish(repo:string,number:number,sha:string,summary:string,findings:Finding[],marker:string,style="detailed",revisionKey?:string,unresolvedCount=findings.length,options:import("./github").PublishOptions={}){
   const prefix=this.prefix(repo)+"/merge_requests/"+number;

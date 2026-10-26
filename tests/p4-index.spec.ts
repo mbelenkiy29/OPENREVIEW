@@ -255,6 +255,8 @@ test("P4 worker leases serialize publishers and reject stale completion after re
 test('durable P4 polling reaches older updated shelves, deduplicates revisions and exposes a complete inventory cycle',async()=>{
  vi.useFakeTimers();try{
  const {t,args,setShelfArchive}=await setup();await t.action(api.p4IndexJobs.upload,args);await t.finishAllScheduledFunctions(vi.runAllTimers);
+ // Re-reviewing a new shelf revision is opt-in.
+ const {defaults}=await import('../src/review-settings');await t.run(ctx=>ctx.db.insert('scopeSettings',{organizationId:args.organizationId,settings:{...defaults,rereview:true},overrideKeys:['rereview']}));
  const nativeFetch=globalThis.fetch;
  vi.stubGlobal('fetch',async(input:unknown,init?:RequestInit)=>{
   const u=new URL(String(input));

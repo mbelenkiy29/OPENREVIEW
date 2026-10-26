@@ -281,7 +281,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                       defaultValue={repoSettings.settings.model}
                     />
                   </label>
-                  <SummarySettings key={JSON.stringify([repoSettings.repo._id,repoSettings.settings.summarySections,repoSettings.settings.commentStyle])} initial={repoSettings.settings.summarySections} style={repoSettings.settings.commentStyle}/>
+                  <SummarySettings key={JSON.stringify([repoSettings.repo._id,repoSettings.settings.summarySections,repoSettings.settings.commentStyle])} initial={repoSettings.settings.summarySections} style={repoSettings.settings.commentStyle} hideFooter={repoSettings.settings.hideFooter} layout={repoSettings.settings.sectionLayout}/>
                   <fieldset className="wide">
                     <legend>Review categories</legend>
                     {[

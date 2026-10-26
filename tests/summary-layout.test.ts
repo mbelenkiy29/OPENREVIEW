@@ -81,3 +81,12 @@ test("summary counts read naturally and the risk line has one confidence number"
  assert.match(summary,/### Prompt for your coding agent\n```text\n/);
  assert.doesNotMatch(reviewSummary(data([])),/Prompt for your coding agent/,"no prompt without findings");
 });
+
+test("section layout overrides: a section can be shown plainly, expanded or collapsed",()=>{
+ const summary=reviewSummary(data([finding()]))+reviewFooter(3,"other");
+ const layout=disclosureLayout(summary,{diagram:"collapsed",affectedAreas:"plain",overview:"open"});
+ assert.match(layout,/<details><summary><strong>Sequence diagram<\/strong>/);
+ assert.match(layout,/### Files changed\n/);
+ assert.match(layout,/<details open><summary><strong>Overview<\/strong>/);
+ assert.equal(disclosureLayout(summary,{}),disclosureLayout(summary),"no overrides keeps the default layout");
+});

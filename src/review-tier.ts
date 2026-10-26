@@ -1,5 +1,6 @@
 // Per-pull-request review tier: an explicit comment command, then an openreview:<tier> label, then the
-// configured tier (settings, raised by touched .openreview/ folders). An admin cap always applies last.
+// configured tier (settings, raised by touched .openreview/ folders). A request can raise the configured
+// tier, never lower it. An admin cap always applies last.
 export const tiers = ["fast", "standard", "deep"] as const;
 export type Tier = (typeof tiers)[number];
 export const reviewCommandPattern = /@openreview\s+review(?:\s+(again|security|fast|standard|deep))?\b/i;
@@ -17,7 +18,8 @@ export function labelTier(labels: readonly string[]): Tier | undefined {
   return found.sort((a, b) => tiers.indexOf(b) - tiers.indexOf(a))[0];
 }
 export function resolveTier(a: { configured: Tier; requested?: { mode: Tier; source: "comment" | "label" }; cap?: Tier }) {
-  const wanted = a.requested?.mode ?? a.configured, source = a.requested?.source ?? "settings";
+  const raised = a.requested && tiers.indexOf(a.requested.mode) > tiers.indexOf(a.configured);
+  const wanted = raised ? a.requested!.mode : a.configured, source = raised ? a.requested!.source : "settings";
   const cap = a.cap ?? "deep", capped = tiers.indexOf(wanted) > tiers.indexOf(cap);
   return { mode: capped ? cap : wanted, source, capped, requested: wanted } as const;
 }

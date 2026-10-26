@@ -10,6 +10,9 @@ test("automatic approval requires every trusted gate, maximum confidence, and ex
  const failures:Partial<ApprovalState>[]=[{supported:false},{open:false},{draft:true},{latest:false},{head:"new"},{revisionKey:"version2"},{completed:false},{coverageLimits:undefined},{coverageLimits:["Excluded source"]},{unresolved:1},{assessment:undefined},{assessment:{...state.assessment!,confidence:.999}},{assessment:{...state.assessment!,risk:"unknown"}},{assessment:{...state.assessment!,risk:"medium"}},{humanChangeRequested:true},{requiredChecksKnown:false},{checks:[]},{checks:[{name:"regression",appId:43,status:"completed",conclusion:"success"}]},{checks:[{name:"regression",appId:42,status:"completed",conclusion:"neutral"}]},{nativeRequiredChecks:[{name:"security"}]},{runtimeRequired:true}];
  for(const failure of failures)assert.ok(approvalBlockers(policy,{...state,...failure}).length,JSON.stringify(failure));
  assert.ok(approvalBlockers({...policy,excludedPaths:["docs/**"]},state).length);
+ assert.deepEqual(approvalBlockers(policy,{...state,labels:["Do-Not-Merge"]}),["A do-not-merge or manual-review label is present"]);
+ assert.ok(approvalBlockers(policy,{...state,labels:["manual-review"]}).length);
+ assert.deepEqual(approvalBlockers(policy,{...state,labels:["docs"]}),[]);
  assert.ok(approvalBlockers({...policy,excludedAuthors:["ALICE"]},state).length);
  assert.deepEqual(approvalBlockers(policy,{...state,runtimeRequired:true,runtimePassed:true}),[]);
  assert.ok(approvalBlockers(policy,{...state,checks:[...state.checks,{name:"regression",appId:42,status:"completed",conclusion:"failure"}]}).length);
