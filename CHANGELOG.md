@@ -15,6 +15,7 @@
 
 ### Setup
 - Your first workspace now starts on the Free plan, so setup goes straight from naming the workspace to connecting your code. Upgrade anytime in **Organization Settings → Billing & Usage**. Any later workspace still picks a plan, because each owner gets one Free workspace.
+- ⌘/Ctrl+Enter on the Tools step saves your choices on the Free plan too.
 
 ### Dashboard: Greptile's tabs and screens
 - The dashboard is organized into eight tabs: **Analytics**, **Repositories**, **Code Review Settings**, **Custom Context**, **Pull Requests**, **Code Providers**, **Integrations** and **Organization Settings**.

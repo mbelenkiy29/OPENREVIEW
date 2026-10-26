@@ -9,8 +9,8 @@ import { configureLabels, configureSteps, previousStep, stepsFor, stepTitles, ty
 
 /** Full-screen setup frame on Greptile's dotted canvas: the step body, then a bar with Logout and
  *  exit on the left, Back (⌘+⇧+↵) and Next (⌘+↵) centred, and where you are on the right. */
-export function WizardFrame({ step, workspace, organizationId, admin, completed, billing = false, nextLabel, nextHref, centered, children }: {
-  step: WizardStep; workspace?: string; organizationId?: string; admin: boolean; completed?: boolean; billing?: boolean;
+export function WizardFrame({ step, workspace, organizationId, admin, completed, billing = false, planMissing, nextLabel, nextHref, centered, children }: {
+  step: WizardStep; workspace?: string; organizationId?: string; admin: boolean; completed?: boolean; billing?: boolean; planMissing?: boolean;
   nextLabel: string; nextHref?: string; centered?: boolean; children: ReactNode;
 }) {
   const steps = stepsFor(billing), back = previousStep(step, billing), position = steps.indexOf(step) + 1;
@@ -20,7 +20,8 @@ export function WizardFrame({ step, workspace, organizationId, admin, completed,
     <footer className="wizard-bar">
       <div className="wizard-exit">
         <SignOutForm action={logout} label="Logout" className="link" />
-        {organizationId && step !== "done" && (admin && !completed
+        {/* Until a plan is chosen the server refuses to finish setup and the dashboard leads back here, so there is no way out to offer. */}
+        {organizationId && step !== "done" && !planMissing && (admin && !completed
           ? <form action={finishSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="skipped" value="true" /><button className="link">Exit setup</button></form>
           : <Link className="link" href="/dashboard/analytics">Back to dashboard</Link>)}
       </div>
