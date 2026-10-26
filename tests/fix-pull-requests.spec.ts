@@ -41,7 +41,7 @@ async function setup(permissions: Record<string, string> = { contents: "write", 
   vi.spyOn(scm, "request").mockImplementation(async (endpoint: string) => { if (endpoint === "/user/81") return { login: "alice" } as never; throw new Error("unexpected " + endpoint); });
   const canReply = vi.spyOn(scm, "canReply").mockResolvedValue(true);
   vi.spyOn(scm, "pullRequest").mockResolvedValue({ number: 3, title: "Totals", body: "", draft: false, state: "open", html_url: "https://github.com/alice/fixes/pull/3", user: { login: "bob" }, head: { sha: head, ref: "feature/totals" }, base: { sha: "b".repeat(40), ref: "main" }, diff: [{ path: "src/a.ts", patch, status: "modified" }], comments: [], reviews: [], commits: [], checks: [], omitted: [] } as never);
-  vi.spyOn(scm, "tree").mockResolvedValue([{ path: "src/a.ts", sha: "blob1", type: "blob", mode: "100644" }] as never);
+  vi.spyOn(scm, "tree").mockResolvedValue([{ path: "src/a.ts", sha: "blob1", type: "blob", mode: "100755" }] as never);
   vi.spyOn(scm, "blob").mockResolvedValue({ path: "src/a.ts", sha: "blob1", content });
   const openFix = vi.spyOn(scm, "openFixPullRequest").mockResolvedValue({ url: "https://github.com/alice/fixes/pull/4", reused: false });
   const audits = async () => (await t.run((ctx) => ctx.db.query("auditEvents").collect())).map((a) => a.action);
@@ -73,7 +73,7 @@ test("a writer starts OpenReview's fix agent; it opens the fix pull request for 
   expect(model.mock.calls[0][0].messages[0]).toMatchObject({ role: "user", content: expect.stringContaining("Totals become cents twice") });
   const [repository, number, fix] = openFix.mock.calls[0];
   expect([repository, number, fix.branch, fix.expectedHead]).toEqual(["alice/fixes", 3, "openreview/fix-3-fp0123456789", head]);
-  expect(fix.files).toEqual([{ path: "src/a.ts", content: "const a = 1;\nconst total = Math.round(price * 100);\nexport { a };\n", mode: "100644" }]);
+  expect(fix.files).toEqual([{ path: "src/a.ts", content: "const a = 1;\nconst total = Math.round(price * 100);\nexport { a };\n", mode: "100755" }]);
   expect(fix.body).toContain("Requested by @alice");
   expect(fix.body).toContain("Round the converted total once.");
   expect(fix.body).toContain("No tests were run by OpenReview");
@@ -139,7 +139,7 @@ test("viewers, disabled toggles, stale reviews, duplicate runs, other providers 
 
 test("Gitea explains that fix pull requests are not available instead of blaming GitHub permissions", async () => {
   const gitea = new Gitea("https://gitea.example.com", "token");
-  expect(await gitea.openFixPullRequest("o/r", 1, { branch: "openreview/fix-1-abc", expectedHead: head, path: "a.ts", blobSha: "s", content: "", title: "t", body: "b", message: "m" })).toEqual({ skipped: "fix pull requests are not available for Gitea yet" });
+  expect(await gitea.openFixPullRequest("o/r", 1, { branch: "openreview/fix-1-abc", expectedHead: head, files: [{ path: "a.ts", content: "", mode: "100644" }], title: "t", body: "b", message: "m" })).toEqual({ skipped: "fix pull requests are not available for Gitea yet" });
 });
 
 test("agent fixes are on Starter and Pro, counted each month, and a run that fails before the agent gives its fix back", async () => {

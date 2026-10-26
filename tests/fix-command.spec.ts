@@ -103,7 +103,7 @@ test('fix pull requests need the repository setting and contents:write, and only
  await s.ask('@openreview fix this in a new PR');
  const [repository,number,fix]=s.openFix.mock.calls[0];
  expect([repository,number]).toEqual(['alice/fixes',3]);
- expect(fix).toMatchObject({branch:'openreview/fix-3-fp0123456789',expectedHead:head,path:'src/a.ts',blobSha:'blob1',content:'const a = 1;\nconst total = Math.round(price * 100);\nexport { a };\n'});
+ expect(fix).toMatchObject({branch:'openreview/fix-3-fp0123456789',expectedHead:head,files:[{path:'src/a.ts',content:'const a = 1;\nconst total = Math.round(price * 100);\nexport { a };\n',mode:'100644'}]});
  expect(fix.branch).not.toBe('feature/totals');
  expect(s.reply.mock.calls[0][2]).toContain('Opened a fix pull request on a new branch: https://github.com/alice/fixes/pull/4');
  // Setting on, permission missing: the real client skips itself without any write.
