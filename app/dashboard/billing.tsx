@@ -14,7 +14,9 @@ const statusLabel = (status: string) => status[0].toUpperCase() + status.slice(1
 // cloud only), then the referral code. The usage table follows (sections/usage.tsx).
 export async function BillingPanel({ token, organizationId, filters }: { token: string; organizationId: Id<"organizations">; filters: Record<string, string | undefined> }) {
   const s = await backend().query(api.billing.status, { token, organizationId });
-  if (!s.enabled) return <><div className="section-heading"><h2 id="plan-heading">Billing is off</h2></div><section aria-labelledby="plan-heading"><p className="card-line">This deployment does not bill workspaces (<code>BILLING_ENABLED</code> is not set), so reviews have no plan quota. Self-hosted installs are unlimited.</p></section></>;
+  if (!s.enabled) return <><div className="section-heading"><h2 id="plan-heading">{"exempt" in s ? "Operator workspace" : "Billing is off"}</h2></div><section aria-labelledby="plan-heading"><p className="card-line">{"exempt" in s
+    ? "An OpenReview operator owns this workspace, so it has no plan quota: usage and agent fixes are unlimited and every feature is on. The deployment's inference budget still applies."
+    : <>This deployment does not bill workspaces (<code>BILLING_ENABLED</code> is not set), so reviews have no plan quota. Self-hosted installs are unlimited.</>}</p></section></>;
   const subscribed = s.plan === "starter" || s.plan === "pro", percent = s.limit ? Math.min(100, Math.round((s.used / s.limit) * 100)) : 0;
   const trial = checkoutTrialEnd(s.trialEndsAt, Date.now());
   const portal = (label: ReactNode, name?: string, className?: string) => <form action={openBillingPortal}><input type="hidden" name="organizationId" value={organizationId} /><button className={className} aria-label={name}>{label}</button></form>;

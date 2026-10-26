@@ -9,7 +9,6 @@ import { referralConfig } from "../../src/referrals";
 import { knowledgeView } from "../../src/knowledge-view";
 import { navigation } from "./sections/shared";
 import { needsSetup } from "../../src/onboarding-steps";
-import { billingConfig } from "../../src/billing";
 import { parseRuleQuery } from "../../src/rule-query";
 import { pageFor } from "./routes";
 
@@ -40,7 +39,7 @@ export async function loadDashboard({
   const page = pageFor(path), section = page?.internal ?? path;
   // A new workspace on a billing deployment chooses a plan before anything else (Billing, Account and
   // the personal Referrals settings stay reachable); the server enforces the same rule.
-  if (billingConfig().enabled && organization.planRequired && !organization.planSelectedAt && !(section[0] === "settings" && ["billing", "account", "referrals"].includes(section[1] ?? ""))) redirect("/dashboard/onboarding/plan");
+  if (organization.planMissing && !(section[0] === "settings" && ["billing", "account", "referrals"].includes(section[1] ?? ""))) redirect("/dashboard/onboarding/plan");
   // Admins of a workspace still in guided setup land there; deep links are never redirected.
   if (!section[0] && needsSetup(organization) && ["owner", "admin"].includes(organization.role)) redirect("/dashboard/onboarding");
   const aliases: Record<string, string[]> = { overview: ["analytics"], reviews: ["pulls"], findings: ["analytics", "findings"], knowledge: ["repositories", "knowledge"], rules: ["context"], team: ["organization", "people"], usage: ["organization", "billing"] };

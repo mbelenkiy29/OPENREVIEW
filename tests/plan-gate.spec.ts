@@ -4,7 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
 // only the Billing, Account and personal Referrals settings; every other page leads to the plan step.
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }) }));
 vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw new Error(`redirect ${url}`); }, notFound: () => { throw new Error("not found"); } }));
-vi.mock("../src/server", () => ({ current: async () => ({ token: "t", organizations: [{ _id: "org1", role: "owner", planRequired: true }] }), backend: () => { throw new Error("loaded"); } }));
+vi.mock("../src/server", () => ({ current: async () => ({ token: "t", organizations: [{ _id: "org1", role: "owner", planRequired: true, planMissing: true }] }), backend: () => { throw new Error("loaded"); } }));
 vi.mock("../app/dashboard/sections/shared", () => ({ navigation: ["Repositories", "Team", "Settings"] }));
 import { loadDashboard } from "../app/dashboard/load";
 

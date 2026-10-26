@@ -131,6 +131,8 @@ export default defineSchema({
   // Proposed clusters (from manifests and names); applied only when an admin approves one.
   clusterSuggestions: defineTable({ organizationId: org, key: v.string(), name: v.string(), repositoryIds: v.array(repo), reasons: v.array(v.object({ kind: v.string(), detail: v.string() })), score: v.number(), status: v.string() /* suggested | approved | dismissed | stale */, clusterId: v.optional(v.id("repositoryClusters")), decidedBy: v.optional(v.id("users")), createdAt: v.number(), updatedAt: v.number() }).index("by_org_status", ["organizationId", "status"]).index("by_org_key", ["organizationId", "key"]),
   auditEvents: defineTable({ organizationId: org, userId: v.optional(v.id("users")), action: v.string(), target: v.string(), createdAt: v.number() }).index("by_org", ["organizationId"]).index("by_org_user", ["organizationId", "userId"]),
+  // Operator (super admin) access to cross-workspace data, convex/operator.ts; it belongs to no workspace.
+  operatorAudit: defineTable({ userId: v.id("users"), action: v.string(), createdAt: v.number() }),
   // A developer's own third-party agent credentials (Devin), encrypted by the web server with
   // CREDENTIAL_ENCRYPTION_KEY under the scope `<userId>:<kind>`; Convex never sees the plain value.
   personalCredentials: defineTable({ userId: v.id("users"), kind: v.string(), ciphertext: v.string(), updatedAt: v.number() }).index("by_user_kind", ["userId", "kind"]),

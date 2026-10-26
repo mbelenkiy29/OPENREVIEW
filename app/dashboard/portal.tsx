@@ -13,7 +13,7 @@ import { referralConfig } from "../../src/referrals";
 
 // The app chrome, rendered once by the portal layout and kept mounted across navigations: Greptile's
 // trial banner, identity row (organization menu, icon buttons, account menu) and the eight tabs.
-export function PortalNav({ login, avatar, email, role, organizationId, name, organizations, teams, savedTeam, trialDaysLeft, billingPortal }: { login: string; avatar?: string; email?: string; role: string; organizationId: string; name: string; organizations: { _id: string; name: string }[]; teams: { _id: string; name: string }[]; savedTeam?: string; trialDaysLeft?: number; billingPortal?: boolean }) {
+export function PortalNav({ login, avatar, email, role, organizationId, name, organizations, teams, savedTeam, trialDaysLeft, billingPortal, operator }: { login: string; avatar?: string; email?: string; role: string; organizationId: string; name: string; organizations: { _id: string; name: string }[]; teams: { _id: string; name: string }[]; savedTeam?: string; trialDaysLeft?: number; billingPortal?: boolean; operator?: boolean }) {
   const feedback = Boolean(userJotConfig()), referrals = referralConfig().enabled;
   // The provider's avatar, at most 45px: next/image would need every avatar host allow-listed for no gain.
   // eslint-disable-next-line @next/next/no-img-element
@@ -36,6 +36,7 @@ export function PortalNav({ login, avatar, email, role, organizationId, name, or
             <hr />
             <Link className="menu-item" href="/dashboard/account"><Icon name="gear" />Settings</Link>
             <Link className="menu-item" href="/dashboard/onboarding"><Icon name="listChecks" />Workspace setup</Link>
+            {operator && <Link className="menu-item" href="/dashboard/operator"><Icon name="chartBar" />Operator</Link>}
             {feedback && <><UserJotButton className="menu-item">Request a feature</UserJotButton><UserJotButton className="menu-item">Report a bug</UserJotButton><Link className="menu-item" href="/feedback/roadmap">Roadmap</Link></>}
             <div className="menu-theme"><ThemePicker /></div>
             <hr />
