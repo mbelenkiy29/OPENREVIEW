@@ -41,7 +41,7 @@
     "ignore": "^7.0.11",
     "jose": "^6.2.12",
     "mermaid": "11.17.2",
-    "next": "^15.5.27",
+    "next": "^16.4.3",
     "openid-client": "6.8.8",
     "picomatch": "^4.0.7",
     "posthog-js": "1.438.7",
@@ -52,13 +52,11 @@
     "tree-sitter-wasms": "0.1.13",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
-    "undici": "7.30.1",
+    "undici": "8.12.3",
     "web-tree-sitter": "0.22.6",
-    "zod": "^3.25.76",
-    "zod-to-json-schema": "3.25.2"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.3.7",
     "@types/node": "^22.20.1",
     "@types/picomatch": "^4.0.3",
     "@types/react": "^19.2.18",
@@ -66,7 +64,7 @@
     "convex-test": "^0.0.60",
     "esbuild": "0.28.2",
     "eslint": "^9.39.5",
-    "eslint-config-next": "^15.5.27",
+    "eslint-config-next": "^16.4.3",
     "playwright": "^1.63.0",
     "vite": "^8.3.1",
     "vitest": "^5.0.3",

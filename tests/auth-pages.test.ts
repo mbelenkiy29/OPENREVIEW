@@ -39,8 +39,10 @@ test("redirect results become one plain message, errors first", () => {
   assert.match(authMessage({ error: "signin" })!.text, /didn’t finish/);
   assert.match(authMessage({ error: "sso" })!.text, /Single sign-on/);
   assert.match(authMessage({ error: "<script>" })!.text, /didn’t finish/, "unknown codes get the generic message, never echoed");
-  assert.deepEqual(authMessage({ email: "sent" }), { tone: "status", text: "Check your inbox. The sign-in link expires in 15 minutes." });
+  assert.deepEqual(authMessage({ email: "sent" }), { tone: "status", text: "Check your inbox. The sign-in link expires in 15 minutes; if you asked more than once, use the newest email." });
   assert.equal(authMessage({ email: "error" })?.tone, "alert");
+  assert.match(authMessage({ email: "busy" })!.text, /Too many sign-in emails.*another sign-in method/, "limits never say whether an account exists");
+  assert.match(authMessage({ email: "challenge" })!.text, /couldn’t verify this browser/);
   assert.equal(authMessage({ signedout: "1" })?.tone, "status");
   assert.deepEqual(authMessage({ reauth: "1", signedout: "1" }), { tone: "status", text: "For your security, sign in again to continue." }, "a payout step that needs a recent sign-in says why");
   assert.equal(authMessage({ error: "signin", email: "sent" })?.tone, "alert");

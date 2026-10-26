@@ -9,5 +9,5 @@ overrides:
   postcss: 8.5.28
   # convex pins ws 8.21.0 exactly; 8.21.1 fixes CVE-2026-62389 (DoS).
   ws: 8.21.1
-patchedDependencies:
-  next@15.5.27: patches/next@15.5.27.patch
+  # body-parser (via the MCP SDK) wants raw-body ^3; 4.0.0 rejects an unparseable `limit` instead of dropping the cap (AIKIDO-2026-274460).
+  raw-body: 4.0.0

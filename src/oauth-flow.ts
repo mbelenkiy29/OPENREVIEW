@@ -1,7 +1,9 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
+import * as Sentry from "@sentry/nextjs";
 import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
+import { ConvexError } from "convex/values";
 import { z } from "zod";
 import { api } from "../convex/_generated/api";
 import { backend, cookieOptions, origin, seal, signSession, unseal } from "./server";
@@ -35,7 +37,9 @@ export async function startSession(userId: string, sid: string) {
 export async function finishOAuth(request: Request, provider: Provider, profile: (code: string, redirectUri: string) => Promise<Profile>, after?: () => Promise<void>) {
   const url = new URL(request.url), jar = await cookies(), cookie = jar.get(stateCookie(provider))?.value;
   jar.delete(stateCookie(provider));
-  let next = "/dashboard", referral: string | undefined, link = false;
+  // Where a failure happened: "state" (an expired or replayed visit, or a cancel at the provider: the visitor's doing),
+  // "provider" (exchanging the code or reading the profile) or "account" (creating the session).
+  let next = "/dashboard", referral: string | undefined, link = false, stage: "state" | "provider" | "account" = "state";
   try {
     const code = url.searchParams.get("code");
     if (!cookie) throw new Error("Missing OAuth state or code");
@@ -48,11 +52,14 @@ export async function finishOAuth(request: Request, provider: Provider, profile:
       // token to the flow that asked for it, which re-checks the user and workspace.
       const current = jar.get("openreview_session")?.value;
       if (!current || !(await backend().query(api.identity.sessionValid, { token: current }).catch(() => false))) throw new Error("Sign in to OpenReview before re-authorizing GitHub");
+      stage = "provider";
       await profile(code, callbackUrl(provider));
       await after?.();
       return NextResponse.redirect(origin() + next);
     }
+    stage = "provider";
     const p = await profile(code, callbackUrl(provider)), session = newSession();
+    stage = "account";
     const linkToken = saved.link ? jar.get("openreview_session")?.value : undefined;
     // Sent only while the web app has the program on, so an older backend never sees the argument.
     const referralCode = !saved.link && referralConfig().enabled ? normalizeReferralCode(saved.referral) : null;
@@ -61,7 +68,11 @@ export async function finishOAuth(request: Request, provider: Provider, profile:
     await after?.();
     return NextResponse.redirect(origin() + next);
   } catch (error) {
-    console.error(JSON.stringify({ event: "auth.failed", provider, error: error instanceof Error ? error.message.slice(0, 200) : "Authentication failed" }));
+    console.error(JSON.stringify({ event: "auth.failed", provider, stage, error: error instanceof Error ? error.message.slice(0, 200) : "Authentication failed" }));
+    // Provider and account failures go to Sentry, one issue per provider and step. State failures don't, nor do the
+    // refusals the visitor can act on, which the backend throws as ConvexErrors (an account someone else holds,
+    // or linking that needs a fresh sign-in).
+    if (stage === "provider" || (stage === "account" && !(error instanceof ConvexError))) Sentry.captureException(error, { level: "error", fingerprint: ["auth-oauth-failed", provider, stage], tags: { auth_failure: "oauth", auth_provider: provider, auth_stage: stage } });
     // A failed link returns to the page it started from: /login would offer a plain sign-in, which makes a separate account.
     if (link) { await notify("Couldn’t link that account. It may belong to another OpenReview user, or you need to sign out and back in first.", "error"); return NextResponse.redirect(origin() + next); }
     return NextResponse.redirect(`${origin()}/login${authQuery({ error: "signin", referral })}`);

@@ -1,8 +1,9 @@
 import { z } from "zod";
+import { isoTimestamp } from "./iso-timestamp";
 import { assertEgress } from "./egress";
 
 export const atlassianScopes = ["offline_access", "read:jira-work", "read:page:confluence", "read:space:confluence"];
-const cloudId = z.string().uuid();
+const cloudId = z.guid();
 const nativeId = z.string().regex(/^[1-9]\d{0,19}$/);
 const siteUrl = z.string().url().refine(value => {
   const u = new URL(value);
@@ -93,7 +94,7 @@ export class Atlassian {
     const path=`/ex/jira/${site.id}/rest/api/3/issue/`;
     const initial=await this.get(path+encodeURIComponent(key)+"?fields=project",issueIdentity);
     if(initial.key!==key || !projectIds.includes(initial.fields.project.id)) throw new Error("Jira issue is outside selected projects");
-    const issue=await this.get(path+initial.id+"?fields=project,summary,description,updated",issueIdentity.extend({fields:issueIdentity.shape.fields.extend({summary:z.string().max(2000),description:documentSchema.nullable(),updated:z.string().datetime({offset:true})})}));
+    const issue=await this.get(path+initial.id+"?fields=project,summary,description,updated",issueIdentity.extend({fields:issueIdentity.shape.fields.extend({summary:z.string().max(2000),description:documentSchema.nullable(),updated:isoTimestamp})}));
     if(issue.id!==initial.id || issue.key!==key || !projectIds.includes(issue.fields.project.id)) throw new Error("Jira issue moved outside selected projects");
     return {id:issue.id,key,title:issue.fields.summary,description:documentContent(issue.fields.description),revision:issue.fields.updated,url:new URL("/browse/"+key,site.url).href};
   }

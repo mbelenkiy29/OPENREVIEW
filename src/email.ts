@@ -4,6 +4,15 @@ import { egressAllowed } from "./egress";
 // Transactional email through Resend (https://resend.com/docs/api-reference/emails/send-email).
 // Without RESEND_API_KEY and EMAIL_FROM every send is skipped, never an error.
 export const emailAddress = z.string().trim().toLowerCase().max(254).email();
+/** The mailbox an address reaches, for rate limits only: `+tag` dropped on every domain, and Gmail's
+ *  dots and googlemail.com folded too, so variants of one inbox share a limit. Never an identity or a
+ *  delivery address: those stay the address as typed (emailAddress). */
+export function canonicalEmail(email: string) {
+  const address = email.trim().toLowerCase(), at = address.lastIndexOf("@");
+  if (at < 1) return address;
+  const domain = address.slice(at + 1) === "googlemail.com" ? "gmail.com" : address.slice(at + 1), local = address.slice(0, at).split("+")[0] || address.slice(0, at);
+  return `${domain === "gmail.com" ? local.replace(/\./g, "") : local}@${domain}`;
+}
 export function emailConfigured() {
   return Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM) && egressAllowed("email");
 }
@@ -25,13 +34,14 @@ export function brandedEmail(origin: string, e: { subject: string; paragraphs: s
     + `</td></tr></table><p style="margin:16px 0 0;font-size:12px;line-height:18px;color:#6f6d66;">OpenReview · <a href="${escapeHtml(origin)}" style="color:#6f6d66;">${escapeHtml(new URL(origin).host)}</a></p></td></tr></table></body></html>`;
   return { subject: e.subject, text: `${e.paragraphs.join("\n\n")}\n\n${e.action.label}: ${url}`, html };
 }
-export async function sendEmail(message: { to: string; subject: string; text: string; html?: string }, fetchImpl: typeof fetch = fetch): Promise<{ id: string } | { skipped: string }> {
+/** `tags` (letters, digits, `_` and `-`) label the message in Resend's logs and webhooks. */
+export async function sendEmail(message: { to: string; subject: string; text: string; html?: string; tags?: { name: string; value: string }[] }, fetchImpl: typeof fetch = fetch): Promise<{ id: string } | { skipped: string }> {
   if (!emailConfigured()) return { skipped: "Email delivery is not configured" };
   const to = emailAddress.parse(message.to);
   const response = await fetchImpl("https://api.resend.com/emails", {
     method: "POST",
     headers: { authorization: `Bearer ${process.env.RESEND_API_KEY}`, "content-type": "application/json" },
-    body: JSON.stringify({ from: process.env.EMAIL_FROM, to: [to], subject: message.subject.replace(/[\r\n]+/g, " ").slice(0, 200), text: message.text.slice(0, 50000), ...(message.html ? { html: message.html } : {}) }),
+    body: JSON.stringify({ from: process.env.EMAIL_FROM, to: [to], subject: message.subject.replace(/[\r\n]+/g, " ").slice(0, 200), text: message.text.slice(0, 50000), ...(message.html ? { html: message.html } : {}), ...(message.tags?.length ? { tags: message.tags } : {}) }),
     redirect: "error",
     signal: AbortSignal.timeout(15000),
   });

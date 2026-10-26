@@ -28,7 +28,7 @@ export const inspect=query({args:{secret:v.string(),tokenHash:v.string()},handle
 }});
 export const save=mutation({args:{secret:v.string(),tokenHash:v.string(),digest:v.string(),installationId:v.string(),workspaceId:v.string(),externalId:v.string(),username:v.string(),credentials:v.string(),expiresAt:v.number(),invocationId:v.string(),invocationExpiresAt:v.number()},handler:async(ctx,a)=>{
  service(a.secret);const {repo,user,c,g}=await grant(ctx,a.tokenHash),now=Date.now();
- z.string().uuid().parse(a.externalId);
+ z.guid().parse(a.externalId);
  if(a.digest!==g.digest||a.installationId!==c.installationId||a.workspaceId!==c.namespaceId||a.username!=='{'+a.externalId+'}'||!a.credentials||a.credentials.length>40000||a.expiresAt<=now||a.expiresAt>now+60*60000||!a.invocationId||a.invocationId.length>200||a.invocationExpiresAt<=now||a.invocationExpiresAt>now+300000)throw new Error('Verified personal Forge proof required');
  const jti='bitbucket:'+a.invocationId;
  if(await ctx.db.query('providerReceipts').withIndex('by_jti',q=>q.eq('jti',jti)).unique())throw new Error('Forge invocation already consumed');

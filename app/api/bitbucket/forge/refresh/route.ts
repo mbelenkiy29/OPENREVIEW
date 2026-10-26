@@ -12,7 +12,7 @@ export async function POST(request:Request){
  if(identity.principal||identity.module?.type!=="core:endpoint"||identity.module.key!=="openreview-token-refresh")return Response.json({error:"Direct Forge refresh endpoint required"},{status:403,headers});
  try{
   const client=new ConvexHttpClient(url),c=await client.query(api.providerInstalls.bitbucketInstallation,{secret,installationId:identity.installationId,workspaceId:identity.workspaceId});
-  const scope=c.organizationId+":bitbucket-cloud",previous=z.object({publisherId:z.string().uuid(),invocationIssuedAt:z.number().optional()}).parse(JSON.parse(decryptCredential(c.credentials,scope)));
+  const scope=c.organizationId+":bitbucket-cloud",previous=z.object({publisherId:z.guid(),invocationIssuedAt:z.number().optional()}).parse(JSON.parse(decryptCredential(c.credentials,scope)));
   if(previous.invocationIssuedAt!==undefined&&identity.invocationIssuedAt<previous.invocationIssuedAt)throw new Error("Older invocation");
   const systemToken=request.headers.get("x-forge-oauth-system")??"",publisherId=await verifyForgePublisher(systemToken);
   if(publisherId!==previous.publisherId)throw new Error("Publisher changed");

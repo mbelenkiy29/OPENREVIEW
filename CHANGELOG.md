@@ -4,6 +4,18 @@
 
 ## October 2026
 
+### Security and billing fixes
+- **Sign out everywhere** now ends every earlier session, however many there are.
+- Connecting an MCP client approves only the request the consent page showed, even if another tab started a different one.
+- Review emails skip members who can't open a repository the review drew context from, as the dashboard already did.
+- Registering a CLI or MCP client is limited per network, so one caller can't block everyone else's sign-in.
+- Deleting a workspace first stops its repositories, so nothing new is written while it is removed.
+- During a paid-plan trial, reviews stop at the included usage; extra usage starts once the trial ends.
+- A subscription's status can't go backwards when Stripe sends two events in the same second.
+
+### Setup
+- Your first workspace now starts on the Free plan, so setup goes straight from naming the workspace to connecting your code. Upgrade anytime in **Organization Settings → Billing & Usage**. Any later workspace still picks a plan, because each owner gets one Free workspace.
+
 ### Dashboard: Greptile's tabs and screens
 - The dashboard is organized into eight tabs: **Analytics**, **Repositories**, **Code Review Settings**, **Custom Context**, **Pull Requests**, **Code Providers**, **Integrations** and **Organization Settings**.
   - Memory and Settings pages moved into them; old links redirect, with their filters.

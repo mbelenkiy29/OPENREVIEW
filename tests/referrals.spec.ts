@@ -75,6 +75,7 @@ test("only accounts this sign-in creates are attributed, through OAuth and magic
   expect((await t.run((ctx) => ctx.db.query("loginTokens").collect())).map((l) => l.referralCode)).toEqual([code]);
   const frank = (await consume())!;
   expect(await referralOf(t, frank)).toMatchObject([{ referrerId: alice.userId, status: "signed_up" }]);
+  vi.advanceTimersByTime(60_000); // past the one-minute resend cooldown
   await t.action(api.identityJobs.requestMagicLink, { secret: svc, email: "frank@example.com", referralCode: ginaCode });
   expect(await consume()).toBe(frank);
   expect(await referralOf(t, frank)).toMatchObject([{ referrerId: alice.userId }]);

@@ -705,7 +705,11 @@ export async function openFixPullRequest(_previous:{url?:string;reused?:boolean;
 export async function reviewAgain(form:FormData) {
  const {token}=await current();const review=await backend().query(api.reviews.detail,{token,reviewId:text(form,"reviewId") as Id<"reviews">});
  if(review.review.nativeP4&&review.review.status==="failed"&&review.review.resultStorageId&&text(form,"fresh")!=="true"){await backend().mutation(api.p4Reviews.retryPublication,{token,reviewId:review.review._id});revalidatePath("/dashboard","layout");redirect("/dashboard/pulls/"+review.review._id);}
- const id=review.review.nativeP4?await backend().action(api.p4ReviewJobs.request,{token,organizationId:review.review.organizationId,repositoryId:review.review.repositoryId,nativeNumber:review.review.prNumber,force:true}):await backend().action(api.providerJobs.rereview,{token,repositoryId:review.review.repositoryId,prNumber:review.review.prNumber});revalidatePath("/dashboard", "layout");if(id)redirect("/dashboard/pulls/"+id);
+ // Closed changes, lost access, rate limits and provider errors become a toast instead of the dashboard error page.
+ let id:Id<"reviews">|null|undefined;
+ try{id=review.review.nativeP4?await backend().action(api.p4ReviewJobs.request,{token,organizationId:review.review.organizationId,repositoryId:review.review.repositoryId,nativeNumber:review.review.prNumber,force:true}):await backend().action(api.providerJobs.rereview,{token,repositoryId:review.review.repositoryId,prNumber:review.review.prNumber});}
+ catch(error){await notify(`Couldn’t re-review: ${userMessage(error,"the pull request may be closed, rate-limited, or you lack write access")}`,"error");}
+ revalidatePath("/dashboard", "layout");if(id)redirect("/dashboard/pulls/"+id);
 }
 export async function createTeam(form:FormData) {
  const {token}=await current();await backend().mutation(api.scopes.createTeam,{token,organizationId:text(form,"organizationId") as Id<"organizations">,name:text(form,"name")});revalidatePath("/dashboard","layout");

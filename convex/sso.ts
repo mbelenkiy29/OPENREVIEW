@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { audit, authorize, service } from "./auth";
 import { linkIdentity } from "./identity";
+import { rateLimit } from "./rateLimit";
 import { hasEntitlement, scheduleSeatSync } from "./billing";
 import { proGatesAt, upgradeNote } from "../src/plans";
 import { domainSchema, emailDomain, ssoEmailVerified, verificationName, verificationValue } from "../src/sso-domains";
@@ -137,6 +138,9 @@ export const forLogin = query({ args: { secret: v.string(), email: v.optional(v.
 export const cacheSave = mutation({ args: { secret: v.string(), key: v.string(), value: v.string() }, handler: async (ctx, a) => {
   service(a.secret);
   if (a.key.length > 200 || a.value.length > 200) throw new Error("Invalid request id");
+  // Every SAML start writes a row, and /sso/start needs no sign-in, so writes are capped deployment-wide;
+  // convex/authHygiene.ts deletes expired rows.
+  await rateLimit(ctx, "sso-request", 300);
   await ctx.db.insert("ssoRequests", { key: a.key, value: a.value, expiresAt: Date.now() + 10 * 60_000 });
 } });
 export const cacheGet = query({ args: { secret: v.string(), key: v.string() }, handler: async (ctx, a) => {

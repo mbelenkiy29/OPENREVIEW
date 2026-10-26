@@ -5,6 +5,7 @@ import type { Doc, Id, TableNames } from "./_generated/dataModel";
 import schema from "./schema";
 import { audit, authorize, service } from "./auth";
 import { openSubscription } from "../src/billing";
+import { disableRepository } from "./repositories";
 
 // Data controls (M3): data sharing (private by default), retention for reviews and transcripts, and
 // owner-only workspace deletion with a grace period followed by a resumable purge of every
@@ -38,13 +39,13 @@ export const purgePlan: Step[] = [
   ...(["providerInstallRequests", "notificationDeliveries", "oauthCodes", "bridgeDevices"] as const).map((table) => ({ table, via: "scan" as const, match: "organizationId" as const })),
   { table: "providerIdentityGrants", via: "scan", match: "repositoryOrConnection" },
   // Workspace-indexed tables; repositories and members near the end, the audit log last.
-  ...([["fileReviews", "by_org"], ["integrationConnections", "by_org"], ["modelKeys", "by_org"], ["cliReviews", "by_org"], ["approvalPolicies", "by_org"], ["approvalJobs", "by_org_status"], ["runtimePolicies", "by_org"], ["runtimeWorkers", "by_org"], ["runtimeJobs", "by_org_status"], ["p4Polls", "by_org"], ["providerConnections", "by_org"], ["scopeSettings", "by_org"], ["repositoryClusters", "by_org"], ["clusterSuggestions", "by_org_status"], ["modelCache", "by_key"], ["ssoConnections", "by_org"], ["emailInvitations", "by_org"], ["analyticsDaily", "by_org_day"], ["invitations", "by_org"], ["pullRequests", "by_org"], ["findings", "by_org"], ["reviews", "by_org"], ["billingAccounts", "by_org"], ["billingUsage", "by_org_period"], ["billingMeterEvents", "by_org_status"], ["notificationChannels", "by_org"], ["slackInstallations", "by_org"], ["notificationPreferences", "by_org"], ["chatThreads", "by_org_user"], ["learnedRules", "by_org"], ["commentReactions", "by_org_time"], ["findingFeedback", "by_org"], ["findingSignals", "by_org_time"], ["learnedPreferences", "by_org_scope"], ["customRules", "by_org"], ["ruleSuggestions", "by_org_status"], ["ruleAssistantRuns", "by_org_time"], ["usageEvents", "by_org"], ["oauthGrants", "by_org"], ["apiKeys", "by_org"], ["teams", "by_org"], ["githubInstallations", "by_org"], ["repositories", "by_org"], ["organizationMembers", "by_org"], ["auditEvents", "by_org"]] as const).map(([table, index]) => ({ table, via: "org" as const, index })),
+  ...([["conversionEvents", "by_org"], ["fileReviews", "by_org"], ["integrationConnections", "by_org"], ["modelKeys", "by_org"], ["cliReviews", "by_org"], ["approvalPolicies", "by_org"], ["approvalJobs", "by_org_status"], ["runtimePolicies", "by_org"], ["runtimeWorkers", "by_org"], ["runtimeJobs", "by_org_status"], ["p4Polls", "by_org"], ["providerConnections", "by_org"], ["scopeSettings", "by_org"], ["repositoryClusters", "by_org"], ["clusterSuggestions", "by_org_status"], ["modelCache", "by_key"], ["ssoConnections", "by_org"], ["emailInvitations", "by_org"], ["analyticsDaily", "by_org_day"], ["invitations", "by_org"], ["pullRequests", "by_org"], ["findings", "by_org"], ["reviews", "by_org"], ["billingAccounts", "by_org"], ["billingUsage", "by_org_period"], ["billingMeterEvents", "by_org_status"], ["notificationChannels", "by_org"], ["slackInstallations", "by_org"], ["notificationPreferences", "by_org"], ["chatThreads", "by_org_user"], ["learnedRules", "by_org"], ["commentReactions", "by_org_time"], ["findingFeedback", "by_org"], ["findingSignals", "by_org_time"], ["learnedPreferences", "by_org_scope"], ["customRules", "by_org"], ["ruleSuggestions", "by_org_status"], ["ruleAssistantRuns", "by_org_time"], ["usageEvents", "by_org"], ["oauthGrants", "by_org"], ["apiKeys", "by_org"], ["teams", "by_org"], ["githubInstallations", "by_org"], ["repositories", "by_org"], ["organizationMembers", "by_org"], ["auditEvents", "by_org"]] as const).map(([table, index]) => ({ table, via: "org" as const, index })),
   { table: "organizations", via: "self" },
 ];
 // Not owned by a workspace: kept on deletion, with the reason.
 export const sharedTables: Partial<Record<TableNames, string>> = {
   users: "personal account; may belong to other workspaces", identities: "personal sign-in methods", sessions: "personal browser sessions",
-  personalCredentials: "personal agent keys", personalSettings: "personal preferences", cliSessions: "personal CLI sessions", loginTokens: "magic-link tokens keyed by email",
+  personalCredentials: "personal agent keys", personalSettings: "personal preferences", cliSessions: "personal CLI sessions", loginTokens: "magic-link tokens keyed by email; pruned after 30 days",
   inferenceBudgets: "deployment-wide model budget", inferenceReservations: "deployment-wide budget reservations",
   rateLimits: "short-lived counters", changelogDigests: "which public changelog entries were last emailed", providerReceipts: "one-time install receipts that expire", ssoRequests: "SAML request ids that expire in 10 minutes",
   oauthClients: "MCP client registry shared by all workspaces", stripeEvents: "Stripe event ids kept for replay protection (no review data)",
@@ -157,7 +158,21 @@ export const startPurge = internalMutation({ args: { deletionId: v.id("workspace
   }
   await audit(ctx, d.organizationId, undefined, "workspace.purge_started", d._id);
   await ctx.db.patch(d._id, { status: "purging", startedAt: Date.now() });
-  await ctx.scheduler.runAfter(0, internal.dataControls.purge, { deletionId: d._id });
+  await ctx.scheduler.runAfter(0, internal.dataControls.quiesce, { deletionId: d._id });
+} });
+// Before any row goes, stop new work: every writer (webhooks, indexing, reviews) checks repo.enabled, and
+// enableIndexing refuses while the workspace purges. Running jobs get drainMs to finish, so nothing writes
+// into a table the purge has already emptied.
+export const drainMs = 10 * 60000;
+/** Whether the workspace's current deletion (its newest receipt) is purging. */
+export const workspacePurging = async (ctx: { db: MutationCtx["db"] }, organizationId: Id<"organizations">) => (await pendingOf(ctx, organizationId))?.status === "purging";
+export const quiesce = internalMutation({ args: { deletionId: v.id("workspaceDeletions"), cursor: v.optional(v.string()) }, handler: async (ctx, a) => {
+  const d = await ctx.db.get(a.deletionId);
+  if (!d || d.status !== "purging") return;
+  const page = await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", d.organizationId)).paginate({ cursor: a.cursor ?? null, numItems: 100 });
+  for (const repo of page.page) if (repo.enabled) await disableRepository(ctx, repo);
+  if (!page.isDone) await ctx.scheduler.runAfter(0, internal.dataControls.quiesce, { deletionId: d._id, cursor: page.continueCursor });
+  else await ctx.scheduler.runAfter(drainMs, internal.dataControls.purge, { deletionId: d._id });
 } });
 // One bounded chunk per transaction; the receipt holds the step and cursor, so a crash or redeploy
 // resumes where it stopped, and re-running a finished step deletes nothing.

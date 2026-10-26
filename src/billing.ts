@@ -32,12 +32,15 @@ export function billingDecision(account: BillingAccount, used: number, now: numb
   if (account.subscriptionId && paying.has(account.status)) {
     // A subscription without a recorded plan predates Pro, so it is Starter.
     const plan = account.plan === "pro" ? "pro" as const : "starter" as const;
-    const limit = Math.max(1, account.seats) * (plan === "pro" ? config.proUsagePerSeatMicros : config.usagePerSeatMicros), capMicros = Math.round((account.spendCapUsd ?? 0) * 1e6), base = { plan, limit, used, capMicros };
+    // Stripe does not bill metered usage recorded during a trial, so extra usage starts with the paid period.
+    const trialing = account.status === "trialing";
+    const limit = Math.max(1, account.seats) * (plan === "pro" ? config.proUsagePerSeatMicros : config.usagePerSeatMicros), capMicros = trialing ? 0 : Math.round((account.spendCapUsd ?? 0) * 1e6), base = { plan, limit, used, capMicros };
     if (account.status === "past_due" && (account.pastDueSince ?? now) + config.graceDays * 86400000 <= now) return { ...base, allowed: false, overage: false, reason: "Payment is past due and the grace period has ended. Update the payment method in Organization Settings → Billing & Usage." };
     if (!over(limit)) return { ...base, allowed: true, overage: false };
     if (capMicros && !over(limit + capMicros)) return { ...base, allowed: true, overage: true };
     return { ...base, allowed: false, overage: false, reason: capMicros
       ? `This workspace reached its extra usage cap of ${usdText(capMicros)} this month. Usage resets on ${resetText(now)}; a workspace admin can raise the cap in Organization Settings → Billing & Usage.`
+      : trialing ? `This workspace used its included usage for this month. Usage resets on ${resetText(now)}; extra usage can start once the trial ends.`
       : `This workspace used its included usage for this month. Usage resets on ${resetText(now)}; a workspace admin can turn on extra usage in Organization Settings → Billing & Usage.` };
   }
   // Free: no subscription (or a lapsed one). The allowance resets each month and has no extra usage.

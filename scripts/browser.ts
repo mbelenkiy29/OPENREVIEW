@@ -193,10 +193,10 @@ try {
   await page.waitForURL("**/dashboard/onboarding/done");
   const billing = (await backend.query(api.billing.status, { token, organizationId })).enabled;
   if (billing) {
-    // A workspace from before plans were required keeps the optional plan step (trial without a card).
+    // The owner's first workspace is on Free, and the plan step stays open for upgrading or going on.
     await page.goto(`${url}/dashboard/onboarding/plan`);
     await page.getByRole("heading", { name: "Choose your plan", level: 1 }).waitFor();
-    await page.getByRole("button", { name: /Continue on the trial/ }).click();
+    await page.getByRole("button", { name: /Continue on Free/ }).click();
     await page.waitForURL("**/dashboard/onboarding/connect");
   }
   await page.setViewportSize({ width: 390, height: 844 });
@@ -211,8 +211,8 @@ try {
   await page.getByRole("button", { name: /^Go to dashboard/ }).click();
   await page.waitForURL("**/dashboard/analytics");
   assert.ok((await backend.query(api.onboarding.status, { token, organizationId })).onboarding?.completedAt, "Setup completion was not recorded");
-  // A new workspace on a billing deployment must choose a plan first: every dashboard page leads to the
-  // plan step, which only offers Checkout (card required). Then switch back to the fixture workspace.
+  // A second workspace for the same owner gets no Free allowance, so it must choose a paid plan first: every
+  // dashboard page leads to the plan step, which offers only Checkout. Then switch back to the fixture workspace.
   if (billing) {
     const required = await backend.mutation(api.users.createOrganization, { token, name: "Plan gate check" });
     const asWorkspace = (id: string) => context.addCookies([{ name: "openreview_workspace", value: id, url, sameSite: "Lax" }]);
@@ -220,8 +220,8 @@ try {
     await page.goto(`${url}/dashboard/analytics`);
     await page.waitForURL("**/dashboard/onboarding/plan");
     await page.getByRole("heading", { name: "Choose your plan", level: 1 }).waitFor();
-    await page.getByRole("button", { name: /Start free trial/ }).waitFor();
-    assert.equal(await page.getByRole("button", { name: /Continue on the trial/ }).count(), 0, "A required plan can be skipped");
+    await page.getByRole("button", { name: /Choose Starter/ }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /Continue on Free/ }).count(), 0, "A second workspace can take Free");
     await page.goto(`${url}/dashboard/onboarding/connect`);
     await page.waitForURL("**/dashboard/onboarding/plan");
     await asWorkspace(organizationId);

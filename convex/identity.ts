@@ -1,14 +1,16 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authenticated, authenticatedSession, authorize, service } from "./auth";
-import { rateLimit } from "./rateLimit";
+import { cooldown, otherUserEmailLimit, rateLimit } from "./rateLimit";
 import { scheduleSeatSync } from "./billing";
 import { recentSignIn, recordReferralSignup } from "./referralLedger";
 import { lifecycleEmail } from "./lifecycleEmails";
-import { emailAddress } from "../src/email";
+import { recordConversion } from "./conversions";
+import { canonicalEmail, emailAddress } from "../src/email";
+import { limitKey } from "../src/limit-key";
 import { normalizeReferralCode, referralConfig } from "../src/referrals";
 
 // Identities, sessions, email invitations and magic links.
@@ -47,7 +49,11 @@ export async function resolveIdentity(ctx: MutationCtx, p: Profile): Promise<{ u
   const created = !userId;
   if (!userId) userId = await ctx.db.insert("users", { login: p.login.slice(0, 100), avatar: p.avatar, ...(p.provider === "github" ? { githubId: Number(p.providerUserId) } : {}), createdAt: now });
   await ctx.db.insert("identities", { userId, provider: p.provider, providerUserId: p.providerUserId, ...githubLogin(p), ...(email ? { email } : {}), emailVerified: Boolean(email && p.emailVerified), createdAt: now, lastLoginAt: now });
-  if (created) await lifecycleEmail(ctx, "welcome", { userId });
+  if (created) {
+    await lifecycleEmail(ctx, "welcome", { userId });
+    // Every caller has completed a sign-in by now, so a new user here is a verified sign-up.
+    await recordConversion(ctx, "signup_verified", userId, { userId, method: p.provider });
+  }
   return { userId, created };
 }
 async function startSession(ctx: MutationCtx, userId: Id<"users">, hash: string, providerName: string, userAgent?: string, signedInAt?: number) {
@@ -67,12 +73,13 @@ export const signIn = mutation({ args: { secret: v.string(), provider, providerU
   if (a.linkToken) {
     // Linking proves only the new provider account, not who is signed in, and that account can later sign in
     // fresh: while referral payouts are on it needs the same recent sign-in as payouts, and the new session
-    // keeps the old sign-in time.
+    // keeps the old sign-in time. The two refusals the visitor can act on are ConvexErrors, whose message reaches
+    // the web app in production too, so src/oauth-flow.ts can tell them from failures (which it reports to Sentry).
     const { user: current, session } = await authenticatedSession(ctx, a.linkToken);
-    if (referralConfig().payoutsEnabled && !recentSignIn(session)) throw new Error("Sign in again to link another account");
+    if (referralConfig().payoutsEnabled && !recentSignIn(session)) throw new ConvexError("Sign in again to link another account");
     signedInAt = session?.signedInAt ?? session?.createdAt ?? 0;
     const existing = await ctx.db.query("identities").withIndex("by_provider_user", (q) => q.eq("provider", a.provider).eq("providerUserId", a.providerUserId)).unique();
-    if (existing && existing.userId !== current._id) throw new Error("This account is already linked to another OpenReview user");
+    if (existing && existing.userId !== current._id) throw new ConvexError("This account is already linked to another OpenReview user");
     if (!existing) { const email = a.email ? emailAddress.safeParse(a.email).data : undefined; await ctx.db.insert("identities", { userId: current._id, provider: a.provider, providerUserId: a.providerUserId, ...githubLogin(a), ...(email ? { email } : {}), emailVerified: Boolean(email && a.emailVerified), createdAt: Date.now(), lastLoginAt: Date.now() }); }
     else await ctx.db.patch(existing._id, githubLogin(a));
     userId = current._id;
@@ -88,7 +95,7 @@ export const signIn = mutation({ args: { secret: v.string(), provider, providerU
 export const sessionValid = query({ args: { token: v.string() }, handler: async (ctx, a) => { try { await authenticated(ctx, a.token); return true; } catch { return false; } } });
 export const sessions = query({ args: { token: v.string() }, handler: async (ctx, a) => {
   const { user, session } = await authenticatedSession(ctx, a.token);
-  const rows = (await ctx.db.query("sessions").withIndex("by_user", (q) => q.eq("userId", user._id)).take(200)).filter((s) => !s.revokedAt && s.expiresAt > Date.now());
+  const rows = (await ctx.db.query("sessions").withIndex("by_user", (q) => q.eq("userId", user._id)).order("desc").take(200)).reverse().filter((s) => !s.revokedAt && s.expiresAt > Date.now() && s.createdAt >= (user.sessionsValidAfter ?? 0));
   const identities = await ctx.db.query("identities").withIndex("by_user", (q) => q.eq("userId", user._id)).take(20);
   return { sessions: rows.map((s) => ({ _id: s._id, provider: s.provider, userAgent: s.userAgent ?? null, createdAt: s.createdAt, expiresAt: s.expiresAt, current: s._id === session?._id })).sort((x, y) => y.createdAt - x.createdAt), identities: identities.map((i) => ({ provider: i.provider, email: i.email ?? null, emailVerified: i.emailVerified, lastLoginAt: i.lastLoginAt })) };
 } });
@@ -104,7 +111,8 @@ export const signOut = mutation({ args: { token: v.string() }, handler: async (c
 export async function revokeAllSessions(ctx: MutationCtx, userId: Id<"users">) {
   const now = Date.now();
   await ctx.db.patch(userId, { sessionsValidAfter: now });
-  for (const s of await ctx.db.query("sessions").withIndex("by_user", (q) => q.eq("userId", userId)).take(500)) if (!s.revokedAt) await ctx.db.patch(s._id, { revokedAt: now });
+  // Rows past these 500 are already invalid through sessionsValidAfter (convex/auth.ts); marking the newest keeps the list honest.
+  for (const s of await ctx.db.query("sessions").withIndex("by_user", (q) => q.eq("userId", userId)).order("desc").take(500)) if (!s.revokedAt) await ctx.db.patch(s._id, { revokedAt: now });
 }
 export const signOutEverywhere = mutation({ args: { token: v.string() }, handler: async (ctx, a) => { const user = await authenticated(ctx, a.token); await revokeAllSessions(ctx, user._id); } });
 // Removal from a workspace revokes the member's sessions and that workspace's API keys and bridges.
@@ -116,19 +124,42 @@ export async function revokeMemberAccess(ctx: MutationCtx, organizationId: Id<"o
 
 // Magic links (email sign-in): hashes only; single use; 15 minutes. A referral code rides on the token
 // and counts only if the link creates the user.
-export const storeLoginToken = internalMutation({ args: { email: v.string(), tokenHash: v.string(), referralCode: v.optional(v.string()) }, handler: async (ctx, a) => {
-  if (!hex64.test(a.tokenHash)) throw new Error("Invalid token");
-  await rateLimit(ctx, `magic-link:${a.email}`, 3, 600000);
+// Sending is limited per mailbox (canonicalEmail folds Gmail dots and +tags, so one inbox cannot be
+// flooded through its variants), per client network when the web app knows it (an HMAC from
+// src/client-ip.ts), and for the whole deployment (AUTH_EMAIL_HOURLY/AUTH_EMAIL_DAILY, below the Resend
+// quota). Every address meets the same limits, so a refusal never says whether an account exists. A
+// refusal throws ConvexError({code}): "cooldown" (asked within the last minute; the page still says
+// "sent") or "limited"; the throw rolls back every counter this call raised.
+const envLimit = (value: string | undefined, fallback: number) => { const n = Number(value); return Number.isInteger(n) && n > 0 ? n : fallback; };
+export const magicLinkLimits = (env: Record<string, string | undefined> = process.env) => ({ hourly: envLimit(env.AUTH_EMAIL_HOURLY, 60), daily: envLimit(env.AUTH_EMAIL_DAILY, 300) });
+export const storeLoginToken = internalMutation({ args: { email: v.string(), tokenHash: v.string(), referralCode: v.optional(v.string()), ipHash: v.optional(v.string()), requestId: v.optional(v.string()) }, handler: async (ctx, a): Promise<{ nearCap: boolean }> => {
+  if (!hex64.test(a.tokenHash) || (a.ipHash !== undefined && !hex64.test(a.ipHash))) throw new Error("Invalid token");
+  const refuse = (code: "cooldown" | "limited") => () => { throw new ConvexError({ code }); };
+  const limit = (key: string, maximum: number, windowMs: number) => rateLimit(ctx, key, maximum, windowMs).catch(refuse("limited"));
+  const to = `magic-link:to:${await limitKey(canonicalEmail(a.email))}`, { hourly, daily } = magicLinkLimits();
+  await cooldown(ctx, `${to}:last`, 60_000).catch(refuse("cooldown"));
+  await limit(`${to}:15m`, 3, 15 * 60_000);
+  await limit(`${to}:1d`, 10, 86_400_000);
+  if (a.ipHash) {
+    await limit(`magic-link:ip:${a.ipHash}:10m`, 10, 600_000);
+    await limit(`magic-link:ip:${a.ipHash}:1d`, 50, 86_400_000);
+  }
+  const hour = await limit("magic-link:global:1h", hourly, 3_600_000), day = await limit("magic-link:global:1d", daily, 86_400_000);
   const referralCode = referralConfig().enabled ? normalizeReferralCode(a.referralCode) : null;
-  await ctx.db.insert("loginTokens", { email: a.email, tokenHash: a.tokenHash, expiresAt: Date.now() + 15 * 60000, createdAt: Date.now(), ...(referralCode ? { referralCode } : {}) });
+  await ctx.db.insert("loginTokens", { email: a.email, tokenHash: a.tokenHash, expiresAt: Date.now() + 15 * 60000, createdAt: Date.now(), ...(referralCode ? { referralCode } : {}), ...(a.requestId ? { requestId: a.requestId } : {}) });
+  return { nearCap: hour * 2 >= hourly || day * 2 >= daily };
+} });
+export const recordSend = internalMutation({ args: { tokenHash: v.string(), resendId: v.string() }, handler: async (ctx, a) => {
+  const token = await ctx.db.query("loginTokens").withIndex("by_token", (q) => q.eq("tokenHash", a.tokenHash)).unique();
+  if (token) await ctx.db.patch(token._id, { resendId: a.resendId.slice(0, 100) });
 } });
 export const consumeLoginToken = mutation({ args: { secret: v.string(), tokenHash: v.string(), sessionHash: v.string(), userAgent: v.optional(v.string()) }, handler: async (ctx, a): Promise<Id<"users"> | null> => {
   service(a.secret);
   if (!hex64.test(a.tokenHash)) return null;
   const token = await ctx.db.query("loginTokens").withIndex("by_token", (q) => q.eq("tokenHash", a.tokenHash)).unique();
   if (!token || token.usedAt || token.expiresAt <= Date.now()) return null;
-  await ctx.db.patch(token._id, { usedAt: Date.now() });
   const { userId, created } = await resolveIdentity(ctx, { provider: "email", providerUserId: token.email, login: token.email.split("@")[0], avatar: "", email: token.email, emailVerified: true });
+  await ctx.db.patch(token._id, { usedAt: Date.now(), createdUser: created });
   if (created) await recordReferralSignup(ctx, userId, token.referralCode);
   await startSession(ctx, userId, a.sessionHash, "email", a.userAgent);
   return userId;
@@ -139,7 +170,10 @@ export const createEmailInvitation = internalMutation({ args: { token: v.string(
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
   const email = emailAddress.parse(a.email);
   if (!hex64.test(a.tokenHash)) throw new Error("Invalid token");
+  // Per workspace, and per inviter across workspaces (anyone can create a few an hour), and deployment-wide.
   await rateLimit(ctx, `email-invite:${a.organizationId}`, 20, 3600000);
+  await rateLimit(ctx, `email-invite-user:${user._id}`, 30, 86_400_000);
+  await otherUserEmailLimit(ctx);
   const id = await ctx.db.insert("emailInvitations", { organizationId: a.organizationId, email, role: a.role, tokenHash: a.tokenHash, invitedBy: user._id, expiresAt: Date.now() + 7 * 86400000, createdAt: Date.now() });
   await audit(ctx, a.organizationId, user._id, "invitation.email_created", id);
   return { id, workspace: (await ctx.db.get(a.organizationId))?.name ?? "an OpenReview workspace", inviter: user.login, email };

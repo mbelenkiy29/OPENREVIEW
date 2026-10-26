@@ -88,6 +88,9 @@ test('server-side sessions: individual revocation, sign out everywhere, expiry, 
  vi.advanceTimersByTime(2000);
  await t.mutation(api.identity.signOutEverywhere,{token:tablet.token});
  expect([await valid(t,tablet.token),await valid(t,legacyToken)]).toEqual([false,false]);
+ // The cutoff alone ends a session, even one whose row the revoke loop never reached (it stops at 500).
+ await t.run(async ctx=>{const row=await ctx.db.query('sessions').withIndex('by_hash',q=>q.eq('hash',createHash('sha256').update(tablet.sid).digest('hex'))).unique();await ctx.db.patch(row!._id,{revokedAt:undefined});});
+ expect(await valid(t,tablet.token)).toBe(false);
  // Signing in again in the same second still works.
  const again=await signIn(t,{provider:'google',providerUserId:'g-1',login:'dev',email:'dev@example.com',emailVerified:true});
  expect(await valid(t,again.token)).toBe(true);

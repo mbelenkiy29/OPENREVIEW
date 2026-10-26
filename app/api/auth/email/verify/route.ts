@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import * as Sentry from "@sentry/nextjs";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { api } from "../../../../../convex/_generated/api";
@@ -22,7 +23,11 @@ export async function POST(request: Request) {
   // Same-origin only, so another site cannot auto-submit its own link for the visitor.
   if (request.headers.get("origin") !== origin() || !valid(token)) return NextResponse.redirect(`${origin()}/login?error=signin`, 303);
   const session = newSession();
-  const userId = await backend().mutation(api.identity.consumeLoginToken, { secret: process.env.SERVICE_SECRET ?? "", tokenHash: createHash("sha256").update(token).digest("hex"), sessionHash: session.hash, userAgent: (await headers()).get("user-agent")?.slice(0, 200) ?? undefined }).catch(() => null);
+  const userId = await backend().mutation(api.identity.consumeLoginToken, { secret: process.env.SERVICE_SECRET ?? "", tokenHash: createHash("sha256").update(token).digest("hex"), sessionHash: session.hash, userAgent: (await headers()).get("user-agent")?.slice(0, 200) ?? undefined }).catch((error) => {
+    // An expired or used link returns null without throwing; a throw is Convex failing, which Sentry should see.
+    Sentry.captureException(error, { level: "error", fingerprint: ["auth-email-link-failed"], tags: { auth_failure: "email-link" } });
+    return null;
+  });
   if (!userId) return NextResponse.redirect(`${origin()}/login?error=link`, 303);
   await startSession(userId, session.sid);
   return NextResponse.redirect(origin() + safeNext(String(form?.get("next") ?? "")), 303);

@@ -1,10 +1,10 @@
 // Reddit Pixel (Reddit Ads → Events Manager): tells Reddit Ads which visits and sign-ups came from our
 // ads on Reddit. It sets cookies, so like PostHog it starts only after the visitor accepts the
 // analytics banner (src/analytics.ts starts it). Off unless the pixel ID is set when the web app is
-// built, so self-hosted installs send nothing.
+// built, so self-hosted installs send nothing, and off on Vercel preview deployments.
 import { isNewSignup } from "./ads-pixel";
 
-export const redditPixelId = process.env.NEXT_PUBLIC_REDDIT_PIXEL_ID || undefined;
+export const redditPixelId = process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" ? undefined : process.env.NEXT_PUBLIC_REDDIT_PIXEL_ID || undefined;
 
 type Rdt = ((...args: unknown[]) => void) & { callQueue: IArguments[]; sendEvent?: (...args: unknown[]) => void };
 declare global {

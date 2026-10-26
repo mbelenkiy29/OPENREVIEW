@@ -70,7 +70,7 @@ export class BitbucketDC implements Scm {
   const parts=repo.split("/");if(parts.length!==2||parts.some(p=>!p||p==="."||p===".."||/[\0\r\n]/.test(p)))throw new Error("Invalid Bitbucket repository");
   return "/projects/"+encodeURIComponent(parts[0])+"/repos/"+encodeURIComponent(parts[1]);
  }
- async request<T>(endpoint:string,schema:z.ZodType<T,z.ZodTypeDef,unknown>,body?:unknown,namespace:"api/latest"|"build-status/latest"="api/latest",requirePublisher=false,method?:"PUT"):Promise<T>{
+ async request<T>(endpoint:string,schema:z.ZodType<T,unknown>,body?:unknown,namespace:"api/latest"|"build-status/latest"="api/latest",requirePublisher=false,method?:"PUT"):Promise<T>{
   if(!endpoint.startsWith("/")||endpoint.startsWith("//")||endpoint.includes("://"))throw new Error("Invalid Bitbucket API path");
   const verb=method??(body===undefined?"GET":"POST"),response=await retrying(verb,()=>fetch(this.base+"/rest/"+namespace+endpoint,{method:verb,redirect:"error",headers:{authorization:"Bearer "+this.token,accept:"application/json","content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(60000)}));
   if(!response.ok)throw new Error("Bitbucket Data Center "+response.status+" at "+endpoint.split("?")[0]);
@@ -94,7 +94,7 @@ export class BitbucketDC implements Scm {
   throw new Error("Bitbucket pagination exceeded; coverage incomplete");
  }
  async assertRepository(repo:string){if(this.externalId&&(await this.request(this.prefix(repo),z.object({id}))).id.toString()!==this.externalId)throw new Error("Bitbucket repository identity changed");}
- private approvalGet<T>(endpoint:string,schema:z.ZodType<T,z.ZodTypeDef,unknown>,namespace:"api/latest"|"build-status/latest"="api/latest"){
+ private approvalGet<T>(endpoint:string,schema:z.ZodType<T,unknown>,namespace:"api/latest"|"build-status/latest"="api/latest"){
   return this.request(endpoint,schema,undefined,namespace,true);
  }
  private async approvalPages<T>(endpoint:string,schema:z.ZodType<T>,namespace:"api/latest"|"build-status/latest"="api/latest"){
@@ -282,7 +282,7 @@ export class BitbucketDC implements Scm {
   const directories=new Map<string,string[]>(),modified=new Map<string,string>();
   for(const p of paths){const directory=p.split("/").slice(0,-1).join("/");const list=directories.get(directory)??[];list.push(p);directories.set(directory,list);}
   for(const [directory,files] of directories){
-   const result=await this.request(this.prefix(repo)+"/last-modified"+(directory?"/"+directory.split("/").map(encodeURIComponent).join("/"):"")+"?at="+sha,z.object({files:z.record(z.object({id:commit}))}));
+   const result=await this.request(this.prefix(repo)+"/last-modified"+(directory?"/"+directory.split("/").map(encodeURIComponent).join("/"):"")+"?at="+sha,z.object({files:z.record(z.string(),z.object({id:commit}))}));
    for(const p of files){
     const name=p.split("/").at(-1)!;if(!Object.hasOwn(result.files,name))throw new Error("Bitbucket last-modified source coverage incomplete");modified.set(p,result.files[name].id);
    }

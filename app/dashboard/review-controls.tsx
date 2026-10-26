@@ -8,7 +8,7 @@ import { Icon } from "../ui/icons";
 /** Runs `restore` after the owning form resets (Discard, or React's reset after a saved action). */
 export function useFormReset(ref: RefObject<HTMLElement | null>, restore: () => void) {
   const latest = useRef(restore);
-  latest.current = restore;
+  useEffect(() => { latest.current = restore; });
   useEffect(() => {
     const form = (ref.current as HTMLInputElement | null)?.form ?? ref.current?.closest("form");
     if (!form) return;

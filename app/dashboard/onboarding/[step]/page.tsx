@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { api } from "../../../../convex/_generated/api";
 import { backend } from "../../../../src/server";
 import { emailOnWeb } from "../../../../src/email";
-import { billingConfig, checkoutTrialEnd, usdText } from "../../../../src/billing";
+import { checkoutTrialEnd, usdText } from "../../../../src/billing";
 import { entitlements } from "../../../../src/plans";
 import { referralConfig, referralDisclosure, referralFact } from "../../../../src/referrals";
 import { installHref, linkHref } from "../../../../src/github-install";
@@ -33,7 +33,8 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
   const step = resolveStep(requested, state);
   if (step !== requested) redirect(`/dashboard/onboarding/${step}`);
 
-  if (step === "workspace" || !organization || !status) return <WizardFrame step="workspace" admin billing={billingConfig().enabled} nextLabel="Create workspace" centered>
+  // The plan step counts only while a workspace still has to choose: an owner's first workspace starts on Free.
+  if (step === "workspace" || !organization || !status) return <WizardFrame step="workspace" admin nextLabel="Create workspace" centered>
     <div className="wizard-panel wizard-card">
       <span className="wizard-logo"><Mark /></span>
       <Heading step="workspace">A workspace holds your repositories, review settings, history and team. You can rename it later.</Heading>
@@ -45,7 +46,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
   </WizardFrame>;
 
   const admin = status.admin, organizationId = organization._id, next = nextStep(step, state.billing);
-  const frame = { workspace: organization.name, organizationId, admin, completed: state.completed, billing: state.billing, nextHref: next ? `/dashboard/onboarding/${next}` : "/dashboard/analytics" };
+  const frame = { workspace: organization.name, organizationId, admin, completed: state.completed, billing: state.billing && (step === "plan" || Boolean(state.planMissing)), nextHref: next ? `/dashboard/onboarding/${next}` : "/dashboard/analytics" };
   const selected = status.repositories.filter((r) => r.selected);
 
   if (step === "connect") {

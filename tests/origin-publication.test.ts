@@ -109,7 +109,7 @@ test('Origin native unspecified sides allow only unanchored discussions without 
  state.comments.push({...ownFinding(),thread:{...ownFinding().thread,side:'PULL_REQUEST_COMMENT_SIDE_UNSPECIFIED'}});
  await assert.rejects(client.publish(repo,1,sha,summary,[finding],marker,'detailed','4'),/unanchored discussion/);assert.equal(state.reviewPosts,0);
  state.comments.pop();general.thread.side='unexpected' as typeof general.thread.side;
- await assert.rejects(client.followUp(repo,1,general.id,'user_alice',general.body),/Invalid enum value/);assert.equal(state.replyPosts,1);
+ await assert.rejects(client.followUp(repo,1,general.id,'user_alice',general.body),/Invalid option/);assert.equal(state.replyPosts,1);
 });
 
 test('Origin collaborator fallback is limited to App 404 and preserves native denials',async t=>{

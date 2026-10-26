@@ -141,7 +141,9 @@ export default defineSchema({
     key: v.string(),
     window: v.number(),
     count: v.number(),
-  }).index("by_key", ["key"]),
+    // End of the window; absent on rows last written before pruning existed (convex/authHygiene.ts).
+    expiresAt: v.optional(v.number()),
+  }).index("by_key", ["key"]).index("by_expiry", ["expiresAt"]),
   // One row: the changelog entries the last email digest covered (src/changelog.ts feedDigest keys, space-separated).
   changelogDigests: defineTable({ keys: v.string(), sentAt: v.number() }),
   modelCache: defineTable({
@@ -277,7 +279,15 @@ export default defineSchema({
     revokedAt: v.optional(v.number()),
     createdAt: v.number(),
   }).index("by_token", ["tokenHash"]).index("by_org", ["organizationId"]),
-  loginTokens: defineTable({ email: v.string(), tokenHash: v.string(), expiresAt: v.number(), usedAt: v.optional(v.number()), createdAt: v.number(), referralCode: v.optional(v.string()) }).index("by_token", ["tokenHash"]),
+  // Magic links, kept 30 days as the record of sign-in emails sent and used (convex/authFunnel.ts):
+  // requestId ties a link to the web request's log line, resendId to Resend's log, and createdUser
+  // says whether using it created the account.
+  loginTokens: defineTable({ email: v.string(), tokenHash: v.string(), expiresAt: v.number(), usedAt: v.optional(v.number()), createdAt: v.number(), referralCode: v.optional(v.string()), requestId: v.optional(v.string()), resendId: v.optional(v.string()), createdUser: v.optional(v.boolean()) }).index("by_token", ["tokenHash"]),
+  // Funnel milestones recorded server-side in the transaction that reaches them, once each (`key` is
+  // unique): signup_verified:<userId>, github_app_installed:<org>, first_repository_connected:<org>,
+  // first_review_completed:<org>, subscribed:<org>. Internal ids and timestamps only (convex/conversions.ts);
+  // a workspace's rows go with it when it is deleted (sign-up rows carry no workspace).
+  conversionEvents: defineTable({ name: v.string(), key: v.string(), userId: v.optional(v.id("users")), organizationId: v.optional(org), method: v.optional(v.string()), at: v.number() }).index("by_key", ["key"]).index("by_name_at", ["name", "at"]).index("by_org", ["organizationId"]),
   // onboarding: guided setup progress for workspaces created with it (absent on older workspaces,
   // which are never sent to setup). reviewsPaused marks automatic reviews held off while indexing.
   organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), /* how far transcript retention has cleared reviews' agent state */ transcriptsClearedBefore: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), defaultHandoff:v.optional(handoffValidator), defaultCloudAgent:v.optional(cloudAgentValidator), /* billing deployments: a new workspace must choose a plan (Stripe-confirmed) before setup, indexing or reviews; older workspaces have no flag */ planRequired:v.optional(v.boolean()), planSelectedAt:v.optional(v.number()), plan:v.optional(v.string()), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), lifecycleEmails: v.optional(v.array(v.string())) /* one-time emails sent, convex/lifecycleEmails.ts */, createdAt: v.number() }),

@@ -236,7 +236,7 @@ test("referral codes added in Organization Settings → Billing & Usage follow t
   const errors = [];
   for (const [org, value] of [[frankCo, "nope"], [frankCo, frankCode], [frankCo, ginaCode], [frankCo, code], [paidCo, hankCode]] as const) errors.push(await apply(frank, org, value));
   expect(errors).toEqual([
-    { ok: false, error: "That referral code doesn’t exist. Check it and try again." },
+    { ok: false, error: "That referral code doesn’t exist. A discount code goes on the Stripe checkout page instead: choose Starter or Pro, then Add promotion code." },
     { ok: false, error: "You can’t use your own referral code." },
     { ok: false, error: "Someone in this workspace referred the code’s owner, so their code can’t be used here." },
     { ok: false, error: "The code’s owner is or was a member of this workspace." },

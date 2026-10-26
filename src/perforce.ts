@@ -9,7 +9,7 @@ const numeric=z.union([z.string().regex(/^\d+$/),z.number().int().nonnegative().
 const projectId=z.string().min(1).max(200).refine(s=>!/[\0\r\n/]/.test(s)&&s!=="."&&s!=="..");
 export const p4DepotFile=z.string().min(4).max(4096).refine(s=>s.startsWith("//")&&!/[\0\r\n#@*]/.test(s)&&!s.slice(2).split("/").some(p=>!p||p==="."||p===".."));
 export const p4ProjectSchema=z.object({id:projectId,name:z.string().max(2000),branches:z.array(z.object({id:projectId,name:z.string().max(2000),paths:z.array(z.string().min(3).max(4096).refine(s=>/^[+-]?\/\//.test(s)&&!/[\0\r\n]/.test(s))).max(2000)})).max(2000),deleted:z.boolean().optional()}).refine(p=>new Set(p.branches.map(b=>b.id)).size===p.branches.length,"Duplicate P4 branch identity");
-const listing=z.object({id:number,author:z.string(),description:z.string(),updated:z.number().int().nonnegative().max(8640000000000),pending:z.boolean(),state:z.string(),projects:z.union([z.record(z.array(z.string())),z.array(z.never()).transform(():Record<string,string[]>=>({}))])});
+const listing=z.object({id:number,author:z.string(),description:z.string(),updated:z.number().int().nonnegative().max(8640000000000),pending:z.boolean(),state:z.string(),projects:z.union([z.record(z.string(),z.array(z.string())),z.array(z.never()).transform(():Record<string,string[]>=>({}))])});
 const review=listing.extend({versions:z.array(z.object({change:number,archiveChange:number.optional(),pending:z.boolean(),time:z.number().int().nonnegative()})).min(1)});
 const file=z.object({depotFile:p4DepotFile,action:z.string(),type:z.string(),rev:numeric,fileSize:numeric.optional(),digest:z.string().regex(/^[0-9a-fA-F]{32}$/).optional()});
 export type P4Review=z.infer<typeof listing>;
@@ -19,7 +19,7 @@ export const p4DepotRecord=z.object({code:z.literal("stat"),depotFile:p4DepotFil
 export const p4Credential=z.object({username:z.string().min(1).max(200).refine(s=>!/[\0\r\n:]/.test(s)),ticket:z.string().min(10).max(10000).refine(s=>!/[\0\r\n]/.test(s))}).strict();
 export type P4Snapshot={projectId:string;review:z.infer<typeof review>;version:number;change:number;revision:string;files:z.infer<typeof file>[];coverage:string[]};
 export type P4ApprovalInspection={reviewNumber:number;version:number;revision:string;state:string;pending:boolean;nativeApprovalAvailable:boolean;nativeBlockers:string[];coverage:string[];inspectedAt:number};
-const commentContext=z.object({comment:number.optional(),version:number.optional(),file:p4DepotFile.nullish().transform(v=>v??undefined),leftLine:z.number().int().nonnegative().safe().nullable().optional(),rightLine:z.number().int().nonnegative().safe().nullable().optional(),content:z.array(z.string().max(256)).max(5).optional()});
+const commentContext=z.object({comment:number.optional(),version:number.optional(),file:p4DepotFile.nullish().transform(v=>v??undefined).optional(),leftLine:z.number().int().nonnegative().safe().nullable().optional(),rightLine:z.number().int().nonnegative().safe().nullable().optional(),content:z.array(z.string().max(256)).max(5).optional()});
 const comment=z.object({id:number,body:z.string(),user:z.string(),topic:z.string(),flags:z.array(z.string()),context:z.union([commentContext,z.array(z.never()).transform(()=>({}))]).pipe(commentContext)});
 export type P4Comment=z.infer<typeof comment>;
 export class P4Error extends Error {constructor(readonly status:number,path:string){super("P4 Code Review "+status+" at "+path.split("?")[0]);}}
@@ -59,8 +59,8 @@ export class P4CodeReview {
   try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>limit)throw new Error("P4 response exceeds retrieval coverage limit");chunks.push(value);}}finally{await reader.cancel();}
   return Buffer.concat(chunks);
  }
- private async request<T>(path:string,schema:z.ZodType<T,z.ZodTypeDef,unknown>,payload?:Record<string,unknown>):Promise<T>{return schema.parse(JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(await this.bytes(path,4000000,payload))));}
- private async data<T>(path:string,schema:z.ZodType<T,z.ZodTypeDef,unknown>,payload?:Record<string,unknown>):Promise<T>{const result=await this.request(path,z.object({error:z.null(),data:z.unknown()}),payload);return schema.parse(result.data);}
+ private async request<T>(path:string,schema:z.ZodType<T,unknown>,payload?:Record<string,unknown>):Promise<T>{return schema.parse(JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(await this.bytes(path,4000000,payload))));}
+ private async data<T>(path:string,schema:z.ZodType<T,unknown>,payload?:Record<string,unknown>):Promise<T>{const result=await this.request(path,z.object({error:z.null(),data:z.unknown().optional()}),payload);return schema.parse(result.data);}
  async authenticatedIdentity(){
   const session=await this.request("/api/v9/session",z.object({isValid:z.literal(true),user:z.object({User:z.string()})}));
   if(session.user.User!==this.username)throw new Error("P4 authenticated user does not match the claimed identity");
@@ -93,7 +93,7 @@ export class P4CodeReview {
   // Native blockers can contain private project/user metadata. Return only their categories.
   const emptyArray=z.array(z.never()).transform(():Record<string,unknown>=>({}));
   const result=await this.data(`/api/v11/reviews/${id}/transitions`,z.object({
-   transitions:z.record(z.string().max(200)),blocked:z.union([z.record(z.unknown()),emptyArray]),
+   transitions:z.record(z.string(),z.string().max(200)),blocked:z.union([z.record(z.string(),z.unknown()),emptyArray]),
   }));
   const final=await this.snapshot(project,id);
   if(final.revision!==initial.revision||final.review.updated!==initial.review.updated||final.review.state!==initial.review.state||final.review.pending!==initial.review.pending)throw new Error("P4 review changed during approval inspection; retry");
@@ -208,7 +208,7 @@ export class P4CodeReview {
   for(;;){
    if(++pages>100)throw new Error("P4 comment pagination exceeds complete coverage limit");
    const query=new URLSearchParams({topic,max:"100","context[version]":String(snapshot.version),ignoreArchived:"false"});if(after!==undefined)query.set("after",String(after));
-   const page=await this.request("/api/v9/comments?"+query,z.object({topic:z.string().optional(),comments:z.union([z.record(comment),z.array(comment).max(100).refine(values=>new Set(values.map(c=>c.id)).size===values.length,"Duplicate P4 comment identity").transform(values=>Object.fromEntries(values.map(c=>[String(c.id),c])))]),lastSeen:number.nullable()}));
+   const page=await this.request("/api/v9/comments?"+query,z.object({topic:z.string().optional(),comments:z.union([z.record(z.string(),comment),z.array(comment).max(100).refine(values=>new Set(values.map(c=>c.id)).size===values.length,"Duplicate P4 comment identity").transform(values=>Object.fromEntries(values.map(c=>[String(c.id),c])))]),lastSeen:number.nullable()}));
    const values=Object.entries(page.comments);
    if(page.topic!==undefined&&page.topic!==topic||values.length>100||values.some(([key,c])=>String(c.id)!==key||c.topic!==topic||c.context.version!==snapshot.version||c.context.file&&!snapshot.files.some(f=>f.depotFile===c.context.file)))throw new Error("P4 comment identity, version or file scope mismatch");
    // Native version filtering can omit every scanned comment while advancing lastSeen.

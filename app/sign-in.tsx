@@ -6,12 +6,14 @@ import Link from "next/link";
 import { emailOnWeb } from "../src/email";
 import { authProviders, authQuery, providerLoginPaths, providerNames, type AuthMode } from "../src/auth-pages";
 import { normalizeReferralCode } from "../src/referrals";
+import { turnstileConfig } from "../src/turnstile";
 import { ProviderIcon } from "./ui/provider-icons";
 import { Icon } from "./ui/icons";
+import { TurnstileField } from "./turnstile";
 
 export function SignInOptions({ next, mode = "login", referral }: { next?: string; mode?: AuthMode; referral?: string | null }) {
   const code = normalizeReferralCode(referral), q = authQuery({ next, referral: code });
-  const providers = authProviders(), email = emailOnWeb(), verb = mode === "signup" ? "Sign up" : "Sign in";
+  const providers = authProviders(), email = emailOnWeb(), turnstile = turnstileConfig(), verb = mode === "signup" ? "Sign up" : "Sign in";
   return <div className="sign-in-options">
     {email && <form action="/api/auth/email" method="post" className="sign-in-form">
       {next && <input type="hidden" name="next" value={next} />}
@@ -19,7 +21,9 @@ export function SignInOptions({ next, mode = "login", referral }: { next?: strin
       {code && <input type="hidden" name="referral" value={code} />}
       <label>Enter work email<input type="email" name="email" required maxLength={254} autoComplete="email" placeholder="me@example.com" /></label>
       <p className="sign-in-hint">We’ll email you a sign-in link. No password needed.</p>
+      {turnstile.mode !== "off" && <TurnstileField siteKey={turnstile.siteKey!} action="magic_link" />}
       <button className="primary">{mode === "signup" ? "Start for Free" : "Login"} <Icon name="arrowRight" /></button>
+      {turnstile.mode === "enforce" && <noscript><p className="muted">Email sign-in needs JavaScript; use another sign-in method.</p></noscript>}
     </form>}
     {/* Without email sign-in, the first provider is the primary action. */}
     {providers.map((p, i) => <a key={p} className={`button sign-in-provider${!email && i === 0 ? " primary" : ""}`} href={providerLoginPaths[p] + q}><ProviderIcon provider={p} /> {verb} with {providerNames[p]}</a>)}

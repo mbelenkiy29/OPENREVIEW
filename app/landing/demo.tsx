@@ -273,7 +273,7 @@ function ChatPane({ answers, autoplay }: { answers: ReactNode[]; autoplay?: { fr
     </nav>
     <div className="chat-main">
       {thread ? <section aria-label="Conversation">{thread.messages.map((m) => <article key={m.id} className={`chat-message ${m.role}`}>
-        <p className="muted">{m.role === "user" ? "You" : "OpenReview"} · {m.at}{!m.done && <> · <span className="badge running">running</span></>}</p>
+        <p className="muted">{m.role === "user" ? "You" : "OpenReview"} · {m.at}{!m.done && <span> · <span className="badge running">running</span></span>}</p>
         {m.role === "user" ? <p className="chat-question">{m.text}</p>
           : !m.done && !m.shown ? <div className="chat-progress" role="status" aria-live="polite"><p className="muted">Working…</p><ol>{m.steps!.slice(0, Math.max(1, m.progress ?? 0)).map((s) => <li key={s}>{s}</li>)}</ol></div>
           : !m.done ? <p aria-hidden="true">{revealWords(m.text, m.shown ?? 0)}</p>
@@ -463,8 +463,8 @@ export function SummaryDemo({ summaries }: { summaries: Record<string, ReactNode
       <section>
         <div className="row"><H level={2}>Review summary</H><button type="button" disabled={run !== null} onClick={rereview}>{run ? "Reviewing…" : "Re-review current PR"}</button></div>
         {!reviewed && !run && <p className="muted">@{pull.author} pushed {fixPush.sha.slice(0, 7)}: {fixPush.message} · not reviewed yet</p>}
-        {run ? <div className="chat-progress" role="status" aria-live="polite"><p className="muted">{status(run.status)} {fixPush.sha.slice(0, 12)}</p><ol>{fixPush.steps.slice(0, run.step).map((s) => <li key={s}>{s}</li>)}</ol></div>
-          : <div aria-live="polite"><p className="muted">{shown.sha.slice(0, 12)} · {shown.findings} finding{shown.findings === 1 ? "" : "s"} · Score {shown.score}</p>{summaries[shown.sha]}</div>}
+        {run ? <div className="chat-progress" role="status" aria-live="polite"><p key="run" className="muted">{status(run.status)} {fixPush.sha.slice(0, 12)}</p><ol>{fixPush.steps.slice(0, run.step).map((s) => <li key={s}>{s}</li>)}</ol></div>
+          : <div aria-live="polite"><p key="done" className="muted">{shown.sha.slice(0, 12)} · {shown.findings} {shown.findings === 1 ? "finding" : "findings"} · Score {shown.score}</p>{summaries[shown.sha]}</div>}
       </section>
       <section>
         <H level={2}>Review history</H>

@@ -29,7 +29,7 @@ export function p4SubmittedInventory(input:z.input<typeof submittedInventory>){
 
 /** Recompute every identity component when reading an artifact or receiving an upload. */
 export function parseP4SubmittedInventory(input:unknown){
- const {revision,...metadata}=z.object({project:z.unknown(),serverId:z.unknown(),change:z.unknown(),manifest:z.unknown(),revision:z.string()}).strict().parse(input);
+ const {revision,...metadata}=z.object({project:z.unknown().optional(),serverId:z.unknown().optional(),change:z.unknown().optional(),manifest:z.unknown().optional(),revision:z.string()}).strict().parse(input);
  const result=p4SubmittedInventory(submittedInventory.parse(metadata));
  if(revision!==result.revision)throw new Error("P4 submitted inventory revision mismatch");
  return result;

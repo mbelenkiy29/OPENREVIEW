@@ -92,6 +92,15 @@ test('a completed review fans out to matching Slack channels and opted-in verifi
  expect(slackPosts(sent)).toHaveLength(3);expect(emails(sent)).toHaveLength(2);
 });
 
+test('members who cannot read a repository the review drew context from get no email about it',async()=>{
+ const {t,alice,bob,org,shop,billing,reviewId}=await setup();
+ await verify(t,org,alice.id,'alice@example.com',{reviewCompleted:'all',highSeverity:'all'});
+ await verify(t,org,bob.id,'bob@example.com',{reviewCompleted:'all',highSeverity:'all'});
+ // The shop review read code from acme/billing, which only the Billing team (and admins) can open.
+ await t.run(ctx=>ctx.db.patch(reviewId,{status:'completed',repositoryContext:{repositoryId:shop._id,userId:alice.id,actor:'alice',clusters:[],sources:[{repositoryId:billing._id,revision:head,fullName:'acme/billing'}]}}));
+ const targets=await t.query(internal.notifications.reviewTargets,{reviewId});
+ expect(targets!.recipients.map(r=>r.email)).toEqual(['alice@example.com']);
+});
 test('nothing is scheduled or sent for workspaces without notifications; unconfigured email is skipped, not failed',async()=>{
  const {t,alice,org,reviewId}=await setup();
  const sent=fakeNetwork();

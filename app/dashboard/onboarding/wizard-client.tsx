@@ -34,7 +34,8 @@ export function WizardShortcuts({ nextHref, backHref }: { nextHref?: string; bac
       const form = document.getElementById("wizard-form") as HTMLFormElement | null;
       event.preventDefault();
       if (event.shiftKey) { if (backHref) router.push(backHref); }
-      else if (form && !form.querySelector("fieldset:disabled")) form.requestSubmit();
+      // Only the step's own fieldset marks it read-only; a Pro-locked section inside it is disabled too.
+      else if (form && !form.querySelector(".wizard-fieldset:disabled")) form.requestSubmit();
       else if (nextHref) router.push(nextHref);
     };
     window.addEventListener("keydown", onKey);

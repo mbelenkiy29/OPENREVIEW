@@ -24,10 +24,7 @@ function take(show: (toast: { text: string; tone: string }) => void) {
   if (!raw) return false;
   document.cookie = "openreview_toast=; Max-Age=0; Path=/; SameSite=Lax";
   try {
-    // notify() encodes the JSON and Next's cookies().set encodes it again, so accept one or two layers.
-    const once = decodeURIComponent(raw), parse = (s: string) => JSON.parse(s) as { text?: unknown; tone?: unknown };
-    let value: { text?: unknown; tone?: unknown };
-    try { value = parse(once); } catch { value = parse(decodeURIComponent(once)); }
+    const value = JSON.parse(decodeURIComponent(raw)) as { text?: unknown; tone?: unknown };
     if (typeof value.text === "string") show({ text: value.text.slice(0, 200), tone: value.tone === "error" ? "error" : "success" });
   } catch { /* ignore malformed */ }
   return true;

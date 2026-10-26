@@ -8,7 +8,18 @@ import config from "../next.config";
 import { config as middlewareConfig, middleware } from "../middleware";
 import { contentSecurityPolicy, middlewareSkips, prefetchHeaders, securityHeaders } from "../src/security-headers";
 
-const staticPolicy = "object-src 'none'; base-uri 'self'; form-action 'self' https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'";
+const fetchPolicy = [
+  "style-src 'self' 'unsafe-inline' https://cdn.userjot.com https://fonts.googleapis.com",
+  "img-src 'self' data: blob: https://media.userjot.com https://cdn.userjot.com https://alb.reddit.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "connect-src 'self' https://widget.userjot.com wss://widget.userjot.com https://bzrcdn.openai.com https://bzr.openai.com https://pixel-config.reddit.com https://alb.reddit.com",
+  "frame-src https://challenges.cloudflare.com https://*.userjot.com",
+  "media-src 'self'",
+  "manifest-src 'self'",
+  "worker-src 'self'",
+  "object-src 'none'; base-uri 'self'; form-action 'self' https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'",
+].join("; ");
+const staticPolicy = `default-src 'self'; ${fetchPolicy}`;
 
 test("every route sends nosniff, a referrer policy and refuses to be framed", async () => {
   const csp = [{ key: "Content-Security-Policy", value: staticPolicy }];
@@ -45,9 +56,13 @@ test("pages get a nonce script policy from middleware; everything it skips gets 
   assert.equal(response.headers.get("x-middleware-request-content-security-policy"), policy);
   assert.notEqual(nonce, /'nonce-([^']+)'/.exec(middleware(new NextRequest("https://openreview.tech/login")).headers.get("content-security-policy")!)?.[1]);
 
-  assert.equal(contentSecurityPolicy("abc", false), `script-src 'self' 'nonce-abc' 'strict-dynamic'; ${staticPolicy}`);
-  assert.equal(contentSecurityPolicy("abc", true), `script-src 'self' 'nonce-abc' 'strict-dynamic' 'unsafe-eval'; ${staticPolicy}`);
-  assert.doesNotMatch(contentSecurityPolicy("abc", false), /unsafe-inline|unsafe-eval|default-src/);
+  assert.equal(contentSecurityPolicy("abc", false), `default-src 'self'; script-src 'self' 'nonce-abc' 'strict-dynamic'; ${fetchPolicy}`);
+  assert.equal(contentSecurityPolicy("abc", true), `default-src 'self'; script-src 'self' 'nonce-abc' 'strict-dynamic' 'unsafe-eval'; ${fetchPolicy}`);
+  // Inline styles are allowed (React style attributes); inline scripts and eval never are in production.
+  assert.doesNotMatch(/script-src [^;]*/.exec(contentSecurityPolicy("abc", false))![0], /unsafe-inline|unsafe-eval/);
+  // No directive falls back to "anything": every fetch directive is set, and none is a bare scheme or *.
+  for (const directive of ["style-src", "img-src", "font-src", "connect-src", "frame-src", "media-src", "manifest-src", "worker-src"]) assert.match(staticPolicy, new RegExp(`(^|; )${directive} `), directive);
+  assert.doesNotMatch(staticPolicy.replace(/form-action [^;]*/, ""), /(\s|^)(https:|http:|\*)(\s|;|$)/);
   assert.equal(contentSecurityPolicy(), staticPolicy);
 });
 

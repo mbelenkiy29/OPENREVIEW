@@ -4,12 +4,13 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authorize, repositoryAccess } from "./auth";
-import { rateLimit } from "./rateLimit";
+import { otherUserEmailLimit, rateLimit } from "./rateLimit";
 import { emailAddress, emailConfigured } from "../src/email";
 import { billingConfig, billingDecision, usageAlertEmail } from "../src/billing";
 import { notificationEvents } from "../src/notifications";
 import { mentionQuestion, slackChannelId } from "../src/slack";
 import { egressAllowed, offline } from "../src/egress";
+import { contextReadable } from "./repositoryContext";
 
 // Notifications: Slack channels (admin-linked) and per-member email. Everything is inert until a
 // Slack workspace is installed or a member verifies an email address.
@@ -80,7 +81,11 @@ export const savePreferences = mutation({ args: { token: v.string(), organizatio
 export const setEmail = mutation({ args: { token: v.string(), organizationId: v.id("organizations"), email: v.string() }, handler: async (ctx, a) => {
   const { user } = await authorize(ctx, a.token, a.organizationId);
   const email = emailAddress.parse(a.email);
+  // The verification email goes to any address the member types, so it is capped per day and, with
+  // invitations, deployment-wide (otherUserEmailLimit) as well as per minute.
   await rateLimit(ctx, `email-verify:${user._id}`, 3);
+  await rateLimit(ctx, `email-verify-day:${user._id}`, 10, 86_400_000);
+  await otherUserEmailLimit(ctx);
   const own = await ownPreferences(ctx, user._id, a.organizationId);
   const data = { email, emailVerifiedAt: undefined, verificationHash: undefined, verificationExpiresAt: undefined, updatedAt: Date.now() };
   const id = own ? own._id : await ctx.db.insert("notificationPreferences", { organizationId: a.organizationId, userId: user._id, ...preferenceDefaults, ...data });
@@ -125,6 +130,8 @@ export const reviewTargets = internalQuery({ args: { reviewId: v.id("reviews") }
     if (!p.email || !p.emailVerifiedAt) continue;
     const user = await ctx.db.get(p.userId);
     try { await repositoryAccess(ctx, p.userId, repo._id); } catch { continue; }
+    // As on the dashboard: a review that used context from a repository this member can't read stays hidden.
+    if (!await contextReadable(ctx, p.userId, review)) continue;
     const mine = Boolean(user && pr && user.login.toLowerCase() === pr.author.toLowerCase());
     const events = ([["review.completed", p.reviewCompleted], ["finding.high", p.highSeverity]] as const).filter(([, l]) => l === "all" || (l === "mine" && mine)).map(([e]) => e);
     if (events.length) recipients.push({ userId: p.userId, email: p.email, events });

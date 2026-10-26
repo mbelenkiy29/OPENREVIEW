@@ -46,7 +46,7 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
         </div> : <p className="muted">Only workspace owners and admins can change billing.</p>}
         {s.admin && subscribed && <p className="muted">Switching plans takes effect now and is prorated: the price difference for the rest of this period is on the next invoice.</p>}
         {s.admin && subscribed && <form action={setSpendingCap} className="setting-row cap-row stack"><input type="hidden" name="organizationId" value={organizationId} />
-          <div><strong id="cap-label">Extra usage cap per month</strong><p>Usage past the included amount is billed at the end of the period, up to this cap (USD, 0 = off).</p></div>
+          <div><strong id="cap-label">Extra usage cap per month</strong><p>Usage past the included amount is billed at the end of the period, up to this cap (USD, 0 = off). During a trial, reviews stop at the included usage instead.</p></div>
           <span className="days-field">$<input type="number" name="capUsd" min={0} max={1000000} step="0.01" defaultValue={s.capUsd} required aria-labelledby="cap-label" /><button>Save cap</button></span>
         </form>}
       </div>

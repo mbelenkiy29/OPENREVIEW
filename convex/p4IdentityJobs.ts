@@ -28,7 +28,7 @@ export const context=internalAction({args:{reviewId:v.id('reviews'),identityId:v
  const comments=await client.comments(snapshot),question=comments.find(c=>c.id===a.questionId);
  if(!question||question.user!==state.identity.username||question.flags.includes('closed')||!/@openreview\b/i.test(question.body)||Buffer.byteLength(question.body)>16000)throw new Error('Current native question does not belong to this linked identity');
  const blob=await ctx.storage.get(state.baselineJob.manifestStorageId!);if(!blob||blob.size>1000000)throw new Error('P4 question baseline manifest unavailable');
- const stored=z.object({sha:z.string(),inventory:z.unknown()}).parse(JSON.parse(await blob.text())),inventory=parseP4SubmittedInventory(stored.inventory);
+ const stored=z.object({sha:z.string(),inventory:z.unknown().optional()}).parse(JSON.parse(await blob.text())),inventory=parseP4SubmittedInventory(stored.inventory);
  if(stored.sha!==state.review.baseSha||inventory.revision!==state.review.baseSha)throw new Error('P4 question baseline identity changed');
  const project=await client.project(state.repo.externalId!);
  if(JSON.stringify(project)!==JSON.stringify(inventory.project))throw new Error('P4 personal project views changed');

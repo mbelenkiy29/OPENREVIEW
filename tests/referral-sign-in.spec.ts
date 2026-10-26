@@ -58,7 +58,7 @@ test("a magic-link request stores the referral code on the login token and keeps
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ id: "email_1" }), { status: 200, headers: { "content-type": "application/json" } }));
   const form = new FormData();
   form.set("email", "new@example.com"); form.set("from", "signup"); form.set("referral", "abcd-2345");
-  const response = await requestMagicLink(new Request(`${base}/api/auth/email`, { method: "POST", body: form }));
+  const response = await requestMagicLink(new Request(`${base}/api/auth/email`, { method: "POST", headers: { origin: base }, body: form }));
   expect(response.headers.get("location")).toBe(`${base}/signup?email=sent&referral=ABCD2345`);
   expect((await t.run((ctx) => ctx.db.query("loginTokens").collect())).map((token) => token.referralCode)).toEqual(["ABCD2345"]);
 });
@@ -72,7 +72,7 @@ test("a refused or cancelled account link returns to the page it started from, n
   holder.jar.set("openreview_session", await new SignJWT({ sid }).setProtectedHeader({ alg: "HS256" }).setIssuer("openreview").setAudience("openreview").setSubject(carol).setIssuedAt().setExpirationTime("1h").sign(new TextEncoder().encode(env.SESSION_SECRET)));
   const users = async () => (await t.run((ctx) => ctx.db.query("users").collect())).length, before = await users();
   expect((await finish(await begin("link=1&next=/dashboard/account"))).headers.get("location")).toBe(`${base}/dashboard/account`);
-  expect(JSON.parse(decodeURIComponent(holder.jar.get("openreview_toast")!))).toMatchObject({ tone: "error" });
+  expect(JSON.parse(holder.jar.get("openreview_toast")!)).toMatchObject({ tone: "error" });
   const state = await begin("link=1&next=/dashboard/account");
   expect((await finishOAuth(new Request(`${base}/api/auth/callback?error=access_denied&state=${state}`), "github", async () => { throw new Error("unused"); })).headers.get("location")).toBe(`${base}/dashboard/account`);
   expect(await users()).toBe(before);

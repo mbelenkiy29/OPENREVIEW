@@ -46,6 +46,10 @@ test("usage decisions: Free, included Starter and Pro usage, extra usage cap, pa
   assert.deepEqual(billingDecision(pro, 0, now, config), { allowed: true, plan: "pro", limit: 4 * 12 * usd, used: 0, capMicros: 0, overage: false }, "Pro includes its own usage per seat");
   assert.equal(billingDecision({ ...team, plan: "unknown" }, 0, now, config).plan, "starter", "an unrecorded plan on a subscription is Starter");
   assert.equal(billingDecision({ ...team, seats: 0 }, 9, now, config).limit, 10 * usd, "at least one seat");
+  // Stripe does not bill usage recorded during a trial, so a trial's cap never allows overage.
+  const trialing = { ...capped, status: "trialing" };
+  assert.deepEqual(billingDecision(trialing, 39 * usd, now, config, usd), { allowed: true, plan: "starter", limit: 40 * usd, used: 39 * usd, capMicros: 0, overage: false });
+  assert.match(billingDecision(trialing, 40 * usd, now, config, usd).reason!, /extra usage can start once the trial ends/);
 });
 
 test("a subscription is open until Stripe ends it", () => {
