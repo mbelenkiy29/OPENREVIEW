@@ -9,7 +9,9 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 | Price | $0, no card | `BILLING_SEAT_PRICE_LABEL` per seat (we sell $12/month) | `BILLING_PRO_PRICE_LABEL` per seat (we sell $24/month) |
 | Included model usage per month | `BILLING_FREE_USAGE_USD` per workspace (default $3) | `BILLING_USAGE_PER_SEAT_USD` per seat (default $6), pooled | `BILLING_PRO_USAGE_PER_SEAT_USD` per seat (default $12), pooled |
 | Extra usage | none | up to the admin cap | up to the admin cap |
-| Deep reviews, generated reproduction tests, fix pull requests | | | ✓ |
+| Fix prompts, the local bridge, your own cloud agents and Devin | ✓ | ✓ | ✓ |
+| OpenReview agent fixes (fix pull requests) per month | | `BILLING_STARTER_FIXES_PER_SEAT` per seat (default 5), pooled | `BILLING_PRO_FIXES_PER_SEAT` per seat (default 20), pooled |
+| Deep reviews, generated reproduction tests | | | ✓ |
 | Requirements from Linear, Jira, Confluence and Notion; learning conventions | | | ✓ |
 | API keys, analytics older than 30 days, SSO, the audit log | | | ✓ |
 
@@ -28,7 +30,7 @@ The plan catalog is `src/plans.ts`. Security checks, every provider, and the CLI
 - **Gated features:** each one is skipped, never failed.
   - A deep review runs at standard, with a coverage note.
   - Generated reproduction tests are not drafted.
-  - A fix pull request request replies that it is a Pro feature. The validated suggestion is still posted.
+  - A fix pull request request on Free replies that fix pull requests are on Starter and Pro, and one past the month's agent fixes replies with the reset date. The validated suggestion is still posted. Each run counts once it makes a model call (`billingUsage.fixes`); a run that stops before that gives it back. Its model calls also use the included usage.
   - Linked requirements are not fetched, with a coverage note. Connecting a new Linear, Atlassian or Notion workspace needs Pro; existing connections stay and work again after upgrading.
   - Convention learning is skipped (the sweep marks the repository synced without moving its cursor, so an upgrade later learns from the comments it skipped). Approved conventions keep applying.
   - Creating API keys needs Pro. Existing keys are kept but answer `402` with an upgrade message. The Perforce watcher and trigger are exempt: they are a code provider, not the public API.

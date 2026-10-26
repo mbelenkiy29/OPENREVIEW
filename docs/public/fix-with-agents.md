@@ -38,7 +38,11 @@ Add your Devin API key under **Personal Settings → Review Settings** to show *
 
 ## OpenReview fix pull requests
 
-**Open a fix PR** on a finding's Fix page commits OpenReview's validated suggestion for that finding to a new `openreview/fix-*` branch, and opens a pull request against your pull request's branch. Your branch is never written. You can also ask for one by replying `@openreview fix this in a new PR` in the finding's thread.
+**Fix with OpenReview** on a finding's Fix page starts OpenReview's fix agent. It reads the code around the finding, edits the files the fix needs (up to 10), and opens a pull request from a new `openreview/fix-*` branch against your pull request's branch. Your branch is never written. The agent cannot run commands, so **no tests or builds are run**: review the pull request before merging. The Fix page shows its progress and links the pull request when it is ready, usually after a few minutes.
+
+You can also reply `@openreview fix this in a new PR` in the finding's thread. OpenReview replies with its suggestion right away, then replies again with the pull request link when the agent finishes.
+
+Agent fixes are counted each month: none on Free, 5 per seat on Starter and 20 per seat on Pro, pooled across the workspace. The agent's model calls also use the plan's included usage. Copy prompt, the local bridge, cloud agents and Devin are on every plan and are never counted.
 
 This needs:
 - **Fix pull requests** turned on for the repository (Repositories).

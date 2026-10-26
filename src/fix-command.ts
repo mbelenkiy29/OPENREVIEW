@@ -53,11 +53,10 @@ export function fixHandoffLink(appUrl: string | undefined, reviewId: string, fin
   return url ? `\n\n[${label.replace(/[[\]\r\n]/g, "")}](${url})` : "";
 }
 
-export function fixReplyBody(p: { title: string; explanation?: string; block?: string; problem?: string; handoff?: string; pullRequest?: { url: string; reused: boolean }; pullRequestNote?: string; revision: string }) {
+export function fixReplyBody(p: { title: string; explanation?: string; block?: string; problem?: string; handoff?: string; pullRequestNote?: string; revision: string }) {
   const parts = [`**Fix for:** ${p.title.replace(/[\r\n]+/g, " ").slice(0, 200)}`];
   if (p.block) parts.push((p.explanation ? p.explanation + "\n" : "") + p.block.trim());
   else parts.push(`No committable suggestion was published${p.problem ? ` (${p.problem.replace(/[\r\n]+/g, " ")})` : ""}.${p.explanation ? " " + p.explanation : ""}`);
-  if (p.pullRequest) parts.push(`${p.pullRequest.reused ? "A fix pull request already exists" : "Opened a fix pull request"} on a new branch: ${p.pullRequest.url}. It targets this pull request's branch; nothing was pushed to this branch.`);
   if (p.pullRequestNote) parts.push(p.pullRequestNote);
   if (p.handoff) parts.push(`[Fix with your agent](${p.handoff})`);
   parts.push(`Checked against source revision ${p.revision}. No test execution evidence was supplied for this fix.`);

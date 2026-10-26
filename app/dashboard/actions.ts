@@ -697,10 +697,10 @@ export async function startCloudFix(form:FormData) {
  (await cookies()).set(agentIntentCookie,await seal({requestId,userId:user._id,reviewId,...(finding?{finding}:{})},"10m"),{...cookieOptions,maxAge:600});
  redirect(`/api/fixes/agent?request=${encodeURIComponent(requestId)}`);
 }
-// "Open a fix PR": OpenReview opens a pull request with its validated suggestion on a new branch.
-export async function openFixPullRequest(_previous:{url?:string;reused?:boolean;note?:string;error?:string},form:FormData):Promise<{url?:string;reused?:boolean;note?:string;error?:string}> {
- try{const {token}=await current();return await backend().action(api.fixPullRequestJobs.open,{token,findingId:text(form,"findingId") as Id<"findings">});}
- catch(error){return {error:error instanceof Error?error.message.replace(/^.*Uncaught Error: /s,"").split("\n")[0].slice(0,300):"Could not open a fix pull request"};}
+// "Fix with OpenReview": starts OpenReview's fix agent; the button polls /api/fixes/<requestId> for its pull request.
+export async function openFixPullRequest(_previous:{requestId?:string;error?:string},form:FormData):Promise<{requestId?:string;error?:string}> {
+ try{const {token}=await current();return {requestId:await backend().mutation(api.fixPullRequests.start,{token,findingId:text(form,"findingId") as Id<"findings">})};}
+ catch(error){return {error:error instanceof Error?error.message.replace(/^.*Uncaught Error: /s,"").split("\n")[0].slice(0,300):"Could not start the fix"};}
 }
 export async function reviewAgain(form:FormData) {
  const {token}=await current();const review=await backend().query(api.reviews.detail,{token,reviewId:text(form,"reviewId") as Id<"reviews">});

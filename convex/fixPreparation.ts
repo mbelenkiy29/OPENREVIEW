@@ -14,7 +14,7 @@ import type {Scm,ScmChange} from "../src/gitlab";
 // into a fix pull request on a new branch.
 
 // Model output is published: drop explanations that claim test execution, neutralise mentions and links.
-function publishable(text:string|undefined){
+export function publishable(text:string|undefined){
   if(!text||!reviewSummarySchema(undefined,[]).safeParse({summary:text}).success)return undefined;
   return text.replace(/https?:\/\/\S+/g,"[link removed]").replace(/@(?=[\w-])/g,"@\u200b").replace(/```/g,"`").replace(/[\r\n]+/g," ").trim();
 }

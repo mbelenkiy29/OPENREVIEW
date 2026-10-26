@@ -161,6 +161,27 @@ export const tokenCost = (u: ModelUsage) => Math.max(0, u.inputTokens - (u.cache
 
 export type AgentRun = { candidates: ReportedCandidate[]; usage: ModelUsage[]; sources: SourceFile[]; limits: string[]; state: AgentState };
 
+// The read-only tools shared by the review and fix agents (arguments already validated); undefined for other tools.
+export async function readTool(tools: AgentToolbox, name: string, a: Record<string, unknown>, remember?: (file: SourceFile) => void): Promise<{ content: string } | { error: string } | undefined> {
+  const index = tools.revisions.index ?? tools.revisions.head;
+  switch (name) {
+    case "search_code": return { content: wrap(index, "index", (await tools.searchCode(a.query as string)).slice(0, 20).map((m) => ({ ...m, snippet: redact(m.snippet).slice(0, 400) }))) };
+    case "read_file": {
+      const file = await tools.readFile(a.path as string);
+      if (!file) return { error: "File not found at the reviewed revision" };
+      const indexed = indexRepository([{ path: file.path, content: file.content, sha: file.revision }]).files[0];
+      if (!indexed) return { error: "File is excluded from review (binary, generated or too large)" };
+      remember?.({ path: indexed.path, content: indexed.content, sha: file.revision });
+      return { content: wrap(file.revision, "head", numbered(indexed.content, a.startLine as number | undefined, a.endLine as number | undefined)) };
+    }
+    case "find_definition": return { content: wrap(index, "index", (await tools.findDefinition(a.symbol as string)).slice(0, 20)) };
+    case "find_references": return { content: wrap(index, "index", (await tools.findReferences(a.symbol as string)).slice(0, 30).map((m) => ({ ...m, snippet: redact(m.snippet).slice(0, 400) }))) };
+    case "list_directory": return { content: wrap(index, "index", (await tools.listDirectory((a.path as string).replace(/^\.?\/?$/, ""))).slice(0, 200)) };
+    case "get_related_files": return { content: wrap(index, "index", (await tools.relatedFiles(a.path as string)).slice(0, 40)) };
+    case "get_past_findings": return { content: wrap(tools.revisions.head, "history", (await tools.pastFindings(a.path as string)).slice(0, 20)) };
+  }
+}
+
 export async function runReviewAgent(args: {
   input: ReviewInput;
   payload: unknown;
@@ -205,21 +226,9 @@ export async function runReviewAgent(args: {
     if (!parsed.success) return fail("Invalid arguments: " + parsed.error.issues.map((i) => i.path.join(".") + " " + i.message).join("; ").slice(0, 1000));
     const a = parsed.data as Record<string, unknown>;
     try {
+      const read = await readTool(tools, call.name, a, remember);
+      if (read) return "error" in read ? fail(read.error) : { id: call.id, content: read.content };
       switch (call.name) {
-        case "search_code": return { id: call.id, content: wrap(tools.revisions.index ?? tools.revisions.head, "index", (await tools.searchCode(a.query as string)).slice(0, 20).map((m) => ({ ...m, snippet: redact(m.snippet).slice(0, 400) }))) };
-        case "read_file": {
-          const file = await tools.readFile(a.path as string);
-          if (!file) return fail("File not found at the reviewed revision");
-          const indexed = indexRepository([{ path: file.path, content: file.content, sha: file.revision }]).files[0];
-          if (!indexed) return fail("File is excluded from review (binary, generated or too large)");
-          remember({ path: indexed.path, content: indexed.content, sha: file.revision });
-          return { id: call.id, content: wrap(file.revision, "head", numbered(indexed.content, a.startLine as number | undefined, a.endLine as number | undefined)) };
-        }
-        case "find_definition": return { id: call.id, content: wrap(tools.revisions.index ?? tools.revisions.head, "index", (await tools.findDefinition(a.symbol as string)).slice(0, 20)) };
-        case "find_references": return { id: call.id, content: wrap(tools.revisions.index ?? tools.revisions.head, "index", (await tools.findReferences(a.symbol as string)).slice(0, 30).map((m) => ({ ...m, snippet: redact(m.snippet).slice(0, 400) }))) };
-        case "list_directory": return { id: call.id, content: wrap(tools.revisions.index ?? tools.revisions.head, "index", (await tools.listDirectory((a.path as string).replace(/^\.?\/?$/, ""))).slice(0, 200)) };
-        case "get_related_files": return { id: call.id, content: wrap(tools.revisions.index ?? tools.revisions.head, "index", (await tools.relatedFiles(a.path as string)).slice(0, 40)) };
-        case "get_past_findings": return { id: call.id, content: wrap(tools.revisions.head, "history", (await tools.pastFindings(a.path as string)).slice(0, 20)) };
         case "get_rules": return { id: call.id, content: wrap(tools.revisions.head, "settings", args.rules.map((r) => ({ id: r.id, instructions: r.instructions, severity: r.severity, globs: r.globs }))) };
         case "report_finding": {
           const finding = findingSchema.safeParse(a);
