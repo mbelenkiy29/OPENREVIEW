@@ -4,8 +4,8 @@ import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authorize } from "./auth";
-import { billingConfig, billingDecision, freeTakenReason, liveSubscription, nextPeriodStart, openSubscription, periodKey, seatCount, trialEndsFrom } from "../src/billing";
-import { entitled, entitlements, planCatalog, planEntitlements, planForPrice, type Entitlement, type Plan } from "../src/plans";
+import { billingConfig, billingDecision, fixRunLimit, freeTakenReason, liveSubscription, nextPeriodStart, openSubscription, periodKey, resetText, seatCount, trialEndsFrom } from "../src/billing";
+import { entitled, entitlements, planCatalog, planEntitlements, planForPrice, upgradeNote, type Entitlement, type Plan } from "../src/plans";
 import { referralConfig } from "../src/referrals";
 import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus } from "./referralLedger";
 import { lifecycleEmail } from "./lifecycleEmails";
@@ -112,6 +112,27 @@ export async function reviewAllowance(ctx: MutationCtx, organizationId: Id<"orga
   else await ctx.db.insert("billingUsage", { organizationId, period, reviews: decision.allowed ? 1 : 0, blocked: decision.allowed ? 0 : 1 });
   return decision.allowed ? { allowed: true } : { allowed: false, reason: "Billing: " + decision.reason };
 }
+// Called before a hosted agent fix run: counts it against the plan's monthly fix runs (fixRunLimit). The run's
+// model calls still draw on the usage allowance through reserveUsage. releaseFix gives the run back if it never starts.
+export async function fixAllowance(ctx: MutationCtx, organizationId: Id<"organizations">): Promise<{ allowed: true } | { allowed: false; reason: string }> {
+  const config = billingConfig();
+  if (!config.enabled) return { allowed: true };
+  if (await planMissing(ctx, organizationId)) return { allowed: false, reason: "Billing: " + choosePlanMessage };
+  const account = await ensureAccount(ctx, organizationId), now = Date.now(), period = periodKey(now);
+  const usage = await usageOf(ctx, organizationId, period);
+  const decision = await decide(ctx, organizationId, account, spent(usage), now);
+  if (!decision.allowed) return { allowed: false, reason: "Billing: " + decision.reason };
+  if (decision.plan === "free") return { allowed: false, reason: "Billing: " + upgradeNote["fix.pullRequests"] };
+  const limit = fixRunLimit(decision, account.seats, config)!, used = usage?.fixes ?? 0;
+  if (used >= limit) return { allowed: false, reason: `Billing: This workspace used its ${limit} agent fixes for this month. They reset on ${resetText(now)}.${decision.plan === "starter" ? ` Pro includes ${config.proFixesPerSeat} per seat; a workspace admin can upgrade in Organization Settings → Billing & Usage.` : ""}` };
+  if (usage) await ctx.db.patch(usage._id, { fixes: used + 1 });
+  else await ctx.db.insert("billingUsage", { organizationId, period, reviews: 0, blocked: 0, fixes: 1 });
+  return { allowed: true };
+}
+export async function releaseFix(ctx: MutationCtx, organizationId: Id<"organizations">) {
+  const usage = await usageOf(ctx, organizationId, periodKey(Date.now()));
+  if (usage?.fixes) await ctx.db.patch(usage._id, { fixes: usage.fixes - 1 });
+}
 // Workspace side of an inference reservation (inferenceBudget.reserve, same transaction): refuses past the
 // included usage and extra-usage cap with the billing reason, otherwise holds the amount until the call settles.
 export async function reserveUsage(ctx: MutationCtx, organizationId: Id<"organizations">, micros: number): Promise<Id<"billingUsage"> | null> {
@@ -181,7 +202,7 @@ export const status = query({ args: { token: v.string(), organizationId: v.id("o
   const decision = billingDecision(facts, spent(usage), now, config, 0, taken);
   const organization = await ctx.db.get(a.organizationId);
   const admin = ["owner", "admin"].includes(member.role), referrals = admin && referralConfig().enabled;
-  return { enabled: true as const, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, planName: decision.plan === "disabled" ? null : planCatalog[decision.plan].name, legacy: Boolean(account.legacy && decision.plan === "starter"), entitlements: planEntitlements(decision.plan, account.legacy), allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: usage?.usedMicros ?? 0, reserved: usage?.reservedMicros ?? 0, overage: usage?.overageMicros ?? 0, capUsd: account.spendCapUsd ?? 0, resetsAt: nextPeriodStart(now), reviews: usage?.reviews ?? 0, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: paidTrialEndsAt(account, now), trialStarted: Boolean(account.customerId), trialDays: config.trialDays, freeUsageMicros: config.freeUsageMicros, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, usagePerSeatMicros: config.usagePerSeatMicros, proUsagePerSeatMicros: config.proUsagePerSeatMicros, hasCustomer: Boolean(account.customerId), freeElsewhere: taken ?? null };
+  return { enabled: true as const, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, planName: decision.plan === "disabled" ? null : planCatalog[decision.plan].name, legacy: Boolean(account.legacy && decision.plan === "starter"), entitlements: planEntitlements(decision.plan, account.legacy), allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: usage?.usedMicros ?? 0, reserved: usage?.reservedMicros ?? 0, overage: usage?.overageMicros ?? 0, capUsd: account.spendCapUsd ?? 0, resetsAt: nextPeriodStart(now), reviews: usage?.reviews ?? 0, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: paidTrialEndsAt(account, now), trialStarted: Boolean(account.customerId), trialDays: config.trialDays, freeUsageMicros: config.freeUsageMicros, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, usagePerSeatMicros: config.usagePerSeatMicros, proUsagePerSeatMicros: config.proUsagePerSeatMicros, hasCustomer: Boolean(account.customerId), freeElsewhere: taken ?? null, fixes: { used: usage?.fixes ?? 0, limit: fixRunLimit(decision, account.seats, config) }, starterFixesPerSeat: config.starterFixesPerSeat, proFixesPerSeat: config.proFixesPerSeat };
 } });
 
 export const checkoutContext = internalQuery({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {

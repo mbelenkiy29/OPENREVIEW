@@ -4,21 +4,20 @@ import { internal } from "./_generated/api";
 import { redact,eligibleFile } from "../src/engine/indexer";
 import {reviewSummarySchema} from "../src/engine/review";
 import {suggestionProblem,type Suggestion} from "../src/suggestions";
-import {applySuggestion,fixBranchName,fixSuggestionSchema,fixSystem,rangeText} from "../src/fix-command";
+import {fixSuggestionSchema,fixSystem,rangeText} from "../src/fix-command";
 import type {ActionCtx} from "./_generated/server";
 import type {Doc} from "./_generated/dataModel";
 import type {Scm,ScmChange} from "../src/gitlab";
 
-// Shared by "@openreview fix this" (conversationJobs) and the dashboard's "Open a fix PR"
-// (fixPullRequestJobs): one validated suggestion for a finding's exact lines, and one way to turn it
-// into a fix pull request on a new branch.
+// "@openreview fix this" (conversationJobs): one validated suggestion for a finding's exact lines. Fix pull
+// requests come from OpenReview's fix agent (fixPullRequestJobs).
 
 // Model output is published: drop explanations that claim test execution, neutralise mentions and links.
-function publishable(text:string|undefined){
+export function publishable(text:string|undefined){
   if(!text||!reviewSummarySchema(undefined,[]).safeParse({summary:text}).success)return undefined;
   return text.replace(/https?:\/\/\S+/g,"[link removed]").replace(/@(?=[\w-])/g,"@\u200b").replace(/```/g,"`").replace(/[\r\n]+/g," ").trim();
 }
-export type PreparedFix={suggestion?:Suggestion;explanation?:string;problem?:string;content?:string;entry?:{path:string;sha:string};changed?:ScmChange["diff"][number]};
+export type PreparedFix={suggestion?:Suggestion;explanation?:string;problem?:string;changed?:ScmChange["diff"][number]};
 // A suggestion stored with the finding is reused when it still applies to the current head;
 // otherwise the model proposes a replacement for exactly the finding's lines, which is validated.
 export async function prepareFix(ctx:ActionCtx,p:{github:Scm;repo:Doc<"repositories">;pr:ScmChange;tree:Map<string,{path:string;sha:string}>;target:Doc<"findings">}):Promise<PreparedFix>{
@@ -48,15 +47,5 @@ export async function prepareFix(ctx:ActionCtx,p:{github:Scm;repo:Doc<"repositor
       }
     }
   }
-  return {suggestion,explanation,problem,content,entry,changed};
-}
-// Opens (or reuses) the fix pull request for a prepared suggestion, after re-checking that `author`
-// still has write access. Returns the pull request, or a note explaining why none was opened.
-export async function openFix(p:{github:Scm;repo:Doc<"repositories">;pr:ScmChange;target:Doc<"findings">;prepared:PreparedFix;author:string;prNumber:number;requestedIn:string}):Promise<{pullRequest?:{url:string;reused:boolean};note?:string}>{
-  const {github,repo,pr,target,prepared:{suggestion,content,entry}}=p;
-  if(!suggestion||!content||!entry)return {note:"No fix pull request was opened because no validated suggestion is available."};
-  if(!github.openFixPullRequest)return {note:"Fix pull requests are not available for this provider."};
-  if(!github.canReply||!await github.canReply(repo.fullName,p.author))throw new Error("Comment author write access revoked");
-  const result=await github.openFixPullRequest(repo.fullName,p.prNumber,{branch:fixBranchName(p.prNumber,target.fingerprint),expectedHead:pr.head.sha,path:target.filePath,blobSha:entry.sha,content:applySuggestion(content,suggestion),title:("OpenReview fix: "+target.title.replace(/[\r\n]+/g," ")).slice(0,120),body:`Requested by @${p.author} in ${p.requestedIn} for the finding in \`${target.filePath}:${target.startLine}\`. This pull request targets the branch of #${p.prNumber} and changes only the suggested lines. No tests were run by OpenReview.`,message:("Apply OpenReview suggestion: "+target.title.replace(/[\r\n]+/g," ")).slice(0,200)});
-  return "skipped" in result?{note:`No fix pull request was opened: ${result.skipped}.`}:{pullRequest:result};
+  return {suggestion,explanation,problem,changed};
 }

@@ -145,5 +145,5 @@ export const status = query({args:{token:v.string(),requestId:v.id("fixRequests"
  const u=await authenticated(ctx,a.token),r=await ctx.db.get(a.requestId);
  if(!r||r.userId!==u._id)throw new Error("Request not accessible");
  await authorizeRepository(ctx,a.token,r.repositoryId);
- return {status:r.status==="pending"&&r.expiresAt<Date.now()?"expired":r.status,error:r.error,updatedAt:r.updatedAt};
+ return {status:r.status==="pending"&&r.expiresAt<Date.now()?"expired":r.status,error:r.error,updatedAt:r.updatedAt,pullRequestUrl:r.pullRequestUrl};
 }});

@@ -139,7 +139,7 @@ export default defineSchema({
   modelKeys: defineTable({ organizationId: org, provider: v.union(v.literal("anthropic"), v.literal("openai"), v.literal("openrouter")), credentials: v.string(), model: v.optional(v.string()), updatedBy: v.id("users"), updatedAt: v.number() }).index("by_org", ["organizationId"]),
   personalSettings: defineTable({ userId: v.id("users"), agent: v.optional(v.union(v.literal("codex"), v.literal("claude"), v.literal("cursor"))), handoff: v.optional(handoffValidator), cloudAgent: v.optional(cloudAgentValidator), updatedAt: v.number() }).index("by_user", ["userId"]),
   bridgeDevices: defineTable({ tokenHash: v.string(), code: v.string(), userId: v.optional(v.id("users")), organizationId: v.optional(org), name: v.string(), expiresAt: v.number(), revoked: v.boolean(), createdAt: v.number(), lastSeen: v.optional(v.number()) }).index("by_hash", ["tokenHash"]).index("by_code", ["code"]).index("by_user", ["userId"]),
-  fixRequests: defineTable({ userId: v.id("users"), organizationId: org, repositoryId: repo, reviewId: review, headSha: v.string(), findingIds: v.optional(v.array(v.id("findings"))), agent: v.string(), prompt: v.string(), status: v.string(), error: v.optional(v.string()), deviceId: v.optional(v.id("bridgeDevices")), expiresAt: v.number(), createdAt: v.number(), updatedAt: v.number(), /* cloud agent handoffs (kind "cloud"): intent → posting → posted | failed */ kind: v.optional(v.string()), commentUrl: v.optional(v.string()), postedAs: v.optional(v.string()) }).index("by_user", ["userId"]).index("by_review", ["reviewId"]),
+  fixRequests: defineTable({ userId: v.id("users"), organizationId: org, repositoryId: repo, reviewId: review, headSha: v.string(), findingIds: v.optional(v.array(v.id("findings"))), agent: v.string(), prompt: v.string(), status: v.string(), error: v.optional(v.string()), deviceId: v.optional(v.id("bridgeDevices")), expiresAt: v.number(), createdAt: v.number(), updatedAt: v.number(), /* cloud agent handoffs (kind "cloud"): intent → posting → posted | failed; OpenReview fix pull requests (kind "hosted"): queued → running → opened | failed */ kind: v.optional(v.string()), commentUrl: v.optional(v.string()), postedAs: v.optional(v.string()), pullRequestUrl: v.optional(v.string()) }).index("by_user", ["userId"]).index("by_review", ["reviewId"]),
   rateLimits: defineTable({
     key: v.string(),
     window: v.number(),
@@ -733,7 +733,9 @@ export default defineSchema({
   // Usage in micro-dollars of inference cost: settled, reserved by in-flight calls, and the part past the included usage.
   billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number(), usedMicros: v.optional(v.number()), reservedMicros: v.optional(v.number()), overageMicros: v.optional(v.number()),
     // Usage alert thresholds (percent of the included usage) already emailed this period.
-    alertsSent: v.optional(v.array(v.number())) }).index("by_org_period", ["organizationId", "period"]),
+    alertsSent: v.optional(v.array(v.number())),
+    // Hosted agent fix runs started this period (fixAllowance), counted against fixRunLimit.
+    fixes: v.optional(v.number()) }).index("by_org_period", ["organizationId", "period"]),
   // Extra usage waiting to be reported to Stripe as meter events (identifier = this row id).
   billingMeterEvents: defineTable({ organizationId: org, period: v.string(), micros: v.number(), status: v.string() /* pending | reported | skipped | failed */, attempts: v.number(), error: v.optional(v.string()), createdAt: v.number(), reportedAt: v.optional(v.number()) }).index("by_org_status", ["organizationId", "status"]),
   stripeEvents: defineTable({ eventId: v.string(), type: v.string(), outcome: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),

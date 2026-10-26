@@ -12,7 +12,7 @@ import {encryptCredential} from '../src/credentials';
 import type {ModelRequest} from '../src/engine/types';
 import type {z} from 'zod';
 
-// Pro gates (src/plans.ts): each is off on Free and Starter, on for Pro, and everything is unlocked with billing off.
+// Pro gates (src/plans.ts): each is off on Free and Starter (except fix pull requests), on for Pro, and everything is unlocked with billing off.
 const holder=vi.hoisted(()=>({t:undefined as unknown as ReturnType<typeof convexTest>,user:undefined as unknown}));
 const secret='pro-gates-session-secret-at-least-32-characters',service='pro-gates-service';
 vi.mock('../src/server',()=>({
@@ -244,15 +244,15 @@ test('a Starter subscription from before Pro (legacy) keeps its API keys and req
  expect(await t.query(internal.billing.entitlement,{organizationId:org,key:'api.access'})).toBe(true);
 });
 
-test('onboarding tools step: Starter cannot save fix pull requests or deep reviews; Pro and billing off can',async()=>{
+test('onboarding tools step: Free cannot save fix pull requests, Starter can but not deep reviews; Pro and billing off can save both',async()=>{
  const {t,token,org,billing,pro}=await setup();
  // The locked rendering is checked in tests/onboarding-wizard.test.ts; here the server refuses the values.
  const save=async(settings:{fixPullRequests?:boolean;mode?:string})=>{const {defaults}=await t.query(api.onboarding.status,{token,organizationId:org});return t.mutation(api.onboarding.saveDefaults,{token,organizationId:org,step:'tools',settings:{...defaults,...settings}});};
  billing(true);
- await t.run(ctx=>ctx.db.insert('billingAccounts',{organizationId:org,customerId:'cus_1',subscriptionId:'sub_1',plan:'starter',status:'active',seats:1,trialEndsAt:Date.now(),updatedAt:Date.now()}));
  await expect(save({fixPullRequests:true})).rejects.toThrow(upgradeNote['fix.pullRequests']);
+ await t.run(ctx=>ctx.db.insert('billingAccounts',{organizationId:org,customerId:'cus_1',subscriptionId:'sub_1',plan:'starter',status:'active',seats:1,trialEndsAt:Date.now(),updatedAt:Date.now()}));
  await expect(save({mode:'deep'})).rejects.toThrow(/Deep reviews are on the Pro plan/);
- await save({fixPullRequests:false,mode:'standard'});
+ await save({fixPullRequests:true,mode:'standard'});
  billing(false);
  await save({fixPullRequests:true,mode:'deep'});
  billing(true);

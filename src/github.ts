@@ -52,7 +52,7 @@ export type PublishOptions = { placement?: "description" | "comment"; fixLabel?:
 const descriptionLimit = 65000;
 const treeSchema = z.object({
   truncated: z.boolean(),
-  tree: z.array(z.object({ path: z.string(), type: z.string(), sha: z.string(), size: z.number().optional() })),
+  tree: z.array(z.object({ path: z.string(), type: z.string(), sha: z.string(), size: z.number().optional(), mode: z.string().optional() })),
 });
 export class GithubApiError extends Error {
  constructor(message:string,readonly status:number,readonly planRestricted=false,readonly rateLimited=status===429){super(message);}
@@ -490,7 +490,7 @@ export class Github {
   protected fixPullRequestBlocker(): string | null {
     return this.permissions?.contents === "write" ? null : "the GitHub App does not have Contents: Read and write permission";
   }
-  async openFixPullRequest(repository: string, number: number, fix: { branch: string; expectedHead: string; path: string; blobSha: string; content: string; title: string; body: string; message: string }): Promise<{ url: string; reused: boolean } | { skipped: string }> {
+  async openFixPullRequest(repository: string, number: number, fix: { branch: string; expectedHead: string; files: { path: string; content: string; mode: string }[]; title: string; body: string; message: string }): Promise<{ url: string; reused: boolean } | { skipped: string }> {
     const blocked = this.fixPullRequestBlocker();
     if (blocked) return { skipped: blocked };
     const prefix = `/repos/${repository}`;
@@ -501,7 +501,8 @@ export class Github {
     if (!safeFixBranch(fix.branch, [pr.head.ref, pr.base.ref])) throw new Error("Unsafe fix branch");
     const open = await this.request(`${prefix}/pulls?state=open&head=${encodeURIComponent(repository.split("/")[0] + ":" + fix.branch)}&base=${encodeURIComponent(pr.head.ref)}`, z.array(z.object({ html_url: z.string() })));
     if (open.length) return { url: open[0].html_url, reused: true };
-    const ref = `${prefix}/git/ref/heads/${fix.branch.split("/").map(encodeURIComponent).join("/")}`;
+    const branch = fix.branch.split("/").map(encodeURIComponent).join("/");
+    const ref = `${prefix}/git/ref/heads/${branch}`;
     let commit = true;
     try {
       await this.request(`${prefix}/git/refs`, z.object({ ref: z.string() }), { method: "POST", body: JSON.stringify({ ref: `refs/heads/${fix.branch}`, sha: fix.expectedHead }) });
@@ -516,7 +517,12 @@ export class Github {
         commit = false;
       }
     }
-    if (commit) await this.request(`${prefix}/contents/${fix.path.split("/").map(encodeURIComponent).join("/")}`, z.object({ commit: z.object({ sha: z.string() }) }), { method: "PUT", body: JSON.stringify({ message: fix.message, content: Buffer.from(fix.content, "utf8").toString("base64"), sha: fix.blobSha, branch: fix.branch }) });
+    if (commit) {
+      // Every file lands in one commit on the reviewed head; the ref update is a fast-forward, so it fails if the branch moved.
+      const tree = await this.request(`${prefix}/git/trees`, z.object({ sha: z.string() }), { method: "POST", body: JSON.stringify({ base_tree: fix.expectedHead, tree: fix.files.map((f) => ({ path: f.path, mode: f.mode, type: "blob", content: f.content })) }) });
+      const fixCommit = await this.request(`${prefix}/git/commits`, z.object({ sha: z.string() }), { method: "POST", body: JSON.stringify({ message: fix.message, tree: tree.sha, parents: [fix.expectedHead] }) });
+      await this.request(`${prefix}/git/refs/heads/${branch}`, z.object({ ref: z.string() }), { method: "PATCH", body: JSON.stringify({ sha: fixCommit.sha }) });
+    }
     const created = await this.request(`${prefix}/pulls`, z.object({ html_url: z.string() }), { method: "POST", body: JSON.stringify({ title: fix.title, head: fix.branch, base: pr.head.ref, body: fix.body }) });
     return { url: created.html_url, reused: false };
   }
