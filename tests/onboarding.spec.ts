@@ -90,9 +90,13 @@ test("configuration steps are admin-only, write only their own keys, validate va
   expect((await organization())?.onboarding).toMatchObject({ step: "done", skipped: false });
 });
 
-test("leaving setup early releases the review hold; advance only records non-configuration steps", async () => {
+test("setup can't be skipped: finishing needs an indexing repository and releases a leftover review hold; advance only records non-configuration steps", async () => {
   const { t, alice, bob, organizationId, repo, workspaceRow, audits, organization } = await setup();
+  const unfinished = "Select a repository and start indexing before finishing setup";
+  await expect(t.mutation(api.onboarding.complete, { token: alice, organizationId })).rejects.toThrow(unfinished);
   await t.mutation(api.onboarding.select, { token: alice, organizationId, repositoryIds: [repo._id] });
+  await expect(t.mutation(api.onboarding.complete, { token: alice, organizationId })).rejects.toThrow(unfinished);
+  expect(needsSetup(await organization())).toBe(true);
   await t.mutation(api.onboarding.start, { token: alice, organizationId, pauseReviews: true });
   await expect(t.mutation(api.onboarding.advance, { token: alice, organizationId, step: "summary" })).rejects.toThrow("Unknown setup step");
   await expect(t.mutation(api.onboarding.advance, { token: bob, organizationId, step: "indexing" })).rejects.toThrow("Forbidden");
@@ -106,19 +110,50 @@ test("leaving setup early releases the review hold; advance only records non-con
     expect(await t.mutation(api.onboarding.advance, { token: alice, organizationId, step: "plan" })).toBe("connect");
   } finally { delete process.env.BILLING_ENABLED; }
   expect((await organization())?.onboarding?.step).toBe("plan");
-  await expect(t.mutation(api.onboarding.complete, { token: bob, organizationId, skipped: true })).rejects.toThrow("Forbidden");
-  await t.mutation(api.onboarding.complete, { token: alice, organizationId, skipped: true });
+  await expect(t.mutation(api.onboarding.complete, { token: bob, organizationId })).rejects.toThrow("Forbidden");
+  // The last step opens once indexing starts, so the triggers step may never have saved: finishing releases the hold.
+  await t.mutation(api.onboarding.complete, { token: alice, organizationId });
   const org = await organization();
-  expect(org?.onboarding).toMatchObject({ skipped: true, reviewsPaused: false });
+  expect(org?.onboarding).toMatchObject({ step: "done", skipped: false, reviewsPaused: false });
   expect(org?.onboarding?.completedAt).toBeTypeOf("number");
   expect(needsSetup(org)).toBe(false);
   expect(await workspaceRow()).toMatchObject({ settings: { automatic: true }, overrideKeys: [] });
-  expect(await audits()).toEqual(expect.arrayContaining(["onboarding.reviews_resumed", "onboarding.skipped"]));
+  expect(await audits()).toEqual(expect.arrayContaining(["onboarding.reviews_resumed", "onboarding.completed"]));
+  expect(await audits()).not.toContain("onboarding.skipped");
   // Reopening and finishing again re-stamps completion.
   const first = org!.onboarding!.completedAt!;
   vi.setSystemTime(first + 60_000);
   await t.mutation(api.onboarding.complete, { token: alice, organizationId });
   expect((await organization())?.onboarding?.completedAt).toBeGreaterThan(first);
+});
+
+test("workspaces that skipped setup before anything was indexing are reopened once; the rest stay done", async () => {
+  const { t, alice, organizationId, organization } = await setup();
+  const aliceId = (await t.run(ctx => ctx.db.query("users").withIndex("by_github", q => q.eq("githubId", 1)).unique()))!._id;
+  const skippedAt = { startedAt: 1, step: "plan", completedAt: 2, completedBy: aliceId };
+  // Skipped with alice/shop connected but never indexing: reopened.
+  await t.run(ctx => ctx.db.patch(organizationId, { onboarding: { ...skippedAt, skipped: true } }));
+  // Skipped after a repository started indexing, finished normally, and from before guided setup: left alone.
+  const reviewing = await t.mutation(api.users.createOrganization, { token: alice, name: "Reviewing" });
+  await t.mutation(api.repositories.connect, { token: alice, secret: "onboarding-service-secret", organizationId: reviewing, installationId: 302, account: "alice-reviewing", accountId: 2, repositories: [{ id: 302, fullName: "alice-reviewing/app", defaultBranch: "main" }] });
+  const finished = await t.mutation(api.users.createOrganization, { token: alice, name: "Finished" });
+  const legacy = await t.mutation(api.users.createOrganization, { token: alice, name: "Legacy" });
+  await t.run(async ctx => {
+    const repo = (await ctx.db.query("repositories").withIndex("by_org", q => q.eq("organizationId", reviewing)).unique())!;
+    await ctx.db.patch(repo._id, { enabled: true });
+    await ctx.db.patch(reviewing, { onboarding: { ...skippedAt, skipped: true } });
+    await ctx.db.patch(finished, { onboarding: { ...skippedAt, skipped: false } });
+    await ctx.db.patch(legacy, { onboarding: undefined });
+  });
+  const before = await t.run(ctx => Promise.all([reviewing, finished, legacy].map(id => ctx.db.get(id))));
+
+  expect(await t.mutation(internal.onboarding.reopenSkippedSetups, { confirm: "reopen-skipped-setups" })).toBe(1);
+  const reopened = await organization();
+  expect(reopened?.onboarding).toEqual({ startedAt: 1, reviewsPaused: false, skipped: false });
+  expect(needsSetup(reopened)).toBe(true);
+  expect(await t.run(ctx => Promise.all([reviewing, finished, legacy].map(id => ctx.db.get(id))))).toEqual(before);
+  // Running it again changes nothing.
+  expect(await t.mutation(internal.onboarding.reopenSkippedSetups, { confirm: "reopen-skipped-setups" })).toBe(0);
 });
 
 test("the code-graph sample is bounded to 12 files per repository and limited to repositories the viewer can see", async () => {

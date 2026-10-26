@@ -287,7 +287,7 @@ test('a second workspace must choose a plan: nothing indexes, reviews or finishe
  const newRepo=(await t.run(ctx=>ctx.db.query('repositories').withIndex('by_github',q=>q.eq('githubId',7701)).unique()))!;
  await expect(t.mutation(api.repositories.configure,{token:alice.token,repositoryId:newRepo._id,enabled:true})).rejects.toThrow(/Choose a plan/);
  await expect(t.mutation(api.onboarding.advance,{token:alice.token,organizationId:fresh,step:'plan'})).rejects.toThrow(/Choose a plan/);
- await expect(t.mutation(api.onboarding.complete,{token:alice.token,organizationId:fresh,skipped:true})).rejects.toThrow(/Choose a plan/);
+ await expect(t.mutation(api.onboarding.complete,{token:alice.token,organizationId:fresh})).rejects.toThrow(/Choose a plan/);
  await t.run(ctx=>ctx.db.patch(newRepo._id,{enabled:true}));
  const blocked=await reviewOf(t,await enqueue(t,newRepo._id,1));
  expect([blocked?.status,blocked?.error]).toEqual(['failed',expect.stringMatching(/^Billing: Choose a plan/)]);

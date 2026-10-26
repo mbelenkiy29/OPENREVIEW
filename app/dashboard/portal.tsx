@@ -21,7 +21,7 @@ export function PortalNav({ login, avatar, email, role, organizationId, name, or
   return <div className="portal-top">
     {trialDaysLeft !== undefined && <div className="trial-banner"><span>{trialDaysLeft} {trialDaysLeft === 1 ? "day" : "days"} left in your free trial!</span><Link className="button small" href="/dashboard/organization/billing"><Icon name="plus" />Add Payment Method</Link></div>}
     <div className="portal-identity">
-      <IdentityLeft><Link className="brand" href="/dashboard/analytics" aria-label="OpenReview home"><Mark /></Link><WorkspaceMenu organizationId={organizationId} name={name} role={role} organizations={organizations} teams={teams} savedTeam={savedTeam} /></IdentityLeft>
+      <IdentityLeft><Link className="brand" href="/dashboard" aria-label="OpenReview home"><Mark /></Link><WorkspaceMenu organizationId={organizationId} name={name} role={role} organizations={organizations} teams={teams} savedTeam={savedTeam} /></IdentityLeft>
       <div className="header-actions">
         <Link className="header-button" href="/dashboard/chat" title="Chat"><Icon name="chatCircle" /><span className="sr-only">Chat</span></Link>
         <Link className="header-button" href="/docs" title="Docs"><Icon name="bookOpen" /><span className="sr-only">Docs</span></Link>
