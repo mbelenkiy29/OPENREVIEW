@@ -226,6 +226,27 @@ try {
     await page.waitForURL("**/dashboard/onboarding/plan");
     await asWorkspace(organizationId);
   }
+  // An owner whose setup isn't finished is prompted on every visit: /dashboard and the logo lead to setup, every page
+  // carries the setup bar, and setup only offers Back to dashboard, never a way to skip it. This owner's first
+  // workspace starts on Free and never finishes setup, so the check holds on a reused database too.
+  const unfinishedId = await backend.mutation(api.users.login, { secret: process.env.SERVICE_SECRET!, githubId: -102, login: "openreview-setup-fixture", avatar: "" });
+  const unfinishedToken = await new SignJWT({}).setProtectedHeader({ alg: "HS256" }).setSubject(unfinishedId).setIssuer("openreview").setAudience("openreview").setExpirationTime("1h").sign(new TextEncoder().encode(process.env.SESSION_SECRET!));
+  if (!(await backend.query(api.users.me, { token: unfinishedToken })).organizations.length) await backend.mutation(api.users.createOrganization, { token: unfinishedToken, name: "Unfinished setup" });
+  const unfinished = await browser.newContext({ viewport: { width: 1365, height: 900 } });
+  await unfinished.addCookies([{ name: "openreview_session", value: unfinishedToken, url, httpOnly: true, sameSite: "Lax" }]);
+  const unfinishedPage = await unfinished.newPage();
+  await unfinishedPage.goto(`${url}/dashboard`);
+  await unfinishedPage.waitForURL("**/dashboard/onboarding/connect");
+  assert.equal(await unfinishedPage.getByRole("button", { name: "Exit setup" }).count(), 0, "Setup can be skipped");
+  await unfinishedPage.getByRole("link", { name: "Back to dashboard" }).click();
+  await unfinishedPage.waitForURL("**/dashboard/analytics");
+  for (const path of ["/dashboard/analytics", "/dashboard/organization/people"]) {
+    await unfinishedPage.goto(url + path);
+    await unfinishedPage.getByRole("region", { name: "Workspace setup" }).getByRole("link", { name: "Resume setup" }).waitFor();
+  }
+  assert.equal(await unfinishedPage.getByRole("link", { name: "OpenReview home" }).getAttribute("href"), "/dashboard");
+  await unfinishedPage.screenshot({ path: "output/playwright/setup-unfinished.png", caret: "initial" });
+  await unfinished.close();
   // Fix agents: settings list the cloud agents and what each needs; the link page answers without a raw error.
   await page.goto(`${url}/dashboard/account/review`);
   await page.getByRole("heading", { name: "Personal fix agent" }).waitFor();
@@ -407,7 +428,7 @@ try {
   await page.screenshot({ path: "output/playwright/dark-desktop.png", fullPage: true, caret: "initial" });
   assert.deepEqual(errors, [], `Browser errors: ${errors.join("; ")}`);
   console.log(
-    `Browser verification passed: landing (interactive demos, motion and reduced motion), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px), repository selection, ${dashboardPages} dashboard pages (Greptile's eight tabs, their sub-navigation, Bugs Caught, Chat and Personal Settings, with the app chrome kept mounted and no loading flash), review tabs, Findings redirects, Code Review section links, persisted settings/context, learned preference filters, Chat page, the phone tab row, and dark theme. GitHub OAuth and real indexing still require external credentials.`,
+    `Browser verification passed: landing (interactive demos, motion and reduced motion), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px, and the prompt to finish it), repository selection, ${dashboardPages} dashboard pages (Greptile's eight tabs, their sub-navigation, Bugs Caught, Chat and Personal Settings, with the app chrome kept mounted and no loading flash), review tabs, Findings redirects, Code Review section links, persisted settings/context, learned preference filters, Chat page, the phone tab row, and dark theme. GitHub OAuth and real indexing still require external credentials.`,
   );
 } finally {
   await browser.close();

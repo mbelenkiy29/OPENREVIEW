@@ -44,7 +44,9 @@ export default async function Dashboard(props: {
   const { active, data, filters, isAdmin, organization, page, route, savedTeam, section, selectedTeam, user, view } = ctx;
   const title = page?.title ?? (view === "findings" ? "Bugs Caught" : view === "overview" ? "Analytics" : view === "reviews" ? "Pull Requests" : route === "chat" ? "Chat" : navigation.find((n) => n.toLowerCase() === view));
   const subtitle = page?.tab === "context" ? `Manage context for ${organization.name ?? "this organization"}` : page?.subtitle ?? (view === "findings" ? "Every finding OpenReview raised, with its priority and status." : route === "chat" ? "Ask questions about your repositories." : view === "reviews" ? "Review history across your repositories." : undefined);
+  // Every page carries the setup prompt until the workspace finishes guided setup (there is no skipping it).
   const notices = <>
+    {needsSetup(organization) && <section className="setup-banner" aria-label="Workspace setup"><p><strong>Setup isn’t finished.</strong> {organization.onboarding?.reviewsPaused ? "Automatic reviews are paused until you choose when reviews run." : "Finish connecting repositories and choosing review behavior."}</p>{isAdmin ? <Link className="button primary small" href="/dashboard/onboarding">Resume setup</Link> : <p className="muted">A workspace admin is completing setup.</p>}</section>}
     <WorkspaceInvitations invitations={user.invitations}/>
     {savedTeam&&!selectedTeam&&filters.team===undefined&&<p role="status">Your previously selected team is no longer accessible. Showing all accessible repositories; use the organization menu to select a team.</p>}
   </>;
@@ -53,7 +55,6 @@ export default async function Dashboard(props: {
     {/* Analytics renders its own header: Greptile puts the filters on the title row. */}
     {view === "overview" && <AnalyticsView token={user.token} organizationId={organization._id} repositories={data.repositories} teams={ctx.scopes.teams} filters={filters} locked={ctx.locked} live={<Live active={active} />}>
       {notices}
-      {needsSetup(organization) && <section className="setup-banner" aria-label="Workspace setup"><p><strong>Setup isn’t finished.</strong> {organization.onboarding?.reviewsPaused ? "Automatic reviews are paused until you choose when reviews run." : "Finish connecting repositories and choosing review behavior."}</p>{isAdmin ? <Link className="button primary small" href="/dashboard/onboarding">Resume setup</Link> : <p className="muted">A workspace admin is completing setup.</p>}</section>}
     </AnalyticsView>}
     {view === "findings" && <FindingsSection ctx={ctx} />}
     {view === "repositories" && <RepositoriesSection ctx={ctx} />}

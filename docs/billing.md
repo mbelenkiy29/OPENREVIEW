@@ -68,6 +68,8 @@ When billing is on and the new workspace did not start on Free (an owner already
 
 The trial clock starts when the workspace first opens Checkout (its Stripe customer is created), however long it was on Free; each workspace gets one trial. Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
 
+Setup can't be skipped. Until a workspace finishes it, opening the dashboard takes owners and admins back to setup, and every dashboard page shows a **Setup isn't finished** bar (members see that an admin is completing it). Setup finishes only from its last step (`onboarding.complete`), which needs the plan and a selected repository that has started indexing. Workspaces that used the former **Exit setup** before any repository was indexing are reopened once per deployment with `npx convex run onboarding:reopenSkippedSetups '{"confirm":"reopen-skipped-setups"}' --prod`.
+
 When a review is blocked, it is recorded as failed with a `Billing:` reason, visible on the pull request's review page. Blocked reviews are also counted on **Organization Settings → Billing & Usage**.
 
 ## Discounts and free months

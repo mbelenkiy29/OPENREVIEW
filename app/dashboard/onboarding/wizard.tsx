@@ -3,14 +3,13 @@ import type { ReactNode } from "react";
 import { Icon } from "../../ui/icons";
 import { logout } from "../actions";
 import { SignOutForm } from "../../telemetry-identity";
-import { finishSetup } from "./actions";
 import { ShortcutHint, WizardShortcuts } from "./wizard-client";
 import { configureLabels, configureSteps, previousStep, stepsFor, stepTitles, type ConfigureStep, type WizardStep } from "../../../src/onboarding-steps";
 
 /** Full-screen setup frame on Greptile's dotted canvas: the step body, then a bar with Logout and
- *  exit on the left, Back (⌘+⇧+↵) and Next (⌘+↵) centred, and where you are on the right. */
-export function WizardFrame({ step, workspace, organizationId, admin, completed, billing = false, planMissing, nextLabel, nextHref, centered, children }: {
-  step: WizardStep; workspace?: string; organizationId?: string; admin: boolean; completed?: boolean; billing?: boolean; planMissing?: boolean;
+ *  Back to dashboard on the left, Back (⌘+⇧+↵) and Next (⌘+↵) centred, and where you are on the right. */
+export function WizardFrame({ step, workspace, organizationId, admin, billing = false, planMissing, nextLabel, nextHref, centered, children }: {
+  step: WizardStep; workspace?: string; organizationId?: string; admin: boolean; billing?: boolean; planMissing?: boolean;
   nextLabel: string; nextHref?: string; centered?: boolean; children: ReactNode;
 }) {
   const steps = stepsFor(billing), back = previousStep(step, billing), position = steps.indexOf(step) + 1;
@@ -20,10 +19,9 @@ export function WizardFrame({ step, workspace, organizationId, admin, completed,
     <footer className="wizard-bar">
       <div className="wizard-exit">
         <SignOutForm action={logout} label="Logout" className="link" />
-        {/* Until a plan is chosen the server refuses to finish setup and the dashboard leads back here, so there is no way out to offer. */}
-        {organizationId && step !== "done" && !planMissing && (admin && !completed
-          ? <form action={finishSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="skipped" value="true" /><button className="link">Exit setup</button></form>
-          : <Link className="link" href="/dashboard/analytics">Back to dashboard</Link>)}
+        {/* Leaving changes nothing: setup is finished only from its last step, and the dashboard keeps prompting until
+            then. Until a plan is chosen the dashboard leads straight back here, so there is no way out to offer. */}
+        {organizationId && step !== "done" && !planMissing && <Link className="link" href="/dashboard/analytics">Back to dashboard</Link>}
       </div>
       <nav className="wizard-nav" aria-label="Setup steps">
         {backHref && <Link className="button" href={backHref} aria-keyshortcuts="Meta+Shift+Enter Control+Shift+Enter">Back <ShortcutHint shift /></Link>}
