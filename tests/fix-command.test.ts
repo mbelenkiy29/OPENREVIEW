@@ -35,7 +35,12 @@ test("fix branches are new, namespaced and never the change's own branches; hand
   assert.match(body, /No test execution evidence/);
 });
 
-const fixInput = { branch: "openreview/fix-3-abc123", expectedHead: "h".repeat(40), path: "src/a b.ts", blobSha: "blob1", content: "fixed\n", title: "OpenReview fix: x", body: "body", message: "msg" };
+const fixInput = { branch: "openreview/fix-3-abc123", expectedHead: "h".repeat(40), files: [{ path: "src/a b.ts", content: "fixed\n", mode: "100644" }], title: "OpenReview fix: x", body: "body", message: "msg" };
+const gitDataRoutes = (method: string, path: string) => {
+  if (method === "POST" && path === "/repos/owner/repo/git/trees") return Response.json({ sha: "t1" });
+  if (method === "POST" && path === "/repos/owner/repo/git/commits") return Response.json({ sha: "c1" });
+  if (method === "PATCH" && path === "/repos/owner/repo/git/refs/heads/openreview/fix-3-abc123") return Response.json({ ref: "refs/heads/openreview/fix-3-abc123" });
+};
 function fakeGithub(t: { mock: { method: (o: object, k: string, f: (...a: never[]) => unknown) => void } }, routes: (method: string, path: string, body: unknown) => Response | undefined) {
   const calls: { method: string; path: string; body: unknown }[] = [];
   t.mock.method(globalThis, "fetch", async (input: string | URL, options: RequestInit = {}) => {
@@ -54,22 +59,28 @@ test("fix pull requests are skipped without contents:write and never touch the n
   assert.equal(calls.length, 0);
 });
 
-test("fix pull requests create a new branch from the reviewed head, commit only there, and target the PR branch", async (t) => {
+test("fix pull requests create a new branch from the reviewed head, commit every file there in one commit, and target the PR branch", async (t) => {
   const calls = fakeGithub(t, (method, path) => {
     if (method === "GET" && path === "/repos/owner/repo/pulls/3") return prJson();
     if (method === "GET" && path.startsWith("/repos/owner/repo/pulls?")) return Response.json([]);
     if (method === "POST" && path === "/repos/owner/repo/git/refs") return Response.json({ ref: "refs/heads/" + fixInput.branch });
-    if (method === "PUT" && path === "/repos/owner/repo/contents/src/a%20b.ts") return Response.json({ commit: { sha: "c1" } });
     if (method === "POST" && path === "/repos/owner/repo/pulls") return Response.json({ html_url: "https://github.com/owner/repo/pull/4" });
+    return gitDataRoutes(method, path);
   });
   const github = new Github("token", undefined, undefined, { contents: "write", pull_requests: "write" });
-  assert.deepEqual(await github.openFixPullRequest("owner/repo", 3, fixInput), { url: "https://github.com/owner/repo/pull/4", reused: false });
+  const files = [{ path: "src/a b.ts", content: "fixed\n", mode: "100644" }, { path: "bin/run", content: "#!/bin/sh\n", mode: "100755" }];
+  assert.deepEqual(await github.openFixPullRequest("owner/repo", 3, { ...fixInput, files }), { url: "https://github.com/owner/repo/pull/4", reused: false });
   assert.match(calls[1].path, /head=owner%3Aopenreview%2Ffix-3-abc123&base=feature%2Ftotals/);
   assert.deepEqual(calls[2].body, { ref: "refs/heads/openreview/fix-3-abc123", sha: "h".repeat(40) });
-  assert.deepEqual(calls[3].body, { message: "msg", content: Buffer.from("fixed\n").toString("base64"), sha: "blob1", branch: "openreview/fix-3-abc123" });
-  assert.deepEqual(calls[4].body, { title: "OpenReview fix: x", head: "openreview/fix-3-abc123", base: "feature/totals", body: "body" });
+  // Tree on the reviewed head (both files, modes kept), then one commit on it, then a fast-forward of the fix branch.
+  assert.deepEqual(calls.slice(3, 6).map((c) => c.method + " " + c.path), ["POST /repos/owner/repo/git/trees", "POST /repos/owner/repo/git/commits", "PATCH /repos/owner/repo/git/refs/heads/openreview/fix-3-abc123"]);
+  assert.deepEqual(calls[3].body, { base_tree: "h".repeat(40), tree: [{ path: "src/a b.ts", mode: "100644", type: "blob", content: "fixed\n" }, { path: "bin/run", mode: "100755", type: "blob", content: "#!/bin/sh\n" }] });
+  assert.deepEqual(calls[4].body, { message: "msg", tree: "t1", parents: ["h".repeat(40)] });
+  assert.deepEqual(calls[5].body, { sha: "c1" });
+  assert.deepEqual(calls[6].body, { title: "OpenReview fix: x", head: "openreview/fix-3-abc123", base: "feature/totals", body: "body" });
+  assert.equal(calls.length, 7);
   // No write ever names the pull request's own branch.
-  assert.ok(calls.filter((c) => c.method !== "GET").every((c) => !JSON.stringify(c.body).includes('"branch":"feature/totals"') && !String((c.body as { ref?: string })?.ref ?? "").endsWith("feature/totals")));
+  assert.ok(calls.filter((c) => c.method !== "GET").every((c) => !c.path.includes("feature") && !JSON.stringify(c.body).includes('"branch":"feature/totals"') && !String((c.body as { ref?: string })?.ref ?? "").endsWith("feature/totals")));
 });
 
 test("fix pull requests refuse forks, moved heads, closed PRs and unsafe branches; retries reuse earlier work", async (t) => {
@@ -82,8 +93,8 @@ test("fix pull requests refuse forks, moved heads, closed PRs and unsafe branche
     if (method === "POST" && path === "/repos/owner/repo/git/refs") return Response.json({ message: "Reference already exists" }, { status: 422 });
     if (method === "GET" && path === "/repos/owner/repo/git/ref/heads/openreview/fix-3-abc123") return Response.json({ object: { sha: refSha } });
     if (method === "GET" && path === "/repos/owner/repo/git/commits/" + "f".repeat(40)) return Response.json({ parents });
-    if (method === "PUT") return Response.json({ commit: { sha: "c1" } });
     if (method === "POST" && path === "/repos/owner/repo/pulls") return Response.json({ html_url: "https://github.com/owner/repo/pull/5" });
+    return gitDataRoutes(method, path);
   });
   assert.deepEqual(await github.openFixPullRequest("owner/repo", 3, fixInput), { skipped: "fix pull requests are not opened for changes from forks" });
   pr = prJson({ head: { sha: "x".repeat(40), ref: "feature/totals", repo: { full_name: "owner/repo" } } });
@@ -98,12 +109,12 @@ test("fix pull requests refuse forks, moved heads, closed PRs and unsafe branche
   // Branch left at the reviewed head by an earlier attempt: commit and open.
   const before = calls.length;
   assert.deepEqual(await github.openFixPullRequest("owner/repo", 3, fixInput), { url: "https://github.com/owner/repo/pull/5", reused: false });
-  assert.equal(calls.slice(before).filter((c) => c.method === "PUT").length, 1);
+  assert.deepEqual(calls.slice(before).filter((c) => c.method !== "GET").map((c) => c.method + " " + c.path), ["POST /repos/owner/repo/git/refs", "POST /repos/owner/repo/git/trees", "POST /repos/owner/repo/git/commits", "PATCH /repos/owner/repo/git/refs/heads/openreview/fix-3-abc123", "POST /repos/owner/repo/pulls"]);
   // Branch already holds exactly one fix commit on the reviewed head: open without recommitting.
   refSha = "f".repeat(40);
   const second = calls.length;
   assert.deepEqual(await github.openFixPullRequest("owner/repo", 3, fixInput), { url: "https://github.com/owner/repo/pull/5", reused: false });
-  assert.equal(calls.slice(second).filter((c) => c.method === "PUT").length, 0);
+  assert.deepEqual(calls.slice(second).filter((c) => c.method !== "GET").map((c) => c.method + " " + c.path), ["POST /repos/owner/repo/git/refs", "POST /repos/owner/repo/pulls"]);
   // Anything else on the branch is left alone.
   parents = [{ sha: "z".repeat(40) }];
   assert.deepEqual(await github.openFixPullRequest("owner/repo", 3, fixInput), { skipped: "branch openreview/fix-3-abc123 already exists with other commits; delete it to open a new fix pull request" });

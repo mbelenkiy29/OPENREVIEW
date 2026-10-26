@@ -18,10 +18,10 @@ function publishable(text:string|undefined){
   if(!text||!reviewSummarySchema(undefined,[]).safeParse({summary:text}).success)return undefined;
   return text.replace(/https?:\/\/\S+/g,"[link removed]").replace(/@(?=[\w-])/g,"@\u200b").replace(/```/g,"`").replace(/[\r\n]+/g," ").trim();
 }
-export type PreparedFix={suggestion?:Suggestion;explanation?:string;problem?:string;content?:string;entry?:{path:string;sha:string};changed?:ScmChange["diff"][number]};
+export type PreparedFix={suggestion?:Suggestion;explanation?:string;problem?:string;content?:string;entry?:{path:string;sha:string;mode?:string};changed?:ScmChange["diff"][number]};
 // A suggestion stored with the finding is reused when it still applies to the current head;
 // otherwise the model proposes a replacement for exactly the finding's lines, which is validated.
-export async function prepareFix(ctx:ActionCtx,p:{github:Scm;repo:Doc<"repositories">;pr:ScmChange;tree:Map<string,{path:string;sha:string}>;target:Doc<"findings">}):Promise<PreparedFix>{
+export async function prepareFix(ctx:ActionCtx,p:{github:Scm;repo:Doc<"repositories">;pr:ScmChange;tree:Map<string,{path:string;sha:string;mode?:string}>;target:Doc<"findings">}):Promise<PreparedFix>{
   const {github,repo,pr,tree,target}=p;
   const entry=tree.get(target.filePath),changed=pr.diff.find(d=>d.path===target.filePath);
   let suggestion:Suggestion|undefined,explanation:string|undefined,problem:string|undefined,content:string|undefined;
@@ -57,6 +57,6 @@ export async function openFix(p:{github:Scm;repo:Doc<"repositories">;pr:ScmChang
   if(!suggestion||!content||!entry)return {note:"No fix pull request was opened because no validated suggestion is available."};
   if(!github.openFixPullRequest)return {note:"Fix pull requests are not available for this provider."};
   if(!github.canReply||!await github.canReply(repo.fullName,p.author))throw new Error("Comment author write access revoked");
-  const result=await github.openFixPullRequest(repo.fullName,p.prNumber,{branch:fixBranchName(p.prNumber,target.fingerprint),expectedHead:pr.head.sha,path:target.filePath,blobSha:entry.sha,content:applySuggestion(content,suggestion),title:("OpenReview fix: "+target.title.replace(/[\r\n]+/g," ")).slice(0,120),body:`Requested by @${p.author} in ${p.requestedIn} for the finding in \`${target.filePath}:${target.startLine}\`. This pull request targets the branch of #${p.prNumber} and changes only the suggested lines. No tests were run by OpenReview.`,message:("Apply OpenReview suggestion: "+target.title.replace(/[\r\n]+/g," ")).slice(0,200)});
+  const result=await github.openFixPullRequest(repo.fullName,p.prNumber,{branch:fixBranchName(p.prNumber,target.fingerprint),expectedHead:pr.head.sha,files:[{path:target.filePath,content:applySuggestion(content,suggestion),mode:entry.mode??"100644"}],title:("OpenReview fix: "+target.title.replace(/[\r\n]+/g," ")).slice(0,120),body:`Requested by @${p.author} in ${p.requestedIn} for the finding in \`${target.filePath}:${target.startLine}\`. This pull request targets the branch of #${p.prNumber} and changes only the suggested lines. No tests were run by OpenReview.`,message:("Apply OpenReview suggestion: "+target.title.replace(/[\r\n]+/g," ")).slice(0,200)});
   return "skipped" in result?{note:`No fix pull request was opened: ${result.skipped}.`}:{pullRequest:result};
 }
