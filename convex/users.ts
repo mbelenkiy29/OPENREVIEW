@@ -1,12 +1,13 @@
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
-import { scheduleSeatSync, startOnFree } from "./billing";
+import { planMissing, scheduleSeatSync, startOnFree } from "./billing";
 import { billingConfig } from "../src/billing";
 import { githubAccounts, linkIdentity } from "./identity";
 import { v } from "convex/values";
 import { authenticated, authorize, service, audit } from "./auth";
 import { rateLimit } from "./rateLimit";
 import { bindReferralOnWorkspace } from "./referralLedger";
+import { isOperator } from "./operator";
 
 export const login = mutation({
   args: {
@@ -34,6 +35,8 @@ export const me = query({
       members.map(async (m) => ({
         ...(await ctx.db.get(m.organizationId)),
         role: m.role,
+        // The dashboard's plan gate (app/dashboard/load.ts) uses the server's rule, which exempts operators' workspaces.
+        planMissing: await planMissing(ctx, m.organizationId),
       })),
     );
     // Invitations name a GitHub login, so only logins GitHub reported count (other sign-ins choose `login`).
@@ -46,6 +49,8 @@ export const me = query({
     return {
       user,
       email: identities.find((i) => i.emailVerified && i.email)?.email,
+      // Shows the Operator link; the operator page checks again on the server.
+      operator: await isOperator(ctx, user._id),
       organizations,
       invitations: (await Promise.all(invitations.filter((i) => i.expiresAt > Date.now()).map(async i => {
         const organization = await ctx.db.get(i.organizationId);

@@ -50,7 +50,7 @@ export const sharedTables: Partial<Record<TableNames, string>> = {
   rateLimits: "short-lived counters", changelogDigests: "which public changelog entries were last emailed", providerReceipts: "one-time install receipts that expire", ssoRequests: "SAML request ids that expire in 10 minutes",
   oauthClients: "MCP client registry shared by all workspaces", stripeEvents: "Stripe event ids kept for replay protection (no review data)",
   slackEventReceipts: "Slack event-id dedupe", webhookDeliveries: "provider payloads not linked to a workspace; pruned deployment-wide after 14 days",
-  workspaceDeletions: "deletion receipts",
+  workspaceDeletions: "deletion receipts", operatorAudit: "operator access log; names no workspace",
   referralCodes: "personal referral codes", referrals: "referrer's attribution records; keep only the referred workspace's id",
   referralCommissions: "referrer's earnings ledger (Stripe ids and amounts, no workspace content)",
   referralRedemptions: "referral credits and payouts already issued", referralPayoutAccounts: "personal Stripe payout account link",
@@ -284,8 +284,9 @@ export const pruneWebhookPayloads = internalMutation({ args: { cursor: v.optiona
   return { deliveries: deliveries.length, events: events.length };
 } });
 
-// ---- Data sharing: the only cross-workspace read. Workspaces are private unless an admin opted in;
-// only counts leave the workspace, never code, titles or text.
+// ---- Data sharing: the only cross-workspace read of review data. Workspaces are private unless an admin opted in;
+// only counts leave the workspace, never code, titles or text. (The operator page, convex/operator.ts, reads
+// billing and account metadata across workspaces: plans, seats, spend and activity times.)
 async function sharedAggregate(ctx: QueryCtx) {
   const sharing = (await ctx.db.query("organizations").take(5000)).filter((o) => o.dataSharing === "aggregate");
   const totals = { workspaces: sharing.length, reviews: 0, findings: 0, byCategory: {} as Record<string, number>, bySeverity: {} as Record<string, number> };

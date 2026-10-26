@@ -76,6 +76,7 @@ import type * as notionData from "../notionData.js";
 import type * as notionJobs from "../notionJobs.js";
 import type * as oauth from "../oauth.js";
 import type * as onboarding from "../onboarding.js";
+import type * as operator from "../operator.js";
 import type * as p4ConversationJobs from "../p4ConversationJobs.js";
 import type * as p4Conversations from "../p4Conversations.js";
 import type * as p4FixAuthority from "../p4FixAuthority.js";
@@ -213,6 +214,7 @@ declare const fullApi: ApiFromModules<{
   notionJobs: typeof notionJobs;
   oauth: typeof oauth;
   onboarding: typeof onboarding;
+  operator: typeof operator;
   p4ConversationJobs: typeof p4ConversationJobs;
   p4Conversations: typeof p4Conversations;
   p4FixAuthority: typeof p4FixAuthority;
