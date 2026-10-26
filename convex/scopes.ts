@@ -73,7 +73,7 @@ export const workspaceModel=internalQuery({args:{organizationId:v.id("organizati
  const scope=(await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect()).find(s=>!s.teamId);
  return scope?.overrideKeys.includes("model")&&scope.settings.model||null;
 }});
-// Settings → AI Model: the workspace's pick from the operator's priced list (reviews, chat and fixes use it).
+// Code Review Settings → AI Model: the workspace's pick from the operator's priced list (reviews, chat and fixes use it).
 export const modelChoice=query({args:{token:v.string(),organizationId:v.id("organizations")},handler:async(ctx,a)=>{
  await authorize(ctx,a.token,a.organizationId);
  const scope=(await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect()).find(s=>!s.teamId);

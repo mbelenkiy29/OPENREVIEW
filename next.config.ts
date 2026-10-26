@@ -2,6 +2,7 @@ import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs/config';
 import { posthogHosts, posthogProxyPath, posthogToken, sentryDsn, sentryTunnelPath } from './src/telemetry';
 import { contentSecurityPolicy, middlewareSkips, prefetchHeaders, securityHeaders } from './src/security-headers';
+import { movedPaths } from './app/dashboard/routes';
 
 const config: NextConfig = {
   output: 'standalone',
@@ -23,12 +24,14 @@ const config: NextConfig = {
     // Sign-in results used to land on the home page; older links and bookmarks now go to the sign-in
     // page with their query string. Redirecting here keeps app/page.tsx free of query handling.
     const signIn = ['error', 'email', 'signedout'].map((key) => ({ source: '/', has: [{ type: 'query' as const, key }], destination: '/login', permanent: false }));
-    // The roadmap is a view of the feedback board (app/feedback). Findings moved to Analytics → Bugs Caught;
-    // query strings (filters) carry over.
+    // The roadmap is a view of the feedback board (app/feedback). Findings moved under Analytics, and the
+    // Memory and Settings pages moved into Greptile's tabs (app/dashboard/routes.ts); query strings carry over.
     return [
       ...signIn,
       { source: '/roadmap', destination: '/feedback/roadmap', permanent: false },
       { source: '/dashboard/pulls/findings', destination: '/dashboard/analytics/findings', permanent: false },
+      { source: '/dashboard/settings', has: [{ type: 'query' as const, key: 'repository' }], destination: '/dashboard/code-review', permanent: false },
+      ...movedPaths.map(([source, destination]) => ({ source, destination, permanent: false })),
     ];
   },
   async rewrites() {

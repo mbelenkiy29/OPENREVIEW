@@ -51,7 +51,7 @@ test('Free usage is enforced on every model call and at enqueue; blocked reviews
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({used:10000,reserved:10000,allowed:false});
  await t.mutation(internal.inferenceBudget.settle,{id:held,inputTokens:1000,outputTokens:1000});
  const blocked=await enqueue(t,repo._id,2);
- expect(await reviewOf(t,blocked)).toMatchObject({status:'failed',error:"Billing: This workspace used the Free plan's $0.02 of usage for this month. Usage resets on November 1; a workspace admin can upgrade in Settings → Billing."});
+ expect(await reviewOf(t,blocked)).toMatchObject({status:'failed',error:"Billing: This workspace used the Free plan's $0.02 of usage for this month. Usage resets on November 1; a workspace admin can upgrade in Organization Settings → Billing & Usage."});
  // Re-requesting an existing queued head does not count again.
  expect(await enqueue(t,repo._id,1)).toBe(first);
  const status=await t.query(api.billing.status,{token:alice.token,organizationId:org});
@@ -214,7 +214,7 @@ test('seats follow membership: viewers are free and changes resync the subscript
  expect(await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org})).toBe('https://checkout.stripe.com/c/pay/cs_1');
  const session=new URLSearchParams(calls[1].body);
  // The untouched 14-day trial carries into the subscription, so the card is not charged until it ends.
- expect(Object.fromEntries(session)).toMatchObject({mode:'subscription',customer:'cus_1',client_reference_id:org,integration_identifier:expect.stringMatching(/^openreview-starter-seats-[a-z]{8}$/),allow_promotion_codes:'true','line_items[0][price]':'price_seat','line_items[0][quantity]':'2','subscription_data[metadata][organizationId]':org,'subscription_data[trial_end]':String(Math.floor((Date.now()+14*86400000)/1000)),success_url:'https://review.example.com/dashboard/settings/billing?checkout=success',cancel_url:'https://review.example.com/dashboard/settings/billing?checkout=cancelled'});
+ expect(Object.fromEntries(session)).toMatchObject({mode:'subscription',customer:'cus_1',client_reference_id:org,integration_identifier:expect.stringMatching(/^openreview-starter-seats-[a-z]{8}$/),allow_promotion_codes:'true','line_items[0][price]':'price_seat','line_items[0][quantity]':'2','subscription_data[metadata][organizationId]':org,'subscription_data[trial_end]':String(Math.floor((Date.now()+14*86400000)/1000)),success_url:'https://review.example.com/dashboard/organization/billing?checkout=success',cancel_url:'https://review.example.com/dashboard/organization/billing?checkout=cancelled'});
  expect(session.has('payment_method_types')).toBe(false);
  expect(session.get('payment_method_collection')).toBe('always');
  // With the referral program off (the default) the request has exactly these fields: no discounts, no referral metadata.
@@ -337,7 +337,7 @@ test('a push cancels and refunds a review that never ran; a blocked push leaves 
 test('Free is one workspace per owner: a second one gets no allowance until it subscribes, and billing off is unlimited',async()=>{
  const {t,alice}=await setup();
  const workspace=async(name:string)=>{vi.advanceTimersByTime(1000);return t.mutation(api.users.createOrganization,{token:alice.token,name});};
- const reason='Free is one workspace per owner, and an owner of this workspace already has "Acme" on Free. A workspace admin can choose Starter or Pro in Settings → Billing, or use "Acme" for free reviews.';
+ const reason='Free is one workspace per owner, and an owner of this workspace already has "Acme" on Free. A workspace admin can choose Starter or Pro in Organization Settings → Billing & Usage, or use "Acme" for free reviews.';
  // Alice's first workspace (Acme, from setup) keeps its Free allowance.
  const [acme]=(await t.run(ctx=>ctx.db.query('organizations').collect())).map(o=>o._id);
  await spend(t,acme);
@@ -395,7 +395,7 @@ test('extra usage runs past the included amount up to the admin cap and is meter
  await t.run(ctx=>ctx.db.insert('billingAccounts',{organizationId:org,customerId:'cus_1',subscriptionId:'sub_1',status:'active',seats:1,trialEndsAt:Date.now(),updatedAt:Date.now()}));
  // 1 seat includes $0.01: a half-size call leaves $0.005, and the next full call does not fit without extra usage.
  await spend(t,org,500);
- await expect(reserve(t,org)).rejects.toThrow(/turn on extra usage in Settings → Billing/);
+ await expect(reserve(t,org)).rejects.toThrow(/turn on extra usage in Organization Settings → Billing & Usage/);
  await expect(t.mutation(api.billing.setSpendingCap,{token:bob.token,organizationId:org,capUsd:1})).rejects.toThrow();
  await expect(t.mutation(api.billing.setSpendingCap,{token:alice.token,organizationId:org,capUsd:-1})).rejects.toThrow(/between/);
  await t.mutation(api.billing.setSpendingCap,{token:alice.token,organizationId:org,capUsd:0.01});
@@ -428,7 +428,7 @@ test('workspaces pick models from the operator price list',async()=>{
   expect(await t.query(internal.scopes.workspaceModel,{organizationId:org})).toBeNull();
   await t.mutation(api.scopes.save,{token:alice.token,organizationId:org,settings:{...current.settings,model:'anthropic/claude-sonnet-5-5'},overrideKeys:['model']});
   expect(await t.query(internal.scopes.workspaceModel,{organizationId:org})).toBe('anthropic/claude-sonnet-5-5');
-  // Settings → AI Model: admins pick or reset; members only see it; other scope overrides are kept.
+  // Code Review Settings → AI Model: admins pick or reset; members only see it; other scope overrides are kept.
   await expect(t.mutation(api.scopes.setWorkspaceModel,{token:bob.token,organizationId:org,model:'openai/gpt-4.1'})).rejects.toThrow();
   await expect(t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:'meta/unpriced'})).rejects.toThrow(/model from this deployment's list/);
   await t.mutation(api.scopes.setWorkspaceModel,{token:alice.token,organizationId:org,model:'openai/gpt-4.1'});
@@ -487,7 +487,7 @@ test('Free usage alerts email owners and admins once at 80% and once at 100% eac
  expect(sent).toHaveLength(2);
  await use(t,org,1);
  expect(sent).toHaveLength(4);
- expect(sent[2]).toMatchObject({subject:"Acme used all of this month's included OpenReview usage",text:"Acme has used $0.05 of its $0.05 of included model usage this month. Usage resets on November 1.\n\nReviews are paused until November 1. A workspace admin can upgrade to Starter or Pro in Settings → Billing for more usage.\n\nhttps://review.example.com/dashboard/settings/billing"});
+ expect(sent[2]).toMatchObject({subject:"Acme used all of this month's included OpenReview usage",text:"Acme has used $0.05 of its $0.05 of included model usage this month. Usage resets on November 1.\n\nReviews are paused until November 1. A workspace admin can upgrade to Starter or Pro in Organization Settings → Billing & Usage for more usage.\n\nhttps://review.example.com/dashboard/organization/billing"});
  const usage=await t.run(ctx=>ctx.db.query('billingUsage').first());
  expect(usage?.alertsSent).toEqual([80,100]);
  await t.action(internal.notificationJobs.usageAlert,{usageId:usage!._id,threshold:100});

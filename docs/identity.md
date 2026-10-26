@@ -65,7 +65,7 @@ never meet them.
   - It joins the existing user only when **both** identities carry the same email marked verified by their provider.
   - Otherwise a separate user is created.
   - This means an attacker who registers someone else's address somewhere without verification cannot take over that person's account.
-- **Explicit linking:** to attach another method, sign in, open **Settings → Account & sessions** and choose **Link …**. A provider account that already belongs to another user cannot be linked.
+- **Explicit linking:** to attach another method, sign in, open **Personal Settings → Account Settings** and choose **Link …**. A provider account that already belongs to another user cannot be linked.
 
 ## Sessions
 
@@ -73,14 +73,14 @@ never meet them.
   - Browser sessions carry a random session ID in the signed cookie, and only its SHA-256 is stored.
   - Every Convex call and every dashboard page load checks that the session exists, belongs to the user, has not been revoked and has not expired (7 days).
 - **Managing sessions:**
-  - **Settings → Account & sessions** lists active sessions.
+  - **Personal Settings → Account Settings** lists active sessions.
   - **Sign out** ends the current one.
   - **Sign out everywhere** revokes all of them, plus any older session-less cookies from before this change. Its cutoff time is checked on every request, so it ends every earlier session even when there are more rows than one revoke pass marks.
 - **Workspace removal:** removing a member from a workspace signs them out everywhere. It also revokes their API keys and bridge pairings for that workspace.
 
 ## Email invitations
 
-Admins can invite by email (**Settings → People**). The link is single use, expires in 7 days and can be revoked. Whoever opens it signs in with any method and accepts. Only the token's hash is stored. GitHub-login invitations continue to work.
+Admins can invite by email (**Organization Settings → People**). The link is single use, expires in 7 days and can be revoked. Whoever opens it signs in with any method and accepts. Only the token's hash is stored. GitHub-login invitations continue to work.
 
 ## Migration
 

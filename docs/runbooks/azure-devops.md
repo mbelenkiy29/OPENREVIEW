@@ -11,7 +11,7 @@
 
 ## Steps
 
-1. Connect via **Settings → Code Providers → Azure DevOps**:
+1. Connect via **Code Providers → Azure DevOps**:
    - **Instance:** `https://dev.azure.com/<org>`.
    - **Credential:** the PAT, or `{"tenantId","clientId","clientSecret"}`.
    - **Webhook secret:** 32+ characters.

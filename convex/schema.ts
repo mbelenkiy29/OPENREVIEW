@@ -920,6 +920,8 @@ export default defineSchema({
     globs: v.array(v.string()),
     enabled: v.boolean(),
     createdAt: v.number(),
+    // Last edit or activation change (the Custom Context table's LAST UPDATED); absent on older rules.
+    updatedAt: v.optional(v.number()),
   })
     .index("by_org", ["organizationId"])
     .index("by_repo", ["repositoryId"]),

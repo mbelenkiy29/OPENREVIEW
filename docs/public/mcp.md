@@ -53,6 +53,6 @@ The remote endpoint follows the MCP authorization specification (revision 2026-0
   - Refresh tokens rotate on every use. Presenting an old refresh token, or replaying a code, revokes the connection.
   - Only hashes of codes and tokens are stored.
 - **More access.** A tool that needs more access answers `403` with `WWW-Authenticate: Bearer error="insufficient_scope", scope="write"`, so the client can ask you to approve the extra scope.
-- **Revoking.** Settings → API keys lists connected MCP clients and lets you revoke them; admins see everyone's in the workspace. Clients can revoke their own tokens at `/api/oauth/revoke`.
+- **Revoking.** Organization Settings → API Keys lists connected MCP clients and lets you revoke them; admins see everyone's in the workspace. Clients can revoke their own tokens at `/api/oauth/revoke`.
 
 API keys keep working at the same endpoint.

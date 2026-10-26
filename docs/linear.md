@@ -1,6 +1,6 @@
 # Linear requirements context
 
-OpenReview uses Linear's native OAuth and GraphQL APIs with **read** scope and S256 PKCE. No Linear SDK or write permission is required. Workspace owners/admins connect and configure access in **Memory → Integrations**; members and viewers cannot change connections or retrieve the resource inventory.
+OpenReview uses Linear's native OAuth and GraphQL APIs with **read** scope and S256 PKCE. No Linear SDK or write permission is required. Workspace owners/admins connect and configure access in **Integrations**; members and viewers cannot change connections or retrieve the resource inventory.
 
 ## Setup
 

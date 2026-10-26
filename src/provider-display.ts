@@ -1,5 +1,6 @@
 export type ProviderDisplayIdentity={kind:string;name:string;instance:string;externalId:string|null};
-const names:Record<string,string>={github:"GitHub", "github-enterprise":"GitHub Enterprise",gitlab:"GitLab",gitea:"Gitea", "bitbucket-cloud":"Bitbucket Cloud","bitbucket-dc":"Bitbucket Data Center",origin:"Cursor Origin",perforce:"Perforce"};
+const names:Record<string,string>={github:"GitHub", "github-enterprise":"GitHub Enterprise",gitlab:"GitLab",gitea:"Gitea", "bitbucket-cloud":"Bitbucket Cloud","bitbucket-dc":"Bitbucket Data Center","azure-devops":"Azure DevOps",origin:"Cursor Origin",perforce:"Perforce"};
+export const providerName=(kind:string)=>names[kind]??kind;
 export function providerDisplay(identity:ProviderDisplayIdentity|null){
  if(!identity)return "Provider identity unavailable";
  let instance="Instance unavailable";

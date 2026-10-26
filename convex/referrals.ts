@@ -63,7 +63,7 @@ export const preview = query({ args: { secret: v.string(), code: v.string() }, h
   return owner ? { login: await publicLogin(ctx, owner.userId) } : null;
 } });
 
-/** Adds a referral code to a workspace that has none (Settings → Billing, admins). Rejections return
+/** Adds a referral code to a workspace that has none (Organization Settings → Billing & Usage, admins). Rejections return
  *  {ok:false} rather than throw, so every attempt counts against the rate limit. */
 export const applyCode = mutation({ args: { token: v.string(), organizationId: v.id("organizations"), code: v.string() }, handler: async (ctx, a): Promise<{ ok: true } | { ok: false; error: string }> => {
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
@@ -137,7 +137,7 @@ export const requestCredit = mutation({ args: { token: v.string(), organizationI
   try { await rateLimit(ctx, `referral-credit:${user._id}`, 10, 3600000); } catch { return fail("Too many credit requests. Try again in an hour."); }
   if (!Number.isInteger(a.amount) || a.amount < REFERRAL_MIN_CREDIT_CENTS) return fail(`The smallest credit is ${dollars(REFERRAL_MIN_CREDIT_CENTS)}.`);
   const customerId = (await ctx.db.query("billingAccounts").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId)).first())?.customerId;
-  if (!customerId) return fail("This workspace has no Stripe billing account yet. Subscribe in Settings → Billing first.");
+  if (!customerId) return fail("This workspace has no Stripe billing account yet. Subscribe in Organization Settings → Billing & Usage first.");
   const { available } = await availableFor(ctx, user._id);
   if (a.amount > available) return fail(notAvailable(available));
   const now = Date.now(), id = await ctx.db.insert("referralRedemptions", { userId: user._id, kind: "credit", amount: a.amount, currency: REFERRAL_CURRENCY, creditOrganizationId: a.organizationId, customerId, status: "processing", idempotencyKey: "", keyIssuedAt: now, attempts: 0, createdAt: now, updatedAt: now });

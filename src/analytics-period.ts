@@ -11,11 +11,11 @@ export function analyticsPeriod(since:string,until:string):{since:number;until:n
  if(end-start>366*day)return {error:"Choose a period of at most one year."};
  return {since:start,until:end};
 }
-export const periodPresets=[["week","This week"],["month","This month"],["quarter","This quarter"],["year","This year"],["custom","Custom"]] as const;
-// Greptile-style time periods (UTC): the current week (from Monday), month, quarter or year, through today.
+export const periodPresets=[["week","This week"],["last7","Last 7 days"],["last30","Last 30 days"],["last60","Last 60 days"],["last90","Last 90 days"],["month","This month"],["quarter","This quarter"],["year","This year"],["custom","Custom"]] as const;
+// Greptile-style time periods (UTC): the current week (from Monday), the last 7–90 days, month, quarter or year, through today.
 export function presetPeriod(name:string,now:number):{since:string;until:string}|undefined{
- const d=new Date(now),y=d.getUTCFullYear(),m=d.getUTCMonth(),iso=(t:number)=>new Date(t).toISOString().slice(0,10);
- const start=name==="week"?Date.UTC(y,m,d.getUTCDate()-(d.getUTCDay()+6)%7):name==="month"?Date.UTC(y,m,1):name==="quarter"?Date.UTC(y,m-m%3,1):name==="year"?Date.UTC(y,0,1):NaN;
+ const d=new Date(now),y=d.getUTCFullYear(),m=d.getUTCMonth(),iso=(t:number)=>new Date(t).toISOString().slice(0,10),last=/^last(7|30|60|90)$/.exec(name);
+ const start=last?Date.UTC(y,m,d.getUTCDate()-Number(last[1])+1):name==="week"?Date.UTC(y,m,d.getUTCDate()-(d.getUTCDay()+6)%7):name==="month"?Date.UTC(y,m,1):name==="quarter"?Date.UTC(y,m-m%3,1):name==="year"?Date.UTC(y,0,1):NaN;
  return Number.isFinite(start)?{since:iso(start),until:iso(now)}:undefined;
 }
 // Greptile's "auto" granularity: one point per day up to 90 days, then one per week (Monday-based, UTC),

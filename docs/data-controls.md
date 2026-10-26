@@ -24,7 +24,7 @@ Separately, webhook payloads are deleted 14 days after they were last processed,
 ## Deleting a workspace
 
 1. **Request.** Only the owner can request deletion, by typing the workspace name.
-   - On the hosted cloud, a workspace with a subscription that has not ended cannot be deleted. Cancel it under Settings → Billing → **Manage billing** first, then delete the workspace once Stripe has ended the subscription.
+   - On the hosted cloud, a workspace with a subscription that has not ended cannot be deleted. Cancel it under Organization Settings → Billing & Usage → **Manage billing** first, then delete the workspace once Stripe has ended the subscription.
 2. **Grace period.** The purge starts after `WORKSPACE_DELETION_GRACE_DAYS` (default 7). Until then the workspace works as usual and the owner can cancel.
    - If the workspace subscribes during the grace period, the deletion is cancelled when the purge would start, and the audit log records `workspace.deletion_blocked`.
 3. **Purge.** It first disables every repository, so webhooks, indexing and reviews stop writing and repositories cannot be re-enabled, then waits 10 minutes for running jobs to finish. A review that resumes later (one waiting on a long runtime test job) does not start again. The purge then removes every workspace-owned row and the files those rows reference: repositories, indexes, embeddings, reviews, findings, rules, conventions, chats, members, teams, settings, keys, OAuth grants, SSO, billing records and the audit log.

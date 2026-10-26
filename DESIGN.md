@@ -11,6 +11,8 @@ existing classes and tokens; avoid inline colours.
 
 ## Principles
 
+These hold for the public site. The signed-in dashboard, sign-in and guided setup follow Greptile's look instead (white surfaces, 2px corners, Anybody 600 titles): see [Dashboard](#dashboard).
+
 - **Hairlines before shadows.** Cards, tables and inputs use a 1px `--line` border. Only things that float get a shadow: popovers, the toast, and the app windows on the landing page.
 - **One accent, used sparingly.** Ember is for links, focus rings, emphasis and the dot in the logo. Never use it as a background fill.
 - **Two weights.** Inter at 400 for headings and body text, 500 for labels and small headings. Headings never use 600 or 700, and they tighten as they grow.
@@ -75,18 +77,13 @@ All of these are global classes in `app/globals.css`.
   - `.small` is a compact variant.
 - **Inputs.** Inputs, selects and textareas have a transparent background and a `--line-strong` border, with an ember focus ring. Selects use a custom chevron. `label` stacks its control under the text; `label.check` puts a checkbox inline with its text.
 - **Cards.** A bare `section` is a card: `--surface`, a hairline border and a 4px radius. An `article` inside a card is separated by hairlines. `.empty` is a dashed, transparent card for empty states.
-- **App chrome** (`app/dashboard/(portal)/layout.tsx`, `app/dashboard/portal.tsx`). The portal layout renders the chrome once. It stays mounted while pages change, so switching tabs never shows a loading screen.
-  - `.portal-top` is sticky. A 48px identity row holds the logo, the workspace menu (with a role badge and ⇅) and 28px bordered icon buttons for Docs, Refer someone and the account menu. Below it is the 36px `.primary-nav` row. `--header-h` is 85px: 48 + 36 + the 1px rule.
-  - Main tabs (`PrimaryTabs`) are links with a 16px icon and a 14px/500 label, and a `--surface-2` fill on hover. One 2px ink bar, `.tab-indicator`, slides and stretches to the current tab.
-  - `.secondary-nav` is a sticky 240px sidebar for Memory and Settings (`app/dashboard/sidebar.tsx`). Rows are 36px with an icon, and the current page has a `--soft` fill. Group labels are 13px semibold, separated by hairlines. Settings → Code Review expands into links to the page's sections, and the one in view is marked as you scroll.
-  - Menus are 8px popovers with `--shadow-popover`. They close when the page changes.
-  - Below 640px the main tabs become a bottom bar: an icon over a 12px label ("PRs" for Pull Requests) and a static 32×2px marker on the current tab. Below 600px each sidebar becomes a select.
-- **Tabs** (`app/dashboard/tabs.tsx`). Greptile's tab anatomy in our tokens.
-  - `PrimaryTabs` and `SubNav` are links. A click marks the tab at once and navigates in a transition, so the old page stays on screen until the new one is ready. `SubNav` gives Analytics its PR Reviews and Bugs Caught views, and the review page its Overview, Review, Discussion and Code tabs (`?tab=`).
+- **App chrome** (`app/dashboard/(portal)/layout.tsx`, `app/dashboard/portal.tsx`). The portal layout renders the chrome once. It stays mounted while pages change, so switching tabs never shows a loading screen. See [Dashboard](#dashboard) for its layout.
+- **Tabs** (`app/dashboard/tabs.tsx`).
+  - `PrimaryTabs` and `SubNav` are links. A click marks the tab at once and navigates in a transition, so the old page stays on screen until the new one is ready. `SubNav` gives the review page its Overview, Review, Discussion and Code tabs (`?tab=`).
   - `PanelTabs` are ARIA tabs over panels that are all rendered and hidden until selected, used by the landing replicas. Arrow keys, Home and End move between tabs.
   - In-page tabs are 32px. A bordered `.tab-box` slides over the list's hairline, and the panel that comes in fades up 4px.
-  - Timing: the main bar slides in 220 ms `cubic-bezier(0.16, 1, 0.3, 1)`; the box and the panel fade take 200 ms; sidebar carets and section links take 150 ms. Bars jump into place on first paint and on resize.
-- **Icons** (`app/ui/icons.tsx`). Phosphor regular paths (MIT), drawn inline and `aria-hidden`. Each sits beside a visible or screen-reader label: 16px in tabs and sidebars, 20px in the phone tab bar.
+  - Timing: the main bar slides in 220 ms `cubic-bezier(0.16, 1, 0.3, 1)`; the box and the panel fade take 200 ms; sub-navigation rows take 150 ms. Bars jump into place on first paint and on resize.
+- **Icons** (`app/ui/icons.tsx`). Phosphor regular paths (MIT), drawn inline and `aria-hidden`. Each sits beside a visible or screen-reader label, usually at 16px.
 - **Data.**
   - `.metrics` is a hairline-divided grid with mono labels and 36px tabular numbers.
   - `.badge` is a mono 11px tinted chip, and status names map to tones. For example, `critical` and `high` are red, `medium` is amber, `completed` is green, `running` is ember, and `low` and `queued` are muted.
@@ -111,12 +108,24 @@ All of these are global classes in `app/globals.css`.
   - The code graph is driven by real indexing progress and a sample of indexed paths (`src/onboarding-graph.ts`).
   - Configuration previews follow unsaved form state and reuse the product's own rules (`src/onboarding-preview.ts`). Trigger outcomes are kept in parity with `pullRequestTrigger` by a test.
 
+## Dashboard
+
+The signed-in dashboard follows Greptile's web app as captured on Mobbin: its eight tabs, page anatomy, components, flows and motion, in OpenReview's identity (our name, logo and ember accent, never Greptile's green). It overrides the parchment tokens above on `:root:has(.shell.portal)`, so dialogs rendered into `<body>` match.
+
+- **Look.** A `#fafafa` page, white cards and controls, `#e5e5e5` hairlines, 2px corners and a near-black primary. No shadows except on toasts. DM Sans for text, Anybody 600 for page, section and dialog titles, and Space Mono for uppercase labels (table headers, card titles, status chips). Dark mode maps the same roles to neutral greys.
+- **Information architecture** (`app/dashboard/routes.ts`): Analytics · Repositories · Code Review Settings · Custom Context · Pull Requests · Code Providers · Integrations · Organization Settings. Each tab URL maps to the internal section the loader and views use; the old Memory and Settings URLs redirect (`next.config.ts`). Chat opens from the header's chat icon. Personal Settings opens from the account menu and replaces the tabs with "‹ Back · Personal Settings".
+- **Chrome.** A sticky `.portal-top`: an optional 45px trial banner, a 49px identity row (logo; the organization menu with a role badge and ⇅; 27px icon buttons for Chat, Docs, Refer someone and the account menu) and a 31px row of text tabs with the sliding 2px bar. `--header-h` is 81px, 126px with the banner and 50px in Personal Settings. Below 640px the tab row scrolls sideways.
+- **Pages.** A centred 1142px column under a `.page-header`: a 24px Anybody title, a 14px subtitle and actions on the right. Settings-style tabs (Code Review Settings, Organization Settings, Personal Settings) put a 205px `SettingsNav` (`app/dashboard/sidebar.tsx`) beside the content: rows on a hairline rail, the current one filled and marked with a 2px bar. On Code Review Settings it lists the page's sections and marks the one in view as you scroll. Below 600px it becomes a select.
+- **Components** (the "Greptile components" block in `app/globals.css`): section headings outside their cards; setting rows and option cards with toggles (`input.toggle`); outline, `.primary` and soft `.danger` buttons; search fields with italic placeholders; square tables with mono headers and full-height column rules; status chips; pagination; bulk bars; danger zones; notice banners; flat menus (`.menu` in `PortalDisclosure`); `Dialog` (`app/ui/dialog.tsx`: a white wash, a square box, type-to-confirm); docked drawers; and bottom-right toasts. Each area's own rules follow in its "Area:" block.
+- **Motion.** Modals fade and rise 6px (180 ms), drawers slide in from the right (220 ms), menus fade down 4px (150 ms), toasts slide up (220 ms) and pending status chips spin. Reduced motion stops all of them.
+- **Sign-in and guided setup** use the same fonts and greys (`app/auth-screen.tsx`, `app/dashboard/onboarding/`). Sign-in pairs the form with an original animation of a review in progress: a scan band reads down a diff and findings slide in beside the lines it flags, with the ember dot from the logo.
+
 ## Public site
 
 - **Shared chrome.** `SiteHeader` and `SiteFooter` (`app/site-chrome.tsx`) are shared by the landing page, docs and changelog. The footer carries the Appearance picker.
 - **Landing layout** (`app/page.tsx`): left-aligned hero, then alternating 5:7 feature rows, a provider strip, "How it works", a terminal card, the comparison table, the FAQ and a closing call to action.
 - **Product visuals are interactive replicas of real screens** (`app/landing/demo.tsx`), not drawings or screenshots.
-  - They render the dashboard's own markup and shared components (`DiffFiles`, `LineChart`, `PortalDisclosure` and the `status()` and `priority()` badges) with sample content from `app/landing/sample.ts`. This keeps them in step with the app and its theme.
+  - They render the dashboard's own markup and shared components (`DiffFiles`, `ChartCard`, `PortalDisclosure` and the `status()` and `priority()` badges) with sample content from `app/landing/sample.ts`, inside a `.replica-shell` that carries the dashboard's palette and fonts. This keeps them in step with the app and its theme.
   - Visitors can click through them, as in a working app. The hero is a small dashboard with its own section tabs. The feature windows each demonstrate one thing: evidence shown in its file, a re-review, chat, the agent hand-off and analytics filters.
   - Nothing calls the backend. Slow work (reviews, chat answers, the bridge hand-off) is simulated with timers, and the status text matches the real screens. Each window bar says "Demo".
   - The chat and summary windows play once on their own when half in view: a sample question, then a re-review. A click or key press inside a window first cancels it, and reduced motion turns it off.

@@ -1,6 +1,6 @@
 # Single sign-on (SAML 2.0 and OpenID Connect)
 
-Each workspace can connect one identity provider under **Settings → People → Single sign-on**. Only workspace owners and admins can change it, and every change is recorded in the audit log.
+Each workspace can connect one identity provider under **Organization Settings → People → Single sign-on**. Only workspace owners and admins can change it, and every change is recorded in the audit log.
 
 ## Set up
 

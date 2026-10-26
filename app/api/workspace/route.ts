@@ -19,8 +19,8 @@ export async function GET(request: Request) {
       workspaces,
       installUrl: link(`/api/github/install?organization=${encodeURIComponent(workspace.id)}`),
       dashboardUrl: link("/dashboard"),
-      keysUrl: link("/dashboard/settings/keys"),
-      rulesUrl: link("/dashboard/memory/rules"),
+      keysUrl: link("/dashboard/organization/api-keys"),
+      rulesUrl: link("/dashboard/context"),
     });
   } catch (error) {
     return apiFailure(error, { status: 401, error: "Unauthorized" });

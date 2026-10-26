@@ -53,8 +53,8 @@ const json = (call: Call) => JSON.parse(call.body), form = (call: Call) => Objec
 const list = (data: unknown[]) => Response.json({ object: "list", data, has_more: false });
 const account = (transfers: string, deadline: string | null = null) => Response.json({ id: "acct_1Alice", object: "v2.core.account", configuration: { recipient: { capabilities: { stripe_balance: { stripe_transfers: { status: transfers } } } } }, requirements: { summary: { minimum_deadline: deadline && { status: deadline } } } });
 const onboardingUrl = "https://connect.stripe.com/setup/e/acct_1Alice/abc", link = () => Response.json({ object: "v2.core.account_link", url: onboardingUrl });
-const back = "https://review.example.com/dashboard/settings/referrals?payouts=";
-const signInAgain = { ok: false, error: "Sign in again to continue.", signIn: "/login?next=/dashboard/settings/referrals&reauth=1" };
+const back = "https://review.example.com/dashboard/account/referrals?payouts=";
+const signInAgain = { ok: false, error: "Sign in again to continue.", signIn: "/login?next=/dashboard/account/referrals&reauth=1" };
 const start = (t: T, token: string, country = "US") => t.action(api.referralJobs.startPayoutSetup, { token, country });
 
 test("payout setup creates the Connect account once, with the exact v2 body and a key from the request, then links to onboarding", async () => {
@@ -274,7 +274,7 @@ test("a cash-out looks the transfer up, re-reads the account, then posts one tra
   calls = transferStripe(undefined, undefined, "restricted");
   await request(t, alice, 10000);
   await run(t);
-  expect((await redemptions(t))[2]).toMatchObject({ status: "failed", error: "Stripe can’t pay your account until its setup is complete (Continue setup under Settings → Referrals), so the amount is back in your balance." });
+  expect((await redemptions(t))[2]).toMatchObject({ status: "failed", error: "Stripe can’t pay your account until its setup is complete (Continue setup under Personal Settings → Referrals), so the amount is back in your balance." });
   expect(posts(calls)).toEqual([]);
   expect((await payoutAccounts(t))[0].transfers).toBe("restricted");
   expect(await overview(t, alice)).toMatchObject({ available: 40000, payouts: { state: "restricted" } });

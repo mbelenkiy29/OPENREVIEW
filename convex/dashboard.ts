@@ -183,6 +183,7 @@ export const rules = mutation({
       severity: args.severity,
       globs: args.globs,
       enabled: args.enabled,
+      updatedAt: Date.now(),
     };
     if (args.id) { await ctx.db.patch(args.id, rule); await audit(ctx, args.organizationId, user._id, "rule.updated", args.id); }
     else await audit(ctx, args.organizationId, user._id, "rule.created", await ctx.db.insert("customRules", { ...rule, createdAt: Date.now() }));

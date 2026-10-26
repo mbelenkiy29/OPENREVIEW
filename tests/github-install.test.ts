@@ -14,7 +14,7 @@ test("the install callback resumes at itself with only GitHub's parameters, and 
 
 test("unfinished installs land back on the page they started from, never on a raw error", () => {
   assert.equal(installFailurePath("/dashboard/onboarding/connect", "Sign in again"), "/dashboard/onboarding/connect?error=github-install&message=Sign%20in%20again");
-  assert.equal(installFailurePath("/dashboard/settings/providers", "x"), "/dashboard/settings/providers", "other pages show the message as a toast");
+  assert.equal(installFailurePath("/dashboard/providers", "x"), "/dashboard/providers", "other pages show the message as a toast");
   assert.equal(installFailurePath("//evil.example", "x"), "/dashboard/repositories");
   assert.equal(installFailurePath("/dashboard/onboarding/connect", "m".repeat(500)).length < 300, true);
   assert.match(setupActionMessage("request") ?? "", /owners.*Link an existing installation/);

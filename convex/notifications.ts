@@ -152,7 +152,7 @@ export const usageAlertTargets = internalQuery({ args: { usageId: v.id("billingU
     const p = await ownPreferences(ctx, m.userId, usage.organizationId);
     if (p?.email && p.emailVerifiedAt) recipients.push({ userId: m.userId, email: p.email });
   }
-  return { organizationId: usage.organizationId, recipients, ...usageAlertEmail(organization.name, a.threshold, decision, usage.overageMicros ?? 0, Date.parse(`${usage.period}-01`), a.origin && `${a.origin}/dashboard/settings/billing`) };
+  return { organizationId: usage.organizationId, recipients, ...usageAlertEmail(organization.name, a.threshold, decision, usage.overageMicros ?? 0, Date.parse(`${usage.period}-01`), a.origin && `${a.origin}/dashboard/organization/billing`) };
 } });
 // Claims a delivery once; a failed delivery may be retried, a sent or skipped one never repeats.
 export const claimDelivery = internalMutation({ args: { organizationId: v.id("organizations"), key: v.string(), channel: v.string() }, handler: async (ctx, a) => {
@@ -201,7 +201,7 @@ export const enqueueMention = internalMutation({ args: { eventId: v.string(), te
   const channel = await ctx.db.query("notificationChannels").withIndex("by_channel", (q) => q.eq("installationId", installation._id).eq("channelId", a.channelId)).unique();
   const question = mentionQuestion(a.text, installation.botUserId);
   const threadTs = a.threadTs ?? a.ts;
-  if (!channel?.qa || !channel.repositoryIds.length) { await ctx.scheduler.runAfter(0, internal.notificationJobs.slackReply, { installationId: installation._id, channelId: a.channelId, threadTs, text: "No repositories are linked to this channel for questions. A workspace admin can link up to five in OpenReview → Settings → Notifications." }); return "unlinked"; }
+  if (!channel?.qa || !channel.repositoryIds.length) { await ctx.scheduler.runAfter(0, internal.notificationJobs.slackReply, { installationId: installation._id, channelId: a.channelId, threadTs, text: "No repositories are linked to this channel for questions. A workspace admin can link up to five in OpenReview → Organization Settings → Notifications." }); return "unlinked"; }
   if (question.length < 2) { await ctx.scheduler.runAfter(0, internal.notificationJobs.slackReply, { installationId: installation._id, channelId: a.channelId, threadTs, text: "Ask me a question about the linked repositories, for example: @OpenReview where is the checkout total computed?" }); return "help"; }
   try { await rateLimit(ctx, `slack:${a.teamId}`, 20); } catch { return "rate limited"; }
   await ctx.scheduler.runAfter(0, internal.notificationJobs.slackAnswer, { installationId: installation._id, channelId: a.channelId, threadTs, question, repositoryIds: channel.repositoryIds });
@@ -229,7 +229,7 @@ export const commandStatus = internalQuery({ args: { teamId: v.string(), channel
   const command = a.text.trim().toLowerCase();
   if (command && command !== "status") return "Usage: `/openreview status` shows the repositories linked to this channel. Mention @OpenReview with a question to ask about their code.";
   const channel = await ctx.db.query("notificationChannels").withIndex("by_channel", (q) => q.eq("installationId", installation._id).eq("channelId", a.channelId)).unique();
-  if (!channel) return "This channel is not linked to OpenReview. A workspace admin can link it in OpenReview → Settings → Notifications.";
+  if (!channel) return "This channel is not linked to OpenReview. A workspace admin can link it in OpenReview → Organization Settings → Notifications.";
   const lines = [`Notifications: ${channel.events.length ? channel.events.join(", ") : "none"} · Q&A: ${channel.qa ? "on" : "off"}`];
   const ids = channel.repositoryIds.length ? channel.repositoryIds : [];
   for (const id of ids.slice(0, 10)) {

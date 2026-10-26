@@ -63,7 +63,7 @@ export async function advanceSetup(_state: Result, form: FormData): Promise<Resu
   redirect(`/dashboard/onboarding/${next}`);
 }
 
-// The plan step's Free choice: no card; upgrade later in Settings → Billing.
+// The plan step's Free choice: no card; upgrade later in Organization Settings → Billing & Usage.
 export async function continueOnFree(form: FormData) {
   const { token } = await current();
   await backend().mutation(api.billing.chooseFreePlan, { token, organizationId: organizationOf(form) });

@@ -14,17 +14,33 @@
 - A subscription's status can't go backwards when Stripe sends two events in the same second.
 
 ### Setup
-- Your first workspace now starts on the Free plan, so setup goes straight from naming the workspace to connecting your code. Upgrade anytime in **Settings → Billing**. Any later workspace still picks a plan, because each owner gets one Free workspace.
+- Your first workspace now starts on the Free plan, so setup goes straight from naming the workspace to connecting your code. Upgrade anytime in **Organization Settings → Billing & Usage**. Any later workspace still picks a plan, because each owner gets one Free workspace.
 - ⌘/Ctrl+Enter on the Tools step saves your choices on the Free plan too.
-- **Exit setup** no longer leads to an error page from **Choose your plan**. While a workspace still has to pick a plan, that step only offers the plans (and **Log out**), and a setup page opened earlier brings you back to it.
+- **Exit setup** no longer leads to an error page from **Choose your plan**. While a workspace still has to pick a plan, that step only offers the plans (and **Logout**), and a setup page opened earlier brings you back to it.
 
-### Dashboard navigation
-- Switching tabs no longer shows a loading screen. The header, tabs and sidebar stay in place, the tab you click is marked at once, and the page changes when it's ready.
-- The underline slides to the tab you click, and so does the box on the review page's tabs. Every Memory and Settings sidebar row has an icon.
-- Findings moved to **Analytics → Bugs Caught**, next to **PR Reviews**. Old Findings links, including "View all bugs", still work.
-- **Settings → Code Review** lists the page's sections in the sidebar and marks the one you're reading.
-- On phones, the main tabs move to a bar at the bottom of the screen, and each sidebar becomes a menu.
+### Dashboard: Greptile's tabs and screens
+- The dashboard is organized into eight tabs: **Analytics**, **Repositories**, **Code Review Settings**, **Custom Context**, **Pull Requests**, **Code Providers**, **Integrations** and **Organization Settings**.
+  - Memory and Settings pages moved into them; old links redirect, with their filters.
+  - **Chat** opens from the chat button in the header.
+  - **Personal Settings** (your account, your review agents and referrals) opens from the account menu.
+- Every page follows Greptile's layout: a title and subtitle, square tables with small mono headers, cards with switches, menus, dialogs, a docked details panel and toasts at the bottom right.
+- **Analytics:** filters on the title row that apply at once, a four-number summary, and bar charts with hover details, averages and leaderboards. **Bugs Caught** opens from "View all bugs".
+- **Repositories:** a searchable, sortable table with review metrics, pages, a Manage Repos dialog to enable or disable reviews, and each repository's pull requests in a dialog.
+- **Code Review Settings:**
+  - It opens on your first repository, with the page's sections in a side list that follows your scroll.
+  - Settings use switches, sliders and steppers, and a save bar appears when you change something.
+- **Custom Context:** rules in a table with bulk activate, deactivate and delete, a details panel to view and edit a rule, and a four-step Add Context dialog that also imports AGENTS.md, CLAUDE.md and `.cursorrules` files.
+- **Pull Requests:** a table with live status, and bulk Rerun.
+- **Code Providers:** provider cards with their repositories, and Add Provider.
+- **Integrations:** a table with each integration's status.
+- **Organization Settings:**
+  - People can be invited from a popover and managed from each row's menu.
+  - API keys are created in a dialog that shows the key once.
+  - Deleting the organization asks you to type its name.
+- Sign-in and guided setup have the same look, with a new animation of a review in progress beside sign-in.
+- Switching tabs never shows a loading screen: the header and tabs stay in place, the tab you click is marked at once, and its underline slides there. On phones, the tabs scroll sideways at the top.
 - Dashboard pages load faster: independent data now loads in parallel.
+- Confirmation messages after saving show again; they were being dropped.
 
 ### Landing page
 - The landing page now moves:

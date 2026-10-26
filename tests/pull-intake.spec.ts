@@ -147,6 +147,9 @@ test("browse filters before paging, counts the total and filters on the current 
  await review(1,5,"low");await review(2,2,"high");await review(3,4,"high");
  expect((await s.t.query(api.pulls.browse,{...args,page:1,scoreMin:4})).page.map(p=>p.number).sort()).toEqual([1,3]);
  expect((await s.t.query(api.pulls.browse,{...args,page:1,impact:"high",scoreMax:3})).page.map(p=>p.number)).toEqual([2]);
+ // The list's "# Reviews" column counts each pull request's reviews.
+ await review(1,4,"low");
+ expect((await s.t.query(api.pulls.browse,{...args,page:1,scoreMin:4})).page.map(p=>[p.number,p.reviewCount]).sort()).toEqual([[1,2],[3,1]]);
  expect((await s.t.query(api.pulls.browse,{...args,page:1,status:"unreviewed",state:"open"})).total).toBe(17);
  expect((await s.t.query(api.pulls.browse,{...args,page:1,state:"closed"})).total).toBe(5);
  await expect(s.t.query(api.pulls.browse,{...args,page:0})).rejects.toThrow("Invalid page");

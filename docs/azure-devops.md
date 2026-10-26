@@ -7,7 +7,7 @@ OpenReview reviews pull requests in Azure Repos (Azure DevOps Services) through 
 1. Choose a credential, either:
    - **A PAT** for a dedicated service account, with Code (Read & write), Code (Status) and Pull Request Threads (Read & write).
    - **A Microsoft Entra service principal** added to the organization with the same access, entered as JSON: `{"tenantId":"…","clientId":"…","clientSecret":"…"}`. OpenReview obtains short-lived tokens with the client-credentials flow and caches them in memory.
-2. Go to **Settings → Code Providers → Connect provider** and choose **Azure DevOps**.
+2. Go to **Code Providers → Connect provider** and choose **Azure DevOps**.
    - **Instance URL:** your organization, for example `https://dev.azure.com/fabrikam`.
    - **Webhook secret:** at least 32 random characters. Keep a copy for step 3.
 3. In each Azure DevOps project, open **Project settings → Service hooks** and add **Web Hooks** subscriptions:

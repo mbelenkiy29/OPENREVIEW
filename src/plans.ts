@@ -16,13 +16,13 @@ export const entitled = (plan: Plan | "disabled", key: Entitlement, legacy = fal
 export const upgradeNote: Record<Entitlement, string> = {
   "review.deep": "Deep reviews are on the Pro plan, so this review ran at the standard tier.",
   "review.reproTests": "Generated reproduction tests are on the Pro plan.",
-  "fix.pullRequests": "Fix pull requests are on the Pro plan; a workspace admin can upgrade in Settings → Billing.",
+  "fix.pullRequests": "Fix pull requests are on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage.",
   "context.requirements": "Linked Linear, Jira, Confluence and Notion requirements are on the Pro plan, so they were not checked in this review.",
   "memory.conventions": "Learning conventions from review comments is on the Pro plan; approved conventions keep applying.",
-  "api.access": "API keys are on the Pro plan; a workspace admin can upgrade in Settings → Billing. Your keys are kept and work again after upgrading.",
-  "analytics.history": "Analytics older than 30 days are on the Pro plan; a workspace admin can upgrade in Settings → Billing.",
-  "auth.sso": "Single sign-on is on the Pro plan; a workspace admin can upgrade in Settings → Billing.",
-  "audit.log": "The audit log is on the Pro plan; a workspace admin can upgrade in Settings → Billing. Changes are still recorded.",
+  "api.access": "API keys are on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage. Your keys are kept and work again after upgrading.",
+  "analytics.history": "Analytics older than 30 days are on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage.",
+  "auth.sso": "Single sign-on is on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage.",
+  "audit.log": "The audit log is on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage. Changes are still recorded.",
 };
 // When the Pro gates shipped: SSO connections created before then stay fully editable on any plan.
 export const proGatesAt = Date.UTC(2026, 9, 21);

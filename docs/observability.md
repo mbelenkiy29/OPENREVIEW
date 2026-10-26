@@ -127,7 +127,7 @@ Set these on the **web app** (Vercel → Project → Settings → Environment Va
 
 **Release builds:** with `SENTRY_AUTH_TOKEN` set, a build uploads source maps and deletes them from the output, so they are never served publicly. Errors are tagged with the Vercel environment (`production` or `preview`) and the commit.
 
-**Backend errors:** Convex functions are not covered by this setup. On a Convex Pro plan, turn on Sentry under Convex dashboard → Settings → Integrations → Exception Reporting with the same DSN. Otherwise, use the Convex dashboard's logs.
+**Backend errors:** Convex functions are not covered by this setup. On a Convex Pro plan, turn on Sentry under Convex dashboard → Integrations → Exception Reporting with the same DSN. Otherwise, use the Convex dashboard's logs.
 
 ## Turning it off
 

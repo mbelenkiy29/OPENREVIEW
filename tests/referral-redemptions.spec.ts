@@ -212,7 +212,7 @@ test("credit requests: admins of a workspace with a Stripe customer, within the 
   expect(await request(t, alice, aliceCo, 999)).toEqual({ ok: false, error: "The smallest credit is $10.00." });
   expect(await request(t, alice, aliceCo, 1500.5)).toEqual({ ok: false, error: "The smallest credit is $10.00." });
   expect(await request(t, alice, aliceCo, 2001)).toEqual({ ok: false, error: "You have $20.00 available." });
-  expect(await request(t, alice, bare, 1000)).toEqual({ ok: false, error: "This workspace has no Stripe billing account yet. Subscribe in Settings → Billing first." });
+  expect(await request(t, alice, bare, 1000)).toEqual({ ok: false, error: "This workspace has no Stripe billing account yet. Subscribe in Organization Settings → Billing & Usage first." });
   expect(await redemptions(t)).toEqual([]);
   // The overview offers only workspaces Alice administers that have a customer; Bob gets none of hers.
   expect(await t.query(api.referrals.overview, { token: alice.token })).toMatchObject({ available: 2000, redeemed: 0, onHold: 0, workspaces: [{ organizationId: aliceCo, name: "Alice Co" }] });

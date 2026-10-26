@@ -14,10 +14,10 @@ vi.mock("../src/server", () => ({
 import { WizardFrame } from "../app/dashboard/onboarding/wizard";
 import { finishSetup } from "../app/dashboard/onboarding/actions";
 
-test("the plan step offers no way out of setup but Log out while the plan is missing", () => {
+test("the plan step offers no way out of setup but Logout while the plan is missing", () => {
   const footer = (planMissing: boolean) => renderToStaticMarkup(WizardFrame({ step: "plan", organizationId: "org1", admin: true, completed: false, billing: true, planMissing, nextLabel: "Choose Pro", children: null }));
   expect(footer(true)).not.toMatch(/Exit setup|Back to dashboard/);
-  expect(footer(true)).toContain("Log out");
+  expect(footer(true)).toContain("Logout");
   expect(footer(false)).toContain("Exit setup");
 });
 
