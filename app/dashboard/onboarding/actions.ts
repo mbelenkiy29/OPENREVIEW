@@ -92,8 +92,15 @@ export async function inviteFromSetup(_state: Result, form: FormData): Promise<R
 }
 
 export async function finishSetup(form: FormData) {
-  const { token } = await current();
-  await backend().mutation(api.onboarding.complete, { token, organizationId: organizationOf(form), skipped: form.get("skipped") === "true" });
+  const { token } = await current(), organizationId = organizationOf(form);
+  try { await backend().mutation(api.onboarding.complete, { token, organizationId, skipped: form.get("skipped") === "true" }); }
+  catch (error) {
+    // complete refuses until a plan is chosen (a page opened earlier can still post Exit setup); production
+    // redacts its message, so check the plan itself.
+    const billing = await backend().query(api.billing.status, { token, organizationId });
+    if (billing.enabled && billing.planMissing) redirect("/dashboard/onboarding/plan");
+    throw error;
+  }
   revalidatePath("/dashboard", "layout");
   redirect("/dashboard/analytics");
 }
