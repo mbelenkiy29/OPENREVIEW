@@ -730,7 +730,9 @@ export default defineSchema({
   // Usage in micro-dollars of inference cost: settled, reserved by in-flight calls, and the part past the included usage.
   billingUsage: defineTable({ organizationId: org, period: v.string(), reviews: v.number(), blocked: v.number(), usedMicros: v.optional(v.number()), reservedMicros: v.optional(v.number()), overageMicros: v.optional(v.number()),
     // Usage alert thresholds (percent of the included usage) already emailed this period.
-    alertsSent: v.optional(v.array(v.number())) }).index("by_org_period", ["organizationId", "period"]),
+    alertsSent: v.optional(v.array(v.number())),
+    // Hosted agent fix runs started this period (fixAllowance), counted against fixRunLimit.
+    fixes: v.optional(v.number()) }).index("by_org_period", ["organizationId", "period"]),
   // Extra usage waiting to be reported to Stripe as meter events (identifier = this row id).
   billingMeterEvents: defineTable({ organizationId: org, period: v.string(), micros: v.number(), status: v.string() /* pending | reported | skipped | failed */, attempts: v.number(), error: v.optional(v.string()), createdAt: v.number(), reportedAt: v.optional(v.number()) }).index("by_org_status", ["organizationId", "status"]),
   stripeEvents: defineTable({ eventId: v.string(), type: v.string(), outcome: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),

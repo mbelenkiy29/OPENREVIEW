@@ -1,13 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, formEncode, nextPeriodStart, openSubscription, periodKey, seatCount, stripe, stripeGet, stripeKey, stripeV2, trialEndsFrom, verifyStripeSignature } from "../src/billing";
+import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, fixRunLimit, formEncode, nextPeriodStart, openSubscription, periodKey, seatCount, stripe, stripeGet, stripeKey, stripeV2, trialEndsFrom, verifyStripeSignature } from "../src/billing";
 
 const config = billingConfig({ BILLING_ENABLED: "true", BILLING_FREE_USAGE_USD: "3", BILLING_USAGE_PER_SEAT_USD: "10", BILLING_GRACE_DAYS: "7" });
 const now = Date.UTC(2026, 9, 14), day = 86400000, usd = 1e6;
 
 test("billing configuration defaults to disabled and validates numbers", () => {
-  assert.deepEqual(billingConfig({}), { enabled: false, trialDays: 14, freeUsageMicros: 3 * usd, usagePerSeatMicros: 6 * usd, proUsagePerSeatMicros: 12 * usd, graceDays: 7 });
+  assert.deepEqual(billingConfig({}), { enabled: false, trialDays: 14, freeUsageMicros: 3 * usd, usagePerSeatMicros: 6 * usd, proUsagePerSeatMicros: 12 * usd, graceDays: 7, starterFixesPerSeat: 5, proFixesPerSeat: 20 });
+  assert.deepEqual([billingConfig({ BILLING_STARTER_FIXES_PER_SEAT: "8", BILLING_PRO_FIXES_PER_SEAT: "x" })].map((c) => [c.starterFixesPerSeat, c.proFixesPerSeat]), [[8, 20]]);
   assert.equal(billingConfig({ BILLING_ENABLED: "yes" }).enabled, false);
   assert.equal(billingConfig({ BILLING_TRIAL_DAYS: "-1", BILLING_USAGE_PER_SEAT_USD: "abc" }).trialDays, 14);
   assert.equal(billingConfig({ BILLING_USAGE_PER_SEAT_USD: "abc" }).usagePerSeatMicros, 6 * usd);
@@ -50,6 +51,15 @@ test("usage decisions: Free, included Starter and Pro usage, extra usage cap, pa
   const trialing = { ...capped, status: "trialing" };
   assert.deepEqual(billingDecision(trialing, 39 * usd, now, config, usd), { allowed: true, plan: "starter", limit: 40 * usd, used: 39 * usd, capMicros: 0, overage: false });
   assert.match(billingDecision(trialing, 40 * usd, now, config, usd).reason!, /extra usage can start once the trial ends/);
+});
+
+test("fix run limits follow the usage decision's plan and the billed seats", () => {
+  const team = { status: "active", seats: 4, trialEndsAt: now - day, subscriptionId: "sub_1" };
+  assert.equal(fixRunLimit(billingDecision(team, 0, now, config), 4, config), 20);
+  assert.equal(fixRunLimit(billingDecision({ ...team, plan: "pro" }, 0, now, config), 4, config), 80);
+  assert.equal(fixRunLimit(billingDecision({ ...team, plan: "pro" }, 0, now, config), 1, config), 20);
+  assert.equal(fixRunLimit(billingDecision({ ...team, status: "canceled" }, 0, now, config), 4, config), 0, "a lapsed subscription is Free");
+  assert.equal(fixRunLimit(billingDecision(team, 0, now, billingConfig({})), 4, config), null, "billing off is unlimited");
 });
 
 test("a subscription is open until Stripe ends it", () => {
