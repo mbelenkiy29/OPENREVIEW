@@ -41,7 +41,7 @@ async function again(reviewId: string) {
   try { await reviewAgain(form); } catch (error) { if (error instanceof Redirect) return error.url; throw error; }
   return undefined;
 }
-const toast = () => JSON.parse(decodeURIComponent(holder.jar.get("openreview_toast") ?? "null"));
+const toast = () => JSON.parse(holder.jar.get("openreview_toast") ?? "null");
 
 test("a closed pull request shows an error toast and stays on the page instead of throwing", async () => {
   const { t, reviewId } = await setup("closed");
