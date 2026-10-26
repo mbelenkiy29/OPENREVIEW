@@ -4,11 +4,12 @@ import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authorize } from "./auth";
-import { billingConfig, billingDecision, fixRunLimit, freeTakenReason, liveSubscription, nextPeriodStart, openSubscription, periodKey, resetText, seatCount, trialEndsFrom } from "../src/billing";
+import { billingConfig, billingDecision, fixRunLimit, reviewsLeft, freeTakenReason, liveSubscription, nextPeriodStart, openSubscription, periodKey, resetText, seatCount, trialEndsFrom } from "../src/billing";
 import { entitled, entitlements, planCatalog, planEntitlements, planForPrice, upgradeNote, type Entitlement, type Plan } from "../src/plans";
 import { referralConfig } from "../src/referrals";
 import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus } from "./referralLedger";
 import { lifecycleEmail } from "./lifecycleEmails";
+import { recordConversion } from "./conversions";
 import { operatorOwned } from "./operator";
 
 // Billing state, the review gate and the workspace usage ledger. With BILLING_ENABLED unset every check allows.
@@ -212,7 +213,9 @@ export const status = query({ args: { token: v.string(), organizationId: v.id("o
   const decision = billingDecision(facts, spent(usage), now, config, 0, taken);
   const organization = await ctx.db.get(a.organizationId);
   const admin = ["owner", "admin"].includes(member.role), referrals = admin && referralConfig().enabled;
-  return { enabled: true as const, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, planName: decision.plan === "disabled" ? null : planCatalog[decision.plan].name, legacy: Boolean(account.legacy && decision.plan === "starter"), entitlements: planEntitlements(decision.plan, account.legacy), allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: usage?.usedMicros ?? 0, reserved: usage?.reservedMicros ?? 0, overage: usage?.overageMicros ?? 0, capUsd: account.spendCapUsd ?? 0, resetsAt: nextPeriodStart(now), reviews: usage?.reviews ?? 0, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: paidTrialEndsAt(account, now), trialStarted: Boolean(account.customerId), trialDays: config.trialDays, freeUsageMicros: config.freeUsageMicros, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, usagePerSeatMicros: config.usagePerSeatMicros, proUsagePerSeatMicros: config.proUsagePerSeatMicros, hasCustomer: Boolean(account.customerId), freeElsewhere: taken ?? null, fixes: { used: usage?.fixes ?? 0, limit: fixRunLimit(decision, account.seats, config) }, starterFixesPerSeat: config.starterFixesPerSeat, proFixesPerSeat: config.proFixesPerSeat };
+  // A subscription with neither recorded yet (from before they were) counts as having one: Checkout always collects a card.
+  const cards = [account.subscriptionPaymentMethod, account.customerPaymentMethod], hasPaymentMethod = cards.includes(true) || (Boolean(account.subscriptionId) && cards.every((c) => c === undefined));
+  return { enabled: true as const, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, planName: decision.plan === "disabled" ? null : planCatalog[decision.plan].name, legacy: Boolean(account.legacy && decision.plan === "starter"), entitlements: planEntitlements(decision.plan, account.legacy), allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: usage?.usedMicros ?? 0, reserved: usage?.reservedMicros ?? 0, overage: usage?.overageMicros ?? 0, capUsd: account.spendCapUsd ?? 0, resetsAt: nextPeriodStart(now), reviews: usage?.reviews ?? 0, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: paidTrialEndsAt(account, now), trialStarted: Boolean(account.customerId), trialDays: config.trialDays, freeUsageMicros: config.freeUsageMicros, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, usagePerSeatMicros: config.usagePerSeatMicros, proUsagePerSeatMicros: config.proUsagePerSeatMicros, hasCustomer: Boolean(account.customerId), hasPaymentMethod, freeElsewhere: taken ?? null, fixes: { used: usage?.fixes ?? 0, limit: fixRunLimit(decision, account.seats, config) }, starterFixesPerSeat: config.starterFixesPerSeat, proFixesPerSeat: config.proFixesPerSeat, reviewsLeft: reviewsLeft(decision.limit, (usage?.usedMicros ?? 0) + (usage?.reservedMicros ?? 0), (await ctx.db.query("usageEvents").withIndex("by_org_time", (q) => q.eq("organizationId", a.organizationId).gt("createdAt", now - 30 * 86400000)).order("desc").take(2000)).filter((e) => e.kind === "review")) };
 } });
 
 export const checkoutContext = internalQuery({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
@@ -232,10 +235,10 @@ export const linkCustomer = internalMutation({ args: { organizationId: v.id("org
   await ctx.db.patch(account._id, { customerId: a.customerId, ...(account.customerId ? {} : { trialEndsAt: trialEndsFrom(Date.now(), billingConfig()) }), updatedAt: Date.now() });
 } });
 
-const subscriptionArgs = v.object({ id: v.string(), customer: v.string(), status: v.string(), quantity: v.number(), itemId: v.optional(v.string()), price: v.optional(v.string()), currentPeriodEnd: v.optional(v.number()), organizationId: v.optional(v.string()) });
+const subscriptionArgs = v.object({ id: v.string(), customer: v.string(), status: v.string(), quantity: v.number(), itemId: v.optional(v.string()), price: v.optional(v.string()), currentPeriodEnd: v.optional(v.number()), organizationId: v.optional(v.string()), paymentMethod: v.boolean() });
 // Signed Stripe events, applied at most once; subscription events older than the last applied
 // one are recorded but ignored, so redelivery and reordering cannot roll state back.
-export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), type: v.string(), created: v.number(), checkout: v.optional(v.object({ organizationId: v.string(), customer: v.string(), subscription: v.optional(v.string()) })), subscription: v.optional(subscriptionArgs), invoice: v.optional(v.object(invoiceFacts)), charge: v.optional(v.object(chargeEvent)) }, handler: async (ctx, a): Promise<string> => {
+export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), type: v.string(), created: v.number(), checkout: v.optional(v.object({ organizationId: v.string(), customer: v.string(), subscription: v.optional(v.string()) })), subscription: v.optional(subscriptionArgs), customer: v.optional(v.object({ id: v.string(), paymentMethod: v.boolean() })), invoice: v.optional(v.object(invoiceFacts)), charge: v.optional(v.object(chargeEvent)) }, handler: async (ctx, a): Promise<string> => {
   if (await ctx.db.query("stripeEvents").withIndex("by_event", (q) => q.eq("eventId", a.eventId)).unique()) return "duplicate";
   const record = async (outcome: string) => { await ctx.db.insert("stripeEvents", { eventId: a.eventId, type: a.type.slice(0, 100), outcome, createdAt: Date.now() }); return outcome; };
   const byCustomer = (customer: string) => ctx.db.query("billingAccounts").withIndex("by_customer", (q) => q.eq("customerId", customer)).unique();
@@ -269,9 +272,17 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
     if (a.created === account.lastEventCreated && s.id === account.subscriptionId && (a.type === "customer.subscription.created" || account.status === "canceled")) return record("stale");
     const deleted = a.type === "customer.subscription.deleted", plan = planForPrice(s.price);
     // An unknown seat price keeps the recorded plan.
-    await ctx.db.patch(account._id, { ...(plan ? { plan } : {}), subscriptionId: s.id, subscriptionItemId: s.itemId, status: deleted ? "canceled" : s.status, seats: s.quantity, currentPeriodEnd: s.currentPeriodEnd, pastDueSince: s.status === "past_due" ? account.pastDueSince ?? a.created : undefined, lastEventCreated: a.created, updatedAt: Date.now() });
+    await ctx.db.patch(account._id, { ...(plan ? { plan } : {}), subscriptionId: s.id, subscriptionItemId: s.itemId, status: deleted ? "canceled" : s.status, seats: s.quantity, currentPeriodEnd: s.currentPeriodEnd, pastDueSince: s.status === "past_due" ? account.pastDueSince ?? a.created : undefined, subscriptionPaymentMethod: s.paymentMethod, lastEventCreated: a.created, updatedAt: Date.now() });
     if (!deleted) await recordPlanSelected(ctx, account.organizationId, s.status, plan ?? (account.plan === "pro" ? "pro" : "starter"));
     return record(deleted ? "canceled" : s.status);
+  }
+  // customer.updated: a card added or made default in the Customer Portal. Its own clock, so it never makes a subscription event stale.
+  if (a.customer) {
+    const account = await byCustomer(a.customer.id);
+    if (!account) return record("unknown customer");
+    if (account.customerEventCreated && a.created < account.customerEventCreated) return record("stale");
+    await ctx.db.patch(account._id, { customerPaymentMethod: a.customer.paymentMethod, customerEventCreated: a.created, updatedAt: Date.now() });
+    return record(a.customer.paymentMethod ? "payment method" : "no payment method");
   }
   if (a.invoice) {
     const account = await byCustomer(a.invoice.customer);
@@ -279,6 +290,8 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
     // Past due and recovery come from customer.subscription.updated, which carries the ordering guard above.
     // Referral commissions accrue in their own job, so a referral bug can never fail this webhook.
     if (a.type === "invoice.paid" && referralConfig().enabled && a.invoice.id && a.invoice.subscription) await ctx.scheduler.runAfter(0, internal.referrals.accrue, { ...a.invoice, paidAt: a.invoice.paidAt ?? a.created });
+    // "subscribed" includes trials; the first invoice with money in it is the first real payment.
+    if (a.type === "invoice.paid" && (a.invoice.amountPaid ?? 0) > 0) await recordConversion(ctx, "first_paid", account.organizationId, { organizationId: account.organizationId });
     return record(a.type);
   }
   // Refunds and disputes claw referral commissions back, so this follows billing rather than
@@ -296,7 +309,7 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
 // with `npx convex run billing:forgetStripeLinks '{"confirm":"switch-stripe-mode"}' --prod`.
 export const forgetStripeLinks = internalMutation({ args: { confirm: v.literal("switch-stripe-mode") }, handler: async (ctx): Promise<number> => {
   const accounts = await ctx.db.query("billingAccounts").collect();
-  for (const account of accounts) await ctx.db.patch(account._id, { customerId: undefined, subscriptionId: undefined, plan: undefined, legacy: undefined, subscriptionItemId: undefined, currentPeriodEnd: undefined, pastDueSince: undefined, lastEventCreated: undefined, status: "trial", seats: seatCount(await members(ctx, account.organizationId)), updatedAt: Date.now() });
+  for (const account of accounts) await ctx.db.patch(account._id, { customerId: undefined, subscriptionId: undefined, plan: undefined, legacy: undefined, subscriptionItemId: undefined, currentPeriodEnd: undefined, pastDueSince: undefined, lastEventCreated: undefined, subscriptionPaymentMethod: undefined, customerPaymentMethod: undefined, customerEventCreated: undefined, status: "trial", seats: seatCount(await members(ctx, account.organizationId)), updatedAt: Date.now() });
   return accounts.length;
 } });
 

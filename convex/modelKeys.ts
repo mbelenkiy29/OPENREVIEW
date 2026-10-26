@@ -4,6 +4,7 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { audit, authorize } from "./auth";
 import { rateLimit } from "./rateLimit";
+import { hasEntitlement } from "./billing";
 
 // A workspace's own model provider key (bring your own key). modelKeyJobs.save checks and encrypts it;
 // only budgetModel decrypts it, and `status` never returns it.
@@ -30,4 +31,5 @@ export const remove = mutation({ args: { token: v.string(), organizationId: v.id
   await ctx.db.delete(key._id);
   await audit(ctx, a.organizationId, user._id, "model_key.removed", key.provider);
 } });
-export const forWorkspace = internalQuery({ args: { organizationId: v.id("organizations") }, handler: (ctx, a) => keyOf(ctx, a.organizationId) });
+// Model calls use the saved key only on a plan that includes it; otherwise they are metered on the operator's model.
+export const forWorkspace = internalQuery({ args: { organizationId: v.id("organizations") }, handler: async (ctx, a) => await hasEntitlement(ctx, a.organizationId, "model.ownKey") ? keyOf(ctx, a.organizationId) : null });

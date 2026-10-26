@@ -22,6 +22,7 @@ export const checkout = action({ args: { token: v.string(), organizationId: v.id
     customer = (await stripe<{ id: string }>("/v1/customers", { metadata: { organizationId: a.organizationId } }, key, fetch, `customer:${a.organizationId}`)).id;
     await ctx.runMutation(internal.billing.linkCustomer, { organizationId: a.organizationId, customerId: customer });
   }
+  await ctx.runMutation(internal.conversions.record, { name: "checkout_started", organizationId: a.organizationId, method: a.plan ?? "starter" });
   // The card is always collected, even for a trial; any remaining trial carries over, so the first
   // charge waits for it.
   // Checkout also takes a promotion code (for example a single-use code for a free month; docs/billing.md).

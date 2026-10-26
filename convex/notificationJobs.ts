@@ -71,6 +71,12 @@ export const usageAlert = internalAction({ args: { usageId: v.id("billingUsage")
   return outcome;
 } });
 
+// "Ask an admin": one email to each owner and admin with a verified address, once per requester per day.
+export const upgradeRequest = internalAction({ args: { organizationId: v.id("organizations"), userId: v.id("users") }, handler: async (ctx, a): Promise<void> => {
+  const target = await ctx.runQuery(internal.notifications.upgradeRequestTargets, a), origin = appOrigin(), day = new Date().toISOString().slice(0, 10);
+  for (const recipient of target?.recipients ?? []) await deliver(ctx, a.organizationId, `upgrade-request:${a.userId}:${day}:email:${recipient.userId}`, "email", () => sendEmail({ to: recipient.email, subject: `${target!.login} asked to upgrade ${target!.workspace} on OpenReview`, text: `${target!.login} reached this month's plan limit in ${target!.workspace} and asked a workspace admin to upgrade.${origin ? `\n\nPlans and usage: ${origin}/dashboard/organization/billing` : ""}` }));
+} });
+
 // Email verification: a random token (only its hash is stored) mailed as a one-hour link.
 export const sendVerification = internalAction({ args: { preferenceId: v.id("notificationPreferences") }, handler: async (ctx, a): Promise<string> => {
   const target = await ctx.runQuery(internal.notifications.verificationTarget, { preferenceId: a.preferenceId });

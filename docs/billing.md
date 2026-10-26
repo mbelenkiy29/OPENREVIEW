@@ -11,7 +11,8 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 | Extra usage | none | up to the admin cap | up to the admin cap |
 | Fix prompts, the local bridge, your own cloud agents and Devin | ✓ | ✓ | ✓ |
 | OpenReview agent fixes (fix pull requests) per month | | `BILLING_STARTER_FIXES_PER_SEAT` per seat (default 5), pooled | `BILLING_PRO_FIXES_PER_SEAT` per seat (default 20), pooled |
-| Deep reviews, generated reproduction tests | | | ✓ |
+| Your own model key (its calls are not metered) | | ✓ | ✓ |
+| Deep reviews (deep tier, agentic and hypothesis engines, agent budgets, model overrides), generated reproduction tests | | | ✓ |
 | Requirements from Linear, Jira, Confluence and Notion; learning conventions | | | ✓ |
 | API keys, analytics older than 30 days, SSO, the audit log | | | ✓ |
 
@@ -28,7 +29,8 @@ The plan catalog is `src/plans.ts`. Security checks, every provider, and the CLI
 - **One Free workspace per owner:** otherwise creating workspaces would be unlimited free usage. A new workspace (`planRequired`) gets no Free allowance (a $0 limit, with a `Billing:` reason naming the owner's Free workspace) while any of its owners owns another Free workspace created before it. Before a new workspace has chosen a plan, any other Free workspace counts, so `billing.chooseFreePlan` refuses it and the plan step offers only Starter and Pro. A Free workspace is one with no paying subscription that is not still choosing its plan. Paid workspaces, workspaces from before plans were required, and billing off are unaffected. When the owner's Free workspace subscribes, the next-oldest one gets Free. A workspace that is pending deletion still counts until it is purged.
 - **Which paid plan:** the subscription's seat price decides it (`billingAccounts.plan`): `STRIPE_SEAT_PRICE_ID` / `STRIPE_SEAT_ANNUAL_PRICE_ID` is Starter, and `STRIPE_PRO_PRICE_ID` / `STRIPE_PRO_ANNUAL_PRICE_ID` is Pro. An unknown price keeps the recorded plan, and a subscription with none recorded is Starter. Checkout uses the monthly prices. Admins switch between Starter and Pro in Organization Settings → Billing & Usage (`billingJobs.changePlan`): it swaps the seat price on the subscription item with prorations and audits `billing.plan_change_requested`, and the webhook then records the new plan. The Customer Portal can't do this, because it doesn't update subscriptions that carry a metered price. Switching to Starter leaves `legacy` as it is.
 - **Gated features:** each one is skipped, never failed.
-  - A deep review runs at standard, with a coverage note.
+  - A deep review runs at standard, with a coverage note. So does a repository set to the agentic or hypothesis engine: it runs the standard pipeline, its agent budgets are ignored, and team, repository and agent-authored model overrides give way to the workspace model.
+  - Saving your own model key needs Starter or Pro. A key saved earlier is kept but not used on Free (calls are metered on the operator's model), and works again after upgrading.
   - Generated reproduction tests are not drafted.
   - A fix pull request request on Free replies that fix pull requests are on Starter and Pro, and one past the month's agent fixes replies with the reset date. The validated suggestion is still posted. Each run counts once it makes a model call (`billingUsage.fixes`); a run that stops before that gives it back. Its model calls also use the included usage.
   - Linked requirements are not fetched, with a coverage note. Connecting a new Linear, Atlassian or Notion workspace needs Pro; existing connections stay and work again after upgrading.
@@ -77,6 +79,14 @@ When billing is on and the new workspace did not start on Free (an owner already
 
 The trial clock starts when the workspace first opens Checkout (its Stripe customer is created), however long it was on Free; each workspace gets one trial. Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
 
+The dashboard's trial banner (days left, **Add Payment Method**) shows only while the subscription is trialing with no default payment method on file: neither the subscription's `default_payment_method` (from `customer.subscription.*`) nor the customer's `invoice_settings.default_payment_method` (from `customer.updated`, sent when a card is added in the Customer Portal). A subscription from before these were recorded counts as having one, because Checkout always collects a card. With a card on file the banner returns for the last 3 days of the trial, saying when the card will be charged, with **Manage billing**. Also turn on Stripe's own trial-ending reminder email (Stripe Dashboard → Settings → Billing → Subscriptions and emails), in test and live mode.
+
+From 80% of the included usage, or when reviews are blocked, every dashboard page shows a usage banner with an estimate of the reviews left (this workspace's average review cost over the last 30 days, at least five reviews, else $0.065). Admins get **Upgrade** (Free) or **Manage usage**; members get **Ask an admin**, which emails owners and admins with a verified notification address, at most once a day per member.
+
+Pricing-page buttons for Starter and Pro send sign-up to `/dashboard/onboarding/plan?intent=<plan>`; the intent survives workspace creation, so even an owner's first (Free) workspace lands on the plan step with that plan's Checkout as the main action.
+
+Conversion events (`conversionEvents`, see `convex/conversions.ts`) add `checkout_started`, `first_paid` (the first `invoice.paid` with money in it; `subscribed` includes trials), `paywall:<feature>` (a deep review or agentic engine capped, repro tests or linked tickets skipped, a fix PR asked for on Free) and `upgrade_requested`. Operators see them, for the last 30 days, on `/dashboard/operator`.
+
 Setup can't be skipped. Until a workspace finishes it, opening the dashboard takes owners and admins back to setup, and every dashboard page shows a **Setup isn't finished** bar (members see that an admin is completing it). Setup finishes only from its last step (`onboarding.complete`), which needs the plan and a selected repository that has started indexing. Workspaces that used the former **Exit setup** before any repository was indexing are reopened once per deployment with `npx convex run onboarding:reopenSkippedSetups '{"confirm":"reopen-skipped-setups"}' --prod`.
 
 When a review is blocked, it is recorded as failed with a `Billing:` reason, visible on the pull request's review page. Blocked reviews are also counted on **Organization Settings → Billing & Usage**.
@@ -102,6 +112,7 @@ The prospect enters the code at Checkout, from the setup plan step or Organizati
 3. **Webhook:** add the endpoint `https://<convex-site>/stripe/webhook` on API version `2026-08-26.dahlia` (`STRIPE_API_VERSION` in `src/billing.ts`) for these events:
    - `checkout.session.completed`
    - `customer.subscription.created`, `customer.subscription.updated` and `customer.subscription.deleted`
+   - `customer.updated` (a card added in the Customer Portal). An endpoint created before this event was added must be edited in the Stripe Dashboard to subscribe to it too, in test and live mode.
    - `invoice.payment_failed` and `invoice.paid`
    - with the [referral program](#referral-program): `charge.refunded`, `charge.dispute.created` and `charge.dispute.closed`
 
@@ -192,5 +203,5 @@ Setup:
 
 - **Signatures:** webhooks are verified against the `Stripe-Signature` header with a five-minute tolerance.
 - **Duplicates:** each event ID is applied at most once.
-- **Ordering:** subscription events older than the last one applied are recorded as `stale` and ignored, so redelivery and reordering cannot roll state back. Stripe timestamps are whole seconds, so an event from the same second as the last one is also `stale` when it is the subscription's creation or arrives after a cancellation: an update to active that came first stays active, and a cancellation stays canceled.
+- **Ordering:** subscription events older than the last one applied are recorded as `stale` and ignored, so redelivery and reordering cannot roll state back. Stripe timestamps are whole seconds, so an event from the same second as the last one is also `stale` when it is the subscription's creation or arrives after a cancellation: an update to active that came first stays active, and a cancellation stays canceled. `customer.updated` events are ordered the same way on their own clock (`customerEventCreated`), so they never make a subscription event stale.
 - **Workspace linking:** Checkout sets both `client_reference_id` and subscription metadata. A subscription that claims a different workspace than its customer's is ignored.

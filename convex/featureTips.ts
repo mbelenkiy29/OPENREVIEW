@@ -2,6 +2,7 @@ import { internalMutation, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { eligibleTips, tipCooldown, tipKeys, type TicketKind, type TipKey } from "../src/feature-tips";
+import { hasEntitlement } from "./billing";
 
 // Chooses at most one tip for a review and records it, so a publish retry shows the same tip and the
 // repository cooldown (one tip every few days, the same tip at most monthly) holds across reviews.
@@ -17,11 +18,13 @@ export const choose = internalMutation({
     if (recent.some((t) => t.shownAt > now - tipCooldown.anyTipMs)) return null;
     const findings = await ctx.db.query("findings").withIndex("by_repo", (q) => q.eq("repositoryId", review.repositoryId)).order("desc").take(200);
     const rated = findings.filter((f) => f.lastFeedback);
+    // Tips never point at a feature the plan lacks: the agentic engine is a deep review, linked tickets need requirements.
+    const [deep, requirements] = await Promise.all([hasEntitlement(ctx, review.organizationId, "review.deep"), hasEntitlement(ctx, review.organizationId, "context.requirements")]);
     const tip = eligibleTips({
       references: a.references.slice(0, 20000), connected: await connected(ctx, review), rules: a.rules,
       recentFindings: rated.length, dismissedFindings: rated.filter((f) => ["not_useful", "false_positive", "wont_fix"].includes(f.lastFeedback!)).length,
-      strictness: a.strictness, engine: a.engine, agenticAvailable: a.agenticAvailable,
-    }).find((t) => !recent.some((r) => r.key === t.key));
+      strictness: a.strictness, engine: a.engine, agenticAvailable: a.agenticAvailable && deep,
+    }).find((t) => (requirements || t.key !== "ticket") && !recent.some((r) => r.key === t.key));
     if (!tip) return null;
     await ctx.db.insert("featureTips", { organizationId: review.organizationId, repositoryId: review.repositoryId, reviewId: review._id, key: tip.key, ...(tip.ticket ? { ticket: tip.ticket } : {}), shownAt: now });
     return tip;

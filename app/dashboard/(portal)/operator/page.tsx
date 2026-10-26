@@ -14,6 +14,8 @@ const when = (at: number | null) => at === null ? "–" : new Date(at).toISOStri
 const dollars = (n: number) => `$${n.toFixed(2)}`;
 const counted = (n: number, capped: boolean) => capped ? `${n}+` : String(n);
 const Tiles = ({ label, items }: { label: string; items: [string, ReactNode][] }) => <div className="metrics usage-tiles" role="group" aria-label={label}>{items.map(([name, value]) => <div key={name}><span>{name}</span><strong>{value}</strong></div>)}</div>;
+const funnelLabels: Record<string, string> = { signup_verified: "Sign-ups", first_repository_connected: "Repository connected", first_review_completed: "First review", checkout_started: "Checkout started", subscribed: "Card added (subscribed)", first_paid: "First payment", upgrade_requested: "Member asked to upgrade" };
+const featureLabels: Record<string, string> = { "review.deep": "deep reviews", "review.reproTests": "reproduction tests", "fix.pullRequests": "fix pull requests", "context.requirements": "linked requirements" };
 const Heading = ({ id, title, children }: { id: string; title: string; children?: ReactNode }) => <div className="section-heading"><div><h2 id={id}>{title}</h2>{children && <p>{children}</p>}</div></div>;
 
 // Operator analytics across every workspace: metadata and counts only (convex/operator.ts). Anyone who is not an
@@ -43,6 +45,17 @@ export default async function OperatorPage() {
       <ChartCard wide icon="chartBar" title="Model usage, last 30 days" labels={r.days} info="Estimated model cost per UTC day, for the three workspaces that spent most and everyone else."
         views={[{ label: "Spend", kind: "bar", unit: "$", yTitle: "USD", series: series("spend") }, { label: "Model calls", kind: "bar", yTitle: "Calls", series: series("calls") }]} />
       {r.capped.usage && <p className="muted table-note">More than 10,000 model calls in 30 days: spend counts the newest 10,000.</p>}
+
+      <Heading id="operator-funnel" title="Conversion, last 30 days">Each step counts a user or workspace once. &ldquo;Card added&rdquo; includes trials; &ldquo;First payment&rdquo; is the first invoice with money in it. Wanted features are times something asked for a feature the plan lacks, once per workspace.</Heading>
+      <ScrollTable label="Conversion table" className="table-box">
+        <table aria-labelledby="operator-funnel">
+          <thead><tr><th>Step</th><th>Count</th></tr></thead>
+          <tbody>
+            {r.funnel.steps.map((s) => <tr key={s.name}><td>{funnelLabels[s.name]}</td><td>{s.count}</td></tr>)}
+            {r.funnel.wanted.map((w) => <tr key={w.feature}><td>Wanted: {featureLabels[w.feature] ?? w.feature}</td><td>{w.count}</td></tr>)}
+          </tbody>
+        </table>
+      </ScrollTable>
 
       <Heading id="operator-workspaces" title="Workspaces">Counters are this month&apos;s (UTC). Last activity is the latest model call: a review, chat, fix or indexing.</Heading>
       <ScrollTable label="Workspaces table" className="table-box">

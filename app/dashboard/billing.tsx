@@ -28,9 +28,9 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
     {s.allowed && percent >= 80 && <p role="status" className="notice-banner"><Icon name="warning" />{percent >= 100 ? "This workspace used all of its included usage this month; extra usage is on, up to the monthly cap." : `This workspace used ${percent}% of its included usage this month. ${subscribed && s.capUsd > 0 ? "Extra usage covers what comes after it, up to the monthly cap." : `Reviews pause when it runs out${subscribed ? " unless an admin turns on extra usage" : "; upgrade for more"}.`}`}</p>}
     <div className="section-heading"><div><h2 id="billing-heading">Billing &amp; Usage</h2><p>Manage your plan and billing details</p></div></div>
     <section aria-labelledby="plan-heading" className="strip-card">
-      <header className="card-strip"><Icon name="creditCard" /><h3 id="plan-heading">{s.planName} plan</h3><span className="role-badge">{statusLabel(s.status)}</span></header>
+      <header className="card-strip"><Icon name="creditCard" /><h3 id="plan-heading">{s.planName} plan</h3><span className="role-badge">{s.plan === "free" ? "Active" : statusLabel(s.status)}</span></header>
       <div className="strip-body">
-        <div className="usage-meter"><div><strong>{percent}%</strong><span> of included usage{s.admin ? ` (${usdText(s.used)} of ${usdText(s.limit ?? 0)})` : ""}</span></div><meter min={0} max={100} value={percent} aria-label="Included usage used" /><span className="muted">Resets {day(s.resetsAt)}</span></div>
+        <div className="usage-meter"><div><strong>{percent}%</strong><span> of included usage{s.admin ? ` (${usdText(s.used)} of ${usdText(s.limit ?? 0)})` : ""}</span></div><meter min={0} max={100} value={percent} aria-label="Included usage used" /><span className="muted">Resets {day(s.resetsAt)}{s.reviewsLeft !== null ? ` · about ${s.reviewsLeft} reviews left` : ""}</span></div>
         <dl className="facts">
           {s.currentPeriodEnd && <><dt>Current period ends</dt><dd>{day(s.currentPeriodEnd)}</dd></>}
           {s.pastDueSince && <><dt>Past due since</dt><dd>{day(s.pastDueSince)} · reviews pause after {s.graceDays} days</dd></>}
@@ -67,8 +67,8 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
     </table></div>
     <div className="section-heading"><h2 id="portal-heading">Billing Portal</h2></div>
     <section aria-labelledby="portal-heading" className="setting-row portal-card">
-      <div><strong>Manage Billing <span className="role-badge">{statusLabel(s.status)}</span></strong>
-        <p>{s.status === "trial" && s.trialEndsAt ? `You’re on a free trial until ${day(s.trialEndsAt)}. ` : ""}{s.hasCustomer ? "Visit the portal to update your payment method, download invoices or manage your plan." : "The Stripe billing portal opens once this workspace has a plan with a payment method."}</p></div>
+      <div><strong>Manage Billing <span className="role-badge">{s.plan === "free" ? "Active" : statusLabel(s.status)}</span></strong>
+        <p>{s.status === "trialing" && s.trialEndsAt ? `You’re on a free trial until ${day(s.trialEndsAt)}. ` : ""}{s.hasCustomer ? "Visit the portal to update your payment method, download invoices or manage your plan." : "The Stripe billing portal opens once this workspace has a plan with a payment method."}</p></div>
       {s.admin && s.hasCustomer && portal("Manage", "Manage billing")}
     </section>
     {s.referral?.canApply && <><div className="section-heading"><div><h2 id="referral-code-heading">Referral code</h2><p>Were you referred by someone already on OpenReview? Add their code before you subscribe{referralConfig().discountLabel ? ` to get ${referralConfig().discountLabel}` : ""}.</p></div></div>

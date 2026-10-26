@@ -52,7 +52,8 @@ Status: **gated** = enforced by `src/plans.ts` today; **planned** = on Pro by de
 | Security checks and OSV advisories | ✓ | ✓ | ✓ | never gated | none |
 | All providers, CLI, MCP, Claude Code/Codex plugins, chat, custom rules, 👍/👎 learning, Slack and email | ✓ | ✓ | ✓ | always on | none |
 | Extra usage up to an admin cap |  | ✓ | ✓ | live | none |
-| Deep reviews (agentic and hypothesis engines) |  |  | ✓ | gated | `review.deep` |
+| Deep reviews (deep tier, agentic and hypothesis engines, agent budgets, model overrides) |  |  | ✓ | gated | `review.deep` |
+| Your own model key (not metered) |  | ✓ | ✓ | gated | `model.ownKey` |
 | Generated reproduction tests |  |  | ✓ | gated | `review.reproTests` |
 | Fix prompts, local bridge, your own cloud agents and Devin | ✓ | ✓ | ✓ | always on | none |
 | OpenReview agent fixes (fix pull requests), monthly per seat |  | 5 | 20 | gated + counted (`billingUsage.fixes`) | `fix.pullRequests` |

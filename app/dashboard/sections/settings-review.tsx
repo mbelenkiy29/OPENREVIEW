@@ -29,6 +29,8 @@ const severityStops: Stop[] = [
   { value: "critical", label: "Critical", help: "OpenReview comments only on critical findings." },
   ...(["high", "medium", "low"] as const).map((s) => ({ value: s, label: s[0].toUpperCase() + s.slice(1), help: `OpenReview comments on ${s}-severity findings and above.` })),
 ];
+// Shown where a plan without deep reviews locks the engine, agent budgets and model overrides.
+const deepNote = "The agentic engines, agent budgets and model overrides are part of deep reviews on the Pro plan; until then reviews run the standard pipeline on the workspace model.";
 const categories = ["correctness", "security", "data", "compatibility", "testing", "performance", "rules", "style", "syntax"];
 const providerIcon = (kind?: string): IconName => kind?.startsWith("github") ? "githubLogo" : kind === "gitlab" ? "gitlabLogo" : "gitBranch";
 
@@ -138,32 +140,32 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
         <div id="review-tier" className="settings-group">
           <SettingsHeading icon="stack" title="Review Tier" sub="How deep each review goes, with which engine and model" />
           <div className="settings-card">
-            <Row id="rs-mode" title="Depth"><select key={s.mode} id="rs-mode" name="mode" defaultValue={s.mode}>{["fast", "standard", "deep", "auto"].map((v) => <option key={v}>{v}</option>)}</select></Row>
-            <Row id="rs-reviewEngine" title="Review engine"><select key={s.reviewEngine} id="rs-reviewEngine" name="reviewEngine" defaultValue={s.reviewEngine ?? "pipeline"}><option value="pipeline">pipeline (specialists)</option><option value="agentic">agentic (tool-calling, experimental)</option><option value="hypotheses">hypotheses (parallel investigations, experimental)</option></select></Row>
+            <Row id="rs-mode" title="Depth" help={locked.includes("review.deep") ? "Deep is on the Pro plan; reviews run at standard until then." : undefined}><select key={s.mode} id="rs-mode" name="mode" defaultValue={s.mode}>{["fast", "standard", "deep", "auto"].map((v) => <option key={v}>{v}</option>)}</select></Row>
+            <Locked feature="review.deep" locked={locked} note={deepNote}><Row id="rs-reviewEngine" title="Review engine"><select key={s.reviewEngine} id="rs-reviewEngine" name="reviewEngine" defaultValue={s.reviewEngine ?? "pipeline"}><option value="pipeline">pipeline (specialists)</option><option value="agentic">agentic (tool-calling, experimental)</option><option value="hypotheses">hypotheses (parallel investigations, experimental)</option></select></Row>
+              <Row id="rs-model" title="Model override" help={<>Replaces the workspace model (<Link href="/dashboard/code-review/model">AI Model</Link>) for this repository.</>}><ModelSelect id="rs-model" name="model" value={s.model} models={models} empty="Workspace default" /></Row></Locked>
             <Row id="rs-maxReviewTier" title="Highest tier a request may use" help={<>People with write access can comment <code>@openreview review fast</code>, <code>standard</code> or <code>deep</code>, or add an <code>openreview:fast|standard|deep</code> label. A comment wins over a label, a label over the configured tier (which touched <code>.openreview/</code> folders can raise). This cap applies to all of them.</>}>
               <select key={s.maxReviewTier} id="rs-maxReviewTier" name="maxReviewTier" defaultValue={s.maxReviewTier ?? "deep"} aria-describedby="rs-maxReviewTier-help"><option value="deep">deep (no cap)</option><option value="standard">standard</option><option value="fast">fast</option></select>
             </Row>
-            <Row id="rs-model" title="Model override" help={<>Replaces the workspace model (<Link href="/dashboard/code-review/model">AI Model</Link>) for this repository.</>}><ModelSelect id="rs-model" name="model" value={s.model} models={models} empty="Workspace default" /></Row>
           </div>
         </div>
 
         <div id="review-budgets" className="settings-group">
           <SettingsHeading icon="cpu" title="Agent Budgets" sub="Turn and tool-call limits for the agentic engine and each hypothesis" />
-          <div className="settings-card">
+          <div className="settings-card"><Locked feature="review.deep" locked={locked} note={deepNote}>
             {([["agentTurns", "Agentic engine turns"], ["agentToolCalls", "Agentic engine tool calls"], ["hypothesisTurns", "Turns per hypothesis"], ["hypothesisToolCalls", "Tool calls per hypothesis"]] as const).map(([key, title]) =>
               <Row key={key} id={"rs-" + key} title={title}><Stepper id={"rs-" + key} name={key} min={0} max={1000} value={s[key] ?? 0} describedBy="rs-budgets-note" /></Row>)}
             <p className="card-note" id="rs-budgets-note">0 uses the review tier&apos;s default. Values are clamped to the operator&apos;s hard caps (AGENT_MAX_TURNS, AGENT_MAX_TOOL_CALLS); token and time budgets stay per tier. The review page shows the budget a review used.</p>
-          </div>
+          </Locked></div>
         </div>
 
         <div id="review-agents" className="settings-group">
           <SettingsHeading icon="robot" title="Coding Agents" sub="Pull requests that coding agents write, and the fixes OpenReview opens" />
           <div className="settings-card">
-            <Row id="rs-aiAuthoredModel" title={<>Review model for agent-authored pull requests <span className="badge">Experimental</span></>} help="Detection uses explicit signals only: a known agent bot author, a Co-Authored-By trailer naming a coding agent, an agent branch prefix (claude/, copilot/, cursor/, codex/, devin/, jules/) or a marker the agent adds to the description. The reason is shown on the review.">
+            <Locked feature="review.deep" locked={locked} note={deepNote}><Row id="rs-aiAuthoredModel" title={<>Review model for agent-authored pull requests <span className="badge">Experimental</span></>} help="Detection uses explicit signals only: a known agent bot author, a Co-Authored-By trailer naming a coding agent, an agent branch prefix (claude/, copilot/, cursor/, codex/, devin/, jules/) or a marker the agent adds to the description. The reason is shown on the review.">
               <ModelSelect id="rs-aiAuthoredModel" name="aiAuthoredModel" value={s.aiAuthoredModel} models={models} empty="The usual model" />
-            </Row>
-            <input type="hidden" name="fixConfigured" value="true" />
-            <Row id="rs-fixPullRequests" title="Fix pull requests" help="Allow “@openreview fix this in a new PR” to open a fix pull request on a new branch (GitHub, needs the Contents: Read and write permission; the pull request’s own branch is never written)."><Switch id="rs-fixPullRequests" name="fixPullRequests" on={s.fixPullRequests ?? false} /></Row>
+            </Row></Locked>
+            <Locked feature="fix.pullRequests" locked={locked}><input type="hidden" name="fixConfigured" value="true" />
+            <Row id="rs-fixPullRequests" title="Fix pull requests" help="Allow “@openreview fix this in a new PR” to open a fix pull request on a new branch (GitHub, needs the Contents: Read and write permission; the pull request’s own branch is never written)."><Switch id="rs-fixPullRequests" name="fixPullRequests" on={s.fixPullRequests ?? false} /></Row></Locked>
           </div>
         </div>
 

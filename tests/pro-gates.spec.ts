@@ -52,7 +52,7 @@ test('billing.locked lists the Pro features a plan lacks, and none with billing 
  const {t,token,org,billing,pro}=await setup();
  expect(await t.query(api.billing.locked,{token,organizationId:org})).toEqual([]);
  billing(true);
- expect(await t.query(api.billing.locked,{token,organizationId:org})).toEqual(['review.deep','review.reproTests','fix.pullRequests','context.requirements','memory.conventions','api.access','analytics.history','auth.sso','audit.log']);
+ expect(await t.query(api.billing.locked,{token,organizationId:org})).toEqual(['review.deep','review.reproTests','fix.pullRequests','context.requirements','memory.conventions','api.access','analytics.history','auth.sso','audit.log','model.ownKey']);
  await pro();
  expect(await t.query(api.billing.locked,{token,organizationId:org})).toEqual([]);
 });

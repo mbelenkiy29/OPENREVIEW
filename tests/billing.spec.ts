@@ -93,7 +93,7 @@ test('switching Stripe modes drops test customers and subscriptions and returns 
  expect(await t.mutation(internal.billing.forgetStripeLinks,{confirm:'switch-stripe-mode'})).toBe(1);
  const after=(await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0];
  expect(after).toMatchObject({status:'trial',seats:2,trialEndsAt:before.trialEndsAt});
- for(const key of ['customerId','subscriptionId','subscriptionItemId','currentPeriodEnd','lastEventCreated'] as const)expect(after[key]).toBeUndefined();
+ for(const key of ['customerId','subscriptionId','subscriptionItemId','currentPeriodEnd','lastEventCreated','subscriptionPaymentMethod'] as const)expect(after[key]).toBeUndefined();
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'free',allowed:true,hasCustomer:false,trialStarted:false});
  // A live Checkout now creates a new customer instead of reusing the test one.
  vi.spyOn(globalThis,'fetch').mockImplementation(async(input:string|URL|Request)=>String(input).endsWith('/v1/customers')?Response.json({id:'cus_live'}):Response.json({id:'cs_1',url:'https://checkout.stripe.com/c/pay/cs_1'}));
@@ -187,6 +187,34 @@ test('events from the same second never move a subscription back: active stays a
  expect(outcomes.slice(1)).toEqual([['evt_active','active'],['evt_created','stale'],['evt_deleted','canceled'],['evt_late_update','stale']]);
 });
 
+test('the trial banner shows only while a trialing subscription has no payment method on file',async()=>{
+ const {t,alice,org}=await setup();
+ const created=Math.floor(Date.now()/1000),billing=()=>t.query(api.billing.status,{token:alice.token,organizationId:org});
+ const trialing=(id:string,at:number,pm:string|null)=>{const e=subscription(id,'customer.subscription.updated','trialing',1,at,org);return {...e,data:{object:{...e.data.object,default_payment_method:pm}}};};
+ // A card added in the Customer Portal becomes the customer's default: Stripe sends customer.updated.
+ const customer=(id:string,at:number,pm:string|null)=>({id,type:'customer.updated',created:at,data:{object:{id:'cus_1',invoice_settings:{default_payment_method:pm}}}});
+ await deliver(t,{id:'evt_checkout',type:'checkout.session.completed',created,data:{object:{mode:'subscription',client_reference_id:org,customer:'cus_1',subscription:'sub_1'}}});
+ // Nothing reported yet (subscriptions from before this was recorded): Checkout always collects a card, so no banner.
+ expect(await billing()).toMatchObject({hasCustomer:true,hasPaymentMethod:true});
+ // A trial with no card on file shows the banner.
+ await deliver(t,trialing('evt_no_card',created+1,null));
+ expect(await billing()).toMatchObject({status:'trialing',hasPaymentMethod:false});
+ await deliver(t,customer('evt_portal_card',created+5,'pm_portal'));
+ expect(await billing()).toMatchObject({status:'trialing',hasPaymentMethod:true});
+ // An older customer event cannot remove it, and customer events never make a subscription event stale.
+ await deliver(t,customer('evt_old_customer',created+3,null));
+ await deliver(t,trialing('evt_sub_update',created+4,null));
+ expect(await billing()).toMatchObject({status:'trialing',hasPaymentMethod:true});
+ // Removed in the portal: the banner is back until the subscription reports its own default.
+ await deliver(t,customer('evt_card_removed',created+6,null));
+ expect((await billing()).hasPaymentMethod).toBe(false);
+ await deliver(t,trialing('evt_sub_card',created+7,'pm_checkout'));
+ await deliver(t,trialing('evt_old_sub',created+6,null));
+ expect((await billing()).hasPaymentMethod).toBe(true);
+ const outcomes=(await t.run(ctx=>ctx.db.query('stripeEvents').collect())).map(e=>[e.eventId,e.outcome]);
+ expect(outcomes.slice(1)).toEqual([['evt_no_card','trialing'],['evt_portal_card','payment method'],['evt_old_customer','stale'],['evt_sub_update','trialing'],['evt_card_removed','no payment method'],['evt_sub_card','trialing'],['evt_old_sub','stale']]);
+});
+
 test('a second subscription from another open Checkout neither replaces nor, once cancelled, ends the first',async()=>{
  const {t,org}=await setup();
  const created=Math.floor(Date.now()/1000),log=vi.spyOn(console,'error').mockImplementation(()=>{});
@@ -213,6 +241,8 @@ test('seats follow membership: viewers are free and changes resync the subscript
   return new Response('unexpected',{status:500});});
  await expect(t.action(api.billingJobs.checkout,{token:bob.token,organizationId:org})).rejects.toThrow(/Forbidden/);
  expect(await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org})).toBe('https://checkout.stripe.com/c/pay/cs_1');
+ // Opening Checkout is a funnel step; one without a later subscribed was abandoned.
+ expect((await t.run(ctx=>ctx.db.query('conversionEvents').collect())).map(e=>e.key)).toContain(`checkout_started:${org}:starter`);
  const session=new URLSearchParams(calls[1].body);
  // The untouched 14-day trial carries into the subscription, so the card is not charged until it ends.
  expect(Object.fromEntries(session)).toMatchObject({mode:'subscription',customer:'cus_1',client_reference_id:org,integration_identifier:expect.stringMatching(/^openreview-starter-seats-[a-z]{8}$/),allow_promotion_codes:'true','line_items[0][price]':'price_seat','line_items[0][quantity]':'2','subscription_data[metadata][organizationId]':org,'subscription_data[trial_end]':String(Math.floor((Date.now()+14*86400000)/1000)),success_url:'https://review.example.com/dashboard/organization/billing?checkout=success',cancel_url:'https://review.example.com/dashboard/organization/billing?checkout=cancelled'});

@@ -11,6 +11,7 @@ import { notificationEvents } from "../src/notifications";
 import { mentionQuestion, slackChannelId } from "../src/slack";
 import { egressAllowed, offline } from "../src/egress";
 import { contextReadable } from "./repositoryContext";
+import { recordConversion } from "./conversions";
 
 // Notifications: Slack channels (admin-linked) and per-member email. Everything is inert until a
 // Slack workspace is installed or a member verifies an email address.
@@ -138,6 +139,27 @@ export const reviewTargets = internalQuery({ args: { reviewId: v.id("reviews") }
   }
   return { organizationId: repo.organizationId, installationId: slack?._id ?? null, notice: { repository: repo.fullName, prNumber: review.prNumber, prTitle: pr?.title, prUrl: pr?.url, headSha: review.headSha, findings }, channels, recipients };
 } });
+// Owners and admins with a verified notification email: who hears about usage and upgrade requests.
+async function adminEmails(ctx: QueryCtx, organizationId: Id<"organizations">) {
+  const recipients: { userId: Id<"users">; email: string }[] = [];
+  for (const m of await ctx.db.query("organizationMembers").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).take(1000)) {
+    if (m.role !== "owner" && m.role !== "admin") continue;
+    const p = await ownPreferences(ctx, m.userId, organizationId);
+    if (p?.email && p.emailVerifiedAt) recipients.push({ userId: m.userId, email: p.email });
+  }
+  return recipients;
+}
+// "Ask an admin" from the dashboard's usage banner: a member asks the workspace's admins to upgrade, at most once a day.
+export const requestUpgrade = mutation({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
+  const { user } = await authorize(ctx, a.token, a.organizationId);
+  await rateLimit(ctx, `upgrade-request:${a.organizationId}:${user._id}`, 1, 86400000);
+  await ctx.scheduler.runAfter(0, internal.notificationJobs.upgradeRequest, { organizationId: a.organizationId, userId: user._id });
+  await recordConversion(ctx, "upgrade_requested", a.organizationId, { organizationId: a.organizationId, userId: user._id });
+} });
+export const upgradeRequestTargets = internalQuery({ args: { organizationId: v.id("organizations"), userId: v.id("users") }, handler: async (ctx, a) => {
+  const [organization, user] = await Promise.all([ctx.db.get(a.organizationId), ctx.db.get(a.userId)]);
+  return organization && user ? { workspace: organization.name, login: user.login, recipients: await adminEmails(ctx, a.organizationId) } : null;
+} });
 // Usage alert (settleUsage in convex/billing.ts): owners and admins with a verified email, never members or viewers.
 export const usageAlertTargets = internalQuery({ args: { usageId: v.id("billingUsage"), threshold: v.number(), origin: v.optional(v.string()) }, handler: async (ctx, a) => {
   const usage = await ctx.db.get(a.usageId);
@@ -146,13 +168,7 @@ export const usageAlertTargets = internalQuery({ args: { usageId: v.id("billingU
   if (!usage || !account || !organization) return null;
   const decision = billingDecision(account, usage.usedMicros ?? 0, Date.now(), billingConfig());
   if (!decision.limit) return null;
-  const recipients: { userId: Id<"users">; email: string }[] = [];
-  for (const m of await ctx.db.query("organizationMembers").withIndex("by_org", (q) => q.eq("organizationId", usage.organizationId)).take(1000)) {
-    if (m.role !== "owner" && m.role !== "admin") continue;
-    const p = await ownPreferences(ctx, m.userId, usage.organizationId);
-    if (p?.email && p.emailVerifiedAt) recipients.push({ userId: m.userId, email: p.email });
-  }
-  return { organizationId: usage.organizationId, recipients, ...usageAlertEmail(organization.name, a.threshold, decision, usage.overageMicros ?? 0, Date.parse(`${usage.period}-01`), a.origin && `${a.origin}/dashboard/organization/billing`) };
+  return { organizationId: usage.organizationId, recipients: await adminEmails(ctx, usage.organizationId), ...usageAlertEmail(organization.name, a.threshold, decision, usage.overageMicros ?? 0, Date.parse(`${usage.period}-01`), a.origin && `${a.origin}/dashboard/organization/billing`) };
 } });
 // Claims a delivery once; a failed delivery may be retried, a sent or skipped one never repeats.
 export const claimDelivery = internalMutation({ args: { organizationId: v.id("organizations"), key: v.string(), channel: v.string() }, handler: async (ctx, a) => {

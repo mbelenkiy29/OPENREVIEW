@@ -21,7 +21,9 @@ export async function createSetupWorkspace(_state: Result, form: FormData): Prom
     id = await backend().mutation(api.users.createOrganization, { token, name: text(form, "name") });
   } catch (error) { return failure(error, "Could not create the workspace"); }
   (await cookies()).set("openreview_workspace", id, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/" });
-  redirect("/dashboard/onboarding");
+  // A plan chosen on the pricing page goes straight to the plan step, even for an owner's first (Free) workspace.
+  const intent = text(form, "intent");
+  redirect(intent === "starter" || intent === "pro" ? `/dashboard/onboarding/plan?intent=${intent}` : "/dashboard/onboarding");
 }
 
 // Save the repository selection and start indexing; automatic reviews wait for the triggers step.
