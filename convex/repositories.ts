@@ -437,11 +437,14 @@ export const indexProgress = internalMutation({
     cursor: v.number(),
     manifestStorageId: v.optional(v.id("_storage")),
     leaseId:v.optional(v.string()),
+    // A run that keeps going checkpoints under its own lease; releasing it and queuing a continuation here
+    // would put two claimants on this job at every batch boundary (write conflicts on indexJobs).
+    keepLease:v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
-    if (!job || job.status !== "running") return;
-    if(!indexBatchMatches(job,args.leaseId))return;
+    if (!job || job.status !== "running") return false;
+    if(!indexBatchMatches(job,args.leaseId))return false;
     const repo = await ctx.db.get(job.repositoryId);
     if (!await indexWriteAllowed(ctx,repo,job)) {
       await ctx.db.patch(job._id, {
@@ -449,7 +452,7 @@ export const indexProgress = internalMutation({
         updatedAt: Date.now(),
       });
       if(repo&&["queued","indexing"].includes(repo.indexStatus))await ctx.db.patch(repo._id,{indexStatus:"cancelled",error:undefined});
-      return;
+      return false;
     }
     await ctx.db.patch(job._id, {
       cursor: args.cursor,
@@ -458,11 +461,13 @@ export const indexProgress = internalMutation({
         ? { manifestStorageId: args.manifestStorageId }
         : {}),
       updatedAt: Date.now(),
-      batchLease:undefined,
+      ...(args.keepLease ? {} : { batchLease: undefined }),
     });
-    await ctx.scheduler.runAfter(0, internal.jobs.indexBatch, {
-      jobId: job._id,
-    });
+    if (!args.keepLease)
+      await ctx.scheduler.runAfter(0, internal.jobs.indexBatch, {
+        jobId: job._id,
+      });
+    return true;
   },
 });
 export const indexedFile = internalMutation({

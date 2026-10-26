@@ -5,7 +5,8 @@ import schema from "../convex/schema";
 import { api, internal } from "../convex/_generated/api";
 import { Github } from "../src/github";
 
-// One indexBatch invocation works through several 20-file batches (one manifest read) and still stops when the job is cancelled between batches.
+// One indexBatch invocation works through several 20-file batches (one manifest read) under a single claim, stops when the job is
+// cancelled between batches, and queues exactly one continuation only when it runs out of time.
 const modules = import.meta.glob("../convex/**/*.ts");
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 async function setup(count: number, onBlob: (path: string) => Promise<void> = async () => {}) {
@@ -23,12 +24,15 @@ async function setup(count: number, onBlob: (path: string) => Promise<void> = as
   vi.spyOn(Github, "installation").mockResolvedValue(native);
   const jobId = (await t.mutation(internal.repositories.indexing, { repositoryId: repo._id, sha: "head", total: count, knowledgePaths: [] }))!;
   await t.run(async (ctx) => ctx.db.patch(jobId, { manifestStorageId: await ctx.storage.store(new Blob([JSON.stringify({ sha: "head", gitignore: "", changedPaths: [], entries: files.map(({ path, sha }) => ({ path, sha })) })])) }));
-  return { t, repo, jobId, blob };
+  const continuations = () => t.run(async (ctx) => (await ctx.db.system.query("_scheduled_functions").collect()).filter((f) => f.name.includes("indexBatch")));
+  return { t, repo, jobId, blob, continuations };
 }
 
-test("one invocation indexes a 65-file manifest across batches; queued continuations are no-ops", async () => {
-  const { t, repo, jobId, blob } = await setup(65);
+test("one invocation indexes a 65-file manifest across batches without queuing continuations", async () => {
+  const { t, repo, jobId, blob, continuations } = await setup(65);
   await t.action(internal.jobs.indexBatch, { jobId });
+  // A continuation queued at each batch boundary would race this run's own claim on the job (write conflicts).
+  expect(await continuations()).toHaveLength(0);
   expect(blob).toHaveBeenCalledTimes(65);
   expect(await t.run((ctx) => ctx.db.get(jobId))).toMatchObject({ status: "completed", processed: 65 });
   expect(await t.run((ctx) => ctx.db.get(repo._id))).toMatchObject({ indexedSha: "head", indexStatus: "ready" });
@@ -44,4 +48,17 @@ test("a job cancelled during a batch stops before the next batch", async () => {
   await t.action(internal.jobs.indexBatch, { jobId });
   expect(blob).toHaveBeenCalledTimes(20);
   expect(await t.run((ctx) => ctx.db.get(jobId))).toMatchObject({ status: "cancelled" });
+});
+
+test("a run past its time budget hands off to one continuation that finishes the job", async () => {
+  const { t, jobId, blob, continuations } = await setup(65, async (path) => { if (path === "src/f19.ts") vi.setSystemTime(Date.now() + 5 * 60000); });
+  await t.action(internal.jobs.indexBatch, { jobId });
+  expect(blob).toHaveBeenCalledTimes(20);
+  const paused = await t.run((ctx) => ctx.db.get(jobId));
+  expect(paused).toMatchObject({ status: "running", cursor: 20 });
+  expect(paused?.batchLease).toBeUndefined();
+  expect(await continuations()).toHaveLength(1);
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  expect(blob).toHaveBeenCalledTimes(65);
+  expect(await t.run((ctx) => ctx.db.get(jobId))).toMatchObject({ status: "completed", processed: 65 });
 });

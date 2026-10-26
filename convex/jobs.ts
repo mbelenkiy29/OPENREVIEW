@@ -151,7 +151,7 @@ export const index = internalAction({
 export const indexBatch = internalAction({
   args: { jobId: v.id("indexJobs") },
   handler: async (ctx, args) => {
-    let leaseId=crypto.randomUUID();const started=Date.now();
+    const leaseId=crypto.randomUUID(),started=Date.now();
     const job = await ctx.runMutation(internal.repositories.claimIndexBatch, {...args,leaseId});
     if (!job || job.status !== "running") return;
     try {
@@ -263,16 +263,11 @@ export const indexBatch = internalAction({
       }
       const next = Math.min(cursor + 20, manifest.entries.length);
       if (next >= manifest.entries.length) break;
-      await ctx.runMutation(internal.repositories.indexProgress, {
-        jobId: job._id,
-        cursor: next,
-        leaseId,
-      });
-      if (Date.now() - started > 4 * 60000) return;
-      // indexProgress releases the lease and schedules a continuation; carry on only if this run re-claims it at the same cursor (claim also refuses cancelled jobs).
-      const lease = crypto.randomUUID();
-      if ((await ctx.runMutation(internal.repositories.claimIndexBatch, { jobId: job._id, leaseId: lease }))?.cursor !== next) return;
-      leaseId = lease; cursor = next;
+      // Past ~4 minutes the run hands off (lease released, continuation queued); otherwise it checkpoints under its own
+      // lease and carries on. indexProgress refuses cancelled, revoked or re-leased jobs, which stops this run.
+      const handOff = Date.now() - started > 4 * 60000;
+      if (!await ctx.runMutation(internal.repositories.indexProgress, { jobId: job._id, cursor: next, leaseId, ...(handOff ? {} : { keepLease: true }) }) || handOff) return;
+      cursor = next;
       }
         if(inventory&&JSON.stringify(await p4!.project(inventory.project.id))!==JSON.stringify(inventory.project))throw new Error("P4 project views changed before index completion");
         // Sweep stored files missing from this revision in small batches before completing.
