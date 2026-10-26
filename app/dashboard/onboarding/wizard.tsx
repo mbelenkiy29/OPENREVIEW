@@ -23,7 +23,7 @@ export function WizardFrame({ step, workspace, organizationId, admin, completed,
     <footer className="wizard-bar">
       <div className="wizard-exit">
         <SignOutForm action={logout} label="Log out" />
-        {/* Until a plan is chosen the plan step is the only way on: setup can't finish and the dashboard leads back here. */}
+        {/* Until a plan is chosen the server refuses to finish setup and the dashboard leads back here, so there is no way out to offer. */}
         {organizationId && step !== "done" && !planMissing && (admin && !completed
           ? <form action={finishSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="skipped" value="true" /><button className="small">Exit setup</button></form>
           : <Link className="button small" href="/dashboard/analytics">Back to dashboard</Link>)}

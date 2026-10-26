@@ -15,6 +15,7 @@
 
 ### Setup
 - Your first workspace now starts on the Free plan, so setup goes straight from naming the workspace to connecting your code. Upgrade anytime in **Settings → Billing**. Any later workspace still picks a plan, because each owner gets one Free workspace.
+- ⌘/Ctrl+Enter on the Tools step saves your choices on the Free plan too.
 - **Exit setup** no longer leads to an error page from **Choose your plan**. While a workspace still has to pick a plan, that step only offers the plans (and **Log out**), and a setup page opened earlier brings you back to it.
 
 ### Dashboard navigation
