@@ -50,6 +50,14 @@ export function billingDecision(account: BillingAccount, used: number, now: numb
   return { ...base, allowed: true };
 }
 
+/** About how many more reviews the included usage covers: the workspace's own average over its recent reviews (at least
+ * five, from per-call usage rows), else $0.065, a typical standard review. null when there is no limit. */
+export function reviewsLeft(limitMicros: number | null, usedMicros: number, calls: { reviewId?: string; estimatedCost: number }[]) {
+  if (limitMicros === null) return null;
+  const reviews = new Set(calls.flatMap((c) => c.reviewId ? [c.reviewId] : [])).size;
+  const average = reviews >= 5 ? calls.reduce((sum, c) => sum + c.estimatedCost, 0) / reviews * 1e6 : 65_000;
+  return Math.max(0, Math.floor((limitMicros - usedMicros) / Math.max(1, average)));
+}
 /** Hosted agent fix runs a workspace gets each month, pooled across seats; null is unlimited (billing off). */
 export function fixRunLimit(decision: BillingDecision, seats: number, config: BillingConfig): number | null {
   if (decision.plan === "disabled") return null;

@@ -31,7 +31,9 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
   const [{ step: requested }, query] = await Promise.all([params, searchParams]);
   const { user, organization, status, billing, state } = await loadSetup();
   const step = resolveStep(requested, state);
-  if (step !== requested) redirect(`/dashboard/onboarding/${step}`);
+  // The plan chosen on the pricing page survives sign-up and workspace creation, and picks the plan step's main action.
+  const intent = query.intent === "starter" || query.intent === "pro" ? query.intent : undefined;
+  if (step !== requested) redirect(`/dashboard/onboarding/${step}${intent ? `?intent=${intent}` : ""}`);
 
   // The plan step counts only while a workspace still has to choose: an owner's first workspace starts on Free.
   if (step === "workspace" || !organization || !status) return <WizardFrame step="workspace" admin nextLabel="Create workspace" centered>
@@ -40,6 +42,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
       <Heading step="workspace">A workspace holds your repositories, review settings, history and team. You can rename it later.</Heading>
       <StepForm action={createSetupWorkspace} pendingLabel="Creating workspace…">
         <label>Workspace name<input name="name" required maxLength={100} autoFocus placeholder="Acme engineering" /></label>
+        {intent && <input type="hidden" name="intent" value={intent} />}
       </StepForm>
       <WorkspaceInvitations invitations={user.invitations} />
     </div>
@@ -118,12 +121,13 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
     const carries = Boolean(checkoutTrialEnd(billing.trialEndsAt, now)), trialLeft = Math.ceil((billing.trialEndsAt - now) / 86400000);
     const elapsed = billing.trialStarted ? Math.max(0, Math.min(billing.trialDays, Math.floor((now - billing.trialEndsAt) / 86400000) + billing.trialDays)) : 0;
     const percent = Math.min(100, Math.round((billing.used / Math.max(1, billing.limit ?? 1)) * 100));
+    const primary = intent ?? "pro", primaryName = primary === "pro" ? "Pro" : "Starter";
     const cards = [
       { plan: "free", name: "Free", price: "$0", points: [`${usdText(billing.freeUsageMicros)} of model usage per workspace each month`, "Fast and standard reviews with security checks", "Every provider, and the CLI and MCP with browser sign-in", "No card needed"] },
-      { plan: "starter", name: "Starter", price: process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly", points: [`${usdText(billing.usagePerSeatMicros)} of model usage per seat each month, pooled`, "Optional extra usage up to a cap you set", "Owners, admins and members are seats; viewers are free"] },
-      { plan: "pro", name: "Pro", price: process.env.BILLING_PRO_PRICE_LABEL ?? "Per seat, billed monthly", points: [`${usdText(billing.proUsagePerSeatMicros)} of model usage per seat each month, pooled`, "Deep reviews", "Generated reproduction tests", "Fix pull requests", "Requirements from Linear, Jira and Notion", "SSO, audit log and API keys"] },
+      { plan: "starter", name: "Starter", price: process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly", points: [`${usdText(billing.usagePerSeatMicros)} of model usage per seat each month, pooled`, `${billing.starterFixesPerSeat} OpenReview agent fixes per seat each month`, "Your own model key", "Optional extra usage up to a cap you set", "Owners, admins and members are seats; viewers are free"] },
+      { plan: "pro", name: "Pro", price: process.env.BILLING_PRO_PRICE_LABEL ?? "Per seat, billed monthly", points: [`${usdText(billing.proUsagePerSeatMicros)} of model usage per seat each month, pooled`, `${billing.proFixesPerSeat} OpenReview agent fixes per seat each month`, "Deep reviews with the agentic engines", "Generated reproduction tests", "Requirements from Linear, Jira and Notion", "SSO, audit log and API keys"] },
     ] as const;
-    return <WizardFrame step="plan" {...frame} nextLabel={paid ? "Continue" : confirming ? "Waiting for Stripe…" : carries ? `Start ${trialLeft}-day Pro trial` : "Choose Pro"}>
+    return <WizardFrame step="plan" {...frame} nextLabel={paid ? "Continue" : confirming ? "Waiting for Stripe…" : carries ? `Start ${trialLeft}-day ${primaryName} trial` : `Choose ${primaryName}`}>
       <div className="wizard-panel">
         <Heading step="plan">{paid ? `Your workspace is on the ${billing.planName} plan. Seats follow your team, so there is nothing else to set up.`
           : `Choose a plan. Free needs no card. ${carries ? `Starter and Pro come with ${trialLeft} days free: add a card now and nothing is charged until the trial ends.` : "Starter and Pro are billed per seat each month."} Change plans anytime in Organization Settings → Billing & Usage.`}</Heading>
@@ -140,7 +144,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
             {card.plan === "free" && !paid && billing.freeElsewhere && <p className="muted">Free is one workspace per owner, and an owner of this workspace already has &ldquo;{billing.freeElsewhere}&rdquo; on Free. Choose Starter or Pro here, or use &ldquo;{billing.freeElsewhere}&rdquo; for free reviews.</p>}
             {admin && !paid && !confirming && (card.plan === "free"
               ? !billing.freeElsewhere && <form action={continueOnFree}><input type="hidden" name="organizationId" value={organizationId} /><button>Continue on Free</button></form>
-              : <form id={card.plan === "pro" ? "wizard-form" : undefined} action={checkoutFromSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value={card.plan} />{card.plan === "starter" && <button>Choose Starter</button>}</form>)}
+              : <form id={card.plan === primary ? "wizard-form" : undefined} action={checkoutFromSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value={card.plan} />{card.plan !== primary && <button>Choose {card.name}</button>}</form>)}
           </article>)}
         </div>
         <dl className="facts">

@@ -48,6 +48,7 @@ export const overview = action({ args: { token: v.string() }, handler: async (ct
 } });
 
 export type OperatorReport = Awaited<ReturnType<typeof operatorReport>>;
+const funnelSteps = ["signup_verified", "first_repository_connected", "first_review_completed", "checkout_started", "subscribed", "first_paid", "upgrade_requested"] as const;
 // Metadata and counts across every workspace: names, plans, seats, spend and activity times. Never code, review or
 // finding text, chat, emails or user agents. The newest 500 workspaces and users, and 30 days of model calls.
 async function operatorReport(ctx: QueryCtx) {
@@ -123,8 +124,14 @@ async function operatorReport(ctx: QueryCtx) {
   ])).sort((x, y) => y.at - x.at).slice(0, feedSize);
 
   const total = (key: "spend" | "reviews" | "blocked" | "fixes") => workspaces.reduce((n, w) => n + w[key], 0);
+  // Funnel steps and paywall hits from conversionEvents (convex/conversions.ts), each counted once per workspace or user.
+  const [steps, paywalls] = await Promise.all([
+    Promise.all(funnelSteps.map(async (name) => ({ name, count: (await ctx.db.query("conversionEvents").withIndex("by_name_at", (q) => q.eq("name", name).gte("at", since)).take(5000)).length }))),
+    ctx.db.query("conversionEvents").withIndex("by_name_at", (q) => q.eq("name", "paywall").gte("at", since)).take(5000),
+  ]);
+  const wanted = Object.entries(paywalls.reduce<Record<string, number>>((n, e) => ({ ...n, [e.method ?? "unknown"]: (n[e.method ?? "unknown"] ?? 0) + 1 }), {})).map(([feature, count]) => ({ feature, count })).sort((x, y) => y.count - x.count);
   return {
-    billing: config.enabled, days, series, chart, workspaces, users: people, activity,
+    billing: config.enabled, days, series, chart, workspaces, users: people, activity, funnel: { steps, wanted },
     access: await Promise.all(access.map(async (e) => ({ id: e._id, at: e.createdAt, action: e.action, user: await login(e.userId) }))),
     capped: { workspaces: organizations.length === cap, users: users.length === cap, usage: usage.length === usageCap },
     totals: { users: users.length, workspaces: workspaces.length, operators: operators.size, spend: total("spend"), reviews: total("reviews"), blocked: total("blocked"), fixes: total("fixes"), plans: Object.fromEntries(["free", "starter", "pro"].map((p) => [p, workspaces.filter((w) => w.plan === p).length])) },

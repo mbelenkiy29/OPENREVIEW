@@ -477,11 +477,14 @@ export const review = internalAction({
       };
       // K2: comment > label > configured tier (raised by touched folders); a request only raises a fixed tier
       // ("auto" counts as no tier); the admin cap applies last.
-      // A plan without deep reviews caps the tier at standard, below any admin cap.
+      // A plan without deep reviews caps the tier at standard, below any admin cap, and runs the standard pipeline
+      // instead of the agentic engines with the workspace's default model (deep reviews are the Pro feature).
       const deepAllowed = await ctx.runQuery(internal.billing.entitlement, { organizationId: repo.organizationId, key: "review.deep" }), adminCap = z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep");
       const tier = resolveTier({ configured: z.enum(modes).parse(effective.mode), diff: pr.diff, requested: state.review.requestedMode ? { mode: state.review.requestedMode, source: state.review.requestedModeSource ?? "comment" } : undefined, cap: deepAllowed || adminCap !== "deep" ? adminCap : "standard" });
-      const planCapped = !deepAllowed && tier.requested === "deep";
+      const agenticEngine = effective.reviewEngine === "agentic" || effective.reviewEngine === "hypotheses" ? effective.reviewEngine : undefined;
+      const planCapped = !deepAllowed && (tier.requested === "deep" || Boolean(agenticEngine));
       const testsLocked = await ctx.runQuery(internal.runtime.testsLocked, { repositoryId: repo._id });
+      for (const method of [...(planCapped ? ["review.deep"] : []), ...(testsLocked ? ["review.reproTests"] : [])]) await ctx.runMutation(internal.conversions.record, { name: "paywall", organizationId: repo.organizationId, method });
       const touchedDirectories = pr.diff.flatMap((f) => { const d = directorySettings(f.path); return d && !d.ignored ? [d] : []; });
       const configNotes = [...repoConfig.warnings, ...guidance.rejected, ...(planCapped ? [upgradeNote["review.deep"]] : []), ...(testsLocked ? [upgradeNote["review.reproTests"]] : []), ...(configured.blocked.length ? [`Repository config values for ${configured.blocked.join(", ")} were not applied because an administrator locked them.`] : [])];
       // Incremental review when the last reviewed head is an ancestor of this head.
@@ -571,7 +574,7 @@ export const review = internalAction({
       // Agent-authored pull requests (explicit signals only) may be routed to a dedicated model.
       const aiAuthored = detectAiAuthored({ author: pr.user.login, branch: pr.head.ref, body: pr.body, commits: pr.commits });
       const routed = reviewModelFor({ model: settings.model, aiAuthoredModel: effective.aiAuthoredModel }, aiAuthored);
-      const modelProvider = await budgetModel(ctx,repo.organizationId,routed.model, {
+      const modelProvider = await budgetModel(ctx,repo.organizationId,deepAllowed?routed.model:undefined, {
         get: (key) =>
           ctx.runQuery(internal.cache.get, {
             organizationId: repo.organizationId,
@@ -636,7 +639,7 @@ export const review = internalAction({
           }
         },
       };
-      const engine = effective.reviewEngine === "agentic" || effective.reviewEngine === "hypotheses" ? effective.reviewEngine : undefined;
+      const engine = deepAllowed ? agenticEngine : undefined;
       const result = {...await reviewChange(
         {
           repository: repo.fullName,
@@ -724,7 +727,7 @@ export const review = internalAction({
         requirementsNotMet: result.metadata.requirementsNotMet,
         modeDecision: tier,
         // The model that ran: a workspace's own key keeps its own model whatever the routing asked for.
-        aiAuthored: aiAuthored ? { ...aiAuthored, ...(routed.routed ? { model: modelProvider.modelFor("review") } : {}) } : undefined,
+        aiAuthored: aiAuthored ? { ...aiAuthored, ...(deepAllowed && routed.routed ? { model: modelProvider.modelFor("review") } : {}) } : undefined,
         coverageLimits: result.metadata.coverageLimits,
         findings: [...result.findings,...(result.metadata.carriedForward??[])],
         resolved: result.metadata.resolvedFingerprints,
@@ -768,7 +771,7 @@ export const review = internalAction({
         return;
       }
       const message = error instanceof Error ? error.message : "Review failed";
-      await finishCheck(check, supersededCheck(message) ? { conclusion: "neutral", title: "Superseded by a newer revision", summary: "This review stopped because the pull request changed or closed while it ran. A review of the newer revision replaces it.", detailsUrl: dashboardUrl(args.reviewId) } : { conclusion: "neutral", title: "Review could not be completed", summary: "OpenReview could not complete this review: " + redact(message).slice(0, 500), detailsUrl: dashboardUrl(args.reviewId) });
+      await finishCheck(check, supersededCheck(message) ? { conclusion: "neutral", title: "Superseded by a newer revision", summary: "This review stopped because the pull request changed or closed while it ran. A review of the newer revision replaces it.", detailsUrl: dashboardUrl(args.reviewId) } : { conclusion: "neutral", title: "Review could not be completed", summary: /Billing: /.test(message) ? billingNoticeBody(process.env.APP_URL) : "OpenReview could not complete this review: " + redact(message).slice(0, 500), detailsUrl: dashboardUrl(args.reviewId) });
       console.error(
         JSON.stringify({
           event: "review.failed",

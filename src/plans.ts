@@ -3,12 +3,13 @@
 export const plans = ["free", "starter", "pro"] as const;
 export type Plan = (typeof plans)[number];
 // Pro features: the ones that cost us to run, plus the team and admin features. Security checks never are.
-// Starter also gets hosted fix pull requests, with a smaller monthly run limit (fixRunLimit in src/billing.ts).
-export const entitlements = ["review.deep", "review.reproTests", "fix.pullRequests", "context.requirements", "memory.conventions", "api.access", "analytics.history", "auth.sso", "audit.log"] as const;
+// Starter also gets hosted fix pull requests, with a smaller monthly run limit (fixRunLimit in src/billing.ts), and the
+// workspace's own model key, whose calls are not metered (so Free stays bounded by its included usage).
+export const entitlements = ["review.deep", "review.reproTests", "fix.pullRequests", "context.requirements", "memory.conventions", "api.access", "analytics.history", "auth.sso", "audit.log", "model.ownKey"] as const;
 export type Entitlement = (typeof entitlements)[number];
 export const planCatalog: Record<Plan, { name: string; entitlements: readonly Entitlement[] }> = {
   free: { name: "Free", entitlements: [] },
-  starter: { name: "Starter", entitlements: ["fix.pullRequests"] },
+  starter: { name: "Starter", entitlements: ["fix.pullRequests", "model.ownKey"] },
   pro: { name: "Pro", entitlements },
 };
 // legacy: a Starter subscription from before Pro existed keeps every feature it had (grandfathered).
@@ -24,6 +25,7 @@ export const upgradeNote: Record<Entitlement, string> = {
   "analytics.history": "Analytics older than 30 days are on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage.",
   "auth.sso": "Single sign-on is on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage.",
   "audit.log": "The audit log is on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage. Changes are still recorded.",
+  "model.ownKey": "Your own model key is on the Starter and Pro plans; a workspace admin can upgrade in Organization Settings → Billing & Usage. A saved key is kept and works again after upgrading.",
 };
 // When the Pro gates shipped: SSO connections created before then stay fully editable on any plan.
 export const proGatesAt = Date.UTC(2026, 9, 21);

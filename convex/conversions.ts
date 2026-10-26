@@ -1,5 +1,7 @@
-import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { internalMutation, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import { v } from "convex/values";
+import { entitlements } from "../src/plans";
 
 // Funnel milestones, recorded server-side in the transaction that reaches them, once each: the key is
 // looked up before the insert and mutations are serializable, so retries and racing requests leave one
@@ -9,13 +11,24 @@ import type { Doc, Id } from "./_generated/dataModel";
 //   github_app_installed:<org>      the workspace's first GitHub App installation (repositories.ts connect)
 //   first_repository_connected:<org>, first_review_completed:<org>, subscribed:<org>
 //                                   from lifecycleEmails.ts, which records each once per workspace
-export type Conversion = "signup_verified" | "github_app_installed" | "first_repository_connected" | "first_review_completed" | "subscribed";
+//                                   (subscribed is a card added at Checkout, trials included)
+//   checkout_started:<org>:<plan>   Stripe Checkout opened (billingJobs.checkout); without a later subscribed it was abandoned
+//   first_paid:<org>                the first invoice.paid with money in it (billing.applyStripeEvent)
+//   paywall:<feature>:<org>         something wanted a feature the plan lacks: a deep review or agentic engine capped,
+//                                   repro tests or linked tickets skipped, a fix PR asked for on Free (method = feature)
+//   upgrade_requested:<org>         a member asked the admins to upgrade (notifications.requestUpgrade)
+export type Conversion = "signup_verified" | "github_app_installed" | "first_repository_connected" | "first_review_completed" | "subscribed" | "checkout_started" | "first_paid" | "paywall" | "upgrade_requested";
 export async function recordConversion(ctx: MutationCtx, name: Conversion, subject: string, fields: { userId?: Id<"users">; organizationId?: Id<"organizations">; method?: string } = {}) {
   const key = `${name}:${subject}`;
   if (await ctx.db.query("conversionEvents").withIndex("by_key", (q) => q.eq("key", key)).first()) return false;
   await ctx.db.insert("conversionEvents", { name, key, ...fields, at: Date.now() });
   return true;
 }
+// For actions: Checkout opened, or a review that skipped a feature the plan lacks.
+export const record = internalMutation({ args: { name: v.union(v.literal("checkout_started"), v.literal("paywall")), organizationId: v.id("organizations"), method: v.string() }, handler: async (ctx, a) => {
+  if (a.name === "paywall" && !(entitlements as readonly string[]).includes(a.method)) throw new Error("Unknown feature");
+  await recordConversion(ctx, a.name, `${a.name === "paywall" ? a.method + ":" + a.organizationId : a.organizationId + ":" + a.method}`, { organizationId: a.organizationId, method: a.method });
+} });
 
 // Internal and test accounts, left out of analytics milestones (so no ad conversion) and of the funnel
 // report: ANALYTICS_INTERNAL_EMAILS, ANALYTICS_INTERNAL_EMAIL_DOMAINS (subdomains too) and

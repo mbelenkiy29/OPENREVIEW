@@ -78,7 +78,7 @@ export const modelChoice=query({args:{token:v.string(),organizationId:v.id("orga
  await authorize(ctx,a.token,a.organizationId);
  const scope=(await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect()).find(s=>!s.teamId);
  const ownKey=await ctx.db.query("modelKeys").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).first();
- return {model:scope?.overrideKeys.includes("model")&&scope.settings.model||null,models:allowedModels(),defaultModel:process.env.LLM_MODEL||null,ownKey:Boolean(ownKey)};
+ return {model:scope?.overrideKeys.includes("model")&&scope.settings.model||null,models:allowedModels(),defaultModel:process.env.LLM_MODEL||null,ownKey:Boolean(ownKey)&&await hasEntitlement(ctx,a.organizationId,"model.ownKey")};
 }});
 // An empty model returns the workspace to the operator's default. Teams and repositories can still override it.
 export const setWorkspaceModel=mutation({args:{token:v.string(),organizationId:v.id("organizations"),model:v.string()},handler:async(ctx,a)=>{

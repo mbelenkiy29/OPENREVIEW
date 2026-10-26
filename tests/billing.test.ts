@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, fixRunLimit, formEncode, nextPeriodStart, openSubscription, periodKey, seatCount, stripe, stripeGet, stripeKey, stripeV2, trialEndsFrom, verifyStripeSignature } from "../src/billing";
+import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, fixRunLimit, formEncode, reviewsLeft, nextPeriodStart, openSubscription, periodKey, seatCount, stripe, stripeGet, stripeKey, stripeV2, trialEndsFrom, verifyStripeSignature } from "../src/billing";
 
 const config = billingConfig({ BILLING_ENABLED: "true", BILLING_FREE_USAGE_USD: "3", BILLING_USAGE_PER_SEAT_USD: "10", BILLING_GRACE_DAYS: "7" });
 const now = Date.UTC(2026, 9, 14), day = 86400000, usd = 1e6;
@@ -170,4 +170,14 @@ test("Stripe v2 requests send JSON, index include[] in the query, and only reach
 test("the pinned API version is dahlia: account links still take configurations", () => {
   // 2026-09-30.endive drops account_links use_case configurations; update startPayoutSetup when this changes.
   assert.equal(STRIPE_API_VERSION, "2026-08-26.dahlia");
+});
+
+test("reviews left: the workspace's own average after five reviews, else a typical standard review; none without a limit", () => {
+  assert.equal(reviewsLeft(null, 0, []), null);
+  assert.equal(reviewsLeft(3_000_000, 1_050_000, []), 30, "($3 - $1.05) / $0.065");
+  // Two calls each for five reviews at $0.10 per review: (3 - 1) / 0.10.
+  const calls = Array.from({ length: 10 }, (_, i) => ({ reviewId: `r${i % 5}`, estimatedCost: 0.05 }));
+  assert.equal(reviewsLeft(3_000_000, 1_000_000, calls), 20);
+  assert.equal(reviewsLeft(3_000_000, 1_000_000, calls.filter((c) => c.reviewId !== "r4")), 30, "four reviews are too few to trust");
+  assert.equal(reviewsLeft(3_000_000, 4_000_000, calls), 0, "never negative past the limit");
 });

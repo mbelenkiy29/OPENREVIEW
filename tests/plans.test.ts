@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { entitled, entitlements, planForPrice, priceFor } from "../src/plans";
 import { billingConfig, billingDecision, fixRunLimit } from "../src/billing";
 
-test("only Pro unlocks the costly features (Starter also gets fix pull requests), and self-hosted (billing off) unlocks everything", () => {
+test("only Pro unlocks the costly features (Starter also gets fix pull requests and its own model key), and self-hosted (billing off) unlocks everything", () => {
   for (const key of entitlements) {
     assert.equal(entitled("pro", key), true, key);
-    assert.equal(entitled("starter", key), key === "fix.pullRequests", key);
+    assert.equal(entitled("starter", key), key === "fix.pullRequests" || key === "model.ownKey", key);
     assert.equal(entitled("free", key), false, key);
     assert.equal(entitled("disabled", key), true, key);
     assert.equal(entitled("starter", key, true), true, "a grandfathered Starter subscription keeps it");

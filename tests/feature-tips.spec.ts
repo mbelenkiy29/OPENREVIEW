@@ -62,3 +62,9 @@ test('effective settings include Feature tips by default only on the hosted clou
  expect(saved?.inherit).toBe(false);
  expect((await s.t.query(api.settings.repository,{token:s.token,repositoryId:s.repo._id})).settings.summarySections).not.toContain('tips');
 });
+
+test('tips never point at a feature the plan lacks: no agentic or linked-ticket tip on Free',async()=>{
+ const s=await setup();
+ process.env.BILLING_ENABLED='true';
+ expect(await s.choose(await s.review(),{references:'Fixes https://linear.app/acme/issue/ENG-1',rules:3})).toBeNull();
+});

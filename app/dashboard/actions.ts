@@ -295,7 +295,7 @@ export async function saveSettings(form: FormData) {
       severityThreshold: text(form, "severityThreshold"),
       categories: form.getAll("categories").map(String),
       mode: text(form, "mode"),
-      model: text(form, "model"),
+      model: form.has("model") ? text(form, "model") : previous.settings.model ?? "",
       instructions: text(form, "instructions"),
       commentStyle: text(form, "commentStyle"),
       reviewEngine: text(form, "reviewEngine") || previous.settings.reviewEngine || "pipeline",
@@ -379,6 +379,12 @@ export async function requestReferralPayout(form: FormData) {
 export async function openReferralPayoutDashboard() {
   const { token } = await current();
   await payoutStep(() => backend().action(api.referralJobs.payoutDashboardLink, { token }), "", "Could not open the Stripe dashboard.");
+}
+// "Ask an admin" on the usage banner: emails the workspace's owners and admins (once a day per member).
+export async function requestUpgrade(form: FormData) {
+  const { token } = await current();
+  try { await backend().mutation(api.notifications.requestUpgrade, { token, organizationId: text(form, "organizationId") as Id<"organizations"> }); await notify("Asked your workspace admins to upgrade."); }
+  catch (error) { await notify(`Couldn’t send the request: ${userMessage(error, "try again tomorrow")}`, "error"); }
 }
 export async function openBillingPortal(form: FormData) {
   const { token } = await current();

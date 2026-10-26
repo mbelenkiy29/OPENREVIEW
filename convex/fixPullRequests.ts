@@ -10,6 +10,7 @@ import { requireContextReader, requireFindingReader } from "./repositoryContext"
 import { effectiveSettings } from "./scopes";
 import { rateLimit } from "./rateLimit";
 import { eligibleFixFinding } from "../src/fix-prompt";
+import { recordConversion } from "./conversions";
 
 // "Fix with OpenReview" from the dashboard, and "@openreview fix this in a new PR": OpenReview's fix agent
 // (fixPullRequestJobs.run) edits the code and opens a pull request on a new branch. Each run counts against
@@ -78,7 +79,10 @@ export const startFromComment = internalMutation({
   handler: async (ctx, a): Promise<string> => {
     const finding = await ctx.db.get(a.findingId);
     if (!finding) throw new Error("Finding not found");
-    if (!await hasEntitlement(ctx, finding.organizationId, "fix.pullRequests")) return upgradeNote["fix.pullRequests"];
+    if (!await hasEntitlement(ctx, finding.organizationId, "fix.pullRequests")) {
+      await recordConversion(ctx, "paywall", `fix.pullRequests:${finding.organizationId}`, { organizationId: finding.organizationId, method: "fix.pullRequests" });
+      return upgradeNote["fix.pullRequests"];
+    }
     const allowance = await fixAllowance(ctx, finding.organizationId);
     if (!allowance.allowed) return allowance.reason.replace(/^Billing: /, "");
     await audit(ctx, finding.organizationId, undefined, "fix_pull_request.requested", `${finding._id} by @${a.author.slice(0, 100)}`);

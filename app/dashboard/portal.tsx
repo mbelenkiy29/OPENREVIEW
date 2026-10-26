@@ -8,12 +8,12 @@ import {ThemePicker} from "../theme";
 import { SignOutForm } from "../telemetry-identity";
 import { Mark } from "../ui/logo";
 import { Icon } from "../ui/icons";
-import { logout, openBillingPortal } from "./actions";
+import { logout, openBillingPortal, requestUpgrade } from "./actions";
 import { referralConfig } from "../../src/referrals";
 
 // The app chrome, rendered once by the portal layout and kept mounted across navigations: Greptile's
 // trial banner, identity row (organization menu, icon buttons, account menu) and the eight tabs.
-export function PortalNav({ login, avatar, email, role, organizationId, name, organizations, teams, savedTeam, trialDaysLeft, billingPortal, operator }: { login: string; avatar?: string; email?: string; role: string; organizationId: string; name: string; organizations: { _id: string; name: string }[]; teams: { _id: string; name: string }[]; savedTeam?: string; trialDaysLeft?: number; billingPortal?: boolean; operator?: boolean }) {
+export function PortalNav({ login, avatar, email, role, organizationId, name, organizations, teams, savedTeam, trialDaysLeft, trialCharge, usage, billingPortal, operator }: { login: string; avatar?: string; email?: string; role: string; organizationId: string; name: string; organizations: { _id: string; name: string }[]; teams: { _id: string; name: string }[]; savedTeam?: string; trialDaysLeft?: number; trialCharge?: { plan: string; date: string }; usage?: { text: string; admin: boolean; free: boolean }; billingPortal?: boolean; operator?: boolean }) {
   const feedback = Boolean(userJotConfig()), referrals = referralConfig().enabled;
   // The provider's avatar, at most 45px: next/image would need every avatar host allow-listed for no gain.
   // eslint-disable-next-line @next/next/no-img-element
@@ -21,7 +21,14 @@ export function PortalNav({ login, avatar, email, role, organizationId, name, or
   return <div className="portal-top">
     {/* Admins go straight to the Stripe billing portal, like Payment Details' button (a failure lands on Billing
         with an alert); others go to Payment Details. A plain link to Billing did nothing on the Billing page itself. */}
-    {trialDaysLeft !== undefined && <div className="trial-banner"><span>{trialDaysLeft} {trialDaysLeft === 1 ? "day" : "days"} left in your free trial!</span>
+    {/* The usage warning takes the banner's place when both apply. Members can't change billing, so they ask an admin. */}
+    {usage && <div className="trial-banner" role="status"><span>{usage.text}</span>
+      {usage.admin ? <Link className="button small" href="/dashboard/organization/billing">{usage.free ? "Upgrade" : "Manage usage"}</Link>
+        : <form action={requestUpgrade}><input type="hidden" name="organizationId" value={organizationId} /><button className="button small">Ask an admin</button></form>}</div>}
+    {!usage && trialDaysLeft !== undefined && trialCharge && <div className="trial-banner"><span>Your {trialCharge.plan} trial ends in {trialDaysLeft} {trialDaysLeft === 1 ? "day" : "days"}; your card will be charged on {trialCharge.date}.</span>
+      {billingPortal ? <form action={openBillingPortal}><input type="hidden" name="organizationId" value={organizationId} /><button className="button small">Manage billing</button></form>
+        : <Link className="button small" href="/dashboard/organization/billing">Billing</Link>}</div>}
+    {!usage && trialDaysLeft !== undefined && !trialCharge && <div className="trial-banner"><span>{trialDaysLeft} {trialDaysLeft === 1 ? "day" : "days"} left in your free trial!</span>
       {billingPortal ? <form action={openBillingPortal}><input type="hidden" name="organizationId" value={organizationId} /><button className="button small"><Icon name="plus" />Add Payment Method</button></form>
         : <Link className="button small" href="/dashboard/organization/billing#payment-heading"><Icon name="plus" />Add Payment Method</Link>}</div>}
     <div className="portal-identity">

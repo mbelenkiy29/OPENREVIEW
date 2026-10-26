@@ -6,7 +6,7 @@ import { runtimeDefaults } from "../../src/review-settings";
 import { Row,Switch } from "./settings-ui";
 import { Stepper } from "./review-controls";
 type Policy=Omit<typeof runtimeDefaults,"generatedTests"|"testCommand">&{generatedTests?:boolean;testCommand?:string};
-export function RuntimePolicyForm({organizationId,policies,teams,repositories}:{organizationId:string;policies:{teamId?:string;repositoryId?:string;policy:Policy}[];teams:{_id:string;name:string}[];repositories:{_id:string;fullName:string;teamId?:string}[]}){
+export function RuntimePolicyForm({organizationId,policies,teams,repositories,reproLocked}:{organizationId:string;policies:{teamId?:string;repositoryId?:string;policy:Policy}[];teams:{_id:string;name:string}[];repositories:{_id:string;fullName:string;teamId?:string}[];reproLocked?:boolean}){
  const [scope,setScope]=useState("organization"),[state,action,pending]=useActionState(saveRuntimePolicy,{}),u=useId();
  const repoId=scope.startsWith("repository:")?scope.slice(11):undefined,teamId=scope.startsWith("team:")?scope.slice(5):undefined,repo=repositories.find(r=>r._id===repoId);
  const own=policies.find(p=>p.repositoryId===repoId&&p.teamId===teamId);
@@ -20,7 +20,7 @@ export function RuntimePolicyForm({organizationId,policies,teams,repositories}:{
    <Row id={u+"command"} title="Approved test command" className="field-row"><input id={u+"command"} name="command" defaultValue={value.command} placeholder="node --test tests/*.test.js" maxLength={2000}/></Row>
    <Row id={u+"timeout"} title="Timeout in seconds"><Stepper id={u+"timeout"} name="timeout" min={1} max={600} value={value.timeout}/></Row>
    <Row id={u+"required"} title="Require successful runtime validation before automatic approval"><Switch id={u+"required"} name="requiredForApproval" value="true" on={value.requiredForApproval} help={false}/></Row>
-   <Row id={u+"generated"} title="Generate reproduction tests" help="Write tests for up to three verified findings and run them in this sandbox. They are never committed."><Switch id={u+"generated"} name="generatedTests" value="true" on={!!value.generatedTests}/></Row>
+   <Row id={u+"generated"} title="Generate reproduction tests" help={"Write tests for up to three verified findings and run them in this sandbox. They are never committed."+(reproLocked?" Generated reproduction tests are on the Pro plan; until then each review says why none ran.":"")}><Switch id={u+"generated"} name="generatedTests" value="true" on={!!value.generatedTests}/></Row>
    <Row id={u+"testCommand"} title="Test command template" className="field-row" help={<>{"{test}"} is replaced with the generated test file&apos;s path. The same image, timeout and isolation apply; dependencies must already be in the image.</>}><input id={u+"testCommand"} name="testCommand" maxLength={500} defaultValue={value.testCommand??""} placeholder="node --test {test}" aria-describedby={u+"testCommand-help"}/></Row>
    <p className="card-note">Approving this policy allows repository code to run in the selected container. Execution has no network or application secrets, a read-only root, and bounded CPU, memory, time and output. Dependencies must already exist in the approved image.</p>
    {/* Save comes first so Enter in a field saves; the footer shows it on the right. */}

@@ -241,6 +241,8 @@ test('seats follow membership: viewers are free and changes resync the subscript
   return new Response('unexpected',{status:500});});
  await expect(t.action(api.billingJobs.checkout,{token:bob.token,organizationId:org})).rejects.toThrow(/Forbidden/);
  expect(await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org})).toBe('https://checkout.stripe.com/c/pay/cs_1');
+ // Opening Checkout is a funnel step; one without a later subscribed was abandoned.
+ expect((await t.run(ctx=>ctx.db.query('conversionEvents').collect())).map(e=>e.key)).toContain(`checkout_started:${org}:starter`);
  const session=new URLSearchParams(calls[1].body);
  // The untouched 14-day trial carries into the subscription, so the card is not charged until it ends.
  expect(Object.fromEntries(session)).toMatchObject({mode:'subscription',customer:'cus_1',client_reference_id:org,integration_identifier:expect.stringMatching(/^openreview-starter-seats-[a-z]{8}$/),allow_promotion_codes:'true','line_items[0][price]':'price_seat','line_items[0][quantity]':'2','subscription_data[metadata][organizationId]':org,'subscription_data[trial_end]':String(Math.floor((Date.now()+14*86400000)/1000)),success_url:'https://review.example.com/dashboard/organization/billing?checkout=success',cancel_url:'https://review.example.com/dashboard/organization/billing?checkout=cancelled'});
