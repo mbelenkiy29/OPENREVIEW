@@ -10,7 +10,7 @@ import { contentSecurityPolicy, middlewareSkips, prefetchHeaders, securityHeader
 
 const fetchPolicy = [
   "style-src 'self' 'unsafe-inline' https://cdn.userjot.com https://fonts.googleapis.com",
-  "img-src 'self' data: blob: https://media.userjot.com https://cdn.userjot.com https://alb.reddit.com",
+  "img-src 'self' data: blob: https://media.userjot.com https://cdn.userjot.com https://alb.reddit.com https://avatars.githubusercontent.com https://*.googleusercontent.com https://gitlab.com https://secure.gravatar.com",
   "font-src 'self' https://fonts.gstatic.com",
   "connect-src 'self' https://widget.userjot.com wss://widget.userjot.com https://bzrcdn.openai.com https://bzr.openai.com https://pixel-config.reddit.com https://alb.reddit.com",
   "frame-src https://challenges.cloudflare.com https://*.userjot.com",
@@ -64,6 +64,20 @@ test("pages get a nonce script policy from middleware; everything it skips gets 
   for (const directive of ["style-src", "img-src", "font-src", "connect-src", "frame-src", "media-src", "manifest-src", "worker-src"]) assert.match(staticPolicy, new RegExp(`(^|; )${directive} `), directive);
   assert.doesNotMatch(staticPolicy.replace(/form-action [^;]*/, ""), /(\s|^)(https:|http:|\*)(\s|;|$)/);
   assert.equal(contentSecurityPolicy(), staticPolicy);
+});
+
+test("profile pictures from GitHub, Google and GitLab sign-ins are allowed images", () => {
+  // CSP host sources: an exact https origin, or https://*. for any subdomain of the rest.
+  const sources = /img-src ([^;]*)/.exec(contentSecurityPolicy("abc", false))![1].split(" ");
+  const allowed = (url: string) => { const { protocol, host } = new URL(url); return protocol === "https:" && sources.some((s) => s === `https://${host}` || (s.startsWith("https://*.") && host.endsWith(s.slice("https://*".length)))); };
+  for (const avatar of [
+    "https://avatars.githubusercontent.com/u/1?v=4",
+    "https://lh3.googleusercontent.com/a/ACg8ocJ=s96-c",
+    "https://lh6.googleusercontent.com/a/ACg8ocJ=s96-c",
+    "https://gitlab.com/uploads/-/system/user/avatar/1/avatar.png",
+    "https://secure.gravatar.com/avatar/0bc83cb571cd1c50ba6f3e8a78ef1346?s=80&d=identicon",
+  ]) assert.ok(allowed(avatar), avatar);
+  assert.ok(!allowed("https://example.com/avatar.png"));
 });
 
 test("nothing that ships with OpenReview frames its pages", () => {
