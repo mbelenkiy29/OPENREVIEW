@@ -9,6 +9,7 @@ import { entitled, entitlements, planCatalog, planEntitlements, planForPrice, up
 import { referralConfig } from "../src/referrals";
 import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus } from "./referralLedger";
 import { lifecycleEmail } from "./lifecycleEmails";
+import { operatorOwned } from "./operator";
 
 // Billing state, the review gate and the workspace usage ledger. With BILLING_ENABLED unset every check allows.
 // The account row starts with the first review or checkout. Without a subscription a workspace is on
@@ -32,10 +33,16 @@ async function usageOf(ctx: QueryCtx, organizationId: Id<"organizations">, perio
 // Until the first Checkout links a customer, the trial is a full one starting now.
 const paidTrialEndsAt = (account: { customerId?: string; trialEndsAt: number } | null, now: number) => account?.customerId ? account.trialEndsAt : trialEndsFrom(now, billingConfig());
 const spent = (usage: Doc<"billingUsage"> | null) => (usage?.usedMicros ?? 0) + (usage?.reservedMicros ?? 0);
+// A workspace an operator owns (convex/operator.ts) bills like a self-hosted install: unlimited usage and fixes, every
+// feature, nothing reported to Stripe. Its usage is still counted, and the deployment's inference budget still caps it.
+async function configFor(ctx: QueryCtx, organizationId: Id<"organizations">) {
+  const config = billingConfig();
+  return config.enabled && await operatorOwned(ctx, organizationId) ? { ...config, enabled: false } : config;
+}
 export const choosePlanMessage = "Choose a plan for this workspace first: a workspace admin picks Free, Starter or Pro under Setup → Choose your plan";
 /** A workspace that must choose a plan (new, on a billing deployment) and has no Stripe-confirmed choice yet. */
 export async function planMissing(ctx: QueryCtx, organizationId: Id<"organizations">) {
-  if (!billingConfig().enabled) return false;
+  if (!(await configFor(ctx, organizationId)).enabled) return false;
   const organization = await ctx.db.get(organizationId);
   return Boolean(organization?.planRequired && !organization.planSelectedAt);
 }
@@ -53,7 +60,7 @@ async function recordPlanSelected(ctx: MutationCtx, organizationId: Id<"organiza
 // chooses, any other one counts. Returns that workspace's name. Workspaces from before plans keep their allowance.
 async function freeElsewhere(ctx: QueryCtx, organizationId: Id<"organizations">, now: number): Promise<string | undefined> {
   const organization = await ctx.db.get(organizationId);
-  if (!organization?.planRequired) return;
+  if (!organization?.planRequired || await operatorOwned(ctx, organizationId)) return;
   for (const owner of (await members(ctx, organizationId)).filter((m) => m.role === "owner"))
     for (const other of await ctx.db.query("organizationMembers").withIndex("by_user", (q) => q.eq("userId", owner.userId)).collect()) {
       if (other.role !== "owner" || other.organizationId === organizationId) continue;
@@ -65,7 +72,7 @@ async function freeElsewhere(ctx: QueryCtx, organizationId: Id<"organizations">,
 }
 // billingDecision with the one-Free-per-owner rule, which only a Free workspace looks up.
 async function decide(ctx: QueryCtx, organizationId: Id<"organizations">, account: Parameters<typeof billingDecision>[0], used: number, now: number, request = 0) {
-  const config = billingConfig(), decision = billingDecision(account, used, now, config, request);
+  const config = await configFor(ctx, organizationId), decision = billingDecision(account, used, now, config, request);
   return decision.plan === "free" ? billingDecision(account, used, now, config, request, await freeElsewhere(ctx, organizationId, now)) : decision;
 }
 // Free needs no Stripe confirmation, so the workspace can start at once. Returns the name of the owner's
@@ -86,7 +93,7 @@ export const chooseFreePlan = mutation({ args: { token: v.string(), organization
 } });
 // Whether the workspace's plan includes a feature; with billing off every feature is unlocked.
 export async function hasEntitlement(ctx: QueryCtx, organizationId: Id<"organizations">, key: Entitlement) {
-  const config = billingConfig();
+  const config = await configFor(ctx, organizationId);
   if (!config.enabled) return true;
   const account = await accountOf(ctx, organizationId);
   return account ? entitled(billingDecision(account, 0, Date.now(), config).plan, key, account.legacy) : false;
@@ -123,8 +130,9 @@ export async function fixAllowance(ctx: MutationCtx, organizationId: Id<"organiz
   const decision = await decide(ctx, organizationId, account, spent(usage), now);
   if (!decision.allowed) return { allowed: false, reason: "Billing: " + decision.reason };
   if (decision.plan === "free") return { allowed: false, reason: "Billing: " + upgradeNote["fix.pullRequests"] };
-  const limit = fixRunLimit(decision, account.seats, config)!, used = usage?.fixes ?? 0;
-  if (used >= limit) return { allowed: false, reason: `Billing: This workspace used its ${limit} agent fixes for this month. They reset on ${resetText(now)}.${decision.plan === "starter" ? ` Pro includes ${config.proFixesPerSeat} per seat; a workspace admin can upgrade in Organization Settings → Billing & Usage.` : ""}` };
+  // No limit: an operator's workspace (decide), whose runs are still counted.
+  const limit = fixRunLimit(decision, account.seats, config), used = usage?.fixes ?? 0;
+  if (limit !== null && used >= limit) return { allowed: false, reason: `Billing: This workspace used its ${limit} agent fixes for this month. They reset on ${resetText(now)}.${decision.plan === "starter" ? ` Pro includes ${config.proFixesPerSeat} per seat; a workspace admin can upgrade in Organization Settings → Billing & Usage.` : ""}` };
   if (usage) await ctx.db.patch(usage._id, { fixes: used + 1 });
   else await ctx.db.insert("billingUsage", { organizationId, period, reviews: 0, blocked: 0, fixes: 1 });
   return { allowed: true };
@@ -151,7 +159,7 @@ export async function reserveUsage(ctx: MutationCtx, organizationId: Id<"organiz
 export async function settleUsage(ctx: MutationCtx, usageId: Id<"billingUsage">, reservedMicros: number, amount: number) {
   const usage = await ctx.db.get(usageId);
   if (!usage) return;
-  const account = await accountOf(ctx, usage.organizationId), decision = account ? billingDecision(account, 0, Date.now(), billingConfig()) : null;
+  const account = await accountOf(ctx, usage.organizationId), decision = account ? billingDecision(account, 0, Date.now(), await configFor(ctx, usage.organizationId)) : null;
   const before = usage.usedMicros ?? 0, after = before + amount, limit = decision?.plan === "starter" || decision?.plan === "pro" ? decision.limit! : null;
   const overage = limit === null ? 0 : Math.max(0, after - limit) - Math.max(0, before - limit);
   // Usage alerts: each threshold once per period; a jump past both sends only the 100% email.
@@ -194,6 +202,8 @@ export const status = query({ args: { token: v.string(), organizationId: v.id("o
   const { user, member } = await authorize(ctx, a.token, a.organizationId);
   const config = billingConfig();
   if (!config.enabled) return { enabled: false as const };
+  // An operator's own workspace has no plan or quota; the Billing page says so.
+  if (await operatorOwned(ctx, a.organizationId)) return { enabled: false as const, exempt: true as const };
   const stored = await accountOf(ctx, a.organizationId);
   const account = stored ?? { status: "trial", seats: 0, trialEndsAt: 0 } as Pick<Doc<"billingAccounts">, "status" | "seats" | "trialEndsAt"> & Partial<Doc<"billingAccounts">>;
   const now = Date.now(), usage = await usageOf(ctx, a.organizationId, periodKey(now));
