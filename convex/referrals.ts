@@ -70,7 +70,7 @@ export const applyCode = mutation({ args: { token: v.string(), organizationId: v
   if (!referralConfig().enabled) return { ok: false, error: "This deployment doesn’t run the referral program." };
   try { await rateLimit(ctx, `referral-apply:${user._id}`, 5, 3600000); } catch { return { ok: false, error: "Too many referral code attempts. Try again in an hour." }; }
   const fail = (error: string) => ({ ok: false as const, error }), owner = await codeOwner(ctx, a.code);
-  if (!owner) return fail("That referral code doesn’t exist. Check it and try again.");
+  if (!owner) return fail("That referral code doesn’t exist. A discount code goes on the Stripe checkout page instead: choose Starter or Pro, then Add promotion code.");
   if (owner.userId === user._id) return fail("You can’t use your own referral code.");
   if (await referralOfWorkspace(ctx, a.organizationId)) return fail("This workspace already has a referral.");
   if (!await codeWindowOpen(ctx, a.organizationId)) return fail(`A referral code can be added only in a workspace’s first ${REFERRAL_CODE_WINDOW_DAYS} days.`);

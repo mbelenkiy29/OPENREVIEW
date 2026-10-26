@@ -10,7 +10,7 @@ import { installProtocol } from "./bridge-install";
 import {p4CheckoutSchema,p4CheckoutKey,registerP4Checkout,verifyP4Checkout,p4FixFileSchema,p4CheckoutEnvironment} from "./bridge-p4";
 const execute=promisify(execFile);
 const directory=process.env.OPENREVIEW_BRIDGE_HOME??path.join(homedir(),".config","openreview","bridge");
-const configSchema=z.object({url:z.string().url(),token:z.string().regex(/^obr_[a-f0-9]{64}$/),repositories:z.record(z.string()).default({}),p4Repositories:z.record(p4CheckoutSchema).default({})});
+const configSchema=z.object({url:z.string().url(),token:z.string().regex(/^obr_[a-f0-9]{64}$/),repositories:z.record(z.string(),z.string()).default({}),p4Repositories:z.record(z.string(),p4CheckoutSchema).default({})});
 type Config=z.infer<typeof configSchema>;
 export function bridgeUrl(raw:string) {
  const u=new URL(raw);if(u.protocol!=="https:"&&!(u.protocol==="http:"&&["localhost","127.0.0.1"].includes(u.hostname)))throw new Error("Bridge server requires HTTPS or local development HTTP");

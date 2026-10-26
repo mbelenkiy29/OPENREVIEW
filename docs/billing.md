@@ -15,8 +15,10 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 
 The plan catalog is `src/plans.ts`. Security checks, every provider, and the CLI and MCP signed in through the browser are on every plan. With billing off every feature is unlocked.
 
-- **Choosing a plan (new workspaces):** a workspace created while billing is on (`organizations.planRequired`) must choose a plan before anything else. Setup goes workspace → **Choose your plan** → connect.
-  - **Free** is recorded at once (`billing.chooseFreePlan`, admins only).
+- **Choosing a plan (new workspaces):** a workspace created while billing is on (`organizations.planRequired`) needs a plan before anything else.
+  - **An owner's first Free workspace starts on Free** when it is created (`startOnFree`, audited as `billing.plan_selected`), so setup goes workspace → connect. Upgrading happens later in Settings → Billing.
+  - **A later workspace** (an owner already has one on Free) has no Free allowance, so setup goes workspace → **Choose your plan** → connect and the step offers Starter and Pro.
+  - **Free** chosen on the plan step is recorded at once (`billing.chooseFreePlan`, admins only), for example after the owner's Free workspace subscribed.
   - **Starter and Pro** open Stripe Checkout with a `BILLING_TRIAL_DAYS` (default 14) day trial, and the card is always collected (`payment_method_collection: always`). The choice is recorded only when Stripe confirms it: `checkout.session.completed` with a subscription, or a subscription that is trialing, active or past due.
   - Either way the choice is stored in `organizations.planSelectedAt` and `plan`, and audited as `billing.plan_selected`. Until then the dashboard sends everyone to the plan step (Billing, Account and Referrals settings stay open), and the server refuses indexing, reviews, advancing and finishing setup.
 - **Existing subscriptions (grandfathered):** subscriptions from before Pro existed keep every Pro feature while they stay on Starter (`billingAccounts.legacy`). Run once right after deploying plans: `npx convex run billing:grandfatherSubscriptions '{"confirm":"grandfather-pre-plan-subscriptions"}' --prod`.
@@ -60,7 +62,7 @@ Workspace and team defaults and repository settings pick the review model from t
 
 ## Choosing a plan during setup
 
-When billing is on, guided setup adds a **Choose your plan** step after inviting the team. It shows the Free, Starter and Pro cards and the seat count:
+When billing is on and the new workspace did not start on Free (an owner already has a Free workspace), guided setup adds a **Choose your plan** step right after the workspace. It shows the Free, Starter and Pro cards and the seat count:
 - **Continue on Free:** no card. Upgrade later in Settings → Billing. Not offered when an owner already has a Free workspace: the card names it instead.
 - **Choose Starter** or **Start Pro trial:** opens Stripe Checkout and returns to the step.
 

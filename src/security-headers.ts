@@ -5,8 +5,8 @@
 // Pages get their Content-Security-Policy from middleware.ts with a fresh script nonce per request:
 // Next.js puts it on its own inline scripts, app/layout.tsx on the theme script, and 'strict-dynamic'
 // lets those scripts load the rest (webpack chunks, PostHog, UserJot). Responses middleware skips
-// (API routes, static files, the PostHog and Sentry proxies, prefetches) serve no HTML and get the
-// policy without script-src from next.config.ts instead.
+// (API routes, static files, the PostHog and Sentry proxies, prefetches) run no scripts and get the
+// policy without script-src from next.config.ts instead, where default-src 'self' covers scripts.
 export const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
@@ -23,8 +23,24 @@ export const prefetchHeaders = [{ type: "header", key: "next-router-prefetch" },
 /** The Content-Security-Policy value: pages pass their script nonce, other responses none. */
 export function contentSecurityPolicy(nonce?: string, development = process.env.NODE_ENV === "development") {
   return [
+    "default-src 'self'",
     // Development builds evaluate code for Fast Refresh.
     nonce && `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
+    // 'unsafe-inline' for React style={} attributes, the email sign-in page and UserJot's shadow-DOM <style>;
+    // UserJot also adds its stylesheets and the Google Fonts CSS for Inter.
+    "style-src 'self' 'unsafe-inline' https://cdn.userjot.com https://fonts.googleapis.com",
+    // UserJot serves post and team images through its media proxy; the Reddit pixel may fall back to an image beacon.
+    "img-src 'self' data: blob: https://media.userjot.com https://cdn.userjot.com https://alb.reddit.com",
+    // Our fonts ship in the bundle (@fontsource); UserJot's Inter comes from Google Fonts.
+    "font-src 'self' https://fonts.gstatic.com",
+    // PostHog and Sentry go through same-origin proxies (src/telemetry.ts). UserJot's API and live updates,
+    // and the OpenAI Ads and Reddit pixels' config and events (src/ads-pixel.ts, src/reddit-pixel.ts).
+    "connect-src 'self' https://widget.userjot.com wss://widget.userjot.com https://bzrcdn.openai.com https://bzr.openai.com https://pixel-config.reddit.com https://alb.reddit.com",
+    // Cloudflare Turnstile's challenge (app/turnstile.tsx) and the embedded UserJot board on /feedback.
+    "frame-src https://challenges.cloudflare.com https://*.userjot.com",
+    "media-src 'self'",
+    "manifest-src 'self'",
+    "worker-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
     // Forms and the redirects they lead to: sign-in providers, SSO IdPs and Stripe are https; an MCP client's

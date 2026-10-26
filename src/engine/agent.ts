@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { toJsonSchema } from "./json-schema";
 import { indexRepository, redact } from "./indexer";
 import { memoryNeighbors, rankNeighborhood } from "./graph";
 import { executionClaimIssues } from "../execution-claims";
@@ -71,7 +71,7 @@ export type AgentState = {
 };
 const toolMessageSchema = z.union([
   z.object({ role: z.literal("user"), content: z.string() }),
-  z.object({ role: z.literal("assistant"), content: z.string(), toolCalls: z.array(z.object({ id: z.string(), name: z.string(), input: z.unknown() })), providerContent: z.unknown().optional(), provider: z.string().optional() }),
+  z.object({ role: z.literal("assistant"), content: z.string(), toolCalls: z.array(z.object({ id: z.string(), name: z.string(), input: z.unknown().optional() })), providerContent: z.unknown().optional(), provider: z.string().optional() }),
   z.object({ role: z.literal("tool"), results: z.array(z.object({ id: z.string(), content: z.string(), isError: z.boolean().optional() })) }),
 ]);
 export const agentStateSchema = z.object({
@@ -136,11 +136,6 @@ const descriptions: Record<keyof typeof agentToolInputs, string> = {
   get_past_findings: "Earlier OpenReview findings recorded for a file, with their status.",
   get_rules: "Custom review rules that apply to this change.",
   report_finding: "Report one verified defect introduced or materially affected by this change. filePath/startLine must be a changed line in the diff, except when the change breaks code it did not modify (such as an untouched caller): then anchor on that line and include evidence quoting the changed line that causes it. Every evidence quote must exactly match complete source lines at their stated 1-based line numbers.",
-};
-const toJsonSchema = (schema: z.ZodTypeAny) => {
-  const json = zodToJsonSchema(schema, { $refStrategy: "none", effectStrategy: "input" }) as Record<string, unknown>;
-  delete json.$schema;
-  return json;
 };
 export const agentTools: ToolDefinition[] = (Object.keys(agentToolInputs) as (keyof typeof agentToolInputs)[]).map((name) => ({ name, description: descriptions[name], inputSchema: toJsonSchema(agentToolInputs[name]) }));
 

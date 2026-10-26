@@ -2,6 +2,7 @@ import {changeMetadataSchema,catalogPageSize,numberedPage,validateChangePage,typ
 import { fixHandoffLink } from "./fix-command";
 import { reviewLinks } from "./review-summary";
 import { z } from "zod";
+import { isoTimestamp } from "./iso-timestamp";
 import { repositorySourceUrl } from "./source-url";
 import type { Finding, SourceFile } from "./engine/types";
 import { findingComment, summaryMarker, type Github } from "./github";
@@ -42,9 +43,9 @@ export type Scm = Pick<Github,"tree"|"blob"|"branches"|"sourceUrl"> & {
 const note=z.object({id:z.number(),body:z.string(),author:z.object({username:z.string()}),position:z.object({new_path:z.string(),new_line:z.number().nullable(),head_sha:z.string().optional()}).nullish()});
 const prSchema=z.object({iid:z.number(),title:z.string(),description:z.string().nullable(),draft:z.boolean(),state:z.string(),web_url:z.string(),author:z.object({id:z.number().int().positive().optional(),username:z.string()}),source_branch:z.string(),target_branch:z.string(),diff_refs:z.object({base_sha:z.string(),head_sha:z.string(),start_sha:z.string()})});
 const approvalUser=z.object({id:z.number().int().positive(),username:z.string().min(1)});
-const approvalState=z.object({approved_by:z.array(z.object({user:approvalUser,approved_at:z.string().datetime({offset:true}).optional()})),user_can_approve:z.boolean().optional()});
+const approvalState=z.object({approved_by:z.array(z.object({user:approvalUser,approved_at:isoTimestamp.optional()})),user_can_approve:z.boolean().optional()});
 const approvalNote=z.object({id:z.number().int().positive(),body:z.string(),author:approvalUser,system:z.boolean(),noteable_iid:z.number().int().positive(),noteable_type:z.literal("MergeRequest")});
-const approvalReceipt=z.object({head:z.string().regex(/^[a-f0-9]{40}$/),revisionKey:z.string().regex(/^[a-f0-9]{40}:[a-f0-9]{40}$/),approvedAt:z.string().datetime({offset:true}),botId:z.number().int().positive()}).strict();
+const approvalReceipt=z.object({head:z.string().regex(/^[a-f0-9]{40}$/),revisionKey:z.string().regex(/^[a-f0-9]{40}:[a-f0-9]{40}$/),approvedAt:isoTimestamp,botId:z.number().int().positive()}).strict();
 const approvalMarker=/^<!-- openreview:approval:[a-zA-Z0-9_-]+ -->$/;
 const receiptTitle="OpenReview native approval receipt. No merge was performed.";
 function receiptBody(receipt:z.infer<typeof approvalReceipt>,marker:string){return receiptTitle+"\n\n<!-- openreview-gitlab-approval:"+JSON.stringify(receipt)+" -->\n\n"+marker;}

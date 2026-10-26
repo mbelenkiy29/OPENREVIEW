@@ -13,6 +13,9 @@
 - During a paid-plan trial, reviews stop at the included usage; extra usage starts once the trial ends.
 - A subscription's status can't go backwards when Stripe sends two events in the same second.
 
+### Setup
+- Your first workspace now starts on the Free plan, so setup goes straight from naming the workspace to connecting your code. Upgrade anytime in **Settings → Billing**. Any later workspace still picks a plan, because each owner gets one Free workspace.
+
 ### Dashboard navigation
 - Switching tabs no longer shows a loading screen. The header, tabs and sidebar stay in place, the tab you click is marked at once, and the page changes when it's ready.
 - The underline slides to the tab you click, and so does the box on the review page's tabs. Every Memory and Settings sidebar row has an icon.
