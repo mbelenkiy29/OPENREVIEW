@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { Suggestion } from "./suggestions";
 import { localAgentLabels, localAgents } from "./fix-agents";
 
 // `@openreview fix this` in a finding thread: reply with a validated committable suggestion and
@@ -18,13 +17,6 @@ export const fixSuggestionSchema = z.object({ replacement: z.string().max(4000),
 
 export function rangeText(content: string, startLine: number, endLine: number) {
   return content.replace(/\r\n/g, "\n").split("\n").slice(startLine - 1, endLine).join("\n");
-}
-// Replaces exactly the suggestion's lines; the caller has already validated it against this content.
-export function applySuggestion(content: string, s: Suggestion) {
-  const lines = content.replace(/\r\n/g, "\n").split("\n");
-  if (lines.slice(s.startLine - 1, s.endLine).join("\n") !== s.original.replace(/\r\n/g, "\n")) throw new Error("Suggestion no longer matches the file");
-  lines.splice(s.startLine - 1, s.endLine - s.startLine + 1, ...s.replacement.replace(/\r\n/g, "\n").split("\n"));
-  return lines.join("\n");
 }
 
 export function fixBranchName(prNumber: number, fingerprint: string) {

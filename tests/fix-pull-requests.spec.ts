@@ -4,7 +4,7 @@ import { SignJWT } from "jose";
 import schema from "../convex/schema";
 import { api } from "../convex/_generated/api";
 import { HttpModel } from "../src/engine/model";
-import type { ToolCall, ToolRequest, ToolTurn } from "../src/engine/types";
+import type { ToolCall, ToolTurn } from "../src/engine/types";
 import { Github } from "../src/github";
 import { Gitea } from "../src/gitea";
 import { defaults } from "../src/review-settings";
@@ -46,7 +46,7 @@ async function setup(permissions: Record<string, string> = { contents: "write", 
   const openFix = vi.spyOn(scm, "openFixPullRequest").mockResolvedValue({ url: "https://github.com/alice/fixes/pull/4", reused: false });
   const audits = async () => (await t.run((ctx) => ctx.db.query("auditEvents").collect())).map((a) => a.action);
   // The fix agent's model: each turn returns the next scripted tool calls.
-  const agent = (turns: ToolCall[][]) => vi.spyOn(HttpModel.prototype, "runTools").mockImplementation(async (_request: ToolRequest): Promise<ToolTurn> => {
+  const agent = (turns: ToolCall[][]) => vi.spyOn(HttpModel.prototype, "runTools").mockImplementation(async (): Promise<ToolTurn> => {
     const calls = turns.shift() ?? [];
     return { content: calls.length ? "" : "Done.", toolCalls: calls, stopReason: calls.length ? "tool_use" : "end_turn", usage: { task: "fix", provider: "fixture", model: "fixture", inputTokens: 10, outputTokens: 5, latencyMs: 1, estimatedCost: 0.001, cached: false }, message: { role: "assistant", content: "", toolCalls: calls } };
   });
