@@ -8,6 +8,8 @@ import { SummarySettings } from "../summary-settings";
 
 import type { DashboardContext } from "../load";
 
+// The stored snapshot is capped in length; an older cut-off one shows no values rather than breaking the page.
+const fileSnapshot = (values: string): Record<string, unknown> => { try { return JSON.parse(values) as Record<string, unknown>; } catch { return {}; } };
 export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
   const { apiKeys, mcpConnections, modelKey, conventions, data, filters, isAdmin, organization, repoLabel, repoSettings, requestedRepository, section, semantic } = ctx;
   return (
@@ -74,7 +76,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                   {repoSettings.repo.configFile?.warnings.map((w) => <p key={w} className="warning" role="alert">{w}</p>)}
                   <table><thead><tr><th>Setting</th><th>Value</th><th>Source</th></tr></thead><tbody>{lockableKeys.map((key) => {
                     const fromFile = repoSettings.repo.configFile?.applied.includes(key), locked = repoSettings.repo.configFile?.blocked.includes(key);
-                    const fileValues = fromFile ? JSON.parse(repoSettings.repo.configFile!.values) as Record<string, unknown> : {};
+                    const fileValues = fromFile ? fileSnapshot(repoSettings.repo.configFile!.values) : {};
                     const value = fromFile ? fileValues[key] : (repoSettings.settings as Record<string, unknown>)[key];
                     return <tr key={key}><td>{key}</td><td><code>{JSON.stringify(value ?? null).slice(0, 120)}</code></td><td>{fromFile ? "repository file" : (repoSettings.provenance[key] ?? "default") + ((repoSettings.settings.lockedKeys ?? []).includes(key) ? " · locked" : "") + (locked ? " (file value ignored)" : "")}</td></tr>;
                   })}</tbody></table>

@@ -19,7 +19,7 @@ test('GitHub pull_request webhooks honour trigger labels, mention-only mode and 
   const organizationId=await t.mutation(api.users.createOrganization,{token,name:'Triggers'});
   await t.mutation(api.repositories.connect,{token,secret:'integration-service-secret',organizationId,installationId:91,account:'alice',accountId:1,repositories:[{id:9191,fullName:'alice/triggers',defaultBranch:'main'}]});
   const [repo]=await t.query(api.repositories.list,{token,organizationId});
-  await t.mutation(api.repositories.configure,{token,repositoryId:repo._id,enabled:true,settings:{...defaults,automatic:false,rereview:true,triggerLabels:['needs-review'],excludedAuthors:['dependabot[bot]']}});
+  await t.mutation(api.repositories.configure,{token,repositoryId:repo._id,enabled:true,settings:{...defaults,automatic:false,triggerLabels:['needs-review'],excludedAuthors:['dependabot[bot]']}});
   let sequence=0,head='';
   const scm=new Github('fixture');vi.spyOn(Github,'installation').mockResolvedValue(scm);
   vi.spyOn(scm,'changeMetadata').mockImplementation(async(_repo,number)=>({number,title:'Change',body:'',draft:false,state:'open',html_url:'https://github.com/alice/triggers/pull/7',user:{login:'alice'},head:{sha:head,ref:'feature'},base:{sha:'a'.repeat(40),ref:'main'}}) as never);

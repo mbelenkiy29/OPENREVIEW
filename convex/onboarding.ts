@@ -9,7 +9,7 @@ import type {Doc} from "./_generated/dataModel";
 import {repositoryIdentity} from "./repositoryIdentity";
 import {settingsValidator} from "./schema";
 import {assertValidSettings} from "./scopes";
-import {deploymentDefaults,scopeDefaults} from "../src/review-settings";
+import {deploymentDefaults,newWorkspaceDefaults,scopeDefaults} from "../src/review-settings";
 import {isConfigureStep,isWizardStep,nextStep,stepKeys} from "../src/onboarding-steps";
 import {billingConfig} from "../src/billing";
 import type {Infer} from "convex/values";
@@ -66,7 +66,7 @@ export const start=mutation({args:{token:v.string(),organizationId:v.id("organiz
   if(!a.pauseReviews)throw new Error("Save workspace behavior before indexing");
   // Guided setup indexes while behavior is still being configured: hold automatic reviews until the
   // triggers step (or the end of setup) decides them.
-  await ctx.db.insert("scopeSettings",{organizationId:a.organizationId,settings:{...deploymentDefaults(),automatic:false},overrideKeys:["automatic"]});
+  await ctx.db.insert("scopeSettings",{organizationId:a.organizationId,settings:{...deploymentDefaults(),...newWorkspaceDefaults,automatic:false},overrideKeys:["automatic",...Object.keys(newWorkspaceDefaults)]});
   await ctx.db.patch(a.organizationId,{onboarding:{...(organization?.onboarding??{startedAt:Date.now()}),reviewsPaused:true}});
   await audit(ctx,a.organizationId,user._id,"onboarding.reviews_paused",a.organizationId);
  }
@@ -84,7 +84,7 @@ export const saveDefaults=mutation({args:{token:v.string(),organizationId:v.id("
  if(!isConfigureStep(a.step))throw new Error("Unknown setup step");
  const allowed=stepKeys[a.step],rows=await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect(),row=rows.find(s=>!s.teamId);
  const changes=Object.fromEntries(allowed.map(key=>[key,(a.settings as Record<string,unknown>)[key]]).filter(([,value])=>value!==undefined));
- const merged={...(row?.settings??deploymentDefaults()),...changes} as Infer<typeof settingsValidator>,overrideKeys=[...new Set([...(row?.overrideKeys??[]),...allowed])];
+ const merged={...(row?.settings??{...deploymentDefaults(),...newWorkspaceDefaults}),...changes} as Infer<typeof settingsValidator>,overrideKeys=[...new Set([...(row?.overrideKeys??Object.keys(newWorkspaceDefaults)),...allowed])];
  assertValidSettings(merged,overrideKeys);
  if(row)await ctx.db.patch(row._id,{settings:merged,overrideKeys});else await ctx.db.insert("scopeSettings",{organizationId:a.organizationId,settings:merged,overrideKeys});
  const organization=await ctx.db.get(a.organizationId);

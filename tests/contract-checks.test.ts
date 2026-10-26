@@ -109,3 +109,22 @@ test("an invented ruleId no longer discards a correctness finding; rules finding
   assert.deepEqual(rule.findings, []);
   assert.deepEqual((rule.metadata.suppressions ?? []).map((s) => s.reason), ["Unknown or inapplicable rule"]);
 });
+
+test("a rule finding on a file the rule excludes is dropped, even when the rule applies elsewhere in the change", async () => {
+  const shippingFile = added("src/shipping.ts", shipping("cartTotal(items) > 50 ? 0 : 5.99")), cart = added("src/cart.ts", "export const cartTotal = (items: number[]) => items.reduce((a, b) => a + b, 0);\n");
+  const finding = { title: "Orders of exactly $50 still pay shipping", description: "The comment says $50.00 or more ships free, but the comparison is exclusive, so exactly 50 pays shipping.", severity: "medium", confidence: 0.95, category: "rules", filePath: "src/shipping.ts", startLine: 5, endLine: 5, evidence: [{ filePath: "src/shipping.ts", startLine: 3, quote: "/** Orders of $50.00 or more ship free; anything smaller pays a flat $5.99. Returns dollars. */" }, { filePath: "src/shipping.ts", startLine: 5, quote: "  return cartTotal(items) > 50 ? 0 : 5.99;" }], impact: "A $50.00 order is charged $5.99 shipping.", suggestedFix: "Compare with >= 50.", symbol: "shippingCost", ruleId: "rule-money" };
+  const run = async (globs: string[]) => {
+    const model: ModelProvider = {
+      async generate<T>(request: ModelRequest, schema: z.ZodType<T>) {
+        const value = request.task === "review:rules" ? { findings: [finding] } : request.task.startsWith("review:") ? { findings: [] } : request.task === "verify" ? { decisions: [{ index: 0, publish: true, confidence: 0.95, reason: "Line 3 documents an inclusive $50 threshold and line 5 compares exclusively." }] } : request.task === "diagram" ? { diagram: null } : request.task === "resolution" ? { resolved: [] } : { summary: "Adds free shipping from fifty dollars.", reviewScore: { value: 3, reason: "One boundary defect needs a fix before merging." } };
+        return { value: schema.parse(value), usage: { task: request.task, provider: "fixture", model: "fixture", inputTokens: 1, outputTokens: 1, latencyMs: 0, estimatedCost: 0, cached: false } };
+      },
+    };
+    return reviewChange({ repository: "acme/shop", baseSha: "a".repeat(40), headSha: "b".repeat(40), title: "Shipping", description: "", rules: [{ id: "rule-money", instructions: "Money amounts are integer cents.", severity: "medium", category: "rules", globs, enabled: true }], mode: "fast", files: [...shippingFile.files, ...cart.files], diff: [...shippingFile.diff, ...cart.diff], settings: { categories: ["rules"] } as never }, model);
+  };
+  assert.deepEqual((await run(["src/**"])).findings.map((x) => x.ruleId), ["rule-money"]);
+  // A nested folder's disabledRules adds "!src/shipping.ts"-style exclusions; src/cart.ts still brings the rule in.
+  const excluded = await run(["src/**", "!src/shipping.ts"]);
+  assert.deepEqual(excluded.findings, []);
+  assert.deepEqual((excluded.metadata.suppressions ?? []).map((x) => x.reason), ["Unknown or inapplicable rule"]);
+});

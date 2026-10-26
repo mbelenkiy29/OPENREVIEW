@@ -1,4 +1,4 @@
-import { defaults, layoutSections } from "./review-settings";
+import type { layoutSections } from "./review-settings";
 import type { RepoConfig } from "./repo-config";
 
 // Greptile configuration (`greptile.json`, `.greptile/config.json`) translated into OpenReview's repository
@@ -25,36 +25,39 @@ export function gitignoreGlobs(text: string, warnings: string[], file: string) {
   return [...new Set(globs)].slice(0, 200);
 }
 
-export function greptileConfig(raw: unknown, file: string, warnings: string[]): { config: RepoConfig; ignore: string[] } | undefined {
+export function greptileConfig(raw: unknown, file: string, warnings: string[]): { config: RepoConfig; ignore: string[]; sections: Record<string, boolean> } | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) { warnings.push(`${file} is not a JSON object; it was ignored.`); return undefined; }
   const g = raw as Record<string, unknown>, settings: NonNullable<RepoConfig["settings"]> = {}, rules: NonNullable<RepoConfig["rules"]> = [];
-  const context = (g.customContext ?? {}) as { rules?: unknown[]; files?: unknown[]; other?: { content?: unknown }[] };
+  const context = g.customContext && typeof g.customContext === "object" && !Array.isArray(g.customContext) ? (g.customContext as Record<string, unknown>) : {};
+  if (g.customContext !== undefined && context !== g.customContext) warnings.push(`${file}: customContext is not an object; it was ignored.`);
+  // A malformed field is skipped with a warning; it never drops the rest of the file.
+  const list = (key: string): unknown[] => { const value = context[key]; if (value === undefined || Array.isArray(value)) return value ?? []; warnings.push(`${file}: customContext.${key} is not a list; it was ignored.`); return []; };
   const unsupported = Object.keys(g).filter((k) => dashboardOnly.includes(k));
-  if (context.files?.length) unsupported.push("customContext.files");
+  if (list("files").length) unsupported.push("customContext.files");
   // Greptile's 3 posts the fewest comments; OpenReview's 1 does.
   if (typeof g.strictness === "number" && [1, 2, 3].includes(g.strictness)) settings.strictness = 4 - g.strictness;
-  if (Array.isArray(g.commentTypes)) settings.categories = [...new Set([...(g.commentTypes.includes("logic") ? logic : ["security"]), ...g.commentTypes.filter((t) => t === "style" || t === "syntax")])] as typeof settings.categories;
+  if (Array.isArray(g.commentTypes)) settings.categories = [...new Set([...(g.commentTypes.includes("logic") ? logic : ["security", "rules"]), ...g.commentTypes.filter((t) => t === "style" || t === "syntax")])] as typeof settings.categories;
   if (typeof g.effort === "string") { if (tiers[g.effort]) settings.mode = tiers[g.effort] as typeof settings.mode; else unsupported.push(`effort "${g.effort}"`); }
   if (typeof g.hideFooter === "boolean") settings.hideFooter = g.hideFooter;
-  const instructions = [g.instructions, ...(context.other ?? []).map((o) => o?.content)].filter((t): t is string => typeof t === "string" && !!t.trim());
+  const instructions = [g.instructions, ...list("other").map((o) => (o as { content?: unknown } | null)?.content)].filter((t): t is string => typeof t === "string" && !!t.trim());
   if (instructions.length) settings.instructions = instructions.join("\n\n").slice(0, 20000);
-  // Sections: `included` keeps or drops one; collapsible/defaultOpen set its GitHub layout.
-  const shown = new Set<string>(defaults.summarySections), layout: Record<string, string> = {};
-  for (const [key, section] of Object.entries(legacySections)) if (typeof g[key] === "boolean") { if (g[key]) shown.add(section); else shown.delete(section); }
+  // Sections: `included` turns one on or off on top of the effective sections (applyRepoConfig);
+  // collapsible/defaultOpen set its GitHub layout.
+  const sections: Record<string, boolean> = {}, layout: Record<string, string> = {};
+  for (const [key, section] of Object.entries(legacySections)) if (typeof g[key] === "boolean") sections[section] = g[key] as boolean;
   for (const [key, section] of Object.entries(sectionKeys)) {
     const s = g[key] as Section | undefined;
     if (!s || typeof s !== "object") continue;
-    if (s.included === false) shown.delete(section); else if (s.included === true) shown.add(section);
+    if (typeof s.included === "boolean") sections[section] = s.included;
     if (section !== "score" && typeof s.collapsible === "boolean") layout[section] = !s.collapsible ? "plain" : s.defaultOpen ? "open" : "collapsed";
   }
-  if (Object.keys(legacySections).some((k) => k in g) || Object.keys(sectionKeys).some((k) => k in g)) settings.summarySections = defaults.summarySections.filter((s) => shown.has(s)) as typeof settings.summarySections;
   if (Object.keys(layout).length) settings.sectionLayout = layout as typeof settings.sectionLayout;
-  const greptileRules = [...(Array.isArray(g.rules) ? g.rules : []), ...(context.rules ?? [])] as { rule?: unknown; id?: unknown; scope?: unknown; severity?: unknown; enabled?: unknown }[];
+  const greptileRules = [...(Array.isArray(g.rules) ? g.rules : []), ...list("rules")] as { rule?: unknown; id?: unknown; scope?: unknown; severity?: unknown; enabled?: unknown }[];
   for (const [i, r] of greptileRules.entries()) {
     if (typeof r?.rule !== "string" || !r.rule.trim()) continue;
     rules.push({ id: typeof r.id === "string" && r.id ? r.id.slice(0, 100) : `greptile-${i + 1}`, instructions: r.rule.slice(0, 4000), severity: r.severity === "low" || r.severity === "high" ? r.severity : "medium", category: "rules", globs: Array.isArray(r.scope) ? r.scope.filter((s): s is string => typeof s === "string").slice(0, 50) : [], enabled: r.enabled !== false });
   }
   if (unsupported.length) warnings.push(`${file}: ${unsupported.join(", ")} ${unsupported.length === 1 ? "is" : "are"} not read from repository files by OpenReview; set ${unsupported.length === 1 ? "it" : "them"} in the dashboard.`);
   const disabledRules = Array.isArray(g.disabledRules) ? g.disabledRules.filter((id): id is string => typeof id === "string").slice(0, 100) : undefined;
-  return { config: { settings, rules, ...(disabledRules?.length ? { disabledRules } : {}) }, ignore: typeof g.ignorePatterns === "string" ? gitignoreGlobs(g.ignorePatterns, warnings, file) : [] };
+  return { config: { settings, rules, ...(disabledRules?.length ? { disabledRules } : {}) }, ignore: typeof g.ignorePatterns === "string" ? gitignoreGlobs(g.ignorePatterns, warnings, file) : [], sections };
 }

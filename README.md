@@ -209,8 +209,8 @@ Repository configuration as code: `.openreview.json`, `.openreview/config.json`,
 Triggers and filters (GitHub, configurable per workspace, team or repository):
 - With **Automatic reviews** off, reviews run only on `@openreview review` or a trigger label.
 - **Trigger labels** start a review on `pull_request.labeled` and keep re-reviewing labelled pull requests.
-- **Excluded authors** are globs such as `dependabot[bot]` or `*-bot`. `dependabot[bot]` and `renovate[bot]` are excluded by default.
-- **Re-review new revisions** is off by default, so a pull request is reviewed when it opens. Branch globs ignore case. An explicit `@openreview review` also reviews drafts.
+- **Excluded authors** are globs such as `dependabot[bot]` or `*-bot`.
+- Workspaces created through guided setup start with **Re-review new revisions** off and `dependabot[bot]` and `renovate[bot]` excluded; existing workspaces keep their settings. Branch globs ignore case. An explicit `@openreview review` also reviews drafts.
 - Changed-file and changed-line limits skip oversized automatic reviews, with a visible reason; an explicit `@openreview review` overrides the limits.
 - Optional `style` and `syntax` categories are off by default.
 - **Strictness** presets 1–3 set the confidence and severity thresholds: 1 = 0.95/high, 2 = 0.85/medium, 3 = 0.75/low.

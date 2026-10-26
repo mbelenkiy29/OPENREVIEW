@@ -1,9 +1,9 @@
 import { z } from "zod";
 import picomatch from "picomatch";
 import { categories, severities, type Rule } from "./engine/types";
-import { sectionLayouts, summarySections, validSectionLayout } from "./review-settings";
+import { defaults, sectionLayouts, summarySections, validSectionLayout } from "./review-settings";
 import { greptileConfig } from "./greptile-config";
-import { discoverRuleFiles, importCandidates } from "./rule-files";
+import { discoverRuleFiles, importCandidates, ruleText } from "./rule-files";
 import { ruleProblem } from "./rule-assistant";
 
 // Repository configuration as code, shared by the CLI and server reviews. Server reviews read it
@@ -11,7 +11,7 @@ import { ruleProblem } from "./rule-assistant";
 // Precedence: workspace → team → repository dashboard → repository file, except admin-locked keys.
 // Greptile's files (greptile.json, .greptile/) are translated and read first, so OpenReview's own win.
 export const repoConfigFiles = [".openreview.json", ".openreview/config.json", ".openreview/rules.md"] as const;
-export const repoConfigurableKeys = ["mode", "minimumConfidence", "severityThreshold", "maxComments", "categories", "ignoredPaths", "instructions", "commentStyle", "summarySections", "strictness", "reviewEngine", "hideFooter", "sectionLayout"] as const;
+export const repoConfigurableKeys = ["mode", "minimumConfidence", "severityThreshold", "maxComments", "categories", "ignoredPaths", "instructions", "commentStyle", "summarySections", "strictness", "reviewEngine", "hideFooter", "sectionLayout", "assistantRules"] as const;
 export type RepoConfigurableKey = (typeof repoConfigurableKeys)[number];
 
 const ruleSchema = z.object({
@@ -36,6 +36,7 @@ export const repoSettingsSchema = z.object({
   reviewEngine: z.enum(["pipeline", "agentic", "hypotheses"]),
   hideFooter: z.boolean(),
   sectionLayout: z.record(z.string(), z.enum(sectionLayouts)).refine(validSectionLayout, "unknown summary section"),
+  assistantRules: z.boolean(),
 }).partial().strict();
 export const repoConfigSchema = z.object({
   $schema: z.string().optional(),
@@ -70,20 +71,23 @@ export function parseRulesMarkdown(text: string, idPrefix = "repo"): Rule[] {
 export const filesConfigSchema = z.object({ ignore: z.array(z.string().min(1).max(300)).max(200).optional(), include: z.array(z.string().min(1).max(300)).max(200).optional() }).strict();
 // One level of the cascade: the root ("") or a directory holding an .openreview/ folder.
 export type ConfigLevel = { directory: string; settings: z.infer<typeof repoSettingsSchema>; files?: z.infer<typeof filesConfigSchema>; sources: string[]; disabledRules?: string[] };
-export type LoadedRepoConfig = { settings: z.infer<typeof repoSettingsSchema>; rules: Rule[]; files: string[]; warnings: string[]; directories: { directory: string; instructions?: string }[]; guides?: { path: string; content: string }[]; levels?: ConfigLevel[] };
+export type LoadedRepoConfig = { settings: z.infer<typeof repoSettingsSchema>; rules: Rule[]; files: string[]; warnings: string[]; directories: { directory: string; instructions?: string }[]; guides?: { path: string; content: string }[]; levels?: ConfigLevel[]; assistantRules?: Rule[]; sections?: Record<string, boolean> };
 type Source = { tree(repository: string, sha: string): Promise<{ path: string; sha: string; size?: number }[]>; blob(repository: string, path: string, sha: string): Promise<{ content: string; size?: number }> };
-const parseJson = (text: string, file: string, warnings: string[]): RepoConfig | undefined => {
+// Greptile files are translated first; their ignorePatterns and section toggles travel alongside.
+type ParsedConfig = RepoConfig & { greptile?: { ignore: string[]; sections: Record<string, boolean> } };
+const parseJson = (text: string, file: string, warnings: string[]): ParsedConfig | undefined => {
   let raw: unknown;
   try { raw = JSON.parse(text); } catch { warnings.push(`${file} is not valid JSON; it was ignored.`); return undefined; }
-  if (/(^|\/)(\.greptile\/config\.json|greptile\.json)$/.test(file)) { const translated = greptileConfig(raw, file, warnings); if (!translated) return undefined; raw = translated.config; }
-  const parsed = repoConfigSchema.safeParse(raw);
+  const greptile = /(^|\/)(\.greptile\/config\.json|greptile\.json)$/.test(file), translated = greptile ? greptileConfig(raw, file, warnings) : undefined;
+  if (greptile && !translated) return undefined;
+  const parsed = repoConfigSchema.safeParse(translated ? translated.config : raw);
   if (!parsed.success) { warnings.push(`${file} is invalid (${parsed.error.issues.slice(0, 3).map((i) => (i.path.join(".") || "root") + ": " + i.message).join("; ")}); it was ignored.`); return undefined; }
-  return parsed.data;
+  return translated ? { ...parsed.data, greptile: { ignore: translated.ignore, sections: translated.sections } } : parsed.data;
 };
-const scopeGlob = (directory: string, glob: string) => (glob.startsWith("/") ? glob.slice(1) : directory ? `${directory}/${glob}` : glob);
-const scopedGlobs = (directory: string, globs: string[]) => (globs.length ? globs.map((g) => scopeGlob(directory, g)) : [`${directory}/**`]);
-// Greptile's ignorePatterns (gitignore syntax) become the level's ignore globs, ahead of any files.json.
-const greptileIgnore = (text: string, file: string) => { try { return greptileConfig(JSON.parse(text), file, [])?.ignore ?? []; } catch { return []; } };
+// A leading "!" (an exclusion) stays in front of the scoped path.
+const scopeGlob = (directory: string, glob: string): string => (glob.startsWith("!") ? "!" + scopeGlob(directory, glob.slice(1)) : glob.startsWith("/") ? glob.slice(1) : directory ? `${directory}/${glob}` : glob);
+// A folder's rule covers the folder; exclusions alone narrow it rather than widen it to the repository.
+const scopedGlobs = (directory: string, globs: string[]) => { const scoped = globs.map((g) => scopeGlob(directory, g)); return scoped.some((g) => !g.startsWith("!")) ? scoped : [`${directory}/**`, ...scoped]; };
 const parseFiles = (text: string, file: string, warnings: string[]) => {
   let raw: unknown;
   try { raw = JSON.parse(text); } catch { warnings.push(`${file} is not valid JSON; it was ignored.`); return undefined; }
@@ -97,7 +101,11 @@ const parseFiles = (text: string, file: string, warnings: string[]) => {
 export async function loadRepoConfig(source: Source, repository: string, sha: string): Promise<LoadedRepoConfig> {
   const tree = await source.tree(repository, sha);
   const warnings: string[] = [], files: string[] = [], rules: Rule[] = [], directories: LoadedRepoConfig["directories"] = [];
-  let settings: z.infer<typeof repoSettingsSchema> = {};
+  let settings: z.infer<typeof repoSettingsSchema> = {}, sections: Record<string, boolean> | undefined;
+  // Each rule remembers the folder that defined it and its id as written, so disabledRules can find it.
+  type Kind = "openreview" | "greptile" | "assistant";
+  const origins = new Map<Rule, { directory: string; id: string; kind: Kind }>();
+  const add = (rule: Rule, directory: string, id: string, kind: Kind) => { origins.set(rule, { directory, id, kind }); rules.push(rule); };
   const levels: ConfigLevel[] = [];
   const level = (directory: string) => { let l = levels.find((x) => x.directory === directory); if (!l) { l = { directory, settings: {}, sources: [] }; levels.push(l); } return l; };
   const ignoreFrom = (l: ConfigLevel, ignore: string[], source: string) => { if (ignore.length) { l.files = { ...l.files, ignore: [...(l.files?.ignore ?? []), ...ignore].slice(0, 200) }; l.sources.push(source); } };
@@ -114,14 +122,16 @@ export async function loadRepoConfig(source: Source, repository: string, sha: st
   for (const path of [greptileRoot, ".openreview.json", ".openreview/config.json"]) {
     const text = await read(path);
     const config = text === undefined ? undefined : parseJson(text, path, warnings);
-    if (config) { settings = { ...settings, ...config.settings }; rules.push(...(config.rules ?? [])); }
-    if (config && path === greptileRoot) ignoreFrom(level(""), greptileIgnore(text!, path), path);
+    if (!config) continue;
+    settings = { ...settings, ...config.settings };
+    for (const r of config.rules ?? []) add(r, "", r.id, config.greptile ? "greptile" : "openreview");
+    if (config.greptile) { ignoreFrom(level(""), config.greptile.ignore, path); if (Object.keys(config.greptile.sections).length) sections = config.greptile.sections; }
   }
   // Greptile's rules.md is free-form guidance for its whole directory tree.
   const greptileMarkdown = await read(".greptile/rules.md");
   if (greptileMarkdown?.trim()) settings.instructions = [settings.instructions, greptileMarkdown.trim()].filter(Boolean).join("\n\n").slice(0, 20000);
   const markdown = await read(".openreview/rules.md");
-  if (markdown !== undefined) rules.push(...parseRulesMarkdown(markdown));
+  if (markdown !== undefined) for (const r of parseRulesMarkdown(markdown)) add(r, "", r.id.slice("repo:".length), "openreview");
   // K1: .openreview/ (and Greptile's .greptile/) folders at any depth cascade by directory (deeper overrides shallower per field).
   const rootFiles = await read(".openreview/files.json");
   if (rootFiles !== undefined) { const parsed = parseFiles(rootFiles, ".openreview/files.json", warnings); if (parsed) { const l = level(""); l.files = { ...parsed, ignore: [...(l.files?.ignore ?? []), ...(parsed.ignore ?? [])] }; l.sources.push(".openreview/files.json"); } }
@@ -139,13 +149,13 @@ export async function loadRepoConfig(source: Source, repository: string, sha: st
       l.settings = { ...l.settings, ...rest }; l.sources.push(path);
       if (config.disabledRules?.length) l.disabledRules = [...(l.disabledRules ?? []), ...config.disabledRules];
       if (instructions) directories.push({ directory, instructions: instructions.slice(0, 4000) });
-      rules.push(...(config.rules ?? []).map((r) => ({ ...r, id: `${directory}:${r.id}`, globs: scopedGlobs(directory, r.globs) })));
-      if (kind === ".greptile") ignoreFrom(l, greptileIgnore(configText!, path), path);
+      for (const r of config.rules ?? []) add({ ...r, id: `${directory}:${r.id}`, globs: scopedGlobs(directory, r.globs) }, directory, r.id, config.greptile ? "greptile" : "openreview");
+      if (config.greptile) ignoreFrom(l, config.greptile.ignore, path);
     }
     const greptileMd = await read(`${directory}/.greptile/rules.md`);
     if (greptileMd?.trim()) { l.sources.push(`${directory}/.greptile/rules.md`); directories.push({ directory, instructions: greptileMd.trim().slice(0, 4000) }); }
     const md = await read(`${directory}/.openreview/rules.md`);
-    if (md !== undefined) { l.sources.push(`${directory}/.openreview/rules.md`); rules.push(...parseRulesMarkdown(md, directory).map((r) => ({ ...r, globs: r.globs.length ? r.globs.map((g) => scopeGlob(directory, g)) : [`${directory}/**`] }))); }
+    if (md !== undefined) { l.sources.push(`${directory}/.openreview/rules.md`); for (const r of parseRulesMarkdown(md, directory)) add({ ...r, globs: scopedGlobs(directory, r.globs) }, directory, r.id.slice(directory.length + 1), "openreview"); }
     const filesText = await read(`${directory}/.openreview/files.json`);
     const files = filesText === undefined ? undefined : parseFiles(filesText, `${directory}/.openreview/files.json`, warnings);
     if (files) { l.files = { ...files, ignore: [...(l.files?.ignore ?? []), ...(files.ignore ?? [])] }; l.sources.push(`${directory}/.openreview/files.json`); }
@@ -155,21 +165,26 @@ export async function loadRepoConfig(source: Source, repository: string, sha: st
     const text = await read(entry.path);
     const config = text === undefined ? undefined : parseJson(text, entry.path, warnings);
     if (!config) continue;
-    if (config.settings && Object.keys(config.settings).some((k) => k !== "instructions")) warnings.push(`${entry.path}: nested files only add rules and instructions; other settings were ignored.`);
-    rules.push(...(config.rules ?? []).map((r) => ({ ...r, id: `${directory}:${r.id}`, globs: r.globs.length ? r.globs.map((g) => scopeGlob(directory, g)) : [`${directory}/**`] })));
+    if (config.settings && Object.keys(config.settings).some((k) => k !== "instructions")) warnings.push(`${entry.path}: nested files only add rules, instructions and disabledRules; other settings were ignored.`);
+    for (const r of config.rules ?? []) add({ ...r, id: `${directory}:${r.id}`, globs: scopedGlobs(directory, r.globs) }, directory, r.id, "openreview");
+    if (config.disabledRules?.length) { const l = level(directory); l.disabledRules = [...(l.disabledRules ?? []), ...config.disabledRules]; l.sources.push(entry.path); }
     if (config.settings?.instructions) directories.push({ directory, instructions: config.settings.instructions.slice(0, 4000) });
+  }
+  // AI assistant rule files (CLAUDE.md, AGENTS.md, Cursor rules and similar), read only when the
+  // assistantRules setting opts in. They become low-severity rules through the same guard as imported rules.
+  if (settings.assistantRules) {
+    const listed = (directory: string) => Promise.resolve(tree.filter((e) => e.path.startsWith(directory + "/") && !e.path.slice(directory.length + 1).includes("/")).map((e) => e.path.slice(directory.length + 1)));
+    const assistantFiles = await discoverRuleFiles({ read: async (path) => (await read(path)) ?? null, list: listed });
+    for (const r of importCandidates(assistantFiles, 20).filter((r) => !ruleProblem(r))) {
+      const id = `assistant:${r.source.path}:${r.source.line}`.slice(0, 100);
+      add({ id, instructions: r.instructions, severity: "low", category: "rules", globs: r.globs, enabled: true }, "", id, "assistant");
+    }
   }
   // disabledRules: a folder turns off rules from the root or a parent folder for files under it.
   for (const l of levels) for (const id of l.disabledRules ?? []) for (const r of rules) {
-    const at = r.id === id ? "" : r.id.endsWith(":" + id) ? r.id.slice(0, -id.length - 1) : undefined;
-    if (l.directory && at !== undefined && (at === "" || l.directory.startsWith(at + "/"))) r.globs = [...r.globs, `!${l.directory}/**`];
+    const o = origins.get(r)!;
+    if (l.directory && (o.id === id || r.id === id) && (!o.directory || l.directory.startsWith(o.directory + "/"))) r.globs = [...r.globs, `!${l.directory}/**`];
   }
-  // AI assistant rule files (CLAUDE.md, AGENTS.md, Cursor rules and similar) add low-severity rules after the
-  // repository's own, through the same guard as imported rules.
-  const listed = (directory: string) => Promise.resolve(tree.filter((e) => e.path.startsWith(directory + "/") && !e.path.slice(directory.length + 1).includes("/")).map((e) => e.path.slice(directory.length + 1)));
-  const assistantFiles = await discoverRuleFiles({ read: async (path) => (await read(path)) ?? null, list: listed });
-  for (const r of importCandidates(assistantFiles, 20).filter((r) => !ruleProblem(r)))
-    rules.push({ id: `assistant:${r.source.path}:${r.source.line}`.slice(0, 100), instructions: r.instructions, severity: "low", category: "rules", globs: r.globs, enabled: true });
   // API guidance packs (J7): at most 10 Markdown files under .openreview/guides/.
   const guides: { path: string; content: string }[] = [];
   for (const entry of tree.filter((e) => /^\.openreview\/guides\/[^/]+\.md$/.test(e.path)).slice(0, 10)) {
@@ -177,12 +192,17 @@ export async function loadRepoConfig(source: Source, repository: string, sha: st
     const text = await read(entry.path);
     if (text !== undefined) guides.push({ path: entry.path, content: text });
   }
-  const seen = new Set<string>();
-  return { settings, rules: rules.filter((r) => !seen.has(r.id) && seen.add(r.id)).slice(0, 100), files, warnings, directories, guides, levels: levels.filter((l) => l.sources.length) };
+  // OpenReview's own rules come first, then Greptile's: on a shared id OpenReview's wins, and so does the
+  // 100-rule cap. Assistant rules are returned apart, minus any that repeat a repository rule.
+  const rank: Record<Kind, number> = { openreview: 0, greptile: 1, assistant: 2 }, seen = new Set<string>();
+  const ordered = [...rules].sort((a, b) => rank[origins.get(a)!.kind] - rank[origins.get(b)!.kind]).filter((r) => !seen.has(r.id) && seen.add(r.id));
+  const own = ordered.filter((r) => origins.get(r)!.kind !== "assistant").slice(0, 100), known = new Set(own.map((r) => ruleText(r.instructions)));
+  const assistantRules = ordered.filter((r) => origins.get(r)!.kind === "assistant" && !known.has(ruleText(r.instructions)));
+  return { settings, rules: own, files, warnings, directories, guides, levels: levels.filter((l) => l.sources.length), ...(assistantRules.length ? { assistantRules } : {}), ...(sections ? { sections } : {}) };
 }
 
 // Applies the repository file on top of dashboard settings, skipping admin-locked keys.
-export function applyRepoConfig<T extends Record<string, unknown>>(dashboard: T & { lockedKeys?: string[] }, loaded: Pick<LoadedRepoConfig, "settings" | "directories" | "levels">, touched: string[] = []) {
+export function applyRepoConfig<T extends Record<string, unknown>>(dashboard: T & { lockedKeys?: string[] }, loaded: Pick<LoadedRepoConfig, "settings" | "directories" | "levels" | "sections">, touched: string[] = []) {
   const locked = new Set(dashboard.lockedKeys ?? []), applied: RepoConfigurableKey[] = [], blocked: RepoConfigurableKey[] = [];
   const result: Record<string, unknown> = { ...dashboard };
   for (const key of repoConfigurableKeys) {
@@ -190,6 +210,16 @@ export function applyRepoConfig<T extends Record<string, unknown>>(dashboard: T 
     if (locked.has(key)) { blocked.push(key); continue; }
     result[key] = loaded.settings[key];
     applied.push(key);
+  }
+  // Greptile section toggles turn single sections on or off, unless an OpenReview file lists the sections.
+  if (loaded.sections && loaded.settings.summarySections === undefined) {
+    if (locked.has("summarySections")) blocked.push("summarySections");
+    else {
+      const shown = new Set((result.summarySections as string[] | undefined) ?? defaults.summarySections);
+      for (const [section, on] of Object.entries(loaded.sections)) if (on) shown.add(section); else shown.delete(section);
+      result.summarySections = summarySections.filter((s) => shown.has(s));
+      applied.push("summarySections");
+    }
   }
   // Touched directories can raise the PR-wide tier and comment limit above the root value, never lower them.
   const pr = pullRequestSettings(loaded.levels ?? [], touched, [...locked]);
@@ -200,6 +230,13 @@ export function applyRepoConfig<T extends Record<string, unknown>>(dashboard: T 
   return { settings: result as T, applied, blocked };
 }
 
+// Repository-file values for the dashboard, kept under the 4,000-character field limit as valid JSON:
+// long text is shortened first, and anything still too long is left out.
+export const configSnapshot = (settings: Record<string, unknown>) => {
+  const short = Object.fromEntries(Object.entries(settings).map(([k, v]) => [k, typeof v === "string" && v.length > 600 ? v.slice(0, 600) + "…" : v]));
+  const text = JSON.stringify(short);
+  return text.length <= 4000 ? text : JSON.stringify(Object.fromEntries(Object.entries(short).filter(([, v]) => JSON.stringify(v).length <= 300)));
+};
 // Per-file values: deeper folders override shallower ones field by field; admin-locked keys never
 // change. Ignore/include globs apply root first, so a deeper include can re-admit a file.
 export const perFileKeys = ["categories", "strictness", "severityThreshold", "minimumConfidence"] as const;

@@ -24,8 +24,7 @@ export const defaults = {
   ],
   model: "",
   instructions: "",
-  // New pushes are not re-reviewed unless enabled (matches Greptile's default of reviewing when a PR opens).
-  rereview: false,
+  rereview: true,
   mode: "standard",
   // "agentic" uses the tool-calling investigator and "hypotheses" plans bug hypotheses investigated in
   // parallel; the default stays on the fixed pipeline until an approved live comparison says otherwise.
@@ -34,9 +33,8 @@ export const defaults = {
   checkFailureSeverity: "off",
   // Triggers and filters (GitHub webhooks): labels that start a review, excluded author globs,
   // size limits for automatic reviews (0 = none) and a strictness preset (0 = custom thresholds).
-  // Dependency bots are excluded by default; an explicit @openreview request still reviews their PRs.
   triggerLabels: [] as string[],
-  excludedAuthors: ["dependabot[bot]", "renovate[bot]"] as string[],
+  excludedAuthors: [] as string[],
   maxFiles: 0,
   maxChangedLines: 0,
   strictness: 0,
@@ -70,7 +68,13 @@ export const defaults = {
   hideFooter: false,
   // GitHub disclosure layout per summary section ("plain", "open" or "collapsed"); unset sections keep the default.
   sectionLayout: {} as Record<string, string>,
+  // Rules read from CLAUDE.md, AGENTS.md and similar files; a repository file opts in.
+  assistantRules: false,
 };
+// New workspaces start like Greptile: pull requests are reviewed when they open, not on every push, and
+// dependency bots are skipped. Guided setup saves these as workspace overrides, so existing workspaces keep
+// the defaults above.
+export const newWorkspaceDefaults = { rereview: false, excludedAuthors: ["dependabot[bot]", "renovate[bot]"] };
 /** Defaults for this deployment: the hosted cloud (BILLING_ENABLED=true) also shows feature tips. */
 export const deploymentDefaults=(env:Record<string,string|undefined>=process.env)=>env.BILLING_ENABLED==="true"?{...defaults,summarySections:[...defaultSummarySections,"tips"]}:defaults;
 type ScopeReviewSettings = Omit<typeof defaults,"targetBranches"|"ignoredBranches"|"ignoredPaths"|"summarySections"|"triggerLabels"|"excludedAuthors"|"lockedKeys"|"sectionLayout"> & {
@@ -88,7 +92,7 @@ export function scopeDefaults(scopes:readonly {teamId?:string;settings:Partial<S
 export const reviewEngines=["pipeline","agentic","hypotheses"] as const;
 export const validReviewEngine=(value:string|undefined)=>value===undefined||(reviewEngines as readonly string[]).includes(value);
 // Optional trigger/limit settings stay valid when absent (older saved settings).
-export const lockableKeys=["mode","minimumConfidence","severityThreshold","maxComments","categories","ignoredPaths","instructions","commentStyle","summarySections","strictness","reviewEngine","hideFooter","sectionLayout"] as const;
+export const lockableKeys=["mode","minimumConfidence","severityThreshold","maxComments","categories","ignoredPaths","instructions","commentStyle","summarySections","strictness","reviewEngine","hideFooter","sectionLayout","assistantRules"] as const;
 export const validTriggerSettings=(s:{triggerLabels?:string[];excludedAuthors?:string[];maxFiles?:number;maxChangedLines?:number;strictness?:number;lockedKeys?:string[];agentTurns?:number;agentToolCalls?:number;hypothesisTurns?:number;hypothesisToolCalls?:number})=>
  [s.agentTurns??0,s.agentToolCalls??0,s.hypothesisTurns??0,s.hypothesisToolCalls??0].every(n=>Number.isInteger(n)&&n>=0&&n<=1000)&&
  (s.lockedKeys??[]).every(k=>(lockableKeys as readonly string[]).includes(k))&&

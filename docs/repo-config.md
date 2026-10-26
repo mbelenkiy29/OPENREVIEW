@@ -13,7 +13,7 @@ OpenReview reads review configuration from the repository. Server reviews always
 | `<dir>/.openreview/config.json`, `rules.md`, `files.json` | A cascade level for files under `<dir>/` (see [Directory cascade](#directory-cascade)) |
 | `<dir>/.openreview.json` (nested) | Rules scoped to `<dir>/` (globs are prefixed; no globs means `<dir>/**`) plus scoped `settings.instructions`; other nested settings are ignored with a warning |
 | `greptile.json`, `.greptile/config.json`, `.greptile/rules.md`, `<dir>/.greptile/…` | Greptile's files, translated (see [Greptile files](#greptile-files)) |
-| `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.cursor/rules/*.mdc` and similar | Guidance for coding agents, read as low-severity rules (see [AI assistant rule files](#ai-assistant-rule-files)) |
+| `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.cursor/rules/*.mdc` and similar | Guidance for coding agents, read as low-severity rules when `assistantRules` is on (see [AI assistant rule files](#ai-assistant-rule-files)) |
 
 ```json
 {
@@ -46,7 +46,7 @@ OpenReview reads review configuration from the repository. Server reviews always
 - **Per file:** `categories`, `strictness`, `severityThreshold` and `minimumConfidence` from a folder's `config.json` apply to that folder's files; a deeper folder overrides a shallower one field by field. `files.json` ignore globs (relative to the folder's directory) skip files, and a deeper `include` re-admits a file a shallower folder ignored. The review checks each finding against its own file's values; files ignored this way are listed as skipped with the folder that excluded them.
 - **Per pull request:** the review tier (`mode`) and `maxComments` use the highest value among the root and the folders a change touches. A folder can raise them, never lower them.
 - **Rules and instructions:** a folder's `rules.md` and `config.json` rules are scoped to its directory, and its `instructions` are added as scoped text.
-- **Disabling rules:** a folder's `config.json` can list `"disabledRules": ["cents"]` to turn off rules with those ids from the root or a parent folder, for files under that folder only.
+- **Disabling rules:** a folder's `config.json` (or a nested `.openreview.json`) can list `"disabledRules": ["cents"]` to turn off rules with those ids from the root or a parent folder, for files under that folder only. Use the id as written in its file; for a `rules.md` rule that is its heading in lowercase with dashes (`## Integer cents` → `integer-cents`). A finding that cites a rule on a file the rule does not apply to is dropped.
 - **Locks:** keys an admin locked in the dashboard never change at any level (a locked `ignoredPaths` also disables folder ignores).
 
 Invalid files produce a warning in the review's coverage notes and in the dashboard; the rest of the cascade still applies. The dashboard's **Effective configuration and sources** panel lists each level, what it overrides and which files it came from. At most 50 nested folders are read.
@@ -76,20 +76,20 @@ A repository moving from Greptile keeps its files. OpenReview reads `.greptile/c
 | Greptile | OpenReview |
 | --- | --- |
 | `strictness` 1–3 | `strictness`, reversed: Greptile's 3 (fewest comments) is OpenReview's 1 |
-| `commentTypes` | `logic` → the default categories; `style` and `syntax` → those opt-in categories. Security is always kept |
+| `commentTypes` | `logic` → the default categories; `style` and `syntax` → those opt-in categories. Security and custom rules are always kept |
 | `effort` `base` / `plus` / `apex` | `mode` `fast` / `standard` / `deep` (`auto` is not supported) |
 | `ignorePatterns` (gitignore syntax) | Ignore globs for that folder; `!` negation is not supported |
 | `instructions`, `customContext.other`, `rules.md` | Instructions (scoped to the folder for nested files) |
 | `rules[]` (`rule`, `id`, `scope`, `severity`, `enabled`), `customContext.rules` | Rules in the `rules` category |
 | `disabledRules` | `disabledRules` |
-| `summarySection`, `issuesTableSection`, `confidenceScoreSection`, `sequenceDiagramSection`, `includeIssuesTable`, `includeConfidenceScore`, `includeSequenceDiagram` | `summarySections` (`included`) and `sectionLayout` (`collapsible`, `defaultOpen`) |
+| `summarySection`, `issuesTableSection`, `confidenceScoreSection`, `sequenceDiagramSection`, `includeIssuesTable`, `includeConfidenceScore`, `includeSequenceDiagram` | `included` turns that section on or off on top of the effective sections (an OpenReview file's `summarySections` list wins); `collapsible` and `defaultOpen` set `sectionLayout` |
 | `hideFooter` | `hideFooter` |
 
 Trigger and filter keys (`autoReview`, `labels`, author, branch and keyword filters, `triggerOnDrafts`), `statusCheck`, `shouldUpdateDescription`, `autoApprove`, `context.repos`, `patternRepositories`, `customContext.files` and `.greptile/files.json` are not read from files. A review lists them in one warning; set their equivalents in the dashboard.
 
 ## AI assistant rule files
 
-`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.windsurfrules`, `GEMINI.md`, `.github/copilot-instructions.md` and `.cursor/rules/*.mdc` at the root are read from the base revision. Up to 20 directive statements about code become low-severity rules in the `rules` category, after the repository's own rules. Statements about the agent's own workflow (commits, branches, chatting) are dropped, and every rule passes the same safety checks as imported rules, so none can suppress findings, approve changes or change budgets. Cursor rules keep their `globs`.
+Off by default. With `"assistantRules": true` in the repository file's `settings`, `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.windsurfrules`, `GEMINI.md`, `.github/copilot-instructions.md` and `.cursor/rules/*.mdc` at the root are read from the base revision. Up to 20 directive statements about code become low-severity rules in the `rules` category, after the repository's own rules; any that repeat a repository or dashboard rule are skipped, and `disabledRules` can turn one off by its id (`assistant:<file>:<line>`). Administrators can lock `assistantRules` off. To review these lines one by one instead, import them as suggestions with `openreview onboard`. Statements about the agent's own workflow (commits, branches, chatting) are dropped, and every rule passes the same safety checks as imported rules, so none can suppress findings, approve changes or change budgets. Cursor rules keep their `globs`.
 
 ## Precedence
 

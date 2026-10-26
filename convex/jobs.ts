@@ -21,7 +21,8 @@ import { validSequence } from "../src/diagrams";
 import { incrementalDiff } from "../src/incremental";
 import { addressedFindings } from "../src/commit-signals";
 import { effectiveThresholds, sizeLimitIssue } from "../src/triggers";
-import { applyRepoConfig, cascadeSummary, fileSettings, loadRepoConfig, type LoadedRepoConfig } from "../src/repo-config";
+import { applyRepoConfig, cascadeSummary, configSnapshot, fileSettings, loadRepoConfig, type LoadedRepoConfig } from "../src/repo-config";
+import { ruleText } from "../src/rule-files";
 import { type CheckConclusion } from "../src/github";
 import { billingNoticeBody, checkOutcome, supersededCheck } from "../src/check-run";
 import { AgentSuspended } from "../src/engine/agent";
@@ -463,7 +464,7 @@ export const review = internalAction({
       const configured = applyRepoConfig(settings, repoConfig, pr.diff.map((f) => f.path));
       const effective = configured.settings;
       if (repoConfig.files.length || repoConfig.warnings.length || repo.configFile)
-        await ctx.runMutation(internal.repositories.recordConfigFile, { repositoryId: repo._id, sha: pr.base.sha, files: repoConfig.files, applied: configured.applied, blocked: configured.blocked, warnings: repoConfig.warnings, values: JSON.stringify(repoConfig.settings).slice(0, 4000), rules: repoConfig.rules.length, ...(repoConfig.levels?.length ? { cascade: JSON.stringify(cascadeSummary(repoConfig.levels)) } : {}) });
+        await ctx.runMutation(internal.repositories.recordConfigFile, { repositoryId: repo._id, sha: pr.base.sha, files: repoConfig.files, applied: configured.applied, blocked: configured.blocked, warnings: repoConfig.warnings, values: configSnapshot(repoConfig.settings), rules: repoConfig.rules.length, ...(repoConfig.levels?.length ? { cascade: JSON.stringify(cascadeSummary(repoConfig.levels)) } : {}) });
       const guidance = repositoryGuidance(repoConfig.guides ?? []);
       const directorySettings = (path: string) => {
         const resolved = fileSettings(repoConfig.levels ?? [], path, settings.lockedKeys ?? []);
@@ -663,7 +664,7 @@ export const review = internalAction({
             category: r.category,
             globs: r.globs,
             enabled: r.enabled,
-          })), ...repoConfig.rules],
+          })), ...repoConfig.rules, ...(effective.assistantRules ? (repoConfig.assistantRules ?? []).filter((r) => !rules.some((d) => ruleText(d.instructions) === ruleText(r.instructions))) : [])],
           preferences: [...preferences, ...(await ctx.runQuery(internal.conventions.approvedForRepo, { repositoryId: repo._id }))],
           guidance: selectPacks(guidance.packs, scope.diff, sources).map(({ id, version, title, body, source }) => ({ id, version, title, body, source })),
           knowledge: selectKnowledge(await ctx.runQuery(internal.knowledge.forReview, { repositoryId: repo._id }), scope.diff.map((f) => f.path), new Set(head.keys()), knowledgeTokenBudgets[tier.mode]).selected,

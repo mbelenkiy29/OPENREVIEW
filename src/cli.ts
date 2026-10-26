@@ -263,7 +263,8 @@ async function main() {
     blob: async (_repository, _path, sha) => ({ content: await git("cat-file", "blob", sha) }),
   }, root, baseSha);
   for (const warning of repoConfig.warnings) process.stderr.write(`OpenReview config: ${warning}\n`);
-  const rules: Rule[] = repoConfig.rules;
+  // Rules from CLAUDE.md, AGENTS.md and similar files only when the repository file sets assistantRules.
+  const rules: Rule[] = [...repoConfig.rules, ...(repoConfig.settings.assistantRules ? repoConfig.assistantRules ?? [] : [])];
   // --resume continues an interrupted agentic review of this checkout (same base and HEAD only).
   const engine = z.enum(["pipeline", "agentic"]).parse(values.engine ?? (values.resume ? "agentic" : "pipeline"));
   if (values.resume && engine !== "agentic") throw new Error("--resume applies to the agentic engine");
