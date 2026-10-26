@@ -646,6 +646,11 @@ export default defineSchema({
     currentPeriodEnd: v.optional(v.number()),
     pastDueSince: v.optional(v.number()),
     lastEventCreated: v.optional(v.number()),
+    // Whether Stripe reports a default payment method: the subscription's default_payment_method (subscription events)
+    // and the customer's invoice_settings.default_payment_method (customer.updated, ordered by customerEventCreated).
+    subscriptionPaymentMethod: v.optional(v.boolean()),
+    customerPaymentMethod: v.optional(v.boolean()),
+    customerEventCreated: v.optional(v.number()),
     // Monthly extra-usage cap in dollars, set by an admin; 0 or unset means no usage past the included amount.
     spendCapUsd: v.optional(v.number()),
     updatedAt: v.number(),

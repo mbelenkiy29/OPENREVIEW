@@ -20,8 +20,8 @@ export default async function PortalLayout({ children }: { children: React.React
     scopesFor(user.token, organization._id),
     billingConfig().enabled ? backend().query(api.billing.status, { token: user.token, organizationId: organization._id }).catch(() => null) : null,
   ]);
-  // Greptile's trial banner: the days left of a running trial.
-  const trialDaysLeft = billing?.enabled && billing.status === "trialing" ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / 86400000)) : undefined;
+  // Greptile's trial banner: the days left of a running trial that has no payment method on file.
+  const trialDaysLeft = billing?.enabled && billing.status === "trialing" && !billing.hasPaymentMethod ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / 86400000)) : undefined;
   return <div className="shell portal">
     <PortalNav login={user.user.login} avatar={user.user.avatar || undefined} email={user.email} role={organization.role} organizationId={organization._id} name={organization.name ?? "Workspace"}
       organizations={user.organizations.flatMap((o) => o._id ? [{ _id: o._id, name: o.name ?? "Workspace" }] : [])}

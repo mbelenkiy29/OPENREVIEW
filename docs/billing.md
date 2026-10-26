@@ -70,6 +70,8 @@ When billing is on and the new workspace did not start on Free (an owner already
 
 The trial clock starts when the workspace first opens Checkout (its Stripe customer is created), however long it was on Free; each workspace gets one trial. Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
 
+The dashboard's trial banner (days left, **Add Payment Method**) shows only while the subscription is trialing with no default payment method on file: neither the subscription's `default_payment_method` (from `customer.subscription.*`) nor the customer's `invoice_settings.default_payment_method` (from `customer.updated`, sent when a card is added in the Customer Portal). A subscription from before these were recorded counts as having one, because Checkout always collects a card.
+
 Setup can't be skipped. Until a workspace finishes it, opening the dashboard takes owners and admins back to setup, and every dashboard page shows a **Setup isn't finished** bar (members see that an admin is completing it). Setup finishes only from its last step (`onboarding.complete`), which needs the plan and a selected repository that has started indexing. Workspaces that used the former **Exit setup** before any repository was indexing are reopened once per deployment with `npx convex run onboarding:reopenSkippedSetups '{"confirm":"reopen-skipped-setups"}' --prod`.
 
 When a review is blocked, it is recorded as failed with a `Billing:` reason, visible on the pull request's review page. Blocked reviews are also counted on **Organization Settings → Billing & Usage**.
@@ -95,6 +97,7 @@ The prospect enters the code at Checkout, from the setup plan step or Organizati
 3. **Webhook:** add the endpoint `https://<convex-site>/stripe/webhook` on API version `2026-08-26.dahlia` (`STRIPE_API_VERSION` in `src/billing.ts`) for these events:
    - `checkout.session.completed`
    - `customer.subscription.created`, `customer.subscription.updated` and `customer.subscription.deleted`
+   - `customer.updated` (a card added in the Customer Portal). An endpoint created before this event was added must be edited in the Stripe Dashboard to subscribe to it too, in test and live mode.
    - `invoice.payment_failed` and `invoice.paid`
    - with the [referral program](#referral-program): `charge.refunded`, `charge.dispute.created` and `charge.dispute.closed`
 
@@ -185,5 +188,5 @@ Setup:
 
 - **Signatures:** webhooks are verified against the `Stripe-Signature` header with a five-minute tolerance.
 - **Duplicates:** each event ID is applied at most once.
-- **Ordering:** subscription events older than the last one applied are recorded as `stale` and ignored, so redelivery and reordering cannot roll state back. Stripe timestamps are whole seconds, so an event from the same second as the last one is also `stale` when it is the subscription's creation or arrives after a cancellation: an update to active that came first stays active, and a cancellation stays canceled.
+- **Ordering:** subscription events older than the last one applied are recorded as `stale` and ignored, so redelivery and reordering cannot roll state back. Stripe timestamps are whole seconds, so an event from the same second as the last one is also `stale` when it is the subscription's creation or arrives after a cancellation: an update to active that came first stays active, and a cancellation stays canceled. `customer.updated` events are ordered the same way on their own clock (`customerEventCreated`), so they never make a subscription event stale.
 - **Workspace linking:** Checkout sets both `client_reference_id` and subscription metadata. A subscription that claims a different workspace than its customer's is ignored.
