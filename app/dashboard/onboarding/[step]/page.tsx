@@ -44,7 +44,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
   </WizardFrame>;
 
   const admin = status.admin, organizationId = organization._id, next = nextStep(step, state.billing);
-  const frame = { workspace: organization.name, organizationId, admin, completed: state.completed, billing: state.billing && (step === "plan" || Boolean(state.planMissing)), nextHref: next ? `/dashboard/onboarding/${next}` : "/dashboard/analytics" };
+  const frame = { workspace: organization.name, organizationId, admin, completed: state.completed, billing: state.billing && (step === "plan" || Boolean(state.planMissing)), planMissing: state.planMissing, nextHref: next ? `/dashboard/onboarding/${next}` : "/dashboard/analytics" };
   const selected = status.repositories.filter((r) => r.selected);
 
   if (step === "connect") {

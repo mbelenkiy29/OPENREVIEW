@@ -8,8 +8,8 @@ import { ShortcutHint, WizardShortcuts } from "./wizard-client";
 import { configureLabels, configureSteps, previousStep, stepsFor, stepTitles, type ConfigureStep, type WizardStep } from "../../../src/onboarding-steps";
 
 /** Full-screen setup frame: identity row, the step body, and a persistent bar with Back / Next. */
-export function WizardFrame({ step, workspace, organizationId, admin, completed, billing = false, nextLabel, nextHref, centered, children }: {
-  step: WizardStep; workspace?: string; organizationId?: string; admin: boolean; completed?: boolean; billing?: boolean;
+export function WizardFrame({ step, workspace, organizationId, admin, completed, billing = false, planMissing, nextLabel, nextHref, centered, children }: {
+  step: WizardStep; workspace?: string; organizationId?: string; admin: boolean; completed?: boolean; billing?: boolean; planMissing?: boolean;
   nextLabel: string; nextHref?: string; centered?: boolean; children: ReactNode;
 }) {
   const steps = stepsFor(billing), back = previousStep(step, billing), position = steps.indexOf(step) + 1;
@@ -23,7 +23,8 @@ export function WizardFrame({ step, workspace, organizationId, admin, completed,
     <footer className="wizard-bar">
       <div className="wizard-exit">
         <SignOutForm action={logout} label="Log out" />
-        {organizationId && step !== "done" && (admin && !completed
+        {/* Until a plan is chosen the plan step is the only way on: setup can't finish and the dashboard leads back here. */}
+        {organizationId && step !== "done" && !planMissing && (admin && !completed
           ? <form action={finishSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="skipped" value="true" /><button className="small">Exit setup</button></form>
           : <Link className="button small" href="/dashboard/analytics">Back to dashboard</Link>)}
       </div>
