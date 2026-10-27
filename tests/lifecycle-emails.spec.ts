@@ -76,6 +76,24 @@ test('a milestone reached while email is off is recorded, so turning email on la
  expect((await t.run(ctx=>ctx.db.get(org)))?.lifecycleEmails).toEqual(['first_review_completed']);
 });
 
+test('a workspace still in setup two days after starting it reminds its owner once; finished, newer and older workspaces get none',async()=>{
+ const t=convexTest(schema,modules);
+ const owner=await signIn(t,{provider:'google',providerUserId:'g5',login:'rita',email:'rita@example.com',emailVerified:true});
+ const create=(name:string)=>t.mutation(api.users.createOrganization,{token:owner.token,name});
+ const stalled=await create('Stalled'),finished=await create('Finished'),legacy=await create('Legacy'),fresh=await create('Fresh');
+ const startedAt=Date.now()-2*86_400_000-60_000;
+ await t.run(async ctx=>{
+  await ctx.db.patch(stalled,{onboarding:{startedAt}});
+  await ctx.db.patch(finished,{onboarding:{startedAt,completedAt:Date.now()}});
+  await ctx.db.patch(legacy,{onboarding:{startedAt},lifecycleEmails:undefined});
+ });
+ await t.mutation(internal.lifecycleEmails.remindUnfinishedSetup,{});
+ await t.mutation(internal.lifecycleEmails.remindUnfinishedSetup,{});
+ expect((await queued(t)).filter(m=>m.kind==='onboarding_reminder')).toEqual([{to:'rita@example.com',kind:'onboarding_reminder'}]);
+ const sent=await t.run(ctx=>Promise.all([stalled,finished,legacy,fresh].map(async id=>(await ctx.db.get(id))?.lifecycleEmails??null)));
+ expect(sent).toEqual([['onboarding_reminder'],[],null,[]]);
+});
+
 test('branded emails escape their content and carry the same message as plain text',()=>{
  const e=brandedEmail('https://review.example.com',{subject:'<b>Hi</b> & "you"',paragraphs:['a < b'],action:{label:'Go',path:'/dashboard?x=1&y=2'}});
  expect(e.html).not.toContain('<b>Hi');
