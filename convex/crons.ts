@@ -20,5 +20,6 @@ crons.interval("Prune processed webhook payloads older than 14 days",{hours:6},i
 crons.interval("Prune expired rate-limit counters, 30-day-old magic links and SAML request ids",{hours:6},internal.authHygiene.prune,{});
 crons.interval("Expire inference reservations that were never settled",{minutes:5},internal.inferenceBudget.expireStale,{});
 crons.interval("Retry referral credits and payouts stuck in processing",{minutes:15},internal.referralJobs.reconcileRedemptions,{});
+crons.interval("Remind owners of workspaces still in setup after two days",{hours:24},internal.lifecycleEmails.remindUnfinishedSetup,{});
 crons.weekly("Email the week's changelog entries to subscribers",{dayOfWeek:"tuesday",hourUTC:16,minuteUTC:0},internal.changelogJobs.digest,{});
 export default crons;
