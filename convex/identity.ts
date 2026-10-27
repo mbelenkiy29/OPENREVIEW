@@ -6,6 +6,7 @@ import { internal } from "./_generated/api";
 import { audit, authenticated, authenticatedSession, authorize, service } from "./auth";
 import { cooldown, otherUserEmailLimit, rateLimit } from "./rateLimit";
 import { scheduleSeatSync } from "./billing";
+import { joinTeam, teamInviteRoles, teamOf } from "./scopes";
 import { recentSignIn, recordReferralSignup } from "./referralLedger";
 import { lifecycleEmail } from "./lifecycleEmails";
 import { recordConversion } from "./conversions";
@@ -166,21 +167,22 @@ export const consumeLoginToken = mutation({ args: { secret: v.string(), tokenHas
 } });
 
 // Email invitations: admins invite an address; whoever opens the single-use link and signs in joins.
-export const createEmailInvitation = internalMutation({ args: { token: v.string(), organizationId: v.id("organizations"), email: v.string(), role: v.union(v.literal("admin"), v.literal("member"), v.literal("viewer")), tokenHash: v.string() }, handler: async (ctx, a) => {
+export const createEmailInvitation = internalMutation({ args: { token: v.string(), organizationId: v.id("organizations"), email: v.string(), role: v.union(v.literal("admin"), v.literal("member"), v.literal("viewer")), teamId: v.optional(v.id("teams")), tokenHash: v.string() }, handler: async (ctx, a) => {
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
+  const teamId = await teamOf(ctx, a.organizationId, a.teamId);
   const email = emailAddress.parse(a.email);
   if (!hex64.test(a.tokenHash)) throw new Error("Invalid token");
   // Per workspace, and per inviter across workspaces (anyone can create a few an hour), and deployment-wide.
   await rateLimit(ctx, `email-invite:${a.organizationId}`, 20, 3600000);
   await rateLimit(ctx, `email-invite-user:${user._id}`, 30, 86_400_000);
   await otherUserEmailLimit(ctx);
-  const id = await ctx.db.insert("emailInvitations", { organizationId: a.organizationId, email, role: a.role, tokenHash: a.tokenHash, invitedBy: user._id, expiresAt: Date.now() + 7 * 86400000, createdAt: Date.now() });
+  const id = await ctx.db.insert("emailInvitations", { organizationId: a.organizationId, email, role: a.role, ...(teamId ? { teamId } : {}), tokenHash: a.tokenHash, invitedBy: user._id, expiresAt: Date.now() + 7 * 86400000, createdAt: Date.now() });
   await audit(ctx, a.organizationId, user._id, "invitation.email_created", id);
   return { id, workspace: (await ctx.db.get(a.organizationId))?.name ?? "an OpenReview workspace", inviter: user.login, email };
 } });
 export const emailInvitations = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
   await authorize(ctx, a.token, a.organizationId, true);
-  return (await ctx.db.query("emailInvitations").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId)).order("desc").take(100)).filter((i) => !i.acceptedAt && !i.revokedAt && i.expiresAt > Date.now()).map((i) => ({ _id: i._id, email: i.email, role: i.role, expiresAt: i.expiresAt }));
+  return (await ctx.db.query("emailInvitations").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId)).order("desc").take(100)).filter((i) => !i.acceptedAt && !i.revokedAt && i.expiresAt > Date.now()).map((i) => ({ _id: i._id, email: i.email, role: i.role, teamId: i.teamId, expiresAt: i.expiresAt }));
 } });
 export const revokeEmailInvitation = mutation({ args: { token: v.string(), invitationId: v.id("emailInvitations") }, handler: async (ctx, a) => {
   const invitation = await ctx.db.get(a.invitationId);
@@ -228,8 +230,12 @@ export const acceptEmailInvitation = mutation({ args: { token: v.string(), token
   const organizationId = invitation?.organizationId ?? link?.organizationId;
   if (!organizationId) throw new Error("Invitation is invalid or expired");
   const member = await ctx.db.query("organizationMembers").withIndex("by_org_user", (q) => q.eq("organizationId", organizationId).eq("userId", user._id)).unique();
-  if (!member) await ctx.db.insert("organizationMembers", { organizationId, userId: user._id, role: invitation?.role ?? "member" });
-  if (invitation) await ctx.db.patch(invitation._id, { acceptedAt: Date.now(), acceptedBy: user._id });
+  const roles = teamInviteRoles(invitation?.role ?? "member", invitation?.teamId);
+  if (!member) await ctx.db.insert("organizationMembers", { organizationId, userId: user._id, role: roles.organization });
+  if (invitation) {
+    await joinTeam(ctx, organizationId, invitation.teamId, user._id, roles.team);
+    await ctx.db.patch(invitation._id, { acceptedAt: Date.now(), acceptedBy: user._id });
+  }
   await audit(ctx, organizationId, user._id, invitation ? "invitation.email_accepted" : "member_link.used", invitation?._id ?? link!._id);
   await scheduleSeatSync(ctx, organizationId);
   return organizationId;

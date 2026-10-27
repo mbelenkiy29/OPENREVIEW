@@ -19,17 +19,18 @@ export type InviteState = { sent?: number; note?: string; error?: string };
 export async function inviteMember(_state: InviteState, form: FormData): Promise<InviteState> {
   const { token } = await current();
   const who = String(form.get("who") ?? "").trim(), organizationId = String(form.get("organizationId")) as Id<"organizations">;
+  const team = form.get("teamId") ? { teamId: String(form.get("teamId")) as Id<"teams"> } : {};
   const role = z.enum(["admin", "member", "viewer"]).safeParse(form.get("role"));
   if (!who || !role.success) return { error: "Enter an email address or GitHub login and choose a role." };
   const email = who.includes("@") && !who.startsWith("@");
   if (email && !emailOnWeb()) return { error: "Email delivery isn’t configured on this deployment, so invite people by GitHub login." };
   try {
     if (email) {
-      const outcome = await backend().action(api.identityJobs.inviteByEmail, { token, organizationId, email: who, role: role.data });
+      const outcome = await backend().action(api.identityJobs.inviteByEmail, { token, organizationId, email: who, role: role.data, ...team });
       revalidatePath("/dashboard", "layout");
       return { sent: Date.now(), ...(outcome === "skipped" ? { note: "The invitation is saved, but this deployment didn’t send the email." } : {}) };
     }
-    await backend().mutation(api.users.invite, { token, organizationId, githubLogin: who.replace(/^@/, ""), role: role.data });
+    await backend().mutation(api.users.invite, { token, organizationId, githubLogin: who.replace(/^@/, ""), role: role.data, ...team });
   } catch (e) { return { error: message(e, "The invitation could not be sent. Check the address or login and try again.") }; }
   revalidatePath("/dashboard", "layout");
   return { sent: Date.now() };

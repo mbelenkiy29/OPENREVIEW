@@ -36,11 +36,12 @@ const providerIcon = (kind?: string): IconName => kind?.startsWith("github") ? "
 
 /** Page-header actions: the repository whose settings are shown, and the workspace and team defaults. */
 export function ReviewSettingsActions({ ctx }: { ctx: DashboardContext }) {
-  const { data, repoSettings, filters } = ctx;
+  const { data, repoSettings, filters, selectedTeam } = ctx;
   if (!repoSettings) return null;
   const team = filters.team ? "&team=" + filters.team : "", repo = repoSettings.repo, current = data.repositories.find((r) => r._id === repo._id);
   return <div className="page-actions">
-    <Link className="button" href="/dashboard/organization/teams">Workspace &amp; team defaults</Link>
+    {/* Greptile: with a team picked, its Code Review defaults (and Sync from parent) are one click away. */}
+    <Link className="button" href={selectedTeam ? `/dashboard/organization/teams#defaults-${selectedTeam._id}` : "/dashboard/organization/teams"}>{selectedTeam ? `${selectedTeam.name} defaults` : <>Workspace &amp; team defaults</>}</Link>
     {/* Keyed by repository: choosing one changes only the query, so the remount is what closes the menu. */}
     <PortalDisclosure key={repo._id} className="repo-switch" label={<><Icon name={providerIcon(current?.provider?.kind)} /><span title={repositoryDisplay(current)}>{repo.fullName}</span><Icon name="caretUpDown" /><span className="sr-only">Choose repository</span></>}>
       <div className="menu">

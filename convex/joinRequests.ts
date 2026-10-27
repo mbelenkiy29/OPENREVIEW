@@ -5,6 +5,7 @@ import { internal } from "./_generated/api";
 import { audit, authenticated, authorize, service } from "./auth";
 import { rateLimit } from "./rateLimit";
 import { scheduleSeatSync } from "./billing";
+import { joinTeam } from "./scopes";
 
 // "Join a team", as on Greptile: a team is a GitHub organization or GitLab group connected to a workspace
 // (scopes.providerTeam). The web server passes the App installations the signed-in GitHub user can access and the
@@ -73,9 +74,10 @@ export const pending = query({
     const { user, member } = await authorize(ctx, a.token, a.organizationId);
     const admin = ["owner", "admin"].includes(member.role);
     const rows = await Promise.all((await ctx.db.query("joinRequests").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId)).take(200)).map(async (r) => {
-      if (!admin && (await teamMember(ctx, r.teamId, user._id))?.role !== "admin") return null;
+      // A request from someone already added to the team (Add to team, an invitation) needs no answer.
+      if ((!admin && (await teamMember(ctx, r.teamId, user._id))?.role !== "admin") || await teamMember(ctx, r.teamId, r.userId)) return null;
       const [requester, team] = await Promise.all([ctx.db.get(r.userId), ctx.db.get(r.teamId)]);
-      return requester && team ? { _id: r._id, login: requester.login, team: team.name, createdAt: r.createdAt } : null;
+      return requester && team ? { _id: r._id, login: requester.login, teamId: team._id, team: team.name, createdAt: r.createdAt } : null;
     }));
     return rows.filter((r) => r !== null);
   },
@@ -92,7 +94,7 @@ export const answer = mutation({
       if (!(await ctx.db.get(request.teamId))) throw new Error("This team no longer exists; decline the request");
       // Member is a seat; admins change the role afterwards in People.
       if (!(await orgMember(ctx, request.organizationId, request.userId))) await ctx.db.insert("organizationMembers", { organizationId: request.organizationId, userId: request.userId, role: "member" });
-      if (!(await teamMember(ctx, request.teamId, request.userId))) await ctx.db.insert("teamMembers", { organizationId: request.organizationId, teamId: request.teamId, userId: request.userId, role: "member" });
+      await joinTeam(ctx, request.organizationId, request.teamId, request.userId, "member");
       await scheduleSeatSync(ctx, request.organizationId);
     }
     await ctx.db.delete(request._id);

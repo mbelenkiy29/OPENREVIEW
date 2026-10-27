@@ -22,6 +22,17 @@ export async function providerTeam(ctx:MutationCtx,organizationId:Id<"organizati
  const id=await ctx.db.insert("teams",{organizationId,name:group.name.trim(),externalKey,createdAt:Date.now()});
  await audit(ctx,organizationId,userId,"team.provider_group_connected",id);return id;
 }
+// An invitation from a team's People page (Greptile: invite from the team to limit someone to that GitHub org or
+// GitLab group): its role is the team role, and the workspace role is Member, or Viewer for a team Viewer.
+export async function teamOf(ctx:QueryCtx|MutationCtx,organizationId:Id<"organizations">,teamId?:Id<"teams">){
+ if(!teamId)return undefined;const team=await ctx.db.get(teamId);if(team?.organizationId!==organizationId)throw new Error("Team not accessible");return team._id;
+}
+export const teamInviteRoles=(role:"admin"|"member"|"viewer",teamId?:Id<"teams">)=>({organization:teamId?(role==="viewer"?"viewer" as const:"member" as const):role,team:role});
+/** Adds the user to the team (if it still belongs to the workspace), keeping a role they already have. */
+export async function joinTeam(ctx:MutationCtx,organizationId:Id<"organizations">,teamId:Id<"teams">|undefined,userId:Id<"users">,role:"admin"|"member"|"viewer"){
+ const team=teamId&&await ctx.db.get(teamId);if(!team||team.organizationId!==organizationId)return;
+ if(!await ctx.db.query("teamMembers").withIndex("by_team_user",q=>q.eq("teamId",team._id).eq("userId",userId)).unique())await ctx.db.insert("teamMembers",{organizationId,teamId:team._id,userId,role});
+}
 function resolveSettings(repo:Doc<"repositories">,scopes:Doc<"scopeSettings">[],local:Doc<"repositorySettings">|null) {
  const value=scopeDefaults(scopes,repo.teamId,deploymentDefaults());
  return local&&!local.inherit?{...value,...local.settings}:value;
@@ -89,6 +100,12 @@ export const setWorkspaceModel=mutation({args:{token:v.string(),organizationId:v
  if(scope)await ctx.db.patch(scope._id,{settings:{...scope.settings,model:a.model},overrideKeys});
  else await ctx.db.insert("scopeSettings",{organizationId:a.organizationId,settings:{...deploymentDefaults(),model:a.model},overrideKeys});
  await audit(ctx,a.organizationId,user._id,"settings.model",a.model||"default");
+}});
+// Greptile's "Sync from parent" for a team: drop its overrides so every setting follows the workspace again.
+export const syncTeam=mutation({args:{token:v.string(),teamId:v.id("teams")},handler:async(ctx,a)=>{
+ const team=await ctx.db.get(a.teamId);if(!team)throw new Error("Team not found");const {user}=await authorize(ctx,a.token,team.organizationId,true);
+ for(const scope of await ctx.db.query("scopeSettings").withIndex("by_team",q=>q.eq("teamId",team._id)).collect())await ctx.db.patch(scope._id,{overrideKeys:[]});
+ await audit(ctx,team.organizationId,user._id,"scope.team_synced",team._id);
 }});
 export const save=mutation({args:{token:v.string(),organizationId:v.id("organizations"),teamId:v.optional(v.id("teams")),settings:settingsValidator,overrideKeys:v.array(v.string())},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true);if(a.teamId&&(await ctx.db.get(a.teamId))?.organizationId!==a.organizationId)throw new Error("Team not accessible");

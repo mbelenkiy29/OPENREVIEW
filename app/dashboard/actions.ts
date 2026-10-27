@@ -735,6 +735,9 @@ export async function teamMember(form:FormData) {
 export async function inheritSettings(form:FormData) {
  const {token}=await current();await backend().mutation(api.scopes.inherit,{token,repositoryId:text(form,"repositoryId") as Id<"repositories">});revalidatePath("/dashboard","layout");
 }
+export async function syncTeamDefaults(form:FormData) {
+ const {token}=await current();await backend().mutation(api.scopes.syncTeam,{token,teamId:text(form,"teamId") as Id<"teams">});revalidatePath("/dashboard","layout");
+}
 export async function saveScope(form:FormData) {
  const {token}=await current();
  await backend().mutation(api.scopes.save,{token,organizationId:text(form,"organizationId") as Id<"organizations">,...(text(form,"teamId")?{teamId:text(form,"teamId") as Id<"teams">}:{}),overrideKeys:form.getAll("overrideKeys").map(String),settings:scopeSettingsFromForm(form)});

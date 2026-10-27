@@ -80,8 +80,9 @@ export function PeopleTable({ rows, invite }: { rows: PersonRow[]; invite?: Reac
   </>;
 }
 
-/** Greptile's "Invite people" popover: an email address or GitHub login, a role, Invite → ✓ Sent. */
-export function InvitePeople({ organizationId, email }: { organizationId: string; email: boolean }) {
+/** Greptile's "Invite people" popover: an email address or GitHub login, a role, Invite → ✓ Sent. From a team's
+ *  People page the invitee also joins that team, and the role is their team role. */
+export function InvitePeople({ organizationId, email, team }: { organizationId: string; email: boolean; team?: { id: string; name: string } }) {
   const [value, setValue] = useState("");
   const [state, action, pending] = useActionState(async (previous: InviteState, form: FormData) => {
     const next = await inviteMember(previous, form);
@@ -91,16 +92,17 @@ export function InvitePeople({ organizationId, email }: { organizationId: string
   const sent = Boolean(state.sent) && !value;
   return <PortalDisclosure className="invite-people" label={<><Icon name="plus" />Invite people</>}>
     <div className="menu invite-panel">
-      <header><h3>Invite people</h3></header>
+      <header><h3>{team ? `Invite people to ${team.name}` : "Invite people"}</h3></header>
       <form action={action}>
         <input type="hidden" name="organizationId" value={organizationId} />
+        {team && <input type="hidden" name="teamId" value={team.id} />}
         <input name="who" aria-label="Email address or GitHub login" value={value} onChange={(e) => setValue(e.target.value)} placeholder={email ? "Email address or GitHub login" : "GitHub login"} autoComplete="off" spellCheck={false} required maxLength={254} />
         <MiniSelect name="role" aria-label="Role" defaultValue="member"><option value="member">Member</option><option value="viewer">Viewer</option><option value="admin">Admin</option></MiniSelect>
         <button disabled={pending || sent || !value.trim()}>{sent ? <><Icon name="check" />Sent</> : pending ? "Inviting…" : "Invite"}</button>
       </form>
       {state.error && !pending && <p role="alert">{state.error}</p>}
       {sent && <p role="status">{state.note ?? "Invitation sent. It is listed as Pending."}</p>}
-      <p className="muted">{email ? "An email address gets a single-use link that expires in 7 days. A GitHub login sees the invitation when that person signs in." : "The person sees the invitation when they sign in with that GitHub login. Email invitations need email delivery on this deployment."}</p>
+      <p className="muted">{team ? `They join ${team.name} with this team role, and the organization as a Member (a Viewer for a team Viewer). ` : ""}{email ? "An email address gets a single-use link that expires in 7 days. A GitHub login sees the invitation when that person signs in." : "The person sees the invitation when they sign in with that GitHub login. Email invitations need email delivery on this deployment."}</p>
     </div>
   </PortalDisclosure>;
 }

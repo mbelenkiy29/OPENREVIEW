@@ -276,6 +276,7 @@ export default defineSchema({
     organizationId: org,
     email: v.string(),
     role: v.union(v.literal("admin"), v.literal("member"), v.literal("viewer")),
+    teamId: v.optional(v.id("teams")),
     tokenHash: v.string(),
     invitedBy: v.id("users"),
     expiresAt: v.number(),
@@ -329,6 +330,8 @@ export default defineSchema({
     organizationId: org,
     githubLogin: v.string(),
     role: v.union(v.literal("admin"), v.literal("member"), v.literal("viewer")),
+    // Invited from a team's People page: `role` is the team role (scopes.teamInviteRoles).
+    teamId: v.optional(v.id("teams")),
     expiresAt: v.number(),
   })
     .index("by_org", ["organizationId"])

@@ -132,7 +132,8 @@ export async function RepositoriesSection({ ctx }: { ctx: DashboardContext }) {
                         {r.branches && <details><summary>Branches ({r.branches.length}{r.branchesLimited ? "+" : ""})</summary><ul>{r.branches.map((branch) => <li key={branch.name}>{branch.name} · {branch.sha.slice(0, 8)}{branch.protected ? " · Protected" : ""}</li>)}</ul>{r.branchesLimited && <p className="muted">Showing the first 200 branches. Reviews use the exact PR head commit.</p>}</details>}
                       </div>
                     </Dialog>
-                    {isAdmin && <>
+                    {/* Greptile: a team's members (not its viewers) turn that team's repositories on and off. */}
+                    {(isAdmin || (r.teamId && data.writableRepositoryIds.includes(r._id))) && <>
                       <form action={reindex}><input type="hidden" name="repositoryId" value={r._id} /><button className="menu-item" disabled={unavailable || !r.enabled}><Icon name="arrowsClockwise" />Re-index changed files</button></form>
                       <hr />
                       <form action={configureRepository}>

@@ -9,6 +9,7 @@ import { authenticated, authorize, service, audit } from "./auth";
 import { rateLimit } from "./rateLimit";
 import { bindReferralOnWorkspace } from "./referralLedger";
 import { isOperator } from "./operator";
+import { joinTeam, teamInviteRoles, teamOf } from "./scopes";
 
 export const login = mutation({
   args: {
@@ -98,11 +99,13 @@ export const invite = mutation({
     organizationId: v.id("organizations"),
     githubLogin: v.string(),
     role: v.union(v.literal("admin"), v.literal("member"), v.literal("viewer")),
+    teamId: v.optional(v.id("teams")),
   },
   handler: async (ctx, args) => {
     const {user}=await authorize(ctx, args.token, args.organizationId, true);
     if (!/^[a-zA-Z0-9-]{1,39}$/.test(args.githubLogin))
       throw new Error("Enter a valid GitHub login");
+    const teamId = await teamOf(ctx, args.organizationId, args.teamId);
     // Reissuing an invitation replaces its previous grant instead of leaving
     // a stale higher-role invitation available to accept later.
     const login = args.githubLogin.toLowerCase();
@@ -116,6 +119,7 @@ export const invite = mutation({
       organizationId: args.organizationId,
       githubLogin: login,
       role: args.role,
+      ...(teamId ? { teamId } : {}),
       expiresAt: Date.now() + 7 * 86400000,
     });
     await audit(ctx,args.organizationId,user._id,"invitation.created",id);
@@ -159,12 +163,14 @@ export const acceptInvitation = mutation({
           .eq("userId", user._id),
       )
       .unique();
+    const roles = teamInviteRoles(invitation.role, invitation.teamId);
     if (!member)
       await ctx.db.insert("organizationMembers", {
         organizationId: invitation.organizationId,
         userId: user._id,
-        role: invitation.role,
+        role: roles.organization,
       });
+    await joinTeam(ctx, invitation.organizationId, invitation.teamId, user._id, roles.team);
     await ctx.db.delete(invitation._id);
     await audit(ctx,invitation.organizationId,user._id,"invitation.accepted",invitation._id);
     await scheduleSeatSync(ctx, invitation.organizationId);
