@@ -76,6 +76,10 @@ export const upgradeRequest = internalAction({ args: { organizationId: v.id("org
   const target = await ctx.runQuery(internal.notifications.upgradeRequestTargets, a), origin = appOrigin(), day = new Date().toISOString().slice(0, 10);
   for (const recipient of target?.recipients ?? []) await deliver(ctx, a.organizationId, `upgrade-request:${a.userId}:${day}:email:${recipient.userId}`, "email", () => sendEmail({ to: recipient.email, subject: `${target!.login} asked to upgrade ${target!.workspace} on OpenReview`, text: `${target!.login} reached this month's plan limit in ${target!.workspace} and asked a workspace admin to upgrade.${origin ? `\n\nPlans and usage: ${origin}/dashboard/organization/billing` : ""}` }));
 } });
+export const joinRequest = internalAction({ args: { requestId: v.id("joinRequests") }, handler: async (ctx, a): Promise<void> => {
+  const target = await ctx.runQuery(internal.notifications.joinRequestTargets, a), origin = appOrigin();
+  for (const recipient of target?.recipients ?? []) await deliver(ctx, target!.organizationId, `join-request:${a.requestId}:email:${recipient.userId}`, "email", () => sendEmail({ to: recipient.email, subject: `@${target!.login} asked to join ${target!.team} in ${target!.workspace} on OpenReview`, text: `@${target!.login} asked to join the ${target!.team} team in ${target!.workspace}. Approving adds them to ${target!.workspace} as a Member, which uses a seat.${origin ? `\n\nApprove or decline in People (switch to ${target!.workspace} first if it isn't your current organization): ${origin}/dashboard/organization/people` : ""}` }));
+} });
 
 // Email verification: a random token (only its hash is stored) mailed as a one-hour link.
 export const sendVerification = internalAction({ args: { preferenceId: v.id("notificationPreferences") }, handler: async (ctx, a): Promise<string> => {

@@ -12,6 +12,7 @@ import { nextStep, resolveStep, type ConfigureStep } from "../../../../src/onboa
 import { Live } from "../../live";
 import { applyReferralCode, reindex } from "../../actions";
 import { WorkspaceInvitations } from "../../invitations";
+import { JoinTeams } from "../../account";
 import { advanceSetup, checkoutFromSetup, continueOnFree, createSetupWorkspace, finishSetup, inviteFromSetup, saveSetupStep, selectAndIndex } from "../actions";
 import { IndexGraph, Stage, TeamArt, TrialArt } from "../art";
 import { Mark } from "../../../ui/logo";
@@ -45,6 +46,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
         {intent && <input type="hidden" name="intent" value={intent} />}
       </StepForm>
       <WorkspaceInvitations invitations={user.invitations} />
+      <JoinTeams token={user.token} next="/dashboard/onboarding" onlyFound />
     </div>
   </WizardFrame>;
 

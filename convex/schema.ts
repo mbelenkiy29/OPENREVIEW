@@ -124,7 +124,7 @@ export default defineSchema({
   p4Polls:defineTable({organizationId:org,repositoryId:repo,requestedBy:v.id("users"),connectionId:v.id("providerConnections"),credentialDigest:v.string(),baselineJobId:v.id("indexJobs"),enabled:v.boolean(),generation:v.number(),status:v.string(),cursor:v.optional(v.number()),pending:v.array(v.number()),position:v.number(),pages:v.number(),scanned:v.number(),skipped:v.number(),diagnostics:v.array(v.object({nativeNumber:v.number(),reason:v.string()})),attempts:v.number(),error:v.optional(v.string()),scheduledId:v.optional(v.id("_scheduled_functions")),nextAt:v.optional(v.number()),lease:v.optional(v.object({id:v.string(),expiresAt:v.number()})),lastCompleteAt:v.optional(v.number()),updatedAt:v.number(),createdAt:v.number()}).index("by_repo",["repositoryId"]).index("by_org",["organizationId"]).index("by_enabled",["enabled"]),
   // The row outlives its body: it dedupes redeliveries and lists the delivery; the body is cleared after 14 days.
   providerEvents: defineTable({connectionId:v.id("providerConnections"),externalId:v.string(),body:v.string(),bodyDeletedAt:v.optional(v.number()),eventType:v.optional(v.string()),status:v.string(),error:v.optional(v.string()),createdAt:v.number(),updatedAt:v.optional(v.number()),attempts:v.number()}).index("by_delivery",["connectionId","externalId"]).index("by_connection_created",["connectionId","createdAt"]).index("by_status",["status"]).index("by_body_deleted",["bodyDeletedAt","createdAt"]),
-  teams: defineTable({ organizationId: org, name: v.string(), externalKey: v.optional(v.string()), autoEnableRepositories: v.optional(v.boolean()), createdAt: v.number() }).index("by_org", ["organizationId"]),
+  teams: defineTable({ organizationId: org, name: v.string(), externalKey: v.optional(v.string()), autoEnableRepositories: v.optional(v.boolean()), createdAt: v.number() }).index("by_org", ["organizationId"]).index("by_external", ["externalKey"]),
   teamMembers: defineTable({ organizationId: org, teamId: v.id("teams"), userId: v.id("users"), role: v.union(v.literal("admin"), v.literal("member"), v.literal("viewer")) }).index("by_team", ["teamId"]).index("by_team_user", ["teamId", "userId"]),
   scopeSettings: defineTable({ organizationId: org, teamId: v.optional(v.id("teams")), settings: settingsValidator, overrideKeys: v.array(v.string()) }).index("by_org", ["organizationId"]).index("by_team", ["teamId"]),
   repositoryClusters: defineTable({ organizationId: org, name: v.string(), repositoryIds: v.array(repo), createdAt: v.number() }).index("by_org", ["organizationId"]),
@@ -333,6 +333,14 @@ export default defineSchema({
   })
     .index("by_org", ["organizationId"])
     .index("by_login", ["githubLogin"]),
+  // "Join a team" requests (convex/joinRequests.ts); an org admin or that team's admin answers each.
+  joinRequests: defineTable({ organizationId: org, teamId: v.id("teams"), userId: v.id("users"), createdAt: v.number() })
+    .index("by_org", ["organizationId"])
+    .index("by_user_team", ["userId", "teamId"]),
+  // People → Member link: one reusable link per workspace that joins as Member until it expires; hash only, like emailInvitations.
+  memberLinks: defineTable({ organizationId: org, tokenHash: v.string(), createdBy: v.id("users"), createdAt: v.number(), expiresAt: v.number() })
+    .index("by_token", ["tokenHash"])
+    .index("by_org", ["organizationId"]),
   githubInstallations: defineTable({
     organizationId: org,
     installationId: v.number(),

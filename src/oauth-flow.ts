@@ -22,8 +22,9 @@ export async function beginOAuth(request: Request, provider: Provider, authorize
   const url = new URL(request.url), state = randomBytes(32).toString("hex");
   // A signed-in user re-authorizes GitHub only for a fresh GitHub token, without signing in again:
   // "github-install" verifies an App installation, "github-act" posts a comment as the user (cloud agents).
+  // "gitlab-groups" asks GitLab for read_api to list the user's groups for "Join a team".
   const asked = url.searchParams.get("purpose"), link = url.searchParams.get("link") === "1";
-  const purpose = provider === "github" && (asked === "github-install" || asked === "github-act") ? asked : undefined;
+  const purpose = provider === "github" && (asked === "github-install" || asked === "github-act") ? asked : provider === "gitlab" && asked === "gitlab-groups" ? asked : undefined;
   const referral = link || purpose ? null : normalizeReferralCode(url.searchParams.get("referral"));
   (await cookies()).set(stateCookie(provider), await seal({ state, next: safeNext(url.searchParams.get("next")), link, ...(purpose ? { purpose } : {}), ...(referral ? { referral } : {}) }), { ...cookieOptions, maxAge: 600 });
   return NextResponse.redirect(authorize(state, callbackUrl(provider)));
@@ -32,6 +33,7 @@ export async function startSession(userId: string, sid: string) {
   const jar = await cookies();
   // A GitHub token left by an earlier sign-in on this browser belongs to that user; a GitHub sign-in sets its own after this.
   jar.delete("openreview_github_setup");
+  jar.delete("openreview_gitlab_setup");
   jar.set("openreview_session", await signSession(userId, sid), { ...cookieOptions, maxAge: 7 * 86400 });
 }
 export async function finishOAuth(request: Request, provider: Provider, profile: (code: string, redirectUri: string) => Promise<Profile>, after?: () => Promise<void>) {
@@ -43,7 +45,7 @@ export async function finishOAuth(request: Request, provider: Provider, profile:
   try {
     const code = url.searchParams.get("code");
     if (!cookie) throw new Error("Missing OAuth state or code");
-    const saved = z.object({ state: z.string(), next: z.string().optional(), link: z.boolean().optional(), purpose: z.enum(["github-install", "github-act"]).optional(), referral: z.string().optional() }).passthrough().parse(await unseal(cookie));
+    const saved = z.object({ state: z.string(), next: z.string().optional(), link: z.boolean().optional(), purpose: z.enum(["github-install", "github-act", "gitlab-groups"]).optional(), referral: z.string().optional() }).passthrough().parse(await unseal(cookie));
     referral = saved.referral; link = saved.link === true; next = safeNext(saved.next);
     if (!code || code.length > 2000) throw new Error("Missing OAuth state or code");
     if (saved.state !== url.searchParams.get("state")) throw new Error("OAuth state mismatch");
@@ -51,7 +53,7 @@ export async function finishOAuth(request: Request, provider: Provider, profile:
       // No sign-in, session or identity link: keep the current session and hand the fresh GitHub
       // token to the flow that asked for it, which re-checks the user and workspace.
       const current = jar.get("openreview_session")?.value;
-      if (!current || !(await backend().query(api.identity.sessionValid, { token: current }).catch(() => false))) throw new Error("Sign in to OpenReview before re-authorizing GitHub");
+      if (!current || !(await backend().query(api.identity.sessionValid, { token: current }).catch(() => false))) throw new Error(`Sign in to OpenReview before re-authorizing ${provider === "github" ? "GitHub" : "GitLab"}`);
       stage = "provider";
       await profile(code, callbackUrl(provider));
       await after?.();

@@ -1,12 +1,15 @@
 "use server";
+import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { backend, current } from "../../src/server";
+import { backend, current, origin } from "../../src/server";
 import { emailOnWeb } from "../../src/email";
+import { notify } from "../../src/toast";
+import { joinProofs, recheck } from "../../src/join-teams";
 
 // Convex errors carry request IDs and stack frames; show only their message.
 const message = (e: unknown, fallback: string) => /Uncaught Error: ([^\n]+?)(?:\s+at |\n|$)/.exec(e instanceof Error ? e.message : "")?.[1] ?? fallback;
@@ -41,4 +44,45 @@ export async function openWorkspaceSettings(form: FormData) {
   jar.delete("openreview_team");
   revalidatePath("/dashboard", "layout");
   redirect("/dashboard/organization");
+}
+
+// Join a Team → Request access. GitHub installations and GitLab groups are read again here, so Convex can check the
+// team is one this user can see; when that provider's fresh token has expired, re-authorize first and come back.
+export async function requestTeamAccess(form: FormData) {
+  const { token } = await current();
+  const returnTo = form.get("returnTo") === "/dashboard/onboarding" ? "/dashboard/onboarding" : "/dashboard/account";
+  const provider = form.get("provider") === "gitlab" ? "gitlab" : "github";
+  let proofs;
+  try { proofs = await joinProofs(); } catch { proofs = undefined; }
+  if (proofs && !proofs[provider]) redirect(recheck[provider] + encodeURIComponent(returnTo));
+  try {
+    if (!proofs) throw new Error("GitHub or GitLab didn’t answer. Try again in a minute.");
+    await backend().mutation(api.joinRequests.request, { token, secret: process.env.SERVICE_SECRET ?? "", teamId: String(form.get("teamId")) as Id<"teams">, ...proofs.args });
+    await notify("Request sent. A team admin will approve it.");
+  } catch (e) { await notify(message(e, "The request could not be sent. Try again."), "error"); }
+  revalidatePath("/dashboard", "layout");
+}
+
+// People → a join request's Approve or Decline.
+export async function answerJoinRequest(form: FormData) {
+  const { token } = await current();
+  const approve = form.get("approve") === "true";
+  try {
+    await backend().mutation(api.joinRequests.answer, { token, requestId: String(form.get("requestId")) as Id<"joinRequests">, approve });
+    await notify(approve ? "Request approved. They are now a Member of this organization and the team." : "Request declined.");
+  } catch (e) { await notify(message(e, "The request could not be answered."), "error"); }
+  revalidatePath("/dashboard", "layout");
+}
+
+export type MemberLinkState = { url?: string; expiresAt?: number; off?: boolean; error?: string };
+// People → Member link: a fresh token on each create or reset. Convex keeps only its hash, so the URL shows once.
+export async function changeMemberLink(_state: MemberLinkState, form: FormData): Promise<MemberLinkState> {
+  const { token } = await current();
+  const organizationId = String(form.get("organizationId")) as Id<"organizations">, create = form.get("op") === "create";
+  const raw = randomBytes(32).toString("base64url");
+  let expiresAt: number | null;
+  try { expiresAt = await backend().mutation(api.identity.setMemberLink, { token, organizationId, ...(create ? { tokenHash: createHash("sha256").update(raw).digest("hex") } : {}) }); }
+  catch (e) { return { error: message(e, "The member link could not be changed.") }; }
+  revalidatePath("/dashboard", "layout");
+  return expiresAt ? { url: `${origin()}/invite?token=${raw}`, expiresAt } : { off: true };
 }

@@ -17,6 +17,12 @@ export function activeWorkspace<T extends { _id?: string }>(user: { organization
   return user.organizations.find((o) => o._id === jar.get("openreview_workspace")?.value) ?? user.organizations[0];
 }
 
+// The teams the switcher offers. As on Greptile, one team that every repository belongs to is no choice: the menu shows
+// the workspace alone. Repositories outside any team (personal accounts) keep the picker for a single team.
+export function teamChoices<T>(scopes: { teams: T[]; repositories: { teamId?: string }[] }) {
+  return scopes.teams.length > 1 || scopes.repositories.some((r) => !r.teamId) ? scopes.teams : [];
+}
+
 // Read once per server render: the portal layout (app chrome) and the page both need them.
 export const viewer = cache(() => current());
 export const scopesFor = cache((token: string, organizationId: Id<"organizations">) => backend().query(api.scopes.list, { token, organizationId }));
@@ -61,7 +67,7 @@ export async function loadDashboard({
   const requestedRepository = filters.repository;
   if (!navigation.some((n) => n.toLowerCase() === view)) notFound();
   const scopes=await scopesFor(user.token,organization._id);
-  const savedTeam=jar.get("openreview_team")?.value;
+  const savedTeam=teamChoices(scopes).length?jar.get("openreview_team")?.value:undefined;
   const selectedTeam=scopes.teams.find(t=>t._id===(filters.team??savedTeam));
   if(filters.team&&!selectedTeam)notFound();
   if(selectedTeam)filters.team=selectedTeam._id;
@@ -69,7 +75,7 @@ export async function loadDashboard({
   const isAdmin = ["owner", "admin"].includes(organization.role);
   const keysPage = route === "settings" && section[1] === "keys";
   // Independent reads run together; each check below still runs before the queries it guards.
-  const [data, findingsPage, ruleAssistant, ruleUsage, pendingInvitations, detail, apiKeys, devinConfigured, mcpConnections, modelKey, locked] = await Promise.all([
+  const [data, findingsPage, ruleAssistant, ruleUsage, pendingInvitations, detail, apiKeys, devinConfigured, mcpConnections, modelKey, locked, joinRequests] = await Promise.all([
     backend().query(api.dashboard.overview, {
       token: user.token,
       organizationId: organization._id,
@@ -124,6 +130,8 @@ export async function loadDashboard({
     keysPage && isAdmin ? backend().query(api.modelKeys.status, { token: user.token, organizationId: organization._id }) : null,
     // Pro features this plan lacks: their settings render inside <Locked> (none with billing off).
     backend().query(api.billing.locked, { token: user.token, organizationId: organization._id }),
+    // "Join a team" requests this user can answer (org admins: all; team admins: their teams).
+    backend().query(api.joinRequests.pending, { token: user.token, organizationId: organization._id }),
   ]);
   const visibleFindings = findingsPage?.page ?? data.findings.map(f=>({...f,canFix:false}));
   const repoName = (id: string) =>
@@ -178,6 +186,6 @@ export async function loadDashboard({
   ]);
   // Narrowed above: a dashboard always has a workspace.
   const workspace = organization as typeof organization & { _id: Id<"organizations"> };
-  return { kind: "dashboard" as const, page, active, aliases, apiKeys, locked, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, pull, checks, filters, findingsPage, isAdmin, jar, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleUsage, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
+  return { kind: "dashboard" as const, page, active, aliases, apiKeys, locked, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, pull, checks, filters, findingsPage, isAdmin, jar, joinRequests, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleUsage, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
 }
 export type DashboardContext = Extract<Awaited<ReturnType<typeof loadDashboard>>, { kind: "dashboard" }>;

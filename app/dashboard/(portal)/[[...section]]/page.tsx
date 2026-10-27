@@ -48,6 +48,7 @@ export default async function Dashboard(props: {
   const notices = <>
     {needsSetup(organization) && <section className="setup-banner" aria-label="Workspace setup"><p><strong>Setup isn’t finished.</strong> {organization.onboarding?.reviewsPaused ? "Automatic reviews are paused until you choose when reviews run." : "Finish connecting repositories and choosing review behavior."}</p>{isAdmin ? <Link className="button primary small" href="/dashboard/onboarding">Resume setup</Link> : <p className="muted">A workspace admin is completing setup.</p>}</section>}
     <WorkspaceInvitations invitations={user.invitations}/>
+    {ctx.joinRequests.length > 0 && view !== "team" && <p role="status" className="notice-banner">{ctx.joinRequests.length === 1 ? "1 person asked" : `${ctx.joinRequests.length} people asked`} to join a team. <Link href="/dashboard/organization/people">Review in People</Link></p>}
     {savedTeam&&!selectedTeam&&filters.team===undefined&&<p role="status">Your previously selected team is no longer accessible. Showing all accessible repositories; use the organization menu to select a team.</p>}
   </>;
   const content = <>

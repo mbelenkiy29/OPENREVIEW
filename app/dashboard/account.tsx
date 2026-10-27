@@ -5,7 +5,8 @@ import { backend } from "../../src/server";
 import { referralConfig } from "../../src/referrals";
 import { Icon, type IconName } from "../ui/icons";
 import { revokeSession, signOutEverywhere } from "./actions";
-import { openWorkspaceSettings } from "./actions-organization";
+import { openWorkspaceSettings, requestTeamAccess } from "./actions-organization";
+import { joinProofs, recheck } from "../../src/join-teams";
 import { activeWorkspace, viewer } from "./load";
 import { Confirm } from "./org-ui";
 import { PortalDisclosure } from "./portal-disclosure";
@@ -15,8 +16,8 @@ const when = (ms: number) => new Date(ms).toLocaleString("en-US", { timeZone: "U
 const providers: Record<string, [label: string, icon: IconName]> = { github: ["GitHub", "githubLogo"], gitlab: ["GitLab", "gitlabLogo"], google: ["Google", "googleLogo"], email: ["Email", "envelopeSimple"], sso: ["Single sign-on", "lockSimple"] };
 const provider = (p: string) => providers[p] ?? [p, "user"];
 const title = (role: string) => role[0].toUpperCase() + role.slice(1);
-// Personal Settings → Account Settings, as on Greptile: Profile, Roles & Access, Linked Accounts (our sign-in
-// methods; linking only, there is no unlink), then active sessions (revoke one, or everywhere).
+// Personal Settings → Account Settings, as on Greptile: Profile, Roles & Access, Join a Team, Linked Accounts (our
+// sign-in methods; linking only, there is no unlink), then active sessions (revoke one, or everywhere).
 export async function AccountPanel({ token }: { token: string }) {
   const [data, me, jar] = await Promise.all([backend().query(api.identity.sessions, { token }), viewer(), cookies()]);
   const current = activeWorkspace(me, jar)?._id, linked = new Set(data.identities.map((i) => i.provider));
@@ -39,6 +40,8 @@ export async function AccountPanel({ token }: { token: string }) {
         </tr>)}</tbody>
       </table>
     </ScrollTable> : <section aria-labelledby="roles-heading"><p className="card-line">You are not a member of any organizations.</p></section>}
+    <div className="section-heading"><h2 id="join-a-team">Join a Team</h2></div>
+    <section aria-labelledby="join-a-team"><p className="muted">Teams you can ask to join. A team admin approves each request.</p><JoinTeams token={token} next="/dashboard/account" /></section>
     <div className="section-heading"><h2 id="methods-heading">Linked Accounts</h2>
       {links.length > 0 && <PortalDisclosure className="add-account" label={<><Icon name="plus" />Add Account</>}>
         <div className="menu">{links.map(([p, href]) => <a key={p} className="menu-item" href={href}><Icon name={provider(p)[1]} />Link {provider(p)[0]}</a>)}</div>
@@ -75,5 +78,34 @@ export async function AccountPanel({ token }: { token: string }) {
       </table>
     </ScrollTable>
     <p className="muted table-note">Removal from a workspace also signs you out everywhere and revokes your API keys and bridges for that workspace.</p>
+  </>;
+}
+
+/** Greptile's "Join a Team": teams (GitHub organizations and GitLab groups) that your GitHub or GitLab user belongs to,
+ *  in workspaces where you can't see that team yet. Listing them needs a fresh token from each provider
+ *  (src/join-teams.ts), so a Check button re-authorizes the one that's missing. `onlyFound` (first run) renders
+ *  nothing unless there is a team to join. */
+export async function JoinTeams({ token, next, onlyFound = false }: { token: string; next: string; onlyFound?: boolean }) {
+  let proofs: Awaited<ReturnType<typeof joinProofs>> | undefined, teams: { teamId: string; team: string; organization: string; provider: "github" | "gitlab"; requested: boolean }[] = [];
+  try {
+    proofs = await joinProofs();
+    if (proofs.github || proofs.gitlab) teams = await backend().query(api.joinRequests.joinable, { token, secret: process.env.SERVICE_SECRET ?? "", ...proofs.args });
+  } catch { proofs = undefined; }
+  if (onlyFound && !teams.length) return null;
+  if (!proofs) return <p role="alert" className="error">GitHub or GitLab didn’t return your organizations. Try again in a minute.</p>;
+  const checks = ([["github", "GitHub", "githubLogo", process.env.GITHUB_CLIENT_ID], ["gitlab", "GitLab", "gitlabLogo", process.env.GITLAB_OAUTH_CLIENT_ID]] as const).filter(([p, , , on]) => on && !proofs[p]);
+  return <>
+    {onlyFound && <p><strong>Your team may already use OpenReview.</strong> Ask to join it instead of creating a new workspace.</p>}
+    {teams.length > 0 ? <ScrollTable label="Teams you can ask to join" className="table-box">
+      <table>
+        <thead><tr><th>Team</th><th>Actions</th></tr></thead>
+        <tbody>{teams.map((t) => <tr key={t.teamId}>
+          <td className="wrap">{t.team}<span className="cell-detail">{t.organization}</span></td>
+          <td>{t.requested ? <button className="small" disabled>Requested</button>
+            : <form action={requestTeamAccess}><input type="hidden" name="teamId" value={t.teamId} /><input type="hidden" name="provider" value={t.provider} /><input type="hidden" name="returnTo" value={next} /><button className="small">Request access</button></form>}</td>
+        </tr>)}</tbody>
+      </table>
+    </ScrollTable> : (proofs.github || proofs.gitlab) && <p className="card-line">None of the GitHub organizations or GitLab groups you can see has a team you can join.</p>}
+    {!onlyFound && checks.length > 0 && <p className="row">{checks.map(([p, label, icon]) => <a key={p} className="button" href={recheck[p] + encodeURIComponent(next)}><Icon name={icon} />Check {label} for teams</a>)}</p>}
   </>;
 }

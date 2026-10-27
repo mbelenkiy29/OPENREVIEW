@@ -220,6 +220,7 @@ async function endSession(to: string): Promise<never> {
   if (token) await backend().mutation(api.identity.signOut, { token }).catch(() => undefined);
   jar.delete("openreview_session");
   jar.delete("openreview_github_setup");
+  jar.delete("openreview_gitlab_setup");
   redirect(safeNext(to));
 }
 export async function logout() { await endSession("/"); }
@@ -229,6 +230,7 @@ export async function signOutEverywhere() {
   const jar = await cookies();
   jar.delete("openreview_session");
   jar.delete("openreview_github_setup");
+  jar.delete("openreview_gitlab_setup");
   redirect("/login?signedout=1");
 }
 export async function revokeSession(form: FormData) {
@@ -256,7 +258,9 @@ export async function acceptEmailInvitation(form: FormData) {
   let organizationId: string;
   try { organizationId = await backend().mutation(api.identity.acceptEmailInvitation, { token, tokenHash: createHash("sha256").update(raw).digest("hex") }); }
   catch { redirect("/invite?error=1"); }
-  (await cookies()).set("openreview_workspace", organizationId, { httpOnly: true, sameSite: "lax", path: "/", secure: process.env.NODE_ENV === "production" });
+  const jar = await cookies();
+  jar.set("openreview_workspace", organizationId, { httpOnly: true, sameSite: "lax", path: "/", secure: process.env.NODE_ENV === "production" });
+  jar.delete("openreview_team");
   redirect("/dashboard");
 }
 export async function cancelReview(form: FormData) {
