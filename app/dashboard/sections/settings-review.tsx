@@ -213,6 +213,7 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                     <Locked feature="fix.pullRequests" unlocked={unlocked("fix.pullRequests")} admin={isAdmin}>
                       <input type="hidden" name="fixConfigured" value="true" />
                       <label className="check"><input type="checkbox" name="fixPullRequests" defaultChecked={repoSettings.settings.fixPullRequests ?? false} /> Allow “@openreview fix this in a new PR” to open a fix pull request on a new branch (GitHub, needs the Contents: Read and write permission; the pull request’s own branch is never written)</label>
+                      <label className="check"><input type="checkbox" name="autofix" defaultChecked={repoSettings.settings.autofix ?? false} /> Autofix: open fix pull requests automatically for critical and high findings when a review completes (needs fix pull requests on; at most 3 per review, one per issue)</label>
                     </Locked>
                   </fieldset>
                   <fieldset className="wide">

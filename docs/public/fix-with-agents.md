@@ -44,3 +44,6 @@ This needs:
 - **Fix pull requests** turned on for the repository (Settings → Repositories).
 - The GitHub App's **Contents: Read and write** permission, accepted by the owner of the GitHub account. **Settings → Code providers** shows which installations have it.
 - Write access for your linked GitHub account.
+- The **Pro** plan on the hosted cloud (the free trial includes it). On Starter, `@openreview fix this` still replies with a suggestion, and `… in a new PR` explains that fix pull requests are on Pro.
+
+To open them automatically for critical and high findings, turn on [Autofix](/docs/issues-and-autofix#autofix).

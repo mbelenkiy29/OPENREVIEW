@@ -16,6 +16,7 @@ export const open = action({
     const auth = await ctx.runMutation(internal.fixPullRequests.authorizeOpen, a);
     const done = async (result: { url?: string; reused?: boolean; note?: string }) => {
       await ctx.runMutation(internal.fixPullRequests.recordResult, { organizationId: auth.organizationId, userId: auth.userId, findingId: a.findingId, opened: Boolean(result.url), detail: result.url ?? result.note ?? "" });
+      if (result.url) await ctx.runMutation(internal.issues.recordFixPullRequest, { findingId: a.findingId, url: result.url, automatic: false });
       return result;
     };
     const { repo } = await ctx.runQuery(internal.repositories.data, { repositoryId: auth.repositoryId });

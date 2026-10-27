@@ -311,6 +311,7 @@ export async function saveSettings(form: FormData) {
       lockedKeys: form.has("lockedConfigured") ? form.getAll("lockedKeys").map(String) : previous.settings.lockedKeys ?? [],
       autoApproveConventions: form.has("conventionsConfigured") ? form.has("autoApproveConventions") : previous.settings.autoApproveConventions ?? false,
       fixPullRequests: form.has("fixConfigured") ? form.has("fixPullRequests") : previous.settings.fixPullRequests ?? false,
+      autofix: form.has("fixConfigured") ? form.has("autofix") : previous.settings.autofix ?? false,
       threadReplies: form.has("threadRepliesConfigured") ? form.has("threadReplies") : previous.settings.threadReplies ?? true,
       securityScan: form.has("securityScanConfigured") ? form.has("securityScan") : previous.settings.securityScan ?? true,
       aiAuthoredModel: form.has("aiAuthoredModel") ? text(form, "aiAuthoredModel").trim() : previous.settings.aiAuthoredModel ?? "",

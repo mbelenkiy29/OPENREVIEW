@@ -45,6 +45,7 @@ Status: **exists** = built and on main today (every tier gets it until P0 lands)
 | Unlimited reviews (fair use), summary comment, inline findings, committable suggestions | ✓ | ✓ | ✓ | exists | (always on) |
 | Incremental re-reviews, thread resolution, triggers, `.openreview.json` | ✓ | ✓ | ✓ | exists | (always on) |
 | Security checks and OSV advisories | ✓ | ✓ | ✓ | exists | (always on, never gated) |
+| Issues inbox (findings as tickets across pull requests) | ✓ | ✓ | ✓ | exists | (always on, never gated) |
 | All providers (GitHub, GitLab, Azure DevOps, Bitbucket, Gitea, Perforce) | ✓ | ✓ | ✓ | exists | (always on) |
 | Codebase chat in the dashboard | ✓ | ✓ | ✓ | exists | (always on) |
 | 👍/👎 learning and the Memory page | ✓ | ✓ | ✓ | exists | (always on) |
@@ -52,6 +53,7 @@ Status: **exists** = built and on main today (every tier gets it until P0 lands)
 | Agentic and hypothesis review engines (deeper reviews) |  | ✓ | ✓ | exists | `engine.deep` |
 | Requirements check from Linear, Jira, Confluence and Notion |  | ✓ | ✓ | exists | `context.requirements` |
 | Fix pull requests (`@openreview fix this … in a new PR`) |  | ✓ | ✓ | exists | `fix.pullRequests` |
+| Autofix: fix pull requests opened automatically for critical and high findings |  | ✓ | ✓ | exists | `fix.pullRequests` |
 | Generated reproduction tests in the sandbox |  | ✓ | ✓ | exists | `review.reproTests` |
 | Learned conventions from human reviewers |  | ✓ | ✓ | exists | `memory.conventions` |
 | Public API keys and the remote MCP server |  | ✓ | ✓ | exists | `api.access` |
@@ -114,7 +116,7 @@ done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.
 - [ ] Tests: allowed and denied for every tier, always allowed with billing disabled, and a member of another workspace cannot probe the entitlements.
 
 ### - [x] P0.4 Locked-feature UI pattern
-done: 2026-10-27 · see git log feat(billing): Pro tier · tests: covered by the browser check in scripts/browser.ts
+done: 2026-10-27 · see git log feat(billing): Pro tier · tests: checked in a local preview with Playwright (desktop and 390px, both themes, disabled controls); not yet part of scripts/browser.ts
 **Depends on:** P0.2
 **Files:** new `app/dashboard/locked.tsx`, `app/globals.css`, DESIGN.md.
 **Build:**

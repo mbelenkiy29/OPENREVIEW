@@ -1,5 +1,6 @@
 import {executionExplanation} from "../src/execution-claims";
 import { findingResolved, trackFinding } from "./issueLifecycle";
+import { autofixWanted } from "./autofix";
 import { notificationsEnabled } from "./notifications";
 import { reviewAllowance } from "./billing";
 import {
@@ -532,6 +533,8 @@ export const finished = internalMutation({
         });
     }
     if(!args.error&&!review.nativeP4)await ctx.scheduler.runAfter(0,internal.approvals.request,{reviewId:review._id});
+    // Autofix (Pro): fix pull requests for the review's critical and high findings.
+    if(!args.error&&await autofixWanted(ctx,review))await ctx.scheduler.runAfter(0,internal.autofixJobs.run,{reviewId:review._id});
     if(!args.error&&await notificationsEnabled(ctx,review.organizationId))await ctx.scheduler.runAfter(0,internal.notificationJobs.reviewCompleted,{reviewId:review._id});
   },
 });

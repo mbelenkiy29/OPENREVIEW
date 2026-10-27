@@ -19,6 +19,8 @@ import type * as approvalJobs from "../approvalJobs.js";
 import type * as approvals from "../approvals.js";
 import type * as atlassianJobs from "../atlassianJobs.js";
 import type * as auth from "../auth.js";
+import type * as autofix from "../autofix.js";
+import type * as autofixJobs from "../autofixJobs.js";
 import type * as billing from "../billing.js";
 import type * as billingJobs from "../billingJobs.js";
 import type * as bitbucketPersonal from "../bitbucketPersonal.js";
@@ -145,6 +147,8 @@ declare const fullApi: ApiFromModules<{
   approvals: typeof approvals;
   atlassianJobs: typeof atlassianJobs;
   auth: typeof auth;
+  autofix: typeof autofix;
+  autofixJobs: typeof autofixJobs;
   billing: typeof billing;
   billingJobs: typeof billingJobs;
   bitbucketPersonal: typeof bitbucketPersonal;

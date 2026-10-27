@@ -51,6 +51,7 @@ export const settingsValidator = v.object({
   lockedKeys:v.optional(v.array(v.string())),
   autoApproveConventions:v.optional(v.boolean()),
   fixPullRequests:v.optional(v.boolean()),
+  autofix:v.optional(v.boolean()),
   threadReplies:v.optional(v.boolean()),
   securityScan:v.optional(v.boolean()),
   summaryPlacement:v.optional(v.string()),

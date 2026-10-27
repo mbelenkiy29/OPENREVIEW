@@ -8,7 +8,7 @@ import { contextReadable, requireContextReader, requireFindingReader } from "./r
 import { fixEligibility, readableExplanation } from "./findings";
 import { recordFindingFeedback } from "./feedbackCore";
 import { rateLimit } from "./rateLimit";
-import { activeIssue, issueEvent, issueStatuses, syncIssueStatus, trackFinding } from "./issueLifecycle";
+import { activeIssue, fixPullRequestOpened, issueEvent, issueStatuses, syncIssueStatus, trackFinding } from "./issueLifecycle";
 
 // Issues inbox: tickets built from findings (lifecycle rules in issueLifecycle.ts). Reading follows
 // the same repository and context access as findings; changing an issue needs repository write access.
@@ -141,13 +141,7 @@ export const comment = mutation({
 /** A fix pull request was opened for an occurrence, from the dashboard or by Autofix. */
 export const recordFixPullRequest = internalMutation({
   args: { findingId: v.id("findings"), url: v.string(), automatic: v.boolean() },
-  handler: async (ctx, a) => {
-    const finding = await ctx.db.get(a.findingId);
-    const issue = finding?.issueId ? await ctx.db.get(finding.issueId) : null;
-    if (!issue || issue.fixPullRequestUrl === a.url) return;
-    await ctx.db.patch(issue._id, { fixPullRequestUrl: a.url, updatedAt: Date.now() });
-    await issueEvent(ctx, issue, "fix_pr", `${a.automatic ? "Autofix opened" : "Opened"} a fix pull request: ${a.url}`);
-  },
+  handler: async (ctx, a) => fixPullRequestOpened(ctx, await ctx.db.get(a.findingId), a.url, a.automatic),
 });
 
 /** One-off for findings stored before issues existed:

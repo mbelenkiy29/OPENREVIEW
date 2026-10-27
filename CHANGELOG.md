@@ -4,6 +4,11 @@
 
 ## October 2026
 
+### Issues and Autofix
+- **Issues:** Pull Requests → Issues lists every problem as a ticket, with a number, priority, status, assignee, comments and an activity log. The same problem on several pull requests is one issue. Fixing commits and closed pull requests resolve issues; a merged pull request marks an open issue **merged**.
+- **Autofix (Pro):** turn it on per repository and OpenReview opens fix pull requests for a completed review's critical and high findings, at most three per review.
+- **Pro plan:** fix pull requests, Autofix, deeper reviews, the requirements check, generated reproduction tests, learned conventions and API access. Starter workspaces upgrade in Manage billing; the free trial includes Pro features.
+
 ### Your own model key
 - Workspace owners and admins can run reviews, chat and fixes on their own Anthropic, OpenAI or OpenRouter key under Settings → API Keys. The key is checked, stored encrypted and never shown again, and the provider bills its usage.
 

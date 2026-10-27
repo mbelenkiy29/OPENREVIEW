@@ -52,11 +52,11 @@ export async function prepareFix(ctx:ActionCtx,p:{github:Scm;repo:Doc<"repositor
 }
 // Opens (or reuses) the fix pull request for a prepared suggestion, after re-checking that `author`
 // still has write access. Returns the pull request, or a note explaining why none was opened.
-export async function openFix(p:{github:Scm;repo:Doc<"repositories">;pr:ScmChange;target:Doc<"findings">;prepared:PreparedFix;author:string;prNumber:number;requestedIn:string}):Promise<{pullRequest?:{url:string;reused:boolean};note?:string}>{
+export async function openFix(p:{github:Scm;repo:Doc<"repositories">;pr:ScmChange;target:Doc<"findings">;prepared:PreparedFix;author:string;prNumber:number;requestedIn:string;automatic?:boolean}):Promise<{pullRequest?:{url:string;reused:boolean};note?:string}>{
   const {github,repo,pr,target,prepared:{suggestion,content,entry}}=p;
   if(!suggestion||!content||!entry)return {note:"No fix pull request was opened because no validated suggestion is available."};
   if(!github.openFixPullRequest)return {note:"Fix pull requests are not available for this provider."};
   if(!github.canReply||!await github.canReply(repo.fullName,p.author))throw new Error("Comment author write access revoked");
-  const result=await github.openFixPullRequest(repo.fullName,p.prNumber,{branch:fixBranchName(p.prNumber,target.fingerprint),expectedHead:pr.head.sha,path:target.filePath,blobSha:entry.sha,content:applySuggestion(content,suggestion),title:("OpenReview fix: "+target.title.replace(/[\r\n]+/g," ")).slice(0,120),body:`Requested by @${p.author} in ${p.requestedIn} for the finding in \`${target.filePath}:${target.startLine}\`. This pull request targets the branch of #${p.prNumber} and changes only the suggested lines. No tests were run by OpenReview.`,message:("Apply OpenReview suggestion: "+target.title.replace(/[\r\n]+/g," ")).slice(0,200)});
+  const result=await github.openFixPullRequest(repo.fullName,p.prNumber,{branch:fixBranchName(p.prNumber,target.fingerprint),expectedHead:pr.head.sha,path:target.filePath,blobSha:entry.sha,content:applySuggestion(content,suggestion),title:("OpenReview fix: "+target.title.replace(/[\r\n]+/g," ")).slice(0,120),body:`${p.automatic?"Opened automatically by OpenReview Autofix (repository setting)":`Requested by @${p.author} in ${p.requestedIn}`} for the finding in \`${target.filePath}:${target.startLine}\`. This pull request targets the branch of #${p.prNumber} and changes only the suggested lines. No tests were run by OpenReview.`,message:("Apply OpenReview suggestion: "+target.title.replace(/[\r\n]+/g," ")).slice(0,200)});
   return "skipped" in result?{note:`No fix pull request was opened: ${result.skipped}.`}:{pullRequest:result};
 }

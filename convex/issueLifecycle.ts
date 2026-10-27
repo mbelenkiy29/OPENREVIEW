@@ -73,6 +73,14 @@ export async function pullRequestClosed(ctx: MutationCtx, repositoryId: Id<"repo
   }
 }
 
+/** A fix pull request was opened for an occurrence, from the dashboard or by Autofix. */
+export async function fixPullRequestOpened(ctx: MutationCtx, finding: Doc<"findings"> | null, url: string, automatic: boolean) {
+  const issue = finding?.issueId ? await ctx.db.get(finding.issueId) : null;
+  if (!issue || issue.fixPullRequestUrl === url) return;
+  await ctx.db.patch(issue._id, { fixPullRequestUrl: url, updatedAt: Date.now() });
+  await issueEvent(ctx, issue, "fix_pr", `${automatic ? "Autofix opened" : "Opened"} a fix pull request: ${url}`);
+}
+
 /** Retention removed a finding: an issue left without occurrences goes too, with its events. */
 export async function findingRemoved(ctx: MutationCtx, finding: Doc<"findings">) {
   const issue = finding.issueId ? await ctx.db.get(finding.issueId) : null;
