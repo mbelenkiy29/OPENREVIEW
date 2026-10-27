@@ -4,7 +4,8 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { authorize } from "./auth";
-import { billingConfig, billingDecision, periodKey, seatCount, trialEndsFrom } from "../src/billing";
+import { accountTiers, billingConfig, billingDecision, periodKey, seatCount, trialEndsFrom, type BillingConfig } from "../src/billing";
+import { entitled, entitlementKeys, featureNames, tierForPrice, type EntitlementKey } from "../src/plans";
 import { referralConfig } from "../src/referrals";
 import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus } from "./referralLedger";
 
@@ -54,6 +55,32 @@ export async function reviewAllowance(ctx: MutationCtx, organizationId: Id<"orga
   return decision.allowed ? { allowed: true } : { allowed: false, reason: "Billing: " + decision.reason };
 }
 
+// Entitlements (docs/roadmap/pricing-tiers.md P0.3). A workspace without an account row has not
+// started its trial yet, so it gets the trial's features.
+const entitlementsOf = (account: Doc<"billingAccounts"> | null, config: BillingConfig, now = Date.now()): EntitlementKey[] => {
+  const tiers = accountTiers(account ?? { status: "trial", seats: 0, trialEndsAt: trialEndsFrom(now, config) }, now);
+  return entitlementKeys.filter((key) => tiers.some((tier) => entitled(tier, key, true)));
+};
+/** Soft check, for example to skip a stage. Always true with billing disabled (self-hosted). */
+export async function hasEntitlement(ctx: QueryCtx, organizationId: Id<"organizations">, key: EntitlementKey) {
+  const config = billingConfig();
+  if (!config.enabled) return true;
+  if (await planMissing(ctx, organizationId)) return false;
+  return entitlementsOf(await accountOf(ctx, organizationId), config).includes(key);
+}
+export const allows = internalQuery({ args: { organizationId: v.id("organizations"), key: v.union(...entitlementKeys.map((k) => v.literal(k))) }, handler: (ctx, a) => hasEntitlement(ctx, a.organizationId, a.key) });
+export async function requireEntitlement(ctx: QueryCtx, organizationId: Id<"organizations">, key: EntitlementKey) {
+  if (!await hasEntitlement(ctx, organizationId, key)) throw new Error(`Upgrade required: ${featureNames[key]}`);
+}
+
+/** The workspace's features for the dashboard's locked states; null when billing is off (all granted). */
+export const entitlements = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<EntitlementKey[] | null> => {
+  await authorize(ctx, a.token, a.organizationId);
+  const config = billingConfig();
+  if (!config.enabled) return null;
+  return await planMissing(ctx, a.organizationId) ? [] : entitlementsOf(await accountOf(ctx, a.organizationId), config);
+} });
+
 export const status = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
   const { user, member } = await authorize(ctx, a.token, a.organizationId);
   const config = billingConfig();
@@ -61,10 +88,10 @@ export const status = query({ args: { token: v.string(), organizationId: v.id("o
   const stored = await accountOf(ctx, a.organizationId);
   const account = stored ?? { status: "trial", seats: 0, trialEndsAt: trialEndsFrom(Date.now(), config) } as Pick<Doc<"billingAccounts">, "status" | "seats" | "trialEndsAt"> & Partial<Doc<"billingAccounts">>;
   const usage = await usageOf(ctx, a.organizationId, periodKey(Date.now()));
-  const decision = billingDecision({ status: account.status, seats: account.seats, trialEndsAt: account.trialEndsAt, pastDueSince: account.pastDueSince, subscriptionId: account.subscriptionId }, usage?.reviews ?? 0, Date.now(), config);
+  const decision = billingDecision({ status: account.status, seats: account.seats, trialEndsAt: account.trialEndsAt, pastDueSince: account.pastDueSince, subscriptionId: account.subscriptionId, tier: account.tier }, usage?.reviews ?? 0, Date.now(), config);
   const organization = await ctx.db.get(a.organizationId);
   const admin = ["owner", "admin"].includes(member.role), referrals = admin && referralConfig().enabled;
-  return { enabled: true as const, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: decision.used, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: account.trialEndsAt, trialStarted: Boolean(stored), trialDays: config.trialDays, trialReviews: config.trialReviews, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, reviewsPerSeat: config.reviewsPerSeat, hasCustomer: Boolean(account.customerId) };
+  return { enabled: true as const, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, entitlements: organization?.planRequired && !organization.planSelectedAt ? [] : entitlementsOf(stored, config), allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: decision.used, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: account.trialEndsAt, trialStarted: Boolean(stored), trialDays: config.trialDays, trialReviews: config.trialReviews, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, reviewsPerSeat: config.reviewsPerSeat, proReviewsPerSeat: config.proReviewsPerSeat, hasCustomer: Boolean(account.customerId) };
 } });
 
 export const checkoutContext = internalQuery({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
@@ -81,7 +108,7 @@ export const linkCustomer = internalMutation({ args: { organizationId: v.id("org
   await ctx.db.patch(account._id, { customerId: a.customerId, updatedAt: Date.now() });
 } });
 
-const subscriptionArgs = v.object({ id: v.string(), customer: v.string(), status: v.string(), quantity: v.number(), itemId: v.optional(v.string()), currentPeriodEnd: v.optional(v.number()), organizationId: v.optional(v.string()) });
+const subscriptionArgs = v.object({ id: v.string(), customer: v.string(), status: v.string(), quantity: v.number(), price: v.optional(v.string()), itemId: v.optional(v.string()), currentPeriodEnd: v.optional(v.number()), organizationId: v.optional(v.string()) });
 // Signed Stripe events, applied at most once; subscription events older than the last applied
 // one are recorded but ignored, so redelivery and reordering cannot roll state back.
 export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), type: v.string(), created: v.number(), checkout: v.optional(v.object({ organizationId: v.string(), customer: v.string(), subscription: v.optional(v.string()) })), subscription: v.optional(subscriptionArgs), invoice: v.optional(v.object(invoiceFacts)), charge: v.optional(v.object(chargeEvent)) }, handler: async (ctx, a): Promise<string> => {
@@ -104,8 +131,10 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
     if (!account) return record("unknown customer");
     if (s.organizationId && s.organizationId !== account.organizationId) return record("workspace mismatch");
     if (account.lastEventCreated && a.created < account.lastEventCreated) return record("stale");
-    const deleted = a.type === "customer.subscription.deleted";
-    await ctx.db.patch(account._id, { subscriptionId: s.id, subscriptionItemId: s.itemId, status: deleted ? "canceled" : s.status, seats: s.quantity, currentPeriodEnd: s.currentPeriodEnd, pastDueSince: s.status === "past_due" ? account.pastDueSince ?? a.created : undefined, lastEventCreated: a.created, updatedAt: Date.now() });
+    const deleted = a.type === "customer.subscription.deleted", tier = s.price && !deleted ? tierForPrice(s.price) : undefined;
+    // A price this deployment does not sell changes nothing (P0.2).
+    if (s.price && !deleted && !tier) return record("unknown price");
+    await ctx.db.patch(account._id, { ...(tier ? { tier } : {}), subscriptionId: s.id, subscriptionItemId: s.itemId, status: deleted ? "canceled" : s.status, seats: s.quantity, currentPeriodEnd: s.currentPeriodEnd, pastDueSince: s.status === "past_due" ? account.pastDueSince ?? a.created : undefined, lastEventCreated: a.created, updatedAt: Date.now() });
     if (!deleted) await recordPlanSelected(ctx, account.organizationId, s.status);
     return record(deleted ? "canceled" : s.status);
   }

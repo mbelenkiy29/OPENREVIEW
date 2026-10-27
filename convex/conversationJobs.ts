@@ -19,6 +19,7 @@ import type {ActionCtx} from "./_generated/server";
 import type {Doc} from "./_generated/dataModel";
 import type {ScmChange} from "../src/gitlab";
 
+export const fixPullRequestsUpgrade="Fix pull requests are on the Pro plan; a workspace admin can upgrade in Settings → Billing.";
 // `@openreview fix this`: a validated committable suggestion for the thread's finding, the Fix
 // handoff link and, when asked for and allowed, a fix pull request on a new branch.
 async function fixAnswer(ctx:ActionCtx,p:{github:Scm;repo:Doc<"repositories">;fixPullRequests:boolean;pr:ScmChange;tree:Map<string,{path:string;sha:string}>;target:Doc<"findings">|null;openPullRequest:boolean;author:string;prNumber:number}):Promise<string>{
@@ -33,7 +34,8 @@ async function fixAnswer(ctx:ActionCtx,p:{github:Scm;repo:Doc<"repositories">;fi
   const block=suggestion&&changed?syntax?suggestionBlock(suggestion,syntax,syntax==="github"?commentRange(changed.patch,target.startLine,target.endLine):{start:target.startLine,end:target.startLine}):`\n\nReplacement for lines ${suggestion.startLine}–${suggestion.endLine}:\n\n\`\`\`\n${suggestion.replacement}\n\`\`\``:undefined;
   let pullRequest:{url:string;reused:boolean}|undefined,pullRequestNote:string|undefined;
   if(p.openPullRequest){
-    if(!p.fixPullRequests)pullRequestNote="Fix pull requests are turned off for this repository; a workspace admin can allow them in repository settings.";
+    if(!await ctx.runQuery(internal.billing.allows,{organizationId:repo.organizationId,key:"fix.pullRequests"}))pullRequestNote=fixPullRequestsUpgrade;
+    else if(!p.fixPullRequests)pullRequestNote="Fix pull requests are turned off for this repository; a workspace admin can allow them in repository settings.";
     else{const opened=await openFix({github,repo,pr,target,prepared,author:p.author,prNumber:p.prNumber,requestedIn:`#${p.prNumber}`});pullRequest=opened.pullRequest;pullRequestNote=opened.note;}
   }
   return fixReplyBody({title:target.title,explanation:prepared.explanation,block,problem:prepared.problem,handoff,pullRequest,pullRequestNote,revision:pr.head.sha});

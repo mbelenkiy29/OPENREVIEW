@@ -6,6 +6,7 @@ import { audit, authorizeRepository } from "./auth";
 import { requireContextReader, requireFindingReader } from "./repositoryContext";
 import { effectiveSettings } from "./scopes";
 import { rateLimit } from "./rateLimit";
+import { hasEntitlement, requireEntitlement } from "./billing";
 import { eligibleFixFinding } from "../src/fix-prompt";
 
 // "Open a fix PR" from the dashboard: the same fix pull request "@openreview fix this in a new PR"
@@ -25,9 +26,9 @@ export const availability = query({
   handler: async (ctx, a) => {
     const review = await ctx.db.get(a.reviewId);
     if (!review) throw new Error("Review not found");
-    const { repo } = await authorizeRepository(ctx, a.token, review.repositoryId);
+    const { repo, member } = await authorizeRepository(ctx, a.token, review.repositoryId);
     const settings = await effectiveSettings(ctx, repo);
-    return { github: !repo.connectionId && !review.nativeP4, enabled: settings.fixPullRequests === true, permission: await contentsPermission(ctx, repo) };
+    return { admin: ["owner", "admin"].includes(member.role), github: !repo.connectionId && !review.nativeP4, enabled: settings.fixPullRequests === true, entitled: await hasEntitlement(ctx, review.organizationId, "fix.pullRequests"), permission: await contentsPermission(ctx, repo) };
   },
 });
 export const authorizeOpen = internalMutation({
@@ -37,6 +38,7 @@ export const authorizeOpen = internalMutation({
     const review = finding ? await ctx.db.get(finding.reviewId) : null;
     if (!finding || !review) throw new Error("Finding not found");
     const { user, repo } = await authorizeRepository(ctx, a.token, review.repositoryId, true);
+    await requireEntitlement(ctx, review.organizationId, "fix.pullRequests");
     await requireContextReader(ctx, user._id, review);
     await requireFindingReader(ctx, user._id, finding);
     await rateLimit(ctx, `fix-pull-request:${user._id}`, 10);

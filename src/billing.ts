@@ -1,31 +1,42 @@
 import { assertEgress } from "./egress";
+import { planCatalog, type Tier } from "./plans";
 // Cloud billing (Stripe). Disabled unless BILLING_ENABLED=true, which is the self-host default.
 // New workspaces start the trial through Stripe Checkout with a card (planRequired); workspaces from
 // before that keep an app-level trial that starts with the first review or checkout.
-// The Starter plan is a per-seat subscription with unlimited reviews under a monthly fair-use limit.
-export type BillingConfig = { enabled: boolean; trialDays: number; trialReviews: number; reviewsPerSeat: number; graceDays: number };
+// Paid tiers (src/plans.ts) are per-seat subscriptions with unlimited reviews under a monthly fair-use limit.
+export type BillingConfig = { enabled: boolean; trialDays: number; trialReviews: number; reviewsPerSeat: number; proReviewsPerSeat: number; businessReviewsPerSeat: number; graceDays: number };
 export const int = (value: string | undefined, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isInteger(n) && n >= min && n <= max ? n : fallback; };
 export function billingConfig(env: Record<string, string | undefined> = process.env): BillingConfig {
-  return { enabled: env.BILLING_ENABLED === "true", trialDays: int(env.BILLING_TRIAL_DAYS, 14, 0, 365), trialReviews: int(env.BILLING_TRIAL_REVIEWS, 200, 0, 1_000_000), reviewsPerSeat: int(env.BILLING_REVIEWS_PER_SEAT, 500, 1, 1_000_000), graceDays: int(env.BILLING_GRACE_DAYS, 7, 0, 60) };
+  return { enabled: env.BILLING_ENABLED === "true", trialDays: int(env.BILLING_TRIAL_DAYS, 14, 0, 365), trialReviews: int(env.BILLING_TRIAL_REVIEWS, 200, 0, 1_000_000), reviewsPerSeat: int(env.BILLING_REVIEWS_PER_SEAT, planCatalog.starter.reviewsPerSeat, 1, 1_000_000), proReviewsPerSeat: int(env.BILLING_PRO_REVIEWS_PER_SEAT, planCatalog.pro.reviewsPerSeat, 1, 1_000_000), businessReviewsPerSeat: int(env.BILLING_BUSINESS_REVIEWS_PER_SEAT, planCatalog.business.reviewsPerSeat, 1, 1_000_000), graceDays: int(env.BILLING_GRACE_DAYS, 7, 0, 60) };
 }
 // Billed seats: owners, admins and members; viewers are free.
 export const seatCount = (members: { role: string }[]) => members.filter((m) => m.role !== "viewer").length;
 export const periodKey = (now: number) => new Date(now).toISOString().slice(0, 7);
 
-export type BillingAccount = { status: string; seats: number; trialEndsAt: number; pastDueSince?: number; subscriptionId?: string };
-export type BillingDecision = { allowed: boolean; plan: "disabled" | "trial" | "starter"; limit: number | null; used: number; reason?: string };
+export type PaidTier = Exclude<Tier, "trial">;
+// `tier` is absent on accounts from before tiers (Starter while subscribed).
+export type BillingAccount = { status: string; seats: number; trialEndsAt: number; pastDueSince?: number; subscriptionId?: string; tier?: string };
+export type BillingDecision = { allowed: boolean; plan: "disabled" | "trial" | PaidTier; limit: number | null; used: number; reason?: string };
 const paying = new Set(["active", "trialing", "past_due"]);
+const paidTier = (tier: string | undefined): PaidTier => tier === "pro" || tier === "business" ? tier : "starter";
+const perSeat = (tier: PaidTier, config: BillingConfig) => ({ starter: config.reviewsPerSeat, pro: config.proReviewsPerSeat, business: config.businessReviewsPerSeat })[tier];
 export function billingDecision(account: BillingAccount, used: number, now: number, config: BillingConfig): BillingDecision {
   if (!config.enabled) return { allowed: true, plan: "disabled", limit: null, used };
   if (account.subscriptionId && paying.has(account.status)) {
-    const limit = Math.max(1, account.seats) * config.reviewsPerSeat;
-    if (account.status === "past_due" && (account.pastDueSince ?? now) + config.graceDays * 86400000 <= now) return { allowed: false, plan: "starter", limit, used, reason: "Payment is past due and the grace period has ended. Update the payment method in Settings → Billing." };
-    if (used >= limit) return { allowed: false, plan: "starter", limit, used, reason: `This workspace reached its fair-use limit of ${limit} reviews this month (${config.reviewsPerSeat} per seat). Reviews resume at the start of next month.` };
-    return { allowed: true, plan: "starter", limit, used };
+    const plan = paidTier(account.tier), seatLimit = perSeat(plan, config), limit = Math.max(1, account.seats) * seatLimit;
+    if (account.status === "past_due" && (account.pastDueSince ?? now) + config.graceDays * 86400000 <= now) return { allowed: false, plan, limit, used, reason: "Payment is past due and the grace period has ended. Update the payment method in Settings → Billing." };
+    if (used >= limit) return { allowed: false, plan, limit, used, reason: `This workspace reached its fair-use limit of ${limit} reviews this month (${seatLimit} per seat). Reviews resume at the start of next month.` };
+    return { allowed: true, plan, limit, used };
   }
   if (now >= account.trialEndsAt) return { allowed: false, plan: "trial", limit: config.trialReviews, used, reason: "The free trial has ended. Subscribe in Settings → Billing to keep reviewing." };
   if (used >= config.trialReviews) return { allowed: false, plan: "trial", limit: config.trialReviews, used, reason: `The trial includes ${config.trialReviews} reviews per month. Subscribe in Settings → Billing for more.` };
   return { allowed: true, plan: "trial", limit: config.trialReviews, used };
+}
+/** The tiers whose features a workspace has now: a subscription's tier, plus the trial's (Pro)
+ *  features while Stripe or the app trial is running. Empty once the trial ended with no subscription. */
+export function accountTiers(account: BillingAccount, now: number): Tier[] {
+  const subscribed = Boolean(account.subscriptionId && paying.has(account.status));
+  return [...(subscribed ? [paidTier(account.tier)] : []), ...(account.status === "trialing" || (!subscribed && now < account.trialEndsAt) ? ["trial" as const] : [])];
 }
 
 /** A linked Stripe subscription that has not ended yet, so Stripe can still charge for it. */

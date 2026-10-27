@@ -273,7 +273,7 @@ export default defineSchema({
   loginTokens: defineTable({ email: v.string(), tokenHash: v.string(), expiresAt: v.number(), usedAt: v.optional(v.number()), createdAt: v.number(), referralCode: v.optional(v.string()) }).index("by_token", ["tokenHash"]),
   // onboarding: guided setup progress for workspaces created with it (absent on older workspaces,
   // which are never sent to setup). reviewsPaused marks automatic reviews held off while indexing.
-  organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), defaultHandoff:v.optional(handoffValidator), defaultCloudAgent:v.optional(cloudAgentValidator), /* billing deployments: a new workspace must choose a plan (Stripe-confirmed) before setup, indexing or reviews; older workspaces have no flag */ planRequired:v.optional(v.boolean()), planSelectedAt:v.optional(v.number()), plan:v.optional(v.string()), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), createdAt: v.number() }),
+  organizations: defineTable({ name: v.string(), autoEnableRepositories: v.optional(v.boolean()), dataSharing: v.optional(v.string()) /* private (default) | aggregate */, reviewRetentionDays: v.optional(v.number()), transcriptRetentionDays: v.optional(v.number()), defaultAgent:v.optional(codingAgentValidator), defaultHandoff:v.optional(handoffValidator), defaultCloudAgent:v.optional(cloudAgentValidator), /* billing deployments: a new workspace must choose a plan (Stripe-confirmed) before setup, indexing or reviews; older workspaces have no flag */ planRequired:v.optional(v.boolean()), planSelectedAt:v.optional(v.number()), plan:v.optional(v.string()), nextIssueNumber:v.optional(v.number()), onboardingRepositoryIds:v.optional(v.array(repo)), analyticsMinutesPerFinding:v.optional(v.number()), onboarding:v.optional(v.object({startedAt:v.number(),step:v.optional(v.string()),reviewsPaused:v.optional(v.boolean()),completedAt:v.optional(v.number()),completedBy:v.optional(v.id("users")),skipped:v.optional(v.boolean())})), createdAt: v.number() }),
   // Workspace deletion receipts (M3): survive the purge; step + cursor make the purge resumable.
   workspaceDeletions: defineTable({ organizationId: org, name: v.string(), requestedBy: v.id("users"), requestedAt: v.number(), scheduledFor: v.number(), scheduledId: v.optional(v.id("_scheduled_functions")), status: v.string() /* scheduled | cancelled | purging | done */, step: v.number(), cursor: v.optional(v.string()), counts: v.record(v.string(), v.number()), startedAt: v.optional(v.number()), cancelledAt: v.optional(v.number()), completedAt: v.optional(v.number()) }).index("by_org", ["organizationId"]),
   // Daily analytics rollup per (repository, UTC day, PR author), recomputed from raw tables for
@@ -570,6 +570,7 @@ export default defineSchema({
     prNumber: v.number(),
     author: v.optional(v.string()),
     lastFeedback: v.optional(v.string()),
+    issueId: v.optional(v.id("issues")),
     ...findingValidator.fields,
     status: v.string(),
     createdAt: v.number(),
@@ -581,7 +582,39 @@ export default defineSchema({
     .index("by_repo_path", ["repositoryId", "filePath"])
     .index("by_pr", ["repositoryId", "prNumber"])
     .index("by_fingerprint", ["repositoryId", "prNumber", "fingerprint"])
-    .index("by_org_time", ["organizationId", "createdAt"]),
+    .index("by_org_time", ["organizationId", "createdAt"])
+    .index("by_issue", ["issueId"]),
+  // Issues (tickets): one per problem in a repository, grouping its findings with the same fingerprint
+  // across pull requests. Reviews, feedback, pull request lifecycle and fix PRs move them (convex/issues.ts).
+  issues: defineTable({
+    organizationId: org,
+    repositoryId: repo,
+    number: v.number(), // per workspace, shown as #12
+    fingerprint: v.string(),
+    title: v.string(),
+    severity: v.string(),
+    category: v.string(),
+    status: v.string(), // open | in_progress | resolved | wont_fix | false_positive
+    assigneeId: v.optional(v.id("users")),
+    latestFindingId: v.id("findings"),
+    fixPullRequestUrl: v.optional(v.string()),
+    // Set when the latest occurrence's pull request merged while the issue was open.
+    mergedAt: v.optional(v.number()),
+    firstSeenAt: v.number(),
+    lastSeenAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_repo_fingerprint", ["repositoryId", "fingerprint"])
+    .index("by_org_number", ["organizationId", "number"])
+    .index("by_org_last", ["organizationId", "lastSeenAt"]),
+  issueEvents: defineTable({
+    organizationId: org,
+    issueId: v.id("issues"),
+    kind: v.string(), // created | seen | reopened | status | assigned | comment | fix_pr | resolved_by_commit | pr_closed | pr_merged
+    actorId: v.optional(v.id("users")),
+    detail: v.string(),
+    createdAt: v.number(),
+  }).index("by_issue", ["issueId", "createdAt"]).index("by_org", ["organizationId"]),
   // Team conventions learned from human review comments (review guidance only).
   // Cloud billing (BILLING_ENABLED=true only). One account per workspace; Stripe state is applied
   // from signed webhooks, newest event wins.
@@ -591,6 +624,7 @@ export default defineSchema({
     subscriptionId: v.optional(v.string()),
     subscriptionItemId: v.optional(v.string()),
     status: v.string(), // trial | active | trialing | past_due | unpaid | canceled | incomplete | incomplete_expired | paused
+    tier: v.optional(v.string()), // starter | pro | business, from the subscription's price; absent means starter
     seats: v.number(),
     trialEndsAt: v.number(),
     currentPeriodEnd: v.optional(v.number()),

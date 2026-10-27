@@ -70,6 +70,7 @@ All of these are global classes in `app/globals.css`.
   - `.primary` is the ink fill. Use one per group.
   - `.danger` is crimson text on a crimson hairline.
   - `.small` is a compact variant.
+- **Locked features.** A paid feature the plan does not include wraps its controls in `<Locked>` (`app/dashboard/locked.tsx`): they stay visible but disabled and dimmed, with one muted line naming the plan that has it. Admins get an upgrade link to Settings → Billing (the only ember in it); members are told to ask an admin. No gradients and no modal upsell.
 - **Inputs.** Inputs, selects and textareas have a transparent background and a `--line-strong` border, with an ember focus ring. Selects use a custom chevron. `label` stacks its control under the text; `label.check` puts a checkbox inline with its text.
 - **Cards.** A bare `section` is a card: `--surface`, a hairline border and a 4px radius. An `article` inside a card is separated by hairlines. `.empty` is a dashed, transparent card for empty states.
 - **App chrome** (`app/dashboard/portal.tsx`).

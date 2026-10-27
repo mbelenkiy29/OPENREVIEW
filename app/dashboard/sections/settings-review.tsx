@@ -4,12 +4,13 @@ import Link from "next/link";
 import { lockableKeys } from "../../../src/review-settings";
 import { saveSettings, revokeApiKey, revokeMcpConnection, decideConvention, saveModelKey, removeModelKey } from "../actions";
 import { ApiKeyForm } from "../api-key";
+import { Locked } from "../locked";
 import { SummarySettings } from "../summary-settings";
 
 import type { DashboardContext } from "../load";
 
 export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
-  const { apiKeys, mcpConnections, modelKey, conventions, data, filters, isAdmin, organization, repoLabel, repoSettings, requestedRepository, section, semantic } = ctx;
+  const { apiKeys, mcpConnections, modelKey, conventions, data, filters, isAdmin, organization, repoLabel, repoSettings, requestedRepository, section, semantic, unlocked } = ctx;
   return (
 (
           <>
@@ -208,8 +209,11 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
                   </fieldset>
                   <fieldset className="wide">
                     <legend>Fix pull requests</legend>
-                    <input type="hidden" name="fixConfigured" value="true" />
-                    <label className="check"><input type="checkbox" name="fixPullRequests" defaultChecked={repoSettings.settings.fixPullRequests ?? false} /> Allow “@openreview fix this in a new PR” to open a fix pull request on a new branch (GitHub, needs the Contents: Read and write permission; the pull request’s own branch is never written)</label>
+                    {/* Locked controls are disabled, so nothing here is submitted and the saved values stay. */}
+                    <Locked feature="fix.pullRequests" unlocked={unlocked("fix.pullRequests")} admin={isAdmin}>
+                      <input type="hidden" name="fixConfigured" value="true" />
+                      <label className="check"><input type="checkbox" name="fixPullRequests" defaultChecked={repoSettings.settings.fixPullRequests ?? false} /> Allow “@openreview fix this in a new PR” to open a fix pull request on a new branch (GitHub, needs the Contents: Read and write permission; the pull request’s own branch is never written)</label>
+                    </Locked>
                   </fieldset>
                   <fieldset className="wide">
                     <legend>Agent budgets</legend>

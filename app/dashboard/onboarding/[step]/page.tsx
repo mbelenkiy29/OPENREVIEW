@@ -4,6 +4,7 @@ import { api } from "../../../../convex/_generated/api";
 import { backend } from "../../../../src/server";
 import { emailOnWeb } from "../../../../src/email";
 import { billingConfig, checkoutTrialEnd } from "../../../../src/billing";
+import { planName, proHighlights } from "../../../../src/plans";
 import { referralConfig, referralDisclosure, referralFact } from "../../../../src/referrals";
 import { installHref, linkHref } from "../../../../src/github-install";
 import { providerDisplay, providerShort } from "../../../../src/provider-display";
@@ -85,7 +86,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
   if (step === "summary" || step === "comments" || step === "triggers" || step === "tools") {
     const props = { action: saveSetupStep, organizationId, defaults: status.defaults, admin, progress: <ConfigureProgress step={step} />, heading: <><Heading step={step}>{ledes[step]}</Heading><ReadOnlyNote admin={admin} /></> };
     return <WizardFrame step={step} {...frame} nextLabel={step === "tools" ? "Save and continue" : "Next"}>
-      {step === "summary" ? <SummaryStep {...props} /> : step === "comments" ? <CommentsStep {...props} /> : step === "triggers" ? <TriggersStep {...props} /> : <ToolsStep {...props} agent={organization.defaultAgent} handoff={organization.defaultHandoff} cloudAgent={organization.defaultCloudAgent} />}
+      {step === "summary" ? <SummaryStep {...props} /> : step === "comments" ? <CommentsStep {...props} /> : step === "triggers" ? <TriggersStep {...props} /> : <ToolsStep {...props} agent={organization.defaultAgent} handoff={organization.defaultHandoff} cloudAgent={organization.defaultCloudAgent} fixLocked={billing?.enabled === true && !billing.entitlements.includes("fix.pullRequests")} />}
     </WizardFrame>;
   }
 
@@ -108,14 +109,14 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
     // A new workspace must choose: the trial starts through Stripe Checkout with a card, and setup
     // continues only after Stripe confirms it. Older workspaces keep the optional step.
     const required = billing.planRequired && !billing.planSelected;
-    const now = Date.now(), subscribed = billing.plan === "starter" || billing.planSelected, confirming = query.checkout === "success" && !subscribed;
+    const now = Date.now(), subscribed = billing.plan !== "trial" || billing.planSelected, confirming = query.checkout === "success" && !subscribed;
     const trialEnded = billing.trialStarted && billing.trialEndsAt <= now, carries = Boolean(checkoutTrialEnd(billing.trialEndsAt, now));
     const day = (ms: number) => new Date(ms).toLocaleDateString("en-US", { timeZone: "UTC", dateStyle: "medium" });
     const elapsed = billing.trialStarted ? Math.max(0, Math.min(billing.trialDays, Math.floor((now - billing.trialEndsAt) / 86400000) + billing.trialDays)) : 0;
-    const price = process.env.BILLING_SEAT_PRICE_LABEL;
+    const price = process.env.BILLING_SEAT_PRICE_LABEL, proPrice = process.env.BILLING_PRO_PRICE_LABEL;
     return <WizardFrame step="plan" {...frame} nextLabel={subscribed ? "Continue" : confirming ? "Waiting for Stripe…" : required ? "Start free trial" : carries ? "Add payment method" : "Subscribe"}>
       <div className="wizard-panel">
-        <Heading step="plan">{subscribed ? "Your workspace is on the Starter plan. Seats follow your team, so there is nothing else to set up."
+        <Heading step="plan">{subscribed ? `Your workspace is on the ${billing.plan === "trial" ? "Starter" : planName(billing.plan)} plan. Seats follow your team, so there is nothing else to set up.`
           : required ? `Choose a plan to start. The Starter plan comes with ${billing.trialDays} days free: add a card now and nothing is charged until the trial ends. Cancel anytime in Settings → Billing before then.`
           : trialEnded ? "The free trial has ended. Subscribe to the Starter plan to keep reviews running."
           : carries ? `Every workspace starts with ${billing.trialDays} days free. Add a payment method now and nothing is charged until the trial ends, or keep exploring and subscribe later in Settings → Billing.`
@@ -142,6 +143,14 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
             {billing.referral?.discount && <><dt>Referral</dt><dd>{referralFact(billing.referral, referralConfig().discountLabel)}</dd></>}
           </dl>
         </article>
+        {proPrice && !subscribed && <article className="wizard-plan" aria-labelledby="pro-plan-name">
+          <header><h2 id="pro-plan-name">Pro</h2><p className="price">{proPrice}</p></header>
+          <ul>
+            <li>Everything in Starter, with a fair-use limit of {billing.proReviewsPerSeat} per seat each month</li>
+            {proHighlights.map((h) => <li key={h}>{h}</li>)}
+          </ul>
+          {admin && !confirming && <form action={checkoutFromSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="tier" value="pro" /><button>{required ? "Start free trial on Pro" : "Choose Pro"}</button></form>}
+        </article>}
         {/* Checkout ends the window for adding a code, so a referred workspace without the link adds it here. */}
         {admin && !confirming && billing.referral?.canApply && <><form action={applyReferralCode} className="form-grid"><input type="hidden" name="organizationId" value={organizationId} /><label>Referral code<input name="code" defaultValue={query.referral ?? ""} required maxLength={64} autoComplete="off" spellCheck={false} /></label><button>Apply code</button></form><p className="muted">{referralDisclosure(null)}</p></>}
         {admin && (subscribed || (confirming && !required)
@@ -172,7 +181,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
         <div><dt>Reviews</dt><dd>{d.automatic ? "Automatic on new pull requests" : "On request or trigger label"}{d.rereview ? ", re-reviewed on new commits" : ""}</dd></div>
         <div><dt>Flagging</dt><dd>{["Custom thresholds", "Quiet", "Balanced", "Thorough"][d.strictness ?? 0]} · up to {d.maxComments} inline comments</dd></div>
         <div><dt>Summary</dt><dd>{(d.summarySections ?? []).filter((s) => s !== "tips").length} sections · {d.commentStyle} comments</dd></div>
-        {billing?.enabled && <div><dt>Plan</dt><dd>{billing.plan === "starter" ? "Starter" : `Free trial · ${billing.trialStarted ? `ends ${new Date(billing.trialEndsAt).toLocaleDateString("en-US", { timeZone: "UTC", dateStyle: "medium" })}` : `${billing.trialDays} days from your first review`}`}</dd></div>}
+        {billing?.enabled && <div><dt>Plan</dt><dd>{billing.plan !== "trial" ? planName(billing.plan) : `Free trial · ${billing.trialStarted ? `ends ${new Date(billing.trialEndsAt).toLocaleDateString("en-US", { timeZone: "UTC", dateStyle: "medium" })}` : `${billing.trialDays} days from your first review`}`}</dd></div>}
       </dl>
       <p className="row"><Link href="/dashboard/pulls">Review existing pull requests</Link><Link href="/dashboard/settings/review">Fine-tune per repository</Link></p>
       {admin

@@ -10,6 +10,8 @@ import { example, exampleSummary } from "../summary-example";
 import { Stage } from "./art";
 import { cloudAgentIds, cloudAgents, defaultLocalAgent, isCloudAgent, localAgentLabels, localAgents, type CloudAgent } from "../../../src/fix-agents";
 import { StepForm } from "./wizard-client";
+import { Locked } from "../locked";
+import type { EntitlementKey } from "../../../src/plans";
 
 type Settings = { summarySections?: string[]; commentStyle: string; severityThreshold: string; minimumConfidence: number; maxComments: number; strictness?: number; categories: string[];
   automatic: boolean; drafts: boolean; rereview: boolean; triggerLabels?: string[]; threadReplies?: boolean; securityScan?: boolean; fixPullRequests?: boolean; mode: string };
@@ -22,9 +24,10 @@ function Shell({ action, organizationId, admin, progress, heading, step, childre
   </div>;
 }
 // value: what a checked switch submits (a list entry such as a summary section); plain flags send "on".
-function Toggle({ name, value, label, hint, checked, onChange }: { name: string; value?: string; label: string; hint: string; checked: boolean; onChange: (on: boolean) => void }) {
-  return <li className="wizard-toggle"><label><span><strong>{label}</strong><span className="muted">{hint}</span></span>
-    <input type="checkbox" role="switch" className="switch" name={name} value={value} checked={checked} onChange={(e) => onChange(e.target.checked)} /></label></li>;
+function Toggle({ name, value, label, hint, checked, onChange, locked }: { name: string; value?: string; label: string; hint: string; checked: boolean; onChange: (on: boolean) => void; locked?: { feature: EntitlementKey; admin: boolean } }) {
+  const control = <label><span><strong>{label}</strong><span className="muted">{hint}</span></span>
+    <input type="checkbox" role="switch" className="switch" name={name} value={value} checked={checked} onChange={(e) => onChange(e.target.checked)} /></label>;
+  return <li className="wizard-toggle">{locked ? <Locked feature={locked.feature} unlocked={false} admin={locked.admin}>{control}</Locked> : control}</li>;
 }
 function Window({ title, children }: { title: string; children: ReactNode }) {
   return <div className="wizard-window"><div className="wizard-window-bar"><span className="mono">{title}</span></div><div className="wizard-window-body">{children}</div></div>;
@@ -140,7 +143,7 @@ export function TriggersStep(props: Props) {
 }
 
 const agents = localAgents.map((a) => [a, localAgentLabels[a]] as const);
-export function ToolsStep(props: Props & { agent?: string; handoff?: string; cloudAgent?: string }) {
+export function ToolsStep(props: Props & { agent?: string; handoff?: string; cloudAgent?: string; fixLocked?: boolean }) {
   const d = props.defaults;
   const [security, setSecurity] = useState(d.securityScan ?? true), [fixPrs, setFixPrs] = useState(d.fixPullRequests ?? false), [agent, setAgent] = useState(props.agent ?? defaultLocalAgent), [mode, setMode] = useState(d.mode);
   const [handoff, setHandoff] = useState(props.handoff === "cloud" ? "cloud" : "bridge"), [cloud, setCloud] = useState<CloudAgent>(isCloudAgent(props.cloudAgent) ? props.cloudAgent : "claude");
@@ -154,7 +157,7 @@ export function ToolsStep(props: Props & { agent?: string; handoff?: string; clo
       <label>Default local agent<select name="agent" value={agent} onChange={(e) => setAgent(e.target.value)}>{agents.map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select></label>
       <ul className="wizard-toggles">
         <Toggle name="securityScan" label="Security checks" hint="Pattern checks on added lines and advisory lookups for changed dependencies." checked={security} onChange={setSecurity} />
-        <Toggle name="fixPullRequests" label="Fix pull requests" hint="OpenReview opens a fix pull request on a new branch, from a finding’s Fix page or “@openreview fix this in a new PR”. Needs the App’s Contents: write permission." checked={fixPrs} onChange={setFixPrs} />
+        <Toggle name="fixPullRequests" label="Fix pull requests" hint="OpenReview opens a fix pull request on a new branch, from a finding’s Fix page or “@openreview fix this in a new PR”. Needs the App’s Contents: write permission." checked={fixPrs} onChange={setFixPrs} locked={props.fixLocked ? { feature: "fix.pullRequests", admin: props.admin } : undefined} />
       </ul>
       <label>Review depth<select name="mode" value={mode} onChange={(e) => setMode(e.target.value)}><option value="fast">Fast</option><option value="standard">Standard</option><option value="deep">Deep</option></select></label>
     </Shell>

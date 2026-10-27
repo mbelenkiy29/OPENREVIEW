@@ -74,7 +74,7 @@ export async function continueOnTrial(form: FormData) {
 export async function checkoutFromSetup(form: FormData) {
   const { token } = await current();
   let url: string;
-  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: organizationOf(form), returnTo: "onboarding" }); }
+  try { url = await backend().action(api.billingJobs.checkout, { token, organizationId: organizationOf(form), returnTo: "onboarding", tier: form.get("tier") === "pro" ? "pro" : "starter" }); }
   catch { redirect("/dashboard/onboarding/plan?billing=error"); }
   redirect(url);
 }

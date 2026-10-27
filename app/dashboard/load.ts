@@ -9,6 +9,7 @@ import { knowledgeView } from "../../src/knowledge-view";
 import { navigation } from "./sections/shared";
 import { needsSetup } from "../../src/onboarding-steps";
 import { billingConfig } from "../../src/billing";
+import type { EntitlementKey } from "../../src/plans";
 
 // The workspace chosen in the workspace menu (cookie), else the first membership.
 export function activeWorkspace<T extends { _id?: string }>(user: { organizations: T[] }, jar: { get(name: string): { value: string } | undefined }) {
@@ -92,6 +93,9 @@ export async function loadDashboard({
     data.repositories.find((r) => r._id === id)?.fullName ?? id;
   const repoLabel = (id: string) => repositoryDisplay(data.repositories.find(r => r._id === id));
   const isAdmin = ["owner", "admin"].includes(organization.role);
+  // Paid features this workspace has (null: billing is off, everything is granted).
+  const entitlements = billingConfig().enabled ? await backend().query(api.billing.entitlements, { token: user.token, organizationId: organization._id }) : null;
+  const unlocked = (key: EntitlementKey) => !entitlements || entitlements.includes(key);
   const ruleAssistant = ruleView && isAdmin ? await backend().query(api.ruleAssistant.page, { token: user.token, organizationId: organization._id }) : null;
   const pendingInvitations = view === "team" && isAdmin
     ? await backend().query(api.users.invitations,{token:user.token,organizationId:organization._id}) : [];
@@ -146,6 +150,6 @@ export async function loadDashboard({
   const conventions = repoSettings ? await backend().query(api.conventions.list, { token: user.token, repositoryId: repoSettings.repo._id }) : [];
   // Narrowed above: a dashboard always has a workspace.
   const workspace = organization as typeof organization & { _id: Id<"organizations"> };
-  return { kind: "dashboard" as const, active, aliases, apiKeys, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, filters, findingsPage, isAdmin, jar, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
+  return { kind: "dashboard" as const, active, aliases, apiKeys, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, filters, findingsPage, isAdmin, unlocked, jar, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
 }
 export type DashboardContext = Extract<Awaited<ReturnType<typeof loadDashboard>>, { kind: "dashboard" }>;

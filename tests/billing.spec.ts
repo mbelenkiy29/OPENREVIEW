@@ -5,9 +5,10 @@ import {createHmac} from 'node:crypto';
 import schema from '../convex/schema';
 import {api,internal} from '../convex/_generated/api';
 import type {Id} from '../convex/_generated/dataModel';
+import {hasEntitlement,requireEntitlement} from '../convex/billing';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='billing-session-secret-at-least-32-characters',whsec='whsec_billing_fixture';
-const env={SESSION_SECRET:secret,SERVICE_SECRET:'billing-service',BILLING_ENABLED:'true',BILLING_TRIAL_REVIEWS:'2',BILLING_REVIEWS_PER_SEAT:'2',BILLING_GRACE_DAYS:'7',STRIPE_WEBHOOK_SECRET:whsec,STRIPE_SECRET_KEY:'sk_test_fixture',STRIPE_SEAT_PRICE_ID:'price_seat',APP_URL:'https://review.example.com'};
+const env={SESSION_SECRET:secret,SERVICE_SECRET:'billing-service',BILLING_ENABLED:'true',BILLING_TRIAL_REVIEWS:'2',BILLING_REVIEWS_PER_SEAT:'2',BILLING_GRACE_DAYS:'7',STRIPE_WEBHOOK_SECRET:whsec,STRIPE_SECRET_KEY:'sk_test_fixture',STRIPE_SEAT_PRICE_ID:'price_seat',STRIPE_PRO_PRICE_ID:'price_pro',STRIPE_BUSINESS_PRICE_ID:'price_business',APP_URL:'https://review.example.com'};
 beforeEach(()=>{vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date']});vi.setSystemTime(Date.UTC(2026,9,14,12));Object.assign(process.env,env);});
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();for(const k of [...Object.keys(env),'BILLING_TRIAL_DAYS'])if(!['SESSION_SECRET','SERVICE_SECRET'].includes(k))delete process.env[k];});
 
@@ -197,4 +198,64 @@ test('a new workspace must choose a plan: nothing indexes, reviews or finishes s
  expect(await t.mutation(api.onboarding.advance,{token:alice.token,organizationId:fresh,step:'plan'})).toBe('connect');
  // Workspaces from before plans were required are untouched.
  expect(await t.query(api.billing.status,{token:alice.token,organizationId:repo.organizationId})).toMatchObject({planRequired:false,planMissing:false});
+});
+
+const priced=(id:string,type:string,status:string,price:string,created:number,org:string)=>({id,type,created,data:{object:{id:'sub_1',customer:'cus_1',status,metadata:{organizationId:org},items:{data:[{id:'si_1',quantity:2,current_period_end:created+30*86400,price:{id:price}}]}}}});
+test('subscription prices set the tier and its entitlements; stale events cannot downgrade and unknown prices change nothing',async()=>{
+ const {t,alice,org}=await setup();
+ const created=Math.floor(Date.now()/1000),fixes=()=>t.run(ctx=>hasEntitlement(ctx,org,'fix.pullRequests'));
+ // Before any subscription the workspace is on its trial, which has Pro features.
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'trial',entitlements:expect.arrayContaining(['fix.pullRequests'])});
+ await deliver(t,{id:'evt_checkout',type:'checkout.session.completed',created,data:{object:{mode:'subscription',client_reference_id:org,customer:'cus_1',subscription:'sub_1'}}});
+ await deliver(t,priced('evt_starter','customer.subscription.created','active','price_seat',created+10,org));
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'starter',entitlements:[],limit:4});
+ expect(await fixes()).toBe(false);
+ await expect(t.run(ctx=>requireEntitlement(ctx,org,'fix.pullRequests'))).rejects.toThrow('Upgrade required: Fix pull requests and Autofix');
+ await deliver(t,priced('evt_pro','customer.subscription.updated','active','price_pro',created+20,org));
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'pro',limit:3000,entitlements:expect.arrayContaining(['fix.pullRequests','engine.deep'])});
+ expect(await fixes()).toBe(true);
+ await deliver(t,priced('evt_old','customer.subscription.updated','active','price_seat',created+15,org));
+ await deliver(t,priced('evt_other','customer.subscription.updated','active','price_unknown',created+30,org));
+ const outcomes=(await t.run(ctx=>ctx.db.query('stripeEvents').collect())).map(e=>[e.eventId,e.outcome]);
+ expect(outcomes.slice(-2)).toEqual([['evt_old','stale'],['evt_other','unknown price']]);
+ expect((await t.run(ctx=>ctx.db.query('billingAccounts').collect()))[0]).toMatchObject({tier:'pro',status:'active'});
+ await deliver(t,priced('evt_business','customer.subscription.updated','active','price_business',created+40,org));
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).entitlements).toContain('auth.sso');
+ // Cancelled after the trial: no plan, no features.
+ vi.setSystemTime(Date.UTC(2026,11,1));
+ await deliver(t,priced('evt_cancel','customer.subscription.deleted','canceled','price_business',Math.floor(Date.now()/1000),org));
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({status:'canceled',entitlements:[]});
+ expect(await fixes()).toBe(false);
+});
+
+test('entitlements are granted without billing, withheld until a required plan is chosen, and private to the workspace',async()=>{
+ const {t,org}=await setup();
+ const stranger=await t.mutation(api.users.login,{secret:'billing-service',githubId:39,login:'mallory',avatar:''});
+ const token=await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(stranger).setExpirationTime('1d').sign(new TextEncoder().encode(secret));
+ await expect(t.query(api.billing.status,{token,organizationId:org})).rejects.toThrow();
+ await t.run(ctx=>ctx.db.patch(org,{planRequired:true}));
+ expect(await t.run(ctx=>hasEntitlement(ctx,org,'fix.pullRequests'))).toBe(false);
+ delete process.env.BILLING_ENABLED;
+ expect(await t.run(ctx=>hasEntitlement(ctx,org,'auth.sso'))).toBe(true);
+});
+
+test('Checkout uses the chosen tier price, and the portal carries the plan-switching configuration',async()=>{
+ const {t,alice,org}=await setup();
+ const bodies:string[]=[];
+ vi.spyOn(globalThis,'fetch').mockImplementation(async(input:string|URL|Request,init?:RequestInit)=>{const url=String(input);bodies.push(String(init?.body));
+  if(url.endsWith('/v1/customers'))return Response.json({id:'cus_1'});
+  if(url.endsWith('/v1/billing_portal/sessions'))return Response.json({url:'https://billing.stripe.com/p/session_1'});
+  return Response.json({id:'cs_1',url:'https://checkout.stripe.com/c/pay/cs_1'});});
+ await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org,tier:'pro'});
+ expect(Object.fromEntries(new URLSearchParams(bodies.at(-1)!))).toMatchObject({'line_items[0][price]':'price_pro',integration_identifier:expect.stringMatching(/^openreview-starter-seats-/),'subscription_data[trial_end]':expect.any(String)});
+ await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org});
+ expect(new URLSearchParams(bodies.at(-1)!).get('line_items[0][price]')).toBe('price_seat');
+ await expect(t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org,tier:'business' as 'pro'})).rejects.toThrow();
+ delete process.env.STRIPE_PRO_PRICE_ID;
+ await expect(t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org,tier:'pro'})).rejects.toThrow('Configure STRIPE_PRO_PRICE_ID');
+ process.env.STRIPE_PORTAL_CONFIGURATION_ID='bpc_plans';
+ try{
+  await t.action(api.billingJobs.portal,{token:alice.token,organizationId:org});
+  expect(new URLSearchParams(bodies.at(-1)!).get('configuration')).toBe('bpc_plans');
+ }finally{delete process.env.STRIPE_PORTAL_CONFIGURATION_ID;}
 });

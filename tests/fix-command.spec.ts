@@ -115,3 +115,24 @@ test('fix pull requests need the repository setting and contents:write, and only
  expect(s.reply.mock.calls[0][2]).toContain('No fix pull request was opened: the GitHub App does not have Contents: Read and write permission.');
  expect(s.reply.mock.calls[0][2]).toContain('```suggestion');
 });
+
+test('on Starter a fix command still suggests, but fix pull requests from a comment or the dashboard need Pro',async()=>{
+ const s=await setup({suggestion:true,permissions:{contents:'write',pull_requests:'write'}});
+ await s.t.mutation(api.repositories.configure,{token:s.token,repositoryId:s.repo._id,enabled:true,settings:{...defaults,fixPullRequests:true}});
+ const organizationId=s.repo.organizationId;
+ await s.t.run(ctx=>ctx.db.insert('billingAccounts',{organizationId,status:'active',seats:1,trialEndsAt:0,subscriptionId:'sub_1',tier:'starter',updatedAt:0}));
+ process.env.BILLING_ENABLED='true';
+ try{
+  await s.ask('@openreview fix this in a new PR');
+  expect(s.openFix).not.toHaveBeenCalled();
+  expect(s.reply.mock.calls[0][2]).toContain('Fix pull requests are on the Pro plan; a workspace admin can upgrade in Settings → Billing.');
+  expect(s.reply.mock.calls[0][2]).toContain('```suggestion');
+  await expect(s.t.action(api.fixPullRequestJobs.open,{token:s.token,findingId:s.findingId})).rejects.toThrow('Upgrade required: Fix pull requests and Autofix');
+  expect((await s.t.query(api.fixPullRequests.availability,{token:s.token,reviewId:s.reviewId})).entitled).toBe(false);
+  // Pro opens it as before.
+  await s.t.run(async ctx=>{const account=(await ctx.db.query('billingAccounts').collect())[0];await ctx.db.patch(account._id,{tier:'pro'});});
+  s.openFix.mockResolvedValue({url:'https://github.com/alice/fixes/pull/4',reused:false});
+  await s.ask('@openreview fix this in a new PR',602);
+  expect(s.openFix).toHaveBeenCalledTimes(1);
+ }finally{delete process.env.BILLING_ENABLED;}
+});

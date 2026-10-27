@@ -48,7 +48,7 @@ async function setup(permissions: Record<string, string> = { contents: "write", 
 
 test("a writer opens the fix pull request for their GitHub account, and it is audited", async () => {
   const { t, token, reviewId, findingId, openFix, canReply, audits } = await setup();
-  expect(await t.query(api.fixPullRequests.availability, { token, reviewId })).toEqual({ github: true, enabled: true, permission: "unknown" });
+  expect(await t.query(api.fixPullRequests.availability, { token, reviewId })).toEqual({ admin: true, github: true, enabled: true, entitled: true, permission: "unknown" });
   expect(await t.action(api.fixPullRequestJobs.open, { token, findingId })).toEqual({ url: "https://github.com/alice/fixes/pull/4", reused: false });
   expect(canReply).toHaveBeenCalledWith("alice/fixes", "alice");
   const [repository, number, fix] = openFix.mock.calls[0];

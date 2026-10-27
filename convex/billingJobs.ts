@@ -9,11 +9,13 @@ const appOrigin = () => new URL(process.env.APP_URL ?? "http://localhost:3000").
 const returnPaths = { settings: "/dashboard/settings/billing", onboarding: "/dashboard/onboarding/plan" } as const;
 // Tags these sessions in the Stripe Dashboard so this flow can be compared with others.
 const integrationIdentifier = "openreview-starter-seats-qkvmhzrt";
-export const checkout = action({ args: { token: v.string(), organizationId: v.id("organizations"), returnTo: v.optional(v.union(v.literal("settings"), v.literal("onboarding"))) }, handler: async (ctx, a): Promise<string> => {
+// One Stripe price per tier (docs/roadmap/pricing-tiers.md); upgrades of an existing subscription go through the portal.
+const priceVariables = { starter: "STRIPE_SEAT_PRICE_ID", pro: "STRIPE_PRO_PRICE_ID" } as const;
+export const checkout = action({ args: { token: v.string(), organizationId: v.id("organizations"), returnTo: v.optional(v.union(v.literal("settings"), v.literal("onboarding"))), tier: v.optional(v.union(v.literal("starter"), v.literal("pro"))) }, handler: async (ctx, a): Promise<string> => {
   const context = await ctx.runQuery(internal.billing.checkoutContext, { token: a.token, organizationId: a.organizationId });
   if (context.subscriptionId && ["active", "trialing", "past_due"].includes(context.status)) throw new Error("This workspace already has a subscription; manage it in the billing portal");
-  const key = stripeKey(), price = process.env.STRIPE_SEAT_PRICE_ID;
-  if (!price || !/^price_[A-Za-z0-9]+$/.test(price)) throw new Error("Configure STRIPE_SEAT_PRICE_ID");
+  const variable = priceVariables[a.tier ?? "starter"], key = stripeKey(), price = process.env[variable];
+  if (!price || !/^price_[A-Za-z0-9]+$/.test(price)) throw new Error(`Configure ${variable}`);
   let customer = context.customerId;
   if (!customer) {
     customer = (await stripe<{ id: string }>("/v1/customers", { metadata: { organizationId: a.organizationId } }, key, fetch, `customer:${a.organizationId}`)).id;
@@ -42,7 +44,10 @@ export const checkout = action({ args: { token: v.string(), organizationId: v.id
 export const portal = action({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<string> => {
   const context = await ctx.runQuery(internal.billing.checkoutContext, a);
   if (!context.customerId) throw new Error("Start a subscription first");
-  return (await stripe<{ url: string }>("/v1/billing_portal/sessions", { customer: context.customerId, return_url: `${appOrigin()}/dashboard/settings/billing` }, stripeKey())).url;
+  // The configuration lists the plans to switch between (with prorations) and turns quantity changes off.
+  const configuration = process.env.STRIPE_PORTAL_CONFIGURATION_ID;
+  if (configuration && !/^bpc_[A-Za-z0-9]+$/.test(configuration)) throw new Error("STRIPE_PORTAL_CONFIGURATION_ID must be a bpc_… id");
+  return (await stripe<{ url: string }>("/v1/billing_portal/sessions", { customer: context.customerId, return_url: `${appOrigin()}/dashboard/settings/billing`, ...(configuration ? { configuration } : {}) }, stripeKey())).url;
 } });
 export const syncSeats = internalAction({ args: { organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<string> => {
   const target = await ctx.runQuery(internal.billing.seatSyncTarget, a);

@@ -14,7 +14,14 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 - **Past due:** reviews continue for `BILLING_GRACE_DAYS` (default 7) after the first failed payment, then pause until an invoice is paid.
 - **Cancelled:** the workspace falls back to any remaining trial.
 
-Higher tiers (Pro, Business) are planned in [roadmap/pricing-tiers.md](roadmap/pricing-tiers.md).
+- **Pro (per seat):** everything in Starter plus fix pull requests and Autofix, deeper review engines, the requirements check, generated reproduction tests, learned conventions, and API keys with the remote MCP server. Its fair-use limit is `BILLING_PRO_REVIEWS_PER_SEAT` (default 1,500) reviews per seat.
+  - Offered in setup and Settings → Billing once the web app has `BILLING_PRO_PRICE_LABEL`. Checkout uses `STRIPE_PRO_PRICE_ID`.
+  - Starter workspaces upgrade in **Manage billing** (the Customer Portal), with prorations; a second Checkout is refused while a subscription is open.
+  - The tier comes from the subscription's price in each webhook. An event for a price this deployment does not sell is recorded as `unknown price` and changes nothing.
+- **Trial features:** the app trial and a Stripe `trialing` subscription get Pro's features, so a new workspace can try Autofix before it pays.
+- **What is never gated:** reviews, security checks and the Issues inbox are on every plan. Self-hosted installs (billing off) get every feature.
+
+Business is planned in [roadmap/pricing-tiers.md](roadmap/pricing-tiers.md), which also lists which feature belongs to which tier.
 
 ## Choosing a plan during setup
 
@@ -43,7 +50,7 @@ The prospect enters the code at Checkout, from the setup plan step or Settings �
 ## Setup (operator)
 
 1. **Sandbox:** use a Stripe sandbox (or test mode) for setup and testing.
-2. **Product and price:** create the Product "OpenReview Starter" with a recurring, per-unit monthly price. Set its ID as `STRIPE_SEAT_PRICE_ID`. Each future tier gets its own Product.
+2. **Product and price:** create the Product "OpenReview Starter" with a recurring, per-unit monthly price. Set its ID as `STRIPE_SEAT_PRICE_ID`. Each tier gets its own Product: create "OpenReview Pro" the same way ($29 per seat) and set `STRIPE_PRO_PRICE_ID`.
 3. **Webhook:** add the endpoint `https://<convex-site>/stripe/webhook` on API version `2026-08-26.dahlia` (`STRIPE_API_VERSION` in `src/billing.ts`) for these events:
    - `checkout.session.completed`
    - `customer.subscription.created`, `customer.subscription.updated` and `customer.subscription.deleted`
@@ -54,7 +61,7 @@ The prospect enters the code at Checkout, from the setup plan step or Settings �
 4. **API key:** create a restricted key (`rk_test_…`) with write access to Customers, Checkout Sessions, Customer portal and Subscriptions. Set it as `STRIPE_SECRET_KEY` on Convex (a `sk_test_…` key also works).
    - With the referral program, also give it read access to Charges, Disputes, Invoices and Invoice payments. Customers write already covers customer balance transactions (referral credit). Permission names vary in the Dashboard: make one credit and one refund in the sandbox and check the key's request log for denied calls.
 5. **Turn on billing:** set `BILLING_ENABLED=true` on Convex, and on the web app so the landing page shows pricing and the setup step count is right. Live keys (`rk_live_…`/`sk_live_…`) are refused unless `BILLING_ALLOW_LIVE=true`.
-6. **Customer Portal:** turn it on in Stripe so admins can manage their payment method, invoices and cancellation. Turn off quantity changes, because seats follow workspace membership.
+6. **Customer Portal:** turn it on in Stripe so admins can manage their payment method, invoices and cancellation. Turn off quantity changes, because seats follow workspace membership. For upgrades, create a portal configuration with **subscription updates** on, listing the Starter and Pro products (prorations on, quantity off), and set its ID (`bpc_…`) as `STRIPE_PORTAL_CONFIGURATION_ID`.
 7. **Tax:** turn on Stripe Tax only after you have an active tax registration; until then Stripe collects no tax.
 
 On Vercel, Stripe can also be provisioned from the Vercel Marketplace. The keys still belong in the Convex environment, because Convex runs Checkout, the portal and webhook handling.

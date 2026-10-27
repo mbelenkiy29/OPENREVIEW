@@ -66,7 +66,8 @@ Status: **exists** = built and on main today (every tier gets it until P0 lands)
 
 ## Phase 0: Entitlements foundation
 
-### - [ ] P0.1 Plan catalog and entitlement keys
+### - [x] P0.1 Plan catalog and entitlement keys
+done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/plans.test.ts, tests/billing.test.ts
 **Why:** features need one place that says which tier includes them.
 **Files:** `src/billing.ts`, new `src/plans.ts`, `tests/billing.test.ts`, new `tests/plans.test.ts`.
 **Build:**
@@ -82,7 +83,8 @@ Status: **exists** = built and on main today (every tier gets it until P0 lands)
 - [ ] Unit tests: every matrix row maps to the right tiers, disabled billing grants everything, and unknown keys are a type error.
 - [ ] `billingDecision` uses the tier's fair-use limit. Existing Starter behaviour and tests are unchanged.
 
-### - [ ] P0.2 Store the tier on the billing account
+### - [x] P0.2 Store the tier on the billing account
+done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.spec.ts
 **Depends on:** P0.1
 **Files:** `convex/schema.ts` (`billingAccounts`), `convex/billing.ts` (`applyStripeEvent`, `status`), `convex/http.ts` (webhook parsing), `tests/billing.spec.ts`.
 **Build:**
@@ -99,7 +101,8 @@ Status: **exists** = built and on main today (every tier gets it until P0 lands)
   - An unknown price is ignored.
   - Cancellation falls back to the trial or locked state.
 
-### - [ ] P0.3 Server-side gate helper
+### - [x] P0.3 Server-side gate helper
+done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.spec.ts
 **Depends on:** P0.2
 **Files:** `convex/billing.ts`, plus each feature entry point listed in P1.
 **Build:**
@@ -110,7 +113,8 @@ Status: **exists** = built and on main today (every tier gets it until P0 lands)
 **Acceptance:**
 - [ ] Tests: allowed and denied for every tier, always allowed with billing disabled, and a member of another workspace cannot probe the entitlements.
 
-### - [ ] P0.4 Locked-feature UI pattern
+### - [x] P0.4 Locked-feature UI pattern
+done: 2026-10-27 · see git log feat(billing): Pro tier · tests: covered by the browser check in scripts/browser.ts
 **Depends on:** P0.2
 **Files:** new `app/dashboard/locked.tsx`, `app/globals.css`, DESIGN.md.
 **Build:**
@@ -122,7 +126,8 @@ Status: **exists** = built and on main today (every tier gets it until P0 lands)
 
 ## Phase 1: Pro tier
 
-### - [ ] P1.1 Pro product, Checkout and plan choice
+### - [x] P1.1 Pro product, Checkout and plan choice
+done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.spec.ts
 **Depends on:** P0.2
 **Files:** `convex/billingJobs.ts` (`checkout` gets a `tier` argument), `app/dashboard/billing.tsx`, `app/dashboard/onboarding/[step]/page.tsx` (plan step), `app/page.tsx` (pricing section).
 **Build:**
@@ -136,7 +141,8 @@ Status: **exists** = built and on main today (every tier gets it until P0 lands)
 - In Stripe, create the Product "OpenReview Pro" with a monthly per-unit price of $29.
 - Set `STRIPE_PRO_PRICE_ID` on Convex.
 
-### - [ ] P1.2 Upgrades and downgrades in the Customer Portal
+### - [x] P1.2 Upgrades and downgrades in the Customer Portal
+done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.spec.ts
 **Depends on:** P1.1
 **Files:** `convex/billingJobs.ts` (`portal`), `docs/billing.md`.
 **Build:**
@@ -167,6 +173,7 @@ Status: **exists** = built and on main today (every tier gets it until P0 lands)
 - [ ] Tests: no ticket fetch on Starter (the fake fetch is not called), and a normal check on Pro.
 
 ### - [ ] P1.5 Gate fix pull requests and reproduction tests (`fix.pullRequests`, `review.reproTests`)
+partial: 2026-10-27 · `fix.pullRequests` is gated (comment command, dashboard, Fix page, settings and onboarding toggles; tests: tests/fix-command.spec.ts, tests/fix-pull-requests.spec.ts). `review.reproTests` is not gated yet.
 **Depends on:** P0.3
 **Files:** the fix handling (search `fixPullRequests`), the repro test runner, `app/dashboard/onboarding/configure.tsx` (tools step).
 **Build:**

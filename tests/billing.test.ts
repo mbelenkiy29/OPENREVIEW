@@ -7,7 +7,7 @@ const config = billingConfig({ BILLING_ENABLED: "true", BILLING_TRIAL_REVIEWS: "
 const now = Date.UTC(2026, 9, 14), day = 86400000;
 
 test("billing configuration defaults to disabled and validates numbers", () => {
-  assert.deepEqual(billingConfig({}), { enabled: false, trialDays: 14, trialReviews: 200, reviewsPerSeat: 500, graceDays: 7 });
+  assert.deepEqual(billingConfig({}), { enabled: false, trialDays: 14, trialReviews: 200, reviewsPerSeat: 500, proReviewsPerSeat: 1500, businessReviewsPerSeat: 3000, graceDays: 7 });
   assert.equal(billingConfig({ BILLING_ENABLED: "yes" }).enabled, false);
   assert.equal(billingConfig({ BILLING_TRIAL_DAYS: "-1", BILLING_REVIEWS_PER_SEAT: "abc" }).trialDays, 14);
   assert.equal(periodKey(now), "2026-10");
