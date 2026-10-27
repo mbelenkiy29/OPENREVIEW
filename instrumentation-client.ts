@@ -12,6 +12,7 @@ if (sentryDsn)
     tracesSampleRate: tracesSampleRate(),
     // No session replay: signed-in pages show customers' private code.
     dataCollection: sentryDataCollection,
+    ignoreErrors: ["Object Not Found Matching Id:"], // Outlook Safe Links bot scanning emailed links, not our code
     beforeSend: scrubSentryEvent,
     beforeSendTransaction: scrubSentryTransaction,
     beforeBreadcrumb: scrubBreadcrumb,
