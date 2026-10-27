@@ -6,7 +6,7 @@ import { referralConfig } from "../../src/referrals";
 import { Icon, type IconName } from "../ui/icons";
 import { revokeSession, signOutEverywhere } from "./actions";
 import { openWorkspaceSettings, requestTeamAccess } from "./actions-organization";
-import { githubCredentials, userInstallations } from "../../src/github-link";
+import { joinProofs, recheck } from "../../src/join-teams";
 import { activeWorkspace, viewer } from "./load";
 import { Confirm } from "./org-ui";
 import { PortalDisclosure } from "./portal-disclosure";
@@ -81,31 +81,31 @@ export async function AccountPanel({ token }: { token: string }) {
   </>;
 }
 
-/** Greptile's "Join a Team": teams (GitHub organizations) whose OpenReview App installation your GitHub user can see,
- *  in workspaces where you can't see that team yet. Listing them needs a fresh GitHub token (src/github-link.ts).
- *  `onlyFound` (first run) renders nothing unless there is a team to join. */
+/** Greptile's "Join a Team": teams (GitHub organizations and GitLab groups) that your GitHub or GitLab user belongs to,
+ *  in workspaces where you can't see that team yet. Listing them needs a fresh token from each provider
+ *  (src/join-teams.ts), so a Check button re-authorizes the one that's missing. `onlyFound` (first run) renders
+ *  nothing unless there is a team to join. */
 export async function JoinTeams({ token, next, onlyFound = false }: { token: string; next: string; onlyFound?: boolean }) {
-  const credentials = await githubCredentials();
-  let teams: { teamId: string; team: string; organization: string; requested: boolean }[] = [], failed = false;
-  if (credentials) {
-    try { teams = await backend().query(api.joinRequests.joinable, { token, secret: process.env.SERVICE_SECRET ?? "", installationIds: (await userInstallations(credentials.token)).map((i) => i.id) }); }
-    catch { failed = true; }
-  }
+  let proofs: Awaited<ReturnType<typeof joinProofs>> | undefined, teams: { teamId: string; team: string; organization: string; provider: "github" | "gitlab"; requested: boolean }[] = [];
+  try {
+    proofs = await joinProofs();
+    if (proofs.github || proofs.gitlab) teams = await backend().query(api.joinRequests.joinable, { token, secret: process.env.SERVICE_SECRET ?? "", ...proofs.args });
+  } catch { proofs = undefined; }
   if (onlyFound && !teams.length) return null;
-  if (!credentials) return process.env.GITHUB_CLIENT_ID ? <p className="row"><a className="button" href={`/api/auth/login?purpose=github-install&next=${encodeURIComponent(next)}`}><Icon name="githubLogo" />Check GitHub for teams</a></p> : null;
-  if (failed) return <p role="alert" className="error">GitHub didn’t return your installations. Try again in a minute.</p>;
-  if (!teams.length) return <p className="card-line">None of the GitHub organizations you can see has a team you can join.</p>;
+  if (!proofs) return <p role="alert" className="error">GitHub or GitLab didn’t return your organizations. Try again in a minute.</p>;
+  const checks = ([["github", "GitHub", "githubLogo", process.env.GITHUB_CLIENT_ID], ["gitlab", "GitLab", "gitlabLogo", process.env.GITLAB_OAUTH_CLIENT_ID]] as const).filter(([p, , , on]) => on && !proofs[p]);
   return <>
     {onlyFound && <p><strong>Your team may already use OpenReview.</strong> Ask to join it instead of creating a new workspace.</p>}
-    <ScrollTable label="Teams you can ask to join" className="table-box">
+    {teams.length > 0 ? <ScrollTable label="Teams you can ask to join" className="table-box">
       <table>
         <thead><tr><th>Team</th><th>Actions</th></tr></thead>
         <tbody>{teams.map((t) => <tr key={t.teamId}>
           <td className="wrap">{t.team}<span className="cell-detail">{t.organization}</span></td>
           <td>{t.requested ? <button className="small" disabled>Requested</button>
-            : <form action={requestTeamAccess}><input type="hidden" name="teamId" value={t.teamId} /><input type="hidden" name="returnTo" value={next} /><button className="small">Request access</button></form>}</td>
+            : <form action={requestTeamAccess}><input type="hidden" name="teamId" value={t.teamId} /><input type="hidden" name="provider" value={t.provider} /><input type="hidden" name="returnTo" value={next} /><button className="small">Request access</button></form>}</td>
         </tr>)}</tbody>
       </table>
-    </ScrollTable>
+    </ScrollTable> : (proofs.github || proofs.gitlab) && <p className="card-line">None of the GitHub organizations or GitLab groups you can see has a team you can join.</p>}
+    {!onlyFound && checks.length > 0 && <p className="row">{checks.map(([p, label, icon]) => <a key={p} className="button" href={recheck[p] + encodeURIComponent(next)}><Icon name={icon} />Check {label} for teams</a>)}</p>}
   </>;
 }

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { api } from "../../../convex/_generated/api";
 import { billingConfig } from "../../../src/billing";
 import { backend } from "../../../src/server";
-import { activeWorkspace, scopesFor, viewer } from "../load";
+import { activeWorkspace, scopesFor, teamChoices, viewer } from "../load";
 import { PortalNav } from "../portal";
 
 // Landscape phones: the chrome pads itself clear of the notch (safe-area insets).
@@ -16,7 +16,7 @@ export const viewport: Viewport = { viewportFit: "cover" };
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   const user = await viewer(), jar = await cookies(), organization = activeWorkspace(user, jar);
   if (!organization?._id) redirect("/dashboard/onboarding/workspace");
-  const [{ teams }, billing] = await Promise.all([
+  const [scopes, billing] = await Promise.all([
     scopesFor(user.token, organization._id),
     billingConfig().enabled ? backend().query(api.billing.status, { token: user.token, organizationId: organization._id }).catch(() => null) : null,
   ]);
@@ -31,7 +31,7 @@ export default async function PortalLayout({ children }: { children: React.React
   return <div className="shell portal">
     <PortalNav login={user.user.login} avatar={user.user.avatar || undefined} email={user.email} role={organization.role} organizationId={organization._id} name={organization.name ?? "Workspace"}
       organizations={user.organizations.flatMap((o) => o._id ? [{ _id: o._id, name: o.name ?? "Workspace" }] : [])}
-      teams={teams.map((t) => ({ _id: t._id, name: t.name }))} savedTeam={jar.get("openreview_team")?.value} trialDaysLeft={trialDaysLeft} trialCharge={trialCharge} usage={usage} billingPortal={Boolean(billing?.enabled && billing.admin && billing.hasCustomer)} operator={user.operator} />
+      teams={teamChoices(scopes).map((t) => ({ _id: t._id, name: t.name }))} savedTeam={jar.get("openreview_team")?.value} trialDaysLeft={trialDaysLeft} trialCharge={trialCharge} usage={usage} billingPortal={Boolean(billing?.enabled && billing.admin && billing.hasCustomer)} operator={user.operator} />
     {children}
   </div>;
 }

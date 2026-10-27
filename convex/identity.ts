@@ -189,30 +189,36 @@ export const revokeEmailInvitation = mutation({ args: { token: v.string(), invit
   if (!invitation.revokedAt && !invitation.acceptedAt) await ctx.db.patch(invitation._id, { revokedAt: Date.now() });
   await audit(ctx, invitation.organizationId, user._id, "invitation.email_revoked", invitation._id);
 } });
-// People → Member link: one reusable link per workspace that joins as Member. The web server makes the token and
-// shows it once; a new hash replaces the old link, and no hash turns it off.
+// People → Member link: one reusable link per workspace that joins as Member for 30 days. The web server makes the
+// token and shows it once; a new hash replaces the old link, and no hash turns it off.
+const memberLinkDays = 30;
 export const setMemberLink = mutation({ args: { token: v.string(), organizationId: v.id("organizations"), tokenHash: v.optional(v.string()) }, handler: async (ctx, a) => {
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
   if (a.tokenHash !== undefined && !hex64.test(a.tokenHash)) throw new Error("Invalid token");
   for (const old of await ctx.db.query("memberLinks").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId)).collect()) await ctx.db.delete(old._id);
-  if (a.tokenHash) await ctx.db.insert("memberLinks", { organizationId: a.organizationId, tokenHash: a.tokenHash, createdBy: user._id, createdAt: Date.now() });
+  const expiresAt = Date.now() + memberLinkDays * 86400000;
+  if (a.tokenHash) await ctx.db.insert("memberLinks", { organizationId: a.organizationId, tokenHash: a.tokenHash, createdBy: user._id, createdAt: Date.now(), expiresAt });
   await audit(ctx, a.organizationId, user._id, a.tokenHash ? "member_link.created" : "member_link.disabled", a.organizationId);
+  return a.tokenHash ? expiresAt : null;
 } });
 export const memberLink = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
   await authorize(ctx, a.token, a.organizationId, true);
   const link = await ctx.db.query("memberLinks").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId)).first();
-  return link ? { createdAt: link.createdAt } : null;
+  return link && link.expiresAt > Date.now() ? { createdAt: link.createdAt, expiresAt: link.expiresAt } : null;
 } });
-const memberLinkFor = (ctx: QueryCtx, tokenHash: string) => ctx.db.query("memberLinks").withIndex("by_token", (q) => q.eq("tokenHash", tokenHash)).unique();
+const memberLinkFor = async (ctx: QueryCtx, tokenHash: string) => {
+  const link = await ctx.db.query("memberLinks").withIndex("by_token", (q) => q.eq("tokenHash", tokenHash)).unique();
+  return link && link.expiresAt > Date.now() ? link : null;
+};
 const usable = (i: Doc<"emailInvitations"> | null): i is Doc<"emailInvitations"> => Boolean(i && !i.acceptedAt && !i.revokedAt && i.expiresAt > Date.now());
 
-// /invite?token= serves email invitations (single use, 7 days) and member links (until reset).
+// /invite?token= serves email invitations (single use, 7 days) and member links (30 days, until reset).
 export const invitationPreview = query({ args: { tokenHash: v.string() }, handler: async (ctx, a) => {
   if (!hex64.test(a.tokenHash)) return null;
   const invitation = await ctx.db.query("emailInvitations").withIndex("by_token", (q) => q.eq("tokenHash", a.tokenHash)).unique();
   if (usable(invitation)) return { workspace: (await ctx.db.get(invitation.organizationId))?.name ?? "Workspace", role: invitation.role, expiresAt: invitation.expiresAt };
   const link = await memberLinkFor(ctx, a.tokenHash);
-  return link ? { workspace: (await ctx.db.get(link.organizationId))?.name ?? "Workspace", role: "member" as const } : null;
+  return link ? { workspace: (await ctx.db.get(link.organizationId))?.name ?? "Workspace", role: "member" as const, expiresAt: link.expiresAt, link: true } : null;
 } });
 export const acceptEmailInvitation = mutation({ args: { token: v.string(), tokenHash: v.string() }, handler: async (ctx, a) => {
   const user = await authenticated(ctx, a.token);

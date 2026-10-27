@@ -19,7 +19,7 @@ export default async function Invite({ searchParams }: { searchParams: Promise<{
     {error && <p role="alert" className="error">This invitation could not be accepted. It may have expired, been revoked or already been used.</p>}
     {!preview ? <><h1>Invitation unavailable</h1><p>This invitation link is invalid, expired, revoked or already used. Ask a workspace admin for a new one.</p></> : <>
       <h1>Join {preview.workspace}</h1>
-      <p>You were invited as <strong>{preview.role}</strong>. {preview.expiresAt ? `The link works once and expires ${new Date(preview.expiresAt).toLocaleDateString("en-US", { timeZone: "UTC", dateStyle: "medium" })}.` : "This is the workspace’s member link, shared by an admin."}</p>
+      <p>You were invited as <strong>{preview.role}</strong>. {"link" in preview ? "This is the workspace’s member link, shared by an admin. It" : "The link works once and"} expires {new Date(preview.expiresAt).toLocaleDateString("en-US", { timeZone: "UTC", dateStyle: "medium" })}.</p>
       {signedIn ? <form action={acceptEmailInvitation}><input type="hidden" name="token" value={token} /><button className="primary">Accept invitation</button></form>
         : <><p>Sign in or create an account to accept.</p><SignInOptions next={`/invite?token=${token}`} /></>}
     </>}

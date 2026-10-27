@@ -39,7 +39,7 @@ export async function TeamSection({ ctx }: { ctx: DashboardContext }) {
   return <>
     {filters.emailInvite === "sent" && <p role="status" className="notice-banner">Invitation sent.</p>}
     {filters.emailInvite === "error" && <p role="alert" className="notice-banner">The invitation could not be sent. Check the address and email configuration.</p>}
-    <PeopleTable rows={rows} invite={isAdmin && <><MemberLink organizationId={organization._id} active={Boolean(memberLink)} /><InvitePeople organizationId={organization._id} email={emailOnWeb()} /></>} />
+    <PeopleTable rows={rows} invite={isAdmin && <><MemberLink organizationId={organization._id} expiresAt={memberLink?.expiresAt} /><InvitePeople organizationId={organization._id} email={emailOnWeb()} /></>} />
     {isAdmin && <p className="muted table-note">Invitees see GitHub-login invitations when they sign in with that GitHub identity; inviting a login again replaces its previous invitation. Email invitations are single-use links that expire in 7 days.</p>}
   </>;
 }

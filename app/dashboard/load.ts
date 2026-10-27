@@ -17,6 +17,12 @@ export function activeWorkspace<T extends { _id?: string }>(user: { organization
   return user.organizations.find((o) => o._id === jar.get("openreview_workspace")?.value) ?? user.organizations[0];
 }
 
+// The teams the switcher offers. As on Greptile, one team that every repository belongs to is no choice: the menu shows
+// the workspace alone. Repositories outside any team (personal accounts) keep the picker for a single team.
+export function teamChoices<T>(scopes: { teams: T[]; repositories: { teamId?: string }[] }) {
+  return scopes.teams.length > 1 || scopes.repositories.some((r) => !r.teamId) ? scopes.teams : [];
+}
+
 // Read once per server render: the portal layout (app chrome) and the page both need them.
 export const viewer = cache(() => current());
 export const scopesFor = cache((token: string, organizationId: Id<"organizations">) => backend().query(api.scopes.list, { token, organizationId }));
@@ -61,7 +67,7 @@ export async function loadDashboard({
   const requestedRepository = filters.repository;
   if (!navigation.some((n) => n.toLowerCase() === view)) notFound();
   const scopes=await scopesFor(user.token,organization._id);
-  const savedTeam=jar.get("openreview_team")?.value;
+  const savedTeam=teamChoices(scopes).length?jar.get("openreview_team")?.value:undefined;
   const selectedTeam=scopes.teams.find(t=>t._id===(filters.team??savedTeam));
   if(filters.team&&!selectedTeam)notFound();
   if(selectedTeam)filters.team=selectedTeam._id;

@@ -1,58 +1,68 @@
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import { audit, authenticated, authorize, service } from "./auth";
 import { rateLimit } from "./rateLimit";
 import { scheduleSeatSync } from "./billing";
 
-// "Join a team", as on Greptile: a team is a GitHub organization connected to a workspace (scopes.providerTeam).
-// The web server passes the App installations the signed-in GitHub user can access (src/github-link.ts); the
-// teams on them that the user can't see yet are open to request, and an org admin or that team's admin answers.
+// "Join a team", as on Greptile: a team is a GitHub organization or GitLab group connected to a workspace
+// (scopes.providerTeam). The web server passes the App installations the signed-in GitHub user can access and the
+// GitLab groups the GitLab user belongs to (src/join-teams.ts); the teams on them that the user can't see yet are open
+// to request, and an org admin or that team's admin answers.
 const githubTeamKey = (accountId: number) => JSON.stringify(["github", "https://api.github.com", String(accountId)]);
+const proof = { installationIds: v.array(v.number()), gitlab: v.optional(v.object({ instance: v.string(), groupIds: v.array(v.string()) })) };
+type Proof = { installationIds: number[]; gitlab?: { instance: string; groupIds: string[] } };
 const teamMember = (ctx: QueryCtx | MutationCtx, teamId: Id<"teams">, userId: Id<"users">) =>
   ctx.db.query("teamMembers").withIndex("by_team_user", (q) => q.eq("teamId", teamId).eq("userId", userId)).unique();
 const orgMember = (ctx: QueryCtx | MutationCtx, organizationId: Id<"organizations">, userId: Id<"users">) =>
   ctx.db.query("organizationMembers").withIndex("by_org_user", (q) => q.eq("organizationId", organizationId).eq("userId", userId)).unique();
 
-async function joinableTeams(ctx: QueryCtx | MutationCtx, userId: Id<"users">, installationIds: number[]) {
-  const found: { team: Doc<"teams">; organization: Doc<"organizations"> }[] = [];
-  for (const installationId of installationIds.slice(0, 200)) {
-    const installation = await ctx.db.query("githubInstallations").withIndex("by_installation", (q) => q.eq("installationId", installationId)).unique();
-    const organization = installation?.active ? await ctx.db.get(installation.organizationId) : null;
-    if (!installation || !organization) continue;
-    const team = (await ctx.db.query("teams").withIndex("by_org", (q) => q.eq("organizationId", organization._id)).collect()).find((t) => t.externalKey === githubTeamKey(installation.accountId));
-    if (!team || found.some((f) => f.team._id === team._id)) continue;
+async function joinableTeams(ctx: QueryCtx | MutationCtx, userId: Id<"users">, p: Proof) {
+  const found: { team: Doc<"teams">; organization: Doc<"organizations">; provider: "github" | "gitlab" }[] = [];
+  const add = async (team: Doc<"teams"> | undefined, provider: "github" | "gitlab") => {
+    const organization = team && await ctx.db.get(team.organizationId);
+    if (!team || !organization || found.some((f) => f.team._id === team._id)) return;
     // Organization admins already see every team.
-    if (["owner", "admin"].includes((await orgMember(ctx, organization._id, userId))?.role ?? "") || (await teamMember(ctx, team._id, userId))) continue;
-    found.push({ team, organization });
+    if (["owner", "admin"].includes((await orgMember(ctx, organization._id, userId))?.role ?? "") || (await teamMember(ctx, team._id, userId))) return;
+    found.push({ team, organization, provider });
+  };
+  for (const installationId of p.installationIds.slice(0, 200)) {
+    const installation = await ctx.db.query("githubInstallations").withIndex("by_installation", (q) => q.eq("installationId", installationId)).unique();
+    if (!installation?.active) continue;
+    await add((await ctx.db.query("teams").withIndex("by_org", (q) => q.eq("organizationId", installation.organizationId)).collect()).find((t) => t.externalKey === githubTeamKey(installation.accountId)), "github");
   }
+  // A GitLab group can be connected to several workspaces, each with its own team.
+  for (const groupId of p.gitlab?.groupIds.slice(0, 200) ?? [])
+    for (const team of await ctx.db.query("teams").withIndex("by_external", (q) => q.eq("externalKey", JSON.stringify(["gitlab", p.gitlab!.instance, groupId]))).take(20)) await add(team, "gitlab");
   return found;
 }
 const existing = (ctx: QueryCtx | MutationCtx, userId: Id<"users">, teamId: Id<"teams">) =>
   ctx.db.query("joinRequests").withIndex("by_user_team", (q) => q.eq("userId", userId).eq("teamId", teamId)).unique();
 
 export const joinable = query({
-  args: { token: v.string(), secret: v.string(), installationIds: v.array(v.number()) },
-  handler: async (ctx, a) => {
-    service(a.secret);
-    const user = await authenticated(ctx, a.token);
-    return Promise.all((await joinableTeams(ctx, user._id, a.installationIds)).map(async ({ team, organization }) => ({
-      teamId: team._id, team: team.name, organization: organization.name, requested: Boolean(await existing(ctx, user._id, team._id)),
+  args: { token: v.string(), secret: v.string(), ...proof },
+  handler: async (ctx, { token, secret, ...p }) => {
+    service(secret);
+    const user = await authenticated(ctx, token);
+    return Promise.all((await joinableTeams(ctx, user._id, p)).map(async ({ team, organization, provider }) => ({
+      teamId: team._id, team: team.name, organization: organization.name, provider, requested: Boolean(await existing(ctx, user._id, team._id)),
     })));
   },
 });
 
 export const request = mutation({
-  args: { token: v.string(), secret: v.string(), teamId: v.id("teams"), installationIds: v.array(v.number()) },
-  handler: async (ctx, a) => {
-    service(a.secret);
-    const user = await authenticated(ctx, a.token);
-    const match = (await joinableTeams(ctx, user._id, a.installationIds)).find((f) => f.team._id === a.teamId);
-    if (!match) throw new Error("Your GitHub user can't see this team's organization, or you're already in the team");
-    if (await existing(ctx, user._id, a.teamId)) return;
+  args: { token: v.string(), secret: v.string(), teamId: v.id("teams"), ...proof },
+  handler: async (ctx, { token, secret, teamId, ...p }) => {
+    service(secret);
+    const user = await authenticated(ctx, token);
+    const match = (await joinableTeams(ctx, user._id, p)).find((f) => f.team._id === teamId);
+    if (!match) throw new Error("Your GitHub or GitLab user can't see this team's organization or group, or you're already in the team");
+    if (await existing(ctx, user._id, teamId)) return;
     await rateLimit(ctx, `join-request:${user._id}`, 10, 86_400_000);
-    const id = await ctx.db.insert("joinRequests", { organizationId: match.organization._id, teamId: a.teamId, userId: user._id, createdAt: Date.now() });
+    const id = await ctx.db.insert("joinRequests", { organizationId: match.organization._id, teamId, userId: user._id, createdAt: Date.now() });
     await audit(ctx, match.organization._id, user._id, "join_request.created", id);
+    await ctx.scheduler.runAfter(0, internal.notificationJobs.joinRequest, { requestId: id });
   },
 });
 

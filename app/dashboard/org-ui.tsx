@@ -105,11 +105,11 @@ export function InvitePeople({ organizationId, email }: { organizationId: string
   </PortalDisclosure>;
 }
 
-/** Greptile's "Member link": one shareable link that joins as Member. Only its hash is stored, so the URL shows
- *  once after Create or Reset; Reset also stops the old link. */
-export function MemberLink({ organizationId, active }: { organizationId: string; active: boolean }) {
+/** Greptile's "Member link": one shareable link that joins as Member for 30 days. Only its hash is stored, so the URL
+ *  shows once after Create or Reset; Reset also stops the old link. */
+export function MemberLink({ organizationId, expiresAt }: { organizationId: string; expiresAt?: number }) {
   const [state, action, pending] = useActionState(changeMemberLink, {} as MemberLinkState);
-  const on = state.url ? true : state.off ? false : active;
+  const until = state.expiresAt ?? (state.off ? undefined : expiresAt), on = Boolean(until);
   return <PortalDisclosure className="invite-people" label={<><Icon name="linkSimple" />Member link</>}>
     <div className="menu invite-panel">
       <header><h3>Member link</h3></header>
@@ -120,7 +120,7 @@ export function MemberLink({ organizationId, active }: { organizationId: string;
         {on && <button name="op" value="disable" className="danger" disabled={pending}>Disable</button>}
       </form>
       {state.error && !pending && <p role="alert">{state.error}</p>}
-      <p className="muted">{state.url ? "Copy it now: the link is shown only once. " : on ? "A link is active. Reset it to get a new copy; the old one stops working. " : ""}Anyone with the link can join this organization as a Member, which uses a seat.</p>
+      <p className="muted">{state.url ? "Copy it now: the link is shown only once. " : on ? "A link is active. Reset it to get a new copy; the old one stops working. " : ""}{until ? `It expires ${new Date(until).toLocaleDateString("en-US", { timeZone: "UTC", dateStyle: "medium" })}. ` : "A new link lasts 30 days. "}Anyone with the link can join this organization as a Member, which uses a seat.</p>
     </div>
   </PortalDisclosure>;
 }

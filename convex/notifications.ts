@@ -160,6 +160,20 @@ export const upgradeRequestTargets = internalQuery({ args: { organizationId: v.i
   const [organization, user] = await Promise.all([ctx.db.get(a.organizationId), ctx.db.get(a.userId)]);
   return organization && user ? { workspace: organization.name, login: user.login, recipients: await adminEmails(ctx, a.organizationId) } : null;
 } });
+// "Join a team" request (convex/joinRequests.ts): the workspace's owners and admins plus that team's admins, each with a
+// verified notification email, like the upgrade request above.
+export const joinRequestTargets = internalQuery({ args: { requestId: v.id("joinRequests") }, handler: async (ctx, a) => {
+  const request = await ctx.db.get(a.requestId);
+  const [organization, team, user] = request ? await Promise.all([ctx.db.get(request.organizationId), ctx.db.get(request.teamId), ctx.db.get(request.userId)]) : [];
+  if (!request || !organization || !team || !user) return null;
+  const recipients = await adminEmails(ctx, request.organizationId);
+  for (const m of await ctx.db.query("teamMembers").withIndex("by_team", (q) => q.eq("teamId", team._id)).take(1000)) {
+    if (m.role !== "admin" || recipients.some((r) => r.userId === m.userId)) continue;
+    const p = await ownPreferences(ctx, m.userId, request.organizationId);
+    if (p?.email && p.emailVerifiedAt) recipients.push({ userId: m.userId, email: p.email });
+  }
+  return { organizationId: request.organizationId, workspace: organization.name, team: team.name, login: user.login, recipients };
+} });
 // Usage alert (settleUsage in convex/billing.ts): owners and admins with a verified email, never members or viewers.
 export const usageAlertTargets = internalQuery({ args: { usageId: v.id("billingUsage"), threshold: v.number(), origin: v.optional(v.string()) }, handler: async (ctx, a) => {
   const usage = await ctx.db.get(a.usageId);
