@@ -22,7 +22,7 @@ export function SignInOptions({ next, mode = "login", referral }: { next?: strin
       <label>Enter work email<input type="email" name="email" required maxLength={254} autoComplete="email" placeholder="me@example.com" /></label>
       <p className="sign-in-hint">We’ll email you a sign-in link. No password needed.</p>
       {turnstile.mode !== "off" && <TurnstileField siteKey={turnstile.siteKey!} action="magic_link" />}
-      <button className="primary">{mode === "signup" ? "Start for Free" : "Login"} <Icon name="arrowRight" /></button>
+      <button className="primary">{mode === "signup" ? "Sign up" : "Login"} <Icon name="arrowRight" /></button>
       {turnstile.mode === "enforce" && <noscript><p className="muted">Email sign-in needs JavaScript; use another sign-in method.</p></noscript>}
     </form>}
     {/* Without email sign-in, the first provider is the primary action. */}

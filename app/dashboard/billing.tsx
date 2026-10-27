@@ -18,6 +18,8 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
     ? "An OpenReview operator owns this workspace, so it has no plan quota: usage and agent fixes are unlimited and every feature is on. The deployment's inference budget still applies."
     : <>This deployment does not bill workspaces (<code>BILLING_ENABLED</code> is not set), so reviews have no plan quota. Self-hosted installs are unlimited.</>}</p></section></>;
   const subscribed = s.plan === "starter" || s.plan === "pro", percent = s.limit ? Math.min(100, Math.round((s.used / s.limit) * 100)) : 0;
+  // A workspace without a paid plan that does not keep Free (new, or a lapsed new subscription) has no plan at all.
+  const unpaid = !subscribed && !s.freePlan, badge = unpaid ? "Inactive" : s.plan === "free" ? "Active" : statusLabel(s.status);
   const trial = checkoutTrialEnd(s.trialEndsAt, Date.now());
   const portal = (label: ReactNode, name?: string, className?: string) => <form action={openBillingPortal}><input type="hidden" name="organizationId" value={organizationId} /><button className={className} aria-label={name}>{label}</button></form>;
   return <>
@@ -28,17 +30,17 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
     {s.allowed && percent >= 80 && <p role="status" className="notice-banner"><Icon name="warning" />{percent >= 100 ? "This workspace used all of its included usage this month; extra usage is on, up to the monthly cap." : `This workspace used ${percent}% of its included usage this month. ${subscribed && s.capUsd > 0 ? "Extra usage covers what comes after it, up to the monthly cap." : `Reviews pause when it runs out${subscribed ? " unless an admin turns on extra usage" : "; upgrade for more"}.`}`}</p>}
     <div className="section-heading"><div><h2 id="billing-heading">Billing &amp; Usage</h2><p>Manage your plan and billing details</p></div></div>
     <section aria-labelledby="plan-heading" className="strip-card">
-      <header className="card-strip"><Icon name="creditCard" /><h3 id="plan-heading">{s.planName} plan</h3><span className="role-badge">{s.plan === "free" ? "Active" : statusLabel(s.status)}</span></header>
+      <header className="card-strip"><Icon name="creditCard" /><h3 id="plan-heading">{unpaid ? "No plan" : `${s.planName} plan`}</h3><span className="role-badge">{badge}</span></header>
       <div className="strip-body">
-        <div className="usage-meter"><div><strong>{percent}%</strong><span> of included usage{s.admin ? ` (${usdText(s.used)} of ${usdText(s.limit ?? 0)})` : ""}</span></div><meter min={0} max={100} value={percent} aria-label="Included usage used" /><span className="muted">Resets {day(s.resetsAt)}{s.reviewsLeft !== null ? ` · about ${s.reviewsLeft} reviews left` : ""}</span></div>
+        {!unpaid && <div className="usage-meter"><div><strong>{percent}%</strong><span> of included usage{s.admin ? ` (${usdText(s.used)} of ${usdText(s.limit ?? 0)})` : ""}</span></div><meter min={0} max={100} value={percent} aria-label="Included usage used" /><span className="muted">Resets {day(s.resetsAt)}{s.reviewsLeft !== null ? ` · about ${s.reviewsLeft} reviews left` : ""}</span></div>}
         <dl className="facts">
           {s.currentPeriodEnd && <><dt>Current period ends</dt><dd>{day(s.currentPeriodEnd)}</dd></>}
           {s.pastDueSince && <><dt>Past due since</dt><dd>{day(s.pastDueSince)} · reviews pause after {s.graceDays} days</dd></>}
           {subscribed && <><dt>Extra usage</dt><dd>{s.capUsd > 0 ? (s.admin ? `${usdText(s.overage)} of a ${usdText(s.capUsd * 1e6)} monthly cap` : "On") : "Off: reviews pause when the included usage runs out"}</dd></>}
           <dt>Reviews this month</dt><dd>{s.reviews}{s.blocked ? ` · ${s.blocked} blocked` : ""}</dd>
-          <dt>Agent fixes this month</dt><dd>{s.fixes.limit ? `${s.fixes.used} of ${s.fixes.limit}` : "None on Free: copy prompts and your own agents still work"}</dd>
+          <dt>Agent fixes this month</dt><dd>{s.fixes.limit ? `${s.fixes.used} of ${s.fixes.limit}` : `None ${unpaid ? "without a plan" : "on Free"}: copy prompts and your own agents still work`}</dd>
           <dt>Seats</dt><dd>{s.activeSeats} active (owners, admins and members; viewers are free){s.billedSeats !== null ? ` · ${s.billedSeats} billed` : ""}</dd>
-          <dt>Plans</dt><dd>Free: {usdText(s.freeUsageMicros)} of model usage per workspace each month · Starter{process.env.BILLING_SEAT_PRICE_LABEL ? ` (${process.env.BILLING_SEAT_PRICE_LABEL})` : ""}: {usdText(s.usagePerSeatMicros)} and {s.starterFixesPerSeat} agent fixes per seat · Pro{process.env.BILLING_PRO_PRICE_LABEL ? ` (${process.env.BILLING_PRO_PRICE_LABEL})` : ""}: {usdText(s.proUsagePerSeatMicros)} and {s.proFixesPerSeat} agent fixes per seat, plus deep reviews, generated reproduction tests, requirements checks, learned conventions, API keys, analytics older than 30 days, SSO and the audit log. Pricier models use usage faster.</dd>
+          <dt>Plans</dt><dd>{s.freePlan && `Free: ${usdText(s.freeUsageMicros)} of model usage per workspace each month · `}Starter{process.env.BILLING_SEAT_PRICE_LABEL ? ` (${process.env.BILLING_SEAT_PRICE_LABEL})` : ""}: {usdText(s.usagePerSeatMicros)} and {s.starterFixesPerSeat} agent fixes per seat · Pro{process.env.BILLING_PRO_PRICE_LABEL ? ` (${process.env.BILLING_PRO_PRICE_LABEL})` : ""}: {usdText(s.proUsagePerSeatMicros)} and {s.proFixesPerSeat} agent fixes per seat, plus deep reviews, generated reproduction tests, requirements checks, learned conventions, API keys, analytics older than 30 days, SSO and the audit log. Pricier models use usage faster.</dd>
           {s.referral?.referred && <><dt>Referral</dt><dd>{referralFact(s.referral, referralConfig().discountLabel)}</dd></>}
           {s.referralCredit ? <><dt>Referral credit</dt><dd>{formatMoney(s.referralCredit)} applied from referral earnings · Stripe takes it off the next invoices</dd></> : null}
         </dl>
@@ -67,7 +69,7 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
     </table></div>
     <div className="section-heading"><h2 id="portal-heading">Billing Portal</h2></div>
     <section aria-labelledby="portal-heading" className="setting-row portal-card">
-      <div><strong>Manage Billing <span className="role-badge">{s.plan === "free" ? "Active" : statusLabel(s.status)}</span></strong>
+      <div><strong>Manage Billing <span className="role-badge">{badge}</span></strong>
         <p>{s.status === "trialing" && s.trialEndsAt ? `You’re on a free trial until ${day(s.trialEndsAt)}. ` : ""}{s.hasCustomer ? "Visit the portal to update your payment method, download invoices or manage your plan." : "The Stripe billing portal opens once this workspace has a plan with a payment method."}</p></div>
       {s.admin && s.hasCustomer && portal("Manage", "Manage billing")}
     </section>

@@ -65,10 +65,12 @@ test('a workspace an operator owns has unlimited usage, fixes and features, stil
  const t=convexTest(schema,modules);
  const operator=await signIn(t,operatorId,'mbelenkiy29'),alice=await signIn(t,31,'alice');
  const mine=await t.mutation(api.users.createOrganization,{token:operator.token,name:'Mine'});
- // One Free workspace per owner does not apply: the operator's second workspace starts without choosing a plan.
+ // An operator's workspaces never choose a plan.
  const second=await t.mutation(api.users.createOrganization,{token:operator.token,name:'Mine too'});
- expect(await t.run(async ctx=>(await ctx.db.get(second))?.planSelectedAt)).toBeTypeOf('number');
  const theirs=await t.mutation(api.users.createOrganization,{token:alice.token,name:'Theirs'});
+ // A new workspace that is not the operator's has no Free plan; this one started on Free before that.
+ await t.run(ctx=>ctx.db.patch(theirs,{planSelectedAt:Date.now(),plan:'free'}));
+ await t.mutation(api.users.createOrganization,{token:alice.token,name:'Unpaid'});
  // The operator as an admin, not an owner, does not exempt a workspace.
  await t.run(ctx=>ctx.db.insert('organizationMembers',{organizationId:theirs,userId:operator.id,role:'admin'}));
 
@@ -91,14 +93,16 @@ test('a workspace an operator owns has unlimited usage, fixes and features, stil
  expect((await t.run(ctx=>ctx.db.query('billingUsage').collect())).find(r=>r.organizationId===mine)?.fixes).toBe(3);
 
  const report=await t.action(api.operator.overview,{token:operator.token});
- expect(Object.fromEntries(report.workspaces.map(w=>[w.name,w.exempt]))).toEqual({'Mine':true,'Mine too':true,'Theirs':false});
+ expect(Object.fromEntries(report.workspaces.map(w=>[w.name,w.exempt]))).toEqual({'Mine':true,'Mine too':true,'Theirs':false,'Unpaid':false});
+ // The report shows each workspace's own allowance: Free for one that keeps it, none for a new unpaid one.
+ expect(Object.fromEntries(report.workspaces.map(w=>[w.name,w.limitMicros]))).toEqual({'Mine':null,'Mine too':null,'Theirs':20000,'Unpaid':0});
 
  // The deployment-wide inference budget stays the ceiling: room for one more $0.01 call, not two.
  await t.mutation(internal.inferenceBudget.initialize,{limitMicros:15000,baselineMicros:0,source:'operator test'});
  await spend(t,mine);
  await expect(reserve(t,mine)).rejects.toThrow(/Inference budget exhausted/);
 
- // A workspace still without a plan (made before this rule) is not sent to the plan step when an operator owns it.
+ // A workspace still without a plan is not sent to the plan step when an operator owns it.
  await t.run(async ctx=>{await ctx.db.patch(second,{planSelectedAt:undefined});await ctx.db.patch(theirs,{planSelectedAt:undefined});});
  expect(Object.fromEntries((await t.query(api.users.me,{token:operator.token})).organizations.map(o=>[o.name,o.planMissing]))).toEqual({'Mine':false,'Mine too':false,'Theirs':true});
 

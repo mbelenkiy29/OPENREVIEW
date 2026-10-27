@@ -17,9 +17,9 @@ test("structured data names the site and app, and lists prices only when billing
   assert.deepEqual(off["@graph"].map((n) => n["@type"]), ["WebSite", "SoftwareApplication"]);
   assert.equal(offersOf(off), undefined, "self-hosted deployments show no prices");
   const on = homeStructuredData({ ...base, billing: { enabled: true }, priceLabel: "$12 per seat / month", proPriceLabel: "$24 per seat / month" });
-  assert.deepEqual(offersOf(on)?.map((o) => [o.name, o.price]), [["Free", "0"], ["Starter", "12"], ["Pro", "24"]]);
+  assert.deepEqual(offersOf(on)?.map((o) => [o.name, o.price]), [["Starter", "12"], ["Pro", "24"]]);
   const unlabeled = homeStructuredData({ ...base, billing: { enabled: true } });
-  assert.deepEqual(offersOf(unlabeled)?.map((o) => o.name), ["Free"], "no made-up price without a label");
+  assert.equal(offersOf(unlabeled), undefined, "no made-up price without a label");
 });
 
 test("JSON-LD cannot close its script tag", () => {

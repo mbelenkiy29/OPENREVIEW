@@ -4,7 +4,7 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { authenticatedSession } from "./auth";
-import { billingConfig, billingDecision, periodKey, seatCount } from "../src/billing";
+import { billingConfig, billingDecision, keepsFree, paidPlanReason, periodKey, seatCount } from "../src/billing";
 
 // Operators (super admins) of this deployment: OPERATOR_GITHUB_IDS on Convex, comma-separated numeric GitHub
 // user ids (a login can be renamed and then reused). Only this setting grants it, never a client flag or a stored field.
@@ -73,8 +73,9 @@ async function operatorReport(ctx: QueryCtx) {
       ctx.db.query("usageEvents").withIndex("by_org_time", (q) => q.eq("organizationId", o._id)).order("desc").first(),
     ]);
     const exempt = config.enabled && members.some((m) => m.role === "owner" && operators.has(m.userId));
+    // Only workspaces that keep Free (keepsFree) have its allowance, as on their Billing page.
     // shortcut: leaves out the one-Free-workspace-per-owner rule, so an owner's second Free workspace shows the Free allowance; check its Billing page.
-    const decision = config.enabled && !exempt ? billingDecision(account ?? { status: "trial", seats: 0, trialEndsAt: 0 }, month?.usedMicros ?? 0, now, config) : null;
+    const decision = config.enabled && !exempt ? billingDecision(account ?? { status: "trial", seats: 0, trialEndsAt: 0 }, month?.usedMicros ?? 0, now, config, 0, keepsFree(o) ? undefined : paidPlanReason) : null;
     return {
       id: o._id, name: o.name, createdAt: o.createdAt, exempt, plan: decision?.plan ?? null, status: account?.subscriptionId ? account.status : null,
       choosingPlan: config.enabled && !exempt && Boolean(o.planRequired && !o.planSelectedAt), seats: seatCount(members), members: members.length,

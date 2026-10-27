@@ -60,7 +60,7 @@ export default function Home() {
           <Link className="button primary large" href="/signup">Get started</Link>
           <Link className="button large" href="/login">Sign in</Link>
         </div>
-        {billing.enabled && <p className="hero-note">Free plan, no card. Paid plans start with {billing.trialDays} days free.</p>}
+        {billing.enabled && <p className="hero-note">Every plan starts with a {billing.trialDays}-day free trial.</p>}
         <p className="hero-links"><Link href="/docs/quickstart">Read the quickstart →</Link><Link href="/docs/self-hosting">Self-host it →</Link></p>
       </section>
       <div className="stage hero-stage"><ReviewReplica /><p className="stage-hint">Live demo with sample data. Click around.</p></div>
@@ -121,7 +121,6 @@ export default function Home() {
       {billing.enabled && <section id="pricing" className="pricing" aria-labelledby="pricing-heading">
         <h2 id="pricing-heading" data-split>Pricing</h2>
         <div className="feature-grid" data-stagger>
-          <article className="feature-card"><h3>Free</h3><p className="price">$0</p><p>{usdText(billing.freeUsageMicros)} of model usage per workspace each month. Fast and standard reviews with security checks, every provider, and the CLI and MCP with browser sign-in. Fix prompts for any AI agent, the local bridge and your own cloud agents. No card.</p><p className="pricing-action"><Link className="button" href="/signup">Start free</Link></p></article>
           <article className="feature-card"><h3>Starter</h3><p className="price">{process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.usagePerSeatMicros)} of model usage per seat each month, pooled across the workspace, then optional pay-as-you-go extra usage up to a cap you set. {billing.starterFixesPerSeat} OpenReview agent fixes per seat each month, each opened as a pull request, and your own model key. Owners, admins and members are seats; viewers are free.</p><p className="pricing-action"><Link className="button" href={`/signup?next=${encodeURIComponent("/dashboard/onboarding/plan?intent=starter")}`}>Choose Starter</Link></p></article>
           <article className="feature-card"><h3>Pro</h3><p className="price">{process.env.BILLING_PRO_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.proUsagePerSeatMicros)} of model usage and {billing.proFixesPerSeat} OpenReview agent fixes per seat each month, plus deep reviews with the agentic engines, generated reproduction tests, requirements checks, SSO, the audit log and API keys. {billing.trialDays} days free.</p><p className="pricing-action"><Link className="button primary" href={`/signup?next=${encodeURIComponent("/dashboard/onboarding/plan?intent=pro")}`}>Start Pro trial</Link></p></article>
         </div>

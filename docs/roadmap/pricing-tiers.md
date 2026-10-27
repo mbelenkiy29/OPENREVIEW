@@ -28,7 +28,7 @@ Positioning: well under Greptile, which charges $30 per seat per month for 50 re
 
 | Plan | Price (per seat / month) | Included model usage | Status |
 |---|---|---|---|
-| **Free** | $0, no card | $3 per workspace per month (about 40 standard reviews) | Live |
+| **Free** | $0, no card | $3 per workspace per month (about 40 standard reviews) | Existing workspaces only: new workspaces choose Starter or Pro, with a 14-day trial |
 | **Starter** | $12 ($10 billed annually) | $6 per seat, pooled | Live: `STRIPE_SEAT_PRICE_ID` |
 | **Pro** | $24 ($20 billed annually) | $12 per seat, pooled | Live: `STRIPE_PRO_PRICE_ID` |
 | Enterprise | Contact | Custom | Process only: SCIM, custom DPA, invoicing, self-host help |

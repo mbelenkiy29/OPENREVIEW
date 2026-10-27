@@ -4,6 +4,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { SignJWT } from "jose";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
+import { createHmac } from "node:crypto";
 import { api } from "../convex/_generated/api";
 
 loadEnvFile(".env.local");
@@ -24,6 +25,21 @@ const token = await new SignJWT({})
   .setAudience("openreview")
   .setExpirationTime("1h")
   .sign(new TextEncoder().encode(process.env.SESSION_SECRET!));
+// Billing deployments: a new workspace pays per seat, so this stands in for Stripe confirming a Checkout trial,
+// signed like Stripe's webhook, instead of opening Checkout.
+async function confirmTrial(organizationId: string) {
+  const created = Math.floor(Date.now() / 1000), customer = `cus_e2e_${organizationId}`, subscription = `sub_e2e_${organizationId}`;
+  const events = [
+    { type: "checkout.session.completed", object: { mode: "subscription", client_reference_id: organizationId, customer, subscription } },
+    { type: "customer.subscription.updated", object: { id: subscription, customer, status: "trialing", metadata: { organizationId }, items: { data: [{ id: `si_e2e_${organizationId}`, quantity: 1, price: { id: process.env.STRIPE_SEAT_PRICE_ID } }] } } },
+  ];
+  for (const [i, { type, object }] of events.entries()) {
+    const body = JSON.stringify({ id: `evt_e2e_${organizationId}_${i}`, type, created, data: { object } });
+    const signature = createHmac("sha256", process.env.STRIPE_WEBHOOK_SECRET!).update(`${created}.${body}`).digest("hex");
+    const response = await fetch(`${process.env.NEXT_PUBLIC_CONVEX_SITE_URL}/stripe/webhook`, { method: "POST", headers: { "content-type": "application/json", "stripe-signature": `t=${created},v1=${signature}` }, body });
+    assert.equal(response.status, 200, `Stripe webhook answered ${response.status}`);
+  }
+}
 const browser = await chromium.launch();
 const context = await browser.newContext({
   viewport: { width: 1365, height: 900 },
@@ -129,12 +145,18 @@ try {
       .getByLabel("Workspace name")
       .fill("Browser verification workspace");
     await page.getByRole("button", { name: "Create workspace" }).click();
-    // A new workspace continues into guided setup; this branch only runs on a fresh database.
-    await page.waitForURL("**/dashboard/onboarding/connect");
-    await page.getByRole("heading", { name: "Connect your code", level: 1 }).waitFor();
+    // A new workspace continues into guided setup, at the plan step where billing is on: Starter or Pro, no Free.
+    // This branch only runs on a fresh database.
+    await page.waitForURL(/\/dashboard\/onboarding\/(plan|connect)$/);
+    if (page.url().endsWith("/plan")) {
+      await page.getByRole("heading", { name: "Choose your plan", level: 1 }).waitFor();
+      await page.getByRole("button", { name: /Choose Starter/ }).waitFor();
+      assert.equal(await page.getByRole("heading", { name: "Free" }).count(), 0, "A new workspace offers Free");
+    } else await page.getByRole("heading", { name: "Connect your code", level: 1 }).waitFor();
   }
   const me = await backend.query(api.users.me, { token });
   const organizationId = me.organizations[0]._id!;
+  if (me.organizations[0].planMissing) await confirmTrial(organizationId);
   await backend.mutation(api.repositories.connect, {
     token,
     secret: process.env.SERVICE_SECRET!,
@@ -193,10 +215,10 @@ try {
   await page.waitForURL("**/dashboard/onboarding/done");
   const billing = (await backend.query(api.billing.status, { token, organizationId })).enabled;
   if (billing) {
-    // The owner's first workspace is on Free, and the plan step stays open for upgrading or going on.
+    // Once the workspace has a plan (or keeps Free from before), the plan step stays open with Continue.
     await page.goto(`${url}/dashboard/onboarding/plan`);
     await page.getByRole("heading", { name: "Choose your plan", level: 1 }).waitFor();
-    await page.getByRole("button", { name: /Continue on Free/ }).click();
+    await page.getByRole("button", { name: /^Continue/ }).click();
     await page.waitForURL("**/dashboard/onboarding/connect");
   }
   await page.setViewportSize({ width: 390, height: 844 });
@@ -211,8 +233,8 @@ try {
   await page.getByRole("button", { name: /^Go to dashboard/ }).click();
   await page.waitForURL("**/dashboard/analytics");
   assert.ok((await backend.query(api.onboarding.status, { token, organizationId })).onboarding?.completedAt, "Setup completion was not recorded");
-  // A second workspace for the same owner gets no Free allowance, so it must choose a paid plan first: every
-  // dashboard page leads to the plan step, which offers only Checkout. Then switch back to the fixture workspace.
+  // A new workspace has no Free plan, so it must choose a paid plan first: every dashboard page leads to the
+  // plan step, which offers only Checkout. Then switch back to the fixture workspace.
   if (billing) {
     const required = await backend.mutation(api.users.createOrganization, { token, name: "Plan gate check" });
     const asWorkspace = (id: string) => context.addCookies([{ name: "openreview_workspace", value: id, url, sameSite: "Lax" }]);
@@ -221,17 +243,20 @@ try {
     await page.waitForURL("**/dashboard/onboarding/plan");
     await page.getByRole("heading", { name: "Choose your plan", level: 1 }).waitFor();
     await page.getByRole("button", { name: /Choose Starter/ }).waitFor();
-    assert.equal(await page.getByRole("button", { name: /Continue on Free/ }).count(), 0, "A second workspace can take Free");
+    assert.equal(await page.getByRole("heading", { name: "Free" }).count(), 0, "A new workspace offers Free");
     await page.goto(`${url}/dashboard/onboarding/connect`);
     await page.waitForURL("**/dashboard/onboarding/plan");
     await asWorkspace(organizationId);
   }
   // An owner whose setup isn't finished is prompted on every visit: /dashboard and the logo lead to setup, every page
-  // carries the setup bar, and setup only offers Back to dashboard, never a way to skip it. This owner's first
-  // workspace starts on Free and never finishes setup, so the check holds on a reused database too.
+  // carries the setup bar, and setup only offers Back to dashboard, never a way to skip it. This owner's workspace
+  // (on a trial where billing is on) never finishes setup, so the check holds on a reused database too.
   const unfinishedId = await backend.mutation(api.users.login, { secret: process.env.SERVICE_SECRET!, githubId: -102, login: "openreview-setup-fixture", avatar: "" });
   const unfinishedToken = await new SignJWT({}).setProtectedHeader({ alg: "HS256" }).setSubject(unfinishedId).setIssuer("openreview").setAudience("openreview").setExpirationTime("1h").sign(new TextEncoder().encode(process.env.SESSION_SECRET!));
-  if (!(await backend.query(api.users.me, { token: unfinishedToken })).organizations.length) await backend.mutation(api.users.createOrganization, { token: unfinishedToken, name: "Unfinished setup" });
+  if (!(await backend.query(api.users.me, { token: unfinishedToken })).organizations.length) {
+    const created = await backend.mutation(api.users.createOrganization, { token: unfinishedToken, name: "Unfinished setup" });
+    if (billing) await confirmTrial(created);
+  }
   const unfinished = await browser.newContext({ viewport: { width: 1365, height: 900 } });
   await unfinished.addCookies([{ name: "openreview_session", value: unfinishedToken, url, httpOnly: true, sameSite: "Lax" }]);
   const unfinishedPage = await unfinished.newPage();
