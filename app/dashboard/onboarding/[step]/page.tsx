@@ -13,7 +13,7 @@ import { Live } from "../../live";
 import { applyReferralCode, reindex } from "../../actions";
 import { WorkspaceInvitations } from "../../invitations";
 import { JoinTeams } from "../../account";
-import { advanceSetup, checkoutFromSetup, continueOnFree, createSetupWorkspace, finishSetup, inviteFromSetup, saveSetupStep, selectAndIndex } from "../actions";
+import { advanceSetup, checkoutFromSetup, createSetupWorkspace, finishSetup, inviteFromSetup, saveSetupStep, selectAndIndex } from "../actions";
 import { IndexGraph, Stage, TeamArt, TrialArt } from "../art";
 import { Mark } from "../../../ui/logo";
 import { CommentsStep, SummaryStep, ToolsStep, TriggersStep } from "../configure";
@@ -36,7 +36,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
   const intent = query.intent === "starter" || query.intent === "pro" ? query.intent : undefined;
   if (step !== requested) redirect(`/dashboard/onboarding/${step}${intent ? `?intent=${intent}` : ""}`);
 
-  // The plan step counts only while a workspace still has to choose: an owner's first workspace starts on Free.
+  // The plan step counts only while a workspace still has to choose.
   if (step === "workspace" || !organization || !status) return <WizardFrame step="workspace" admin nextLabel="Create workspace" centered>
     <div className="wizard-panel wizard-card">
       <span className="wizard-logo"><Mark /></span>
@@ -116,37 +116,35 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
   }
 
   if (step === "plan" && billing?.enabled) {
-    // A new workspace must choose. Free continues at once; Starter and Pro start through Stripe Checkout
-    // with a card (any remaining trial carries over), and setup continues once Stripe confirms it.
+    // A new workspace must choose Starter or Pro through Stripe Checkout with a card (any remaining trial carries
+    // over), and setup continues once Stripe confirms it. A workspace that keeps Free can just continue.
     const required = billing.planRequired && !billing.planSelected;
-    const now = Date.now(), paid = billing.plan === "starter" || billing.plan === "pro", confirming = query.checkout === "success" && !paid;
+    const now = Date.now(), paid = billing.plan === "starter" || billing.plan === "pro", free = billing.freePlan && !paid, confirming = query.checkout === "success" && !paid;
     const carries = Boolean(checkoutTrialEnd(billing.trialEndsAt, now)), trialLeft = Math.ceil((billing.trialEndsAt - now) / 86400000);
     const elapsed = billing.trialStarted ? Math.max(0, Math.min(billing.trialDays, Math.floor((now - billing.trialEndsAt) / 86400000) + billing.trialDays)) : 0;
     const percent = Math.min(100, Math.round((billing.used / Math.max(1, billing.limit ?? 1)) * 100));
-    const primary = intent ?? "pro", primaryName = primary === "pro" ? "Pro" : "Starter";
+    // On Free, Continue is the main action and both plans keep their own button.
+    const primary = free ? undefined : intent ?? "pro", primaryName = primary === "starter" ? "Starter" : "Pro";
     const cards = [
-      { plan: "free", name: "Free", price: "$0", points: [`${usdText(billing.freeUsageMicros)} of model usage per workspace each month`, "Fast and standard reviews with security checks", "Every provider, and the CLI and MCP with browser sign-in", "No card needed"] },
       { plan: "starter", name: "Starter", price: process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly", points: [`${usdText(billing.usagePerSeatMicros)} of model usage per seat each month, pooled`, `${billing.starterFixesPerSeat} OpenReview agent fixes per seat each month`, "Your own model key", "Optional extra usage up to a cap you set", "Owners, admins and members are seats; viewers are free"] },
       { plan: "pro", name: "Pro", price: process.env.BILLING_PRO_PRICE_LABEL ?? "Per seat, billed monthly", points: [`${usdText(billing.proUsagePerSeatMicros)} of model usage per seat each month, pooled`, `${billing.proFixesPerSeat} OpenReview agent fixes per seat each month`, "Deep reviews with the agentic engines", "Generated reproduction tests", "Requirements from Linear, Jira and Notion", "SSO, audit log and API keys"] },
     ] as const;
-    return <WizardFrame step="plan" {...frame} nextLabel={paid ? "Continue" : confirming ? "Waiting for Stripe…" : carries ? `Start ${trialLeft}-day ${primaryName} trial` : `Choose ${primaryName}`}>
+    return <WizardFrame step="plan" {...frame} nextLabel={paid || free ? "Continue" : confirming ? "Waiting for Stripe…" : carries ? `Start ${trialLeft}-day ${primaryName} trial` : `Choose ${primaryName}`}>
       <div className="wizard-panel">
         <Heading step="plan">{paid ? `Your workspace is on the ${billing.planName} plan. Seats follow your team, so there is nothing else to set up.`
-          : `Choose a plan. Free needs no card. ${carries ? `Starter and Pro come with ${trialLeft} days free: add a card now and nothing is charged until the trial ends.` : "Starter and Pro are billed per seat each month."} Change plans anytime in Organization Settings → Billing & Usage.`}</Heading>
+          : free ? "Your workspace is on the Free plan. Starter and Pro add usage per seat, agent fixes and more; upgrade here or anytime in Organization Settings → Billing & Usage."
+          : `Choose a plan. ${carries ? `Starter and Pro come with ${trialLeft} days free: add a card now and nothing is charged until the trial ends.` : "Starter and Pro are billed per seat each month."} Change plans anytime in Organization Settings → Billing & Usage.`}</Heading>
         <ReadOnlyNote admin={admin} />
         {confirming && <p role="status" className="setup-note">Payment method saved. Your subscription appears here as soon as Stripe confirms it.</p>}
         {query.checkout === "cancelled" && <p role="status" className="setup-note">Checkout was cancelled; nothing was charged.</p>}
-        {query.billing === "error" && <p role="alert" className="wizard-error">Stripe Checkout could not be opened. Try again, or continue on Free.</p>}
+        {query.billing === "error" && <p role="alert" className="wizard-error">Stripe Checkout could not be opened. Try again.</p>}
         {required && !confirming && admin && <p className="muted">Repositories, indexing and reviews start after you choose a plan.</p>}
         <div className="wizard-plans">
           {cards.map((card) => <article key={card.plan} className="wizard-plan" aria-labelledby={`plan-${card.plan}`}>
             <header><h2 id={`plan-${card.plan}`}>{card.name}</h2><p className="price">{card.price}</p></header>
             <ul>{card.points.map((point) => <li key={point}>{point}</li>)}</ul>
             {billing.plan === card.plan && (paid || billing.planSelected) && <p><span className="badge active">Current plan</span></p>}
-            {card.plan === "free" && !paid && billing.freeElsewhere && <p className="muted">Free is one workspace per owner, and an owner of this workspace already has &ldquo;{billing.freeElsewhere}&rdquo; on Free. Choose Starter or Pro here, or use &ldquo;{billing.freeElsewhere}&rdquo; for free reviews.</p>}
-            {admin && !paid && !confirming && (card.plan === "free"
-              ? !billing.freeElsewhere && <form action={continueOnFree}><input type="hidden" name="organizationId" value={organizationId} /><button>Continue on Free</button></form>
-              : <form id={card.plan === primary ? "wizard-form" : undefined} action={checkoutFromSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value={card.plan} />{card.plan !== primary && <button>Choose {card.name}</button>}</form>)}
+            {admin && !paid && !confirming && <form id={card.plan === primary ? "wizard-form" : undefined} action={checkoutFromSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value={card.plan} />{card.plan !== primary && <button>Choose {card.name}</button>}</form>}
           </article>)}
         </div>
         <dl className="facts">
@@ -155,11 +153,11 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
         </dl>
         {/* Checkout ends the window for adding a code, so a referred workspace without the link adds it here. */}
         {admin && !confirming && billing.referral?.canApply && <><form action={applyReferralCode} className="form-grid"><input type="hidden" name="organizationId" value={organizationId} /><label>Referral code<input name="code" defaultValue={query.referral ?? ""} required maxLength={64} autoComplete="off" spellCheck={false} /></label><button>Apply code</button></form><p className="muted">{referralDisclosure(null)}</p></>}
-        {admin && (paid || (confirming && !required)) && <StepForm action={advanceSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="step" value="plan" /></StepForm>}
+        {admin && (paid || free || (confirming && !required)) && <StepForm action={advanceSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="step" value="plan" /></StepForm>}
         <Live active={confirming} />
       </div>
       <Stage caption={paid ? `${billing.plan} plan · ${billing.activeSeats} ${billing.activeSeats === 1 ? "seat" : "seats"}`
-        : carries ? `${trialLeft}-day trial on Starter or Pro` : `${billing.plan} plan · ${percent}% of this month's usage used`}>
+        : carries ? `${trialLeft}-day trial on Starter or Pro` : free ? `free plan · ${percent}% of this month's usage used` : "Starter or Pro · billed per seat"}>
         <TrialArt days={billing.trialDays} elapsed={elapsed} subscribed={paid || confirming} />
       </Stage>
     </WizardFrame>;

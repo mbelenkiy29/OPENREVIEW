@@ -21,7 +21,7 @@ export async function createSetupWorkspace(_state: Result, form: FormData): Prom
     id = await backend().mutation(api.users.createOrganization, { token, name: text(form, "name") });
   } catch (error) { return failure(error, "Could not create the workspace"); }
   (await cookies()).set("openreview_workspace", id, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/" });
-  // A plan chosen on the pricing page goes straight to the plan step, even for an owner's first (Free) workspace.
+  // A new workspace goes on to the plan step; a plan chosen on the pricing page picks its main action.
   const intent = text(form, "intent");
   redirect(intent === "starter" || intent === "pro" ? `/dashboard/onboarding/plan?intent=${intent}` : "/dashboard/onboarding");
 }
@@ -62,14 +62,6 @@ export async function advanceSetup(_state: Result, form: FormData): Promise<Resu
     const { token } = await current();
     next = await backend().mutation(api.onboarding.advance, { token, organizationId: organizationOf(form), step: text(form, "step") });
   } catch (error) { return failure(error, "Could not continue"); }
-  redirect(`/dashboard/onboarding/${next}`);
-}
-
-// The plan step's Free choice: no card; upgrade later in Organization Settings → Billing & Usage.
-export async function continueOnFree(form: FormData) {
-  const { token } = await current();
-  await backend().mutation(api.billing.chooseFreePlan, { token, organizationId: organizationOf(form) });
-  const next = await backend().mutation(api.onboarding.advance, { token, organizationId: organizationOf(form), step: "plan" });
   redirect(`/dashboard/onboarding/${next}`);
 }
 

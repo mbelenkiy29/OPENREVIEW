@@ -13,7 +13,6 @@ export function priceFromLabel(label?: string) {
 export function homeStructuredData({ url, repository, billing, priceLabel, proPriceLabel }: { url: string; repository: string; billing: Pick<BillingConfig, "enabled">; priceLabel?: string; proPriceLabel?: string }) {
   const seat = (name: string, label?: string) => { const price = priceFromLabel(label); return price ? [{ "@type": "Offer", name, price, priceCurrency: "USD", priceSpecification: { "@type": "UnitPriceSpecification", price, priceCurrency: "USD", unitText: "seat per month" } }] : []; };
   const offers = billing.enabled ? [
-    { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD" },
     ...seat("Starter", priceLabel),
     ...seat("Pro", proPriceLabel),
   ] : [];

@@ -6,7 +6,7 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 
 | | Free | Starter | Pro |
 |---|---|---|---|
-| Price | $0, no card | `BILLING_SEAT_PRICE_LABEL` per seat (we sell $12/month) | `BILLING_PRO_PRICE_LABEL` per seat (we sell $24/month) |
+| Price | $0, no card (existing workspaces only) | `BILLING_SEAT_PRICE_LABEL` per seat (we sell $12/month) | `BILLING_PRO_PRICE_LABEL` per seat (we sell $24/month) |
 | Included model usage per month | `BILLING_FREE_USAGE_USD` per workspace (default $3) | `BILLING_USAGE_PER_SEAT_USD` per seat (default $6), pooled | `BILLING_PRO_USAGE_PER_SEAT_USD` per seat (default $12), pooled |
 | Extra usage | none | up to the admin cap | up to the admin cap |
 | Fix prompts, the local bridge, your own cloud agents and Devin | ✓ | ✓ | ✓ |
@@ -18,15 +18,14 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 
 The plan catalog is `src/plans.ts`. Security checks, every provider, and the CLI and MCP signed in through the browser are on every plan. With billing off every feature is unlocked.
 
-- **Choosing a plan (new workspaces):** a workspace created while billing is on (`organizations.planRequired`) needs a plan before anything else.
-  - **An owner's first Free workspace starts on Free** when it is created (`startOnFree`, audited as `billing.plan_selected`), so setup goes workspace → connect. Upgrading happens later in Organization Settings → Billing & Usage.
-  - **A later workspace** (an owner already has one on Free) has no Free allowance, so setup goes workspace → **Choose your plan** → connect and the step offers Starter and Pro.
-  - **Free** chosen on the plan step is recorded at once (`billing.chooseFreePlan`, admins only), for example after the owner's Free workspace subscribed.
+- **Choosing a plan (new workspaces):** a workspace created while billing is on (`organizations.planRequired`) needs a plan before anything else, and pays per seat: setup goes workspace → **Choose your plan** → connect, and the step offers Starter and Pro only.
   - **Starter and Pro** open Stripe Checkout with a `BILLING_TRIAL_DAYS` (default 14) day trial, and the card is always collected (`payment_method_collection: always`). The choice is recorded only when Stripe confirms it: `checkout.session.completed` with a subscription, or a subscription that is trialing, active or past due.
-  - Either way the choice is stored in `organizations.planSelectedAt` and `plan`, and audited as `billing.plan_selected`. Until then the dashboard sends everyone to the plan step (Billing, Account and Referrals settings stay open), and the server refuses indexing, reviews, advancing and finishing setup.
+  - The choice is stored in `organizations.planSelectedAt` and `plan`, and audited as `billing.plan_selected`. Until then the dashboard sends everyone to the plan step (Billing, Account and Referrals settings stay open), and the server refuses indexing, reviews, advancing and finishing setup.
 - **Existing subscriptions (grandfathered):** subscriptions from before Pro existed keep every Pro feature while they stay on Starter (`billingAccounts.legacy`). Run once right after deploying plans: `npx convex run billing:grandfatherSubscriptions '{"confirm":"grandfather-pre-plan-subscriptions"}' --prod`.
-- **Free:** any workspace without a subscription, including workspaces from before plans were required and cancelled subscriptions. Free never expires; its allowance resets each month. `BILLING_TRIAL_USAGE_USD` is no longer read: a generous trial allowance must not become a monthly gift.
-- **One Free workspace per owner:** otherwise creating workspaces would be unlimited free usage. A new workspace (`planRequired`) gets no Free allowance (a $0 limit, with a `Billing:` reason naming the owner's Free workspace) while any of its owners owns another Free workspace created before it. Before a new workspace has chosen a plan, any other Free workspace counts, so `billing.chooseFreePlan` refuses it and the plan step offers only Starter and Pro. A Free workspace is one with no paying subscription that is not still choosing its plan. Paid workspaces, workspaces from before plans were required, and billing off are unaffected. When the owner's Free workspace subscribes, the next-oldest one gets Free. A workspace that is pending deletion still counts until it is purged.
+- **Free (existing workspaces only):** a workspace keeps Free if it was created before plans were required (no `planRequired`) or started on Free (`plan: "free"`); see `keepsFree` in `src/billing.ts`. The rule reads those fields, with no cut-off date and no migration. Without a paying subscription such a workspace is on Free, which never expires; its allowance resets each month. `BILLING_TRIAL_USAGE_USD` is no longer read: a generous trial allowance must not become a monthly gift.
+  - **Every other workspace without a paying subscription** (a new one, or one whose subscription ended) has no allowance: a $0 limit with a `Billing:` reason to choose Starter or Pro. `billing.chooseFreePlan` refuses it.
+  - A workspace that started on Free, then subscribes and later cancels, has its `plan` overwritten by the subscription, so it does not fall back to Free. One from before plans does.
+- **One Free workspace per owner** still holds among the workspaces that keep Free: one that started on Free gets no allowance (a $0 limit, with a `Billing:` reason naming the owner's Free workspace) while any of its owners owns another Free workspace created before it. A Free workspace is one that keeps Free and has no paying subscription. Paid workspaces, workspaces from before plans were required, and billing off are unaffected. When the owner's Free workspace subscribes, the next-oldest one gets Free. A workspace that is pending deletion still counts until it is purged.
 - **Which paid plan:** the subscription's seat price decides it (`billingAccounts.plan`): `STRIPE_SEAT_PRICE_ID` / `STRIPE_SEAT_ANNUAL_PRICE_ID` is Starter, and `STRIPE_PRO_PRICE_ID` / `STRIPE_PRO_ANNUAL_PRICE_ID` is Pro. An unknown price keeps the recorded plan, and a subscription with none recorded is Starter. Checkout uses the monthly prices. Admins switch between Starter and Pro in Organization Settings → Billing & Usage (`billingJobs.changePlan`): it swaps the seat price on the subscription item with prorations and audits `billing.plan_change_requested`, and the webhook then records the new plan. The Customer Portal can't do this, because it doesn't update subscriptions that carry a metered price. Switching to Starter leaves `legacy` as it is.
 - **Gated features:** each one is skipped, never failed.
   - A deep review runs at standard, with a coverage note. So does a repository set to the agentic or hypothesis engine: it runs the standard pipeline, its agent budgets are ignored, and team, repository and agent-authored model overrides give way to the workspace model.
@@ -73,17 +72,17 @@ Workspace and team defaults and repository settings pick the review model from t
 
 ## Choosing a plan during setup
 
-When billing is on and the new workspace did not start on Free (an owner already has a Free workspace), guided setup adds a **Choose your plan** step right after the workspace. It shows the Free, Starter and Pro cards and the seat count:
-- **Continue on Free:** no card. Upgrade later in Organization Settings → Billing & Usage. Not offered when an owner already has a Free workspace: the card names it instead.
+When billing is on, guided setup adds a **Choose your plan** step right after the workspace. It shows the Starter and Pro cards and the seat count:
 - **Choose Starter** or **Start Pro trial:** opens Stripe Checkout and returns to the step.
+- A workspace that keeps Free and opens the step gets **Continue**, with both plans as upgrades.
 
-The trial clock starts when the workspace first opens Checkout, however long it was on Free; each workspace gets one trial. Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
+The trial clock starts when the workspace first opens Checkout; each workspace gets one trial. Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
 
 The dashboard's trial banner (days left, **Add Payment Method**) shows only while the subscription is trialing with no default payment method on file: neither the subscription's `default_payment_method` (from `customer.subscription.*`) nor the customer's `invoice_settings.default_payment_method` (from `customer.updated`, sent when a card is added in the Customer Portal). A subscription from before these were recorded counts as having one, because Checkout always collects a card. With a card on file the banner returns for the last 3 days of the trial, saying when the card will be charged, with **Manage billing**. Also turn on Stripe's own trial-ending reminder email (Stripe Dashboard → Settings → Billing → Subscriptions and emails), in test and live mode.
 
 From 80% of the included usage, or when reviews are blocked, every dashboard page shows a usage banner with an estimate of the reviews left (this workspace's average review cost over the last 30 days, at least five reviews, else $0.065). Admins get **Upgrade** (Free) or **Manage usage**; members get **Ask an admin**, which emails owners and admins with a verified notification address, at most once a day per member.
 
-Pricing-page buttons for Starter and Pro send sign-up to `/dashboard/onboarding/plan?intent=<plan>`; the intent survives workspace creation, so even an owner's first (Free) workspace lands on the plan step with that plan's Checkout as the main action.
+Pricing-page buttons for Starter and Pro send sign-up to `/dashboard/onboarding/plan?intent=<plan>`; the intent survives workspace creation, so the plan step opens with that plan's Checkout as the main action.
 
 Conversion events (`conversionEvents`, see `convex/conversions.ts`) add `checkout_started`, `first_paid` (the first `invoice.paid` with money in it; `subscribed` includes trials), `paywall:<feature>` (a deep review or agentic engine capped, repro tests or linked tickets skipped, a fix PR asked for on Free) and `upgrade_requested`. Operators see them, for the last 30 days, on `/dashboard/operator`.
 
@@ -93,7 +92,7 @@ When a review is blocked, it is recorded as failed with a `Billing:` reason, vis
 
 ## Stripe customers
 
-Every workspace becomes a Stripe customer when it is created, Free ones too, so the Stripe Dashboard lists all of them. The customer is named after the workspace and carries its first owner's verified email (if there is one) and `metadata.organizationId`. The workspace keeps the ID in `organizations.stripeCustomerId`. Checkout reuses it, and linking it there (`billingAccounts.customerId`) is still what starts the trial and shows the billing portal. Operators' workspaces get no customer.
+Every workspace becomes a Stripe customer when it is created, so the Stripe Dashboard lists all of them. The customer is named after the workspace and carries its first owner's verified email (if there is one) and `metadata.organizationId`. The workspace keeps the ID in `organizations.stripeCustomerId`. Checkout reuses it, and linking it there (`billingAccounts.customerId`) is still what starts the trial and shows the billing portal. Operators' workspaces get no customer.
 
 Creating the customer is a scheduled job (`billingJobs.createCustomer`), so signup never waits on Stripe. If Stripe is down, the job logs `billing.customer_failed` and does not retry: Checkout still creates a customer, and the backfill below picks the workspace up.
 
@@ -149,7 +148,7 @@ On Vercel, Stripe can also be provisioned from the Vercel Marketplace. The keys 
    ```bash
    npx convex run billing:forgetStripeLinks '{"confirm":"switch-stripe-mode"}' --prod
    ```
-   Each workspace returns to Free, and its next Checkout creates a live customer with a fresh trial. Then give every workspace a live customer with the backfill under [Stripe customers](#stripe-customers).
+   A workspace that keeps Free returns to it; any other has no allowance until its next Checkout, which creates a live customer with a fresh trial. Then give every workspace a live customer with the backfill under [Stripe customers](#stripe-customers).
 5. **Old webhook:** cancel the test subscriptions and disable the test-mode webhook endpoint, so the sandbox stops sending events (and retries) that would now fail signature checks.
 6. **Referrals:** commissions, credits and payout accounts don't record the Stripe mode. Keep `REFERRALS_ENABLED` off on a deployment until it is live. A deployment where any test invoice earned a commission (any `referralCommissions` row) must not be switched to live, even after voiding them: its referrals stay marked as paid, so live Checkout gives no coupon, the commission window counts from the test invoice and the conversion email is not sent again. Use a separate deployment. If referrals were on but no commission was ever earned, only delete its `referralPayoutAccounts` rows (test `acct_…` IDs don't exist in live mode). Add the three charge events to the live webhook endpoint too, and enable Connect in live mode.
 

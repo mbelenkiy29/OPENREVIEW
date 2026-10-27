@@ -14,7 +14,7 @@
 - A subscription's status can't go backwards when Stripe sends two events in the same second.
 
 ### Setup
-- Your first workspace now starts on the Free plan, so setup goes straight from naming the workspace to connecting your code. Upgrade anytime in **Organization Settings → Billing & Usage**. Any later workspace still picks a plan, because each owner gets one Free workspace.
+- New workspaces choose Starter or Pro, each with a 14-day free trial; there is no Free plan for new workspaces. Workspaces already on Free keep it.
 - ⌘/Ctrl+Enter on the Tools step saves your choices on the Free plan too.
 - **Exit setup** no longer leads to an error page from **Choose your plan**. While a workspace still has to pick a plan, that step only offers the plans (and **Logout**), and a setup page opened earlier brings you back to it.
 - Setup can't be skipped any more. Until it's finished, OpenReview opens on setup and every dashboard page shows a **Resume setup** bar; **Back to dashboard** lets you look around in the meantime. Workspaces that skipped setup before connecting a repository are asked to finish it.

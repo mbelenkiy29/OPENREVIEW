@@ -1,10 +1,11 @@
 import { assertEgress } from "./egress";
 import type { Plan } from "./plans";
 // Cloud billing (Stripe). Disabled unless BILLING_ENABLED=true, which is the self-host default.
-// Plans (src/plans.ts): Free has a small monthly usage allowance per workspace and never expires;
-// Starter and Pro are per-seat subscriptions that include model usage each month, metered in micro-dollars
-// of inference cost (pricier models use it faster). Past it, an admin-set monthly cap allows extra usage,
-// reported to Stripe as meter events. Paid plans start with a trial at Checkout (trialDays).
+// Plans (src/plans.ts): Free has a small monthly usage allowance per workspace and never expires, but only
+// workspaces from before paid-only signups keep it (keepsFree); Starter and Pro are per-seat subscriptions that
+// include model usage each month, metered in micro-dollars of inference cost (pricier models use it faster).
+// Past it, an admin-set monthly cap allows extra usage, reported to Stripe as meter events. Paid plans start with
+// a trial at Checkout (trialDays).
 export type BillingConfig = { enabled: boolean; trialDays: number; freeUsageMicros: number; usagePerSeatMicros: number; proUsagePerSeatMicros: number; graceDays: number; starterFixesPerSeat: number; proFixesPerSeat: number };
 export const int = (value: string | undefined, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isInteger(n) && n >= min && n <= max ? n : fallback; };
 const usd = (value: string | undefined, fallback: number) => { const n = Number(value); return Math.round((value?.trim() && Number.isFinite(n) && n >= 0 && n <= 100_000 ? n : fallback) * 1e6); };
@@ -23,10 +24,13 @@ export type BillingAccount = { status: string; seats: number; trialEndsAt: numbe
 // limit, used and capMicros are micro-dollars; overage is true when this request runs past the included usage.
 export type BillingDecision = { allowed: boolean; plan: "disabled" | Plan; limit: number | null; used: number; capMicros: number; overage: boolean; reason?: string };
 const paying = new Set(["active", "trialing", "past_due"]);
+/** Free is only for workspaces created before plans were required or that started on Free; every newer one pays per seat. */
+export const keepsFree = (organization: { planRequired?: boolean; plan?: string } | null | undefined) => !organization?.planRequired || organization.plan === "free";
+export const paidPlanReason = "This workspace has no paid plan. A workspace admin can choose Starter or Pro in Organization Settings → Billing & Usage.";
 export const freeTakenReason = (workspace: string) => `Free is one workspace per owner, and an owner of this workspace already has "${workspace}" on Free. A workspace admin can choose Starter or Pro in Organization Settings → Billing & Usage, or use "${workspace}" for free reviews.`;
 /** used includes in-flight reservations; request is the next call's reservation (0 for the pre-check at enqueue).
- * freeElsewhere names the owner's other Free workspace when this one gets no Free allowance (convex/billing.ts). */
-export function billingDecision(account: BillingAccount, used: number, now: number, config: BillingConfig, request = 0, freeElsewhere?: string): BillingDecision {
+ * blocked is why this workspace gets no Free allowance (convex/billing.ts): it does not keep Free, or its owner's Free workspace is another one. */
+export function billingDecision(account: BillingAccount, used: number, now: number, config: BillingConfig, request = 0, blocked?: string): BillingDecision {
   if (!config.enabled) return { allowed: true, plan: "disabled", limit: null, used, capMicros: 0, overage: false };
   const over = (room: number) => (request ? used + request > room : used >= room);
   if (account.subscriptionId && paying.has(account.status)) {
@@ -45,7 +49,7 @@ export function billingDecision(account: BillingAccount, used: number, now: numb
   }
   // Free: no subscription (or a lapsed one). The allowance resets each month and has no extra usage.
   const base = { plan: "free" as const, limit: config.freeUsageMicros, used, capMicros: 0, overage: false };
-  if (freeElsewhere) return { ...base, limit: 0, allowed: false, reason: freeTakenReason(freeElsewhere) };
+  if (blocked) return { ...base, limit: 0, allowed: false, reason: blocked };
   if (over(config.freeUsageMicros)) return { ...base, allowed: false, reason: `This workspace used the Free plan's ${usdText(config.freeUsageMicros)} of usage for this month. Usage resets on ${resetText(now)}; a workspace admin can upgrade in Organization Settings → Billing & Usage.` };
   return { ...base, allowed: true };
 }
