@@ -256,7 +256,9 @@ export async function acceptEmailInvitation(form: FormData) {
   let organizationId: string;
   try { organizationId = await backend().mutation(api.identity.acceptEmailInvitation, { token, tokenHash: createHash("sha256").update(raw).digest("hex") }); }
   catch { redirect("/invite?error=1"); }
-  (await cookies()).set("openreview_workspace", organizationId, { httpOnly: true, sameSite: "lax", path: "/", secure: process.env.NODE_ENV === "production" });
+  const jar = await cookies();
+  jar.set("openreview_workspace", organizationId, { httpOnly: true, sameSite: "lax", path: "/", secure: process.env.NODE_ENV === "production" });
+  jar.delete("openreview_team");
   redirect("/dashboard");
 }
 export async function cancelReview(form: FormData) {

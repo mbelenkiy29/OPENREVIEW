@@ -69,7 +69,7 @@ export async function loadDashboard({
   const isAdmin = ["owner", "admin"].includes(organization.role);
   const keysPage = route === "settings" && section[1] === "keys";
   // Independent reads run together; each check below still runs before the queries it guards.
-  const [data, findingsPage, ruleAssistant, ruleUsage, pendingInvitations, detail, apiKeys, devinConfigured, mcpConnections, modelKey, locked] = await Promise.all([
+  const [data, findingsPage, ruleAssistant, ruleUsage, pendingInvitations, detail, apiKeys, devinConfigured, mcpConnections, modelKey, locked, joinRequests] = await Promise.all([
     backend().query(api.dashboard.overview, {
       token: user.token,
       organizationId: organization._id,
@@ -124,6 +124,8 @@ export async function loadDashboard({
     keysPage && isAdmin ? backend().query(api.modelKeys.status, { token: user.token, organizationId: organization._id }) : null,
     // Pro features this plan lacks: their settings render inside <Locked> (none with billing off).
     backend().query(api.billing.locked, { token: user.token, organizationId: organization._id }),
+    // "Join a team" requests this user can answer (org admins: all; team admins: their teams).
+    backend().query(api.joinRequests.pending, { token: user.token, organizationId: organization._id }),
   ]);
   const visibleFindings = findingsPage?.page ?? data.findings.map(f=>({...f,canFix:false}));
   const repoName = (id: string) =>
@@ -178,6 +180,6 @@ export async function loadDashboard({
   ]);
   // Narrowed above: a dashboard always has a workspace.
   const workspace = organization as typeof organization & { _id: Id<"organizations"> };
-  return { kind: "dashboard" as const, page, active, aliases, apiKeys, locked, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, pull, checks, filters, findingsPage, isAdmin, jar, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleUsage, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
+  return { kind: "dashboard" as const, page, active, aliases, apiKeys, locked, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, pull, checks, filters, findingsPage, isAdmin, jar, joinRequests, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleUsage, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
 }
 export type DashboardContext = Extract<Awaited<ReturnType<typeof loadDashboard>>, { kind: "dashboard" }>;

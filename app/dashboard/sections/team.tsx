@@ -2,18 +2,21 @@ import { api } from "../../../convex/_generated/api";
 import { backend } from "../../../src/server";
 import { emailOnWeb } from "../../../src/email";
 import { revokeEmailInvitation, updateMember } from "../actions";
+import { answerJoinRequest } from "../actions-organization";
 import { InvitationForm } from "../invitation-form";
 import { Dialog } from "../../ui/dialog";
-import { Confirm, DialogForm, InvitePeople, MiniSelect, PeopleTable, RowMenu, type PersonRow } from "../org-ui";
+import { Confirm, DialogForm, InvitePeople, MemberLink, MiniSelect, PeopleTable, RowMenu, type PersonRow } from "../org-ui";
 import type { DashboardContext } from "../load";
 
 const expires = (ms: number) => `Expires ${new Date(ms).toLocaleString("en-US", { timeZone: "UTC", dateStyle: "medium", timeStyle: "short" })} UTC`;
-// Organization Settings → People: Greptile's toolbar and one table of members, GitHub-login invitations and
-// email invitations (pending first). Admins get the Invite people popover and a ⋯ menu per row.
+// Organization Settings → People: Greptile's toolbar and one table of join requests, members, GitHub-login
+// invitations and email invitations (pending first). Admins get Member link, Invite people and a ⋯ menu per row;
+// team admins see and answer their teams' join requests.
 export async function TeamSection({ ctx }: { ctx: DashboardContext }) {
-  const { data, filters, isAdmin, organization, pendingInvitations, user } = ctx;
-  const emails = isAdmin ? await backend().query(api.identity.emailInvitations, { token: user.token, organizationId: organization._id }) : [];
+  const { data, filters, isAdmin, joinRequests, organization, pendingInvitations, user } = ctx;
+  const [emails, memberLink] = isAdmin ? await Promise.all([backend().query(api.identity.emailInvitations, { token: user.token, organizationId: organization._id }), backend().query(api.identity.memberLink, { token: user.token, organizationId: organization._id })]) : [[], null];
   const rows: PersonRow[] = [
+    ...joinRequests.map((r) => ({ key: r._id, name: "@" + r.login, role: "member", badges: [`Requested ${r.team}`], actions: <RowMenu label={`Answer @${r.login}’s request to join ${r.team}`}><p className="menu-label">Asked to join {r.team}</p><form action={answerJoinRequest} className="stack"><input type="hidden" name="requestId" value={r._id} /><button className="menu-item" name="approve" value="true">Approve as Member</button><button className="menu-item danger" name="approve" value="false">Decline</button></form></RowMenu> })),
     ...pendingInvitations.map((i) => ({ key: i._id, name: "@" + i.githubLogin, role: i.role, badges: ["Pending"], actions: <RowMenu label={`Actions for the invitation to @${i.githubLogin}`}><p className="menu-label">{expires(i.expiresAt)}</p><InvitationForm id={i._id} label={`Revoke invitation for ${i.githubLogin}`} text="Revoke invitation" className="menu-item danger" revoke /></RowMenu> })),
     ...emails.map((i) => ({ key: i._id, name: i.email, role: i.role, badges: ["Pending"], actions: <RowMenu label={`Actions for the invitation to ${i.email}`}><p className="menu-label">{expires(i.expiresAt)}</p><form action={revokeEmailInvitation}><input type="hidden" name="invitationId" value={i._id} /><button className="menu-item danger" aria-label={`Revoke invitation for ${i.email}`}>Revoke invitation</button></form></RowMenu> })),
     ...data.members.map((m) => {
@@ -36,7 +39,7 @@ export async function TeamSection({ ctx }: { ctx: DashboardContext }) {
   return <>
     {filters.emailInvite === "sent" && <p role="status" className="notice-banner">Invitation sent.</p>}
     {filters.emailInvite === "error" && <p role="alert" className="notice-banner">The invitation could not be sent. Check the address and email configuration.</p>}
-    <PeopleTable rows={rows} invite={isAdmin && <InvitePeople organizationId={organization._id} email={emailOnWeb()} />} />
+    <PeopleTable rows={rows} invite={isAdmin && <><MemberLink organizationId={organization._id} active={Boolean(memberLink)} /><InvitePeople organizationId={organization._id} email={emailOnWeb()} /></>} />
     {isAdmin && <p className="muted table-note">Invitees see GitHub-login invitations when they sign in with that GitHub identity; inviting a login again replaces its previous invitation. Email invitations are single-use links that expire in 7 days.</p>}
   </>;
 }

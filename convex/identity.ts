@@ -189,23 +189,44 @@ export const revokeEmailInvitation = mutation({ args: { token: v.string(), invit
   if (!invitation.revokedAt && !invitation.acceptedAt) await ctx.db.patch(invitation._id, { revokedAt: Date.now() });
   await audit(ctx, invitation.organizationId, user._id, "invitation.email_revoked", invitation._id);
 } });
+// People → Member link: one reusable link per workspace that joins as Member. The web server makes the token and
+// shows it once; a new hash replaces the old link, and no hash turns it off.
+export const setMemberLink = mutation({ args: { token: v.string(), organizationId: v.id("organizations"), tokenHash: v.optional(v.string()) }, handler: async (ctx, a) => {
+  const { user } = await authorize(ctx, a.token, a.organizationId, true);
+  if (a.tokenHash !== undefined && !hex64.test(a.tokenHash)) throw new Error("Invalid token");
+  for (const old of await ctx.db.query("memberLinks").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId)).collect()) await ctx.db.delete(old._id);
+  if (a.tokenHash) await ctx.db.insert("memberLinks", { organizationId: a.organizationId, tokenHash: a.tokenHash, createdBy: user._id, createdAt: Date.now() });
+  await audit(ctx, a.organizationId, user._id, a.tokenHash ? "member_link.created" : "member_link.disabled", a.organizationId);
+} });
+export const memberLink = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
+  await authorize(ctx, a.token, a.organizationId, true);
+  const link = await ctx.db.query("memberLinks").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId)).first();
+  return link ? { createdAt: link.createdAt } : null;
+} });
+const memberLinkFor = (ctx: QueryCtx, tokenHash: string) => ctx.db.query("memberLinks").withIndex("by_token", (q) => q.eq("tokenHash", tokenHash)).unique();
+const usable = (i: Doc<"emailInvitations"> | null): i is Doc<"emailInvitations"> => Boolean(i && !i.acceptedAt && !i.revokedAt && i.expiresAt > Date.now());
+
+// /invite?token= serves email invitations (single use, 7 days) and member links (until reset).
 export const invitationPreview = query({ args: { tokenHash: v.string() }, handler: async (ctx, a) => {
   if (!hex64.test(a.tokenHash)) return null;
   const invitation = await ctx.db.query("emailInvitations").withIndex("by_token", (q) => q.eq("tokenHash", a.tokenHash)).unique();
-  if (!invitation || invitation.acceptedAt || invitation.revokedAt || invitation.expiresAt <= Date.now()) return null;
-  return { workspace: (await ctx.db.get(invitation.organizationId))?.name ?? "Workspace", role: invitation.role, expiresAt: invitation.expiresAt };
+  if (usable(invitation)) return { workspace: (await ctx.db.get(invitation.organizationId))?.name ?? "Workspace", role: invitation.role, expiresAt: invitation.expiresAt };
+  const link = await memberLinkFor(ctx, a.tokenHash);
+  return link ? { workspace: (await ctx.db.get(link.organizationId))?.name ?? "Workspace", role: "member" as const } : null;
 } });
 export const acceptEmailInvitation = mutation({ args: { token: v.string(), tokenHash: v.string() }, handler: async (ctx, a) => {
   const user = await authenticated(ctx, a.token);
   if (!hex64.test(a.tokenHash)) throw new Error("Invitation is invalid or expired");
-  const invitation = await ctx.db.query("emailInvitations").withIndex("by_token", (q) => q.eq("tokenHash", a.tokenHash)).unique();
-  if (!invitation || invitation.acceptedAt || invitation.revokedAt || invitation.expiresAt <= Date.now()) throw new Error("Invitation is invalid or expired");
-  const member = await ctx.db.query("organizationMembers").withIndex("by_org_user", (q) => q.eq("organizationId", invitation.organizationId).eq("userId", user._id)).unique();
-  if (!member) await ctx.db.insert("organizationMembers", { organizationId: invitation.organizationId, userId: user._id, role: invitation.role });
-  await ctx.db.patch(invitation._id, { acceptedAt: Date.now(), acceptedBy: user._id });
-  await audit(ctx, invitation.organizationId, user._id, "invitation.email_accepted", invitation._id);
-  await scheduleSeatSync(ctx, invitation.organizationId);
-  return invitation.organizationId;
+  const found = await ctx.db.query("emailInvitations").withIndex("by_token", (q) => q.eq("tokenHash", a.tokenHash)).unique();
+  const invitation = usable(found) ? found : null, link = invitation ? null : await memberLinkFor(ctx, a.tokenHash);
+  const organizationId = invitation?.organizationId ?? link?.organizationId;
+  if (!organizationId) throw new Error("Invitation is invalid or expired");
+  const member = await ctx.db.query("organizationMembers").withIndex("by_org_user", (q) => q.eq("organizationId", organizationId).eq("userId", user._id)).unique();
+  if (!member) await ctx.db.insert("organizationMembers", { organizationId, userId: user._id, role: invitation?.role ?? "member" });
+  if (invitation) await ctx.db.patch(invitation._id, { acceptedAt: Date.now(), acceptedBy: user._id });
+  await audit(ctx, organizationId, user._id, invitation ? "invitation.email_accepted" : "member_link.used", invitation?._id ?? link!._id);
+  await scheduleSeatSync(ctx, organizationId);
+  return organizationId;
 } });
 
 // Migration: give every legacy GitHub user an identity row (idempotent, paginated).

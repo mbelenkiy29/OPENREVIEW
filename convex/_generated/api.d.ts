@@ -63,6 +63,7 @@ import type * as inferenceBudget from "../inferenceBudget.js";
 import type * as integrationJobs from "../integrationJobs.js";
 import type * as integrations from "../integrations.js";
 import type * as jobs from "../jobs.js";
+import type * as joinRequests from "../joinRequests.js";
 import type * as knowledge from "../knowledge.js";
 import type * as knowledgeJobs from "../knowledgeJobs.js";
 import type * as lifecycleEmails from "../lifecycleEmails.js";
@@ -201,6 +202,7 @@ declare const fullApi: ApiFromModules<{
   integrationJobs: typeof integrationJobs;
   integrations: typeof integrations;
   jobs: typeof jobs;
+  joinRequests: typeof joinRequests;
   knowledge: typeof knowledge;
   knowledgeJobs: typeof knowledgeJobs;
   lifecycleEmails: typeof lifecycleEmails;

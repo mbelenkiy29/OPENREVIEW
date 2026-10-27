@@ -4,7 +4,7 @@ import { ConfirmPhrase, Dialog, DialogClose, useCloseDialog } from "../ui/dialog
 import { Icon } from "../ui/icons";
 import { PortalDisclosure } from "./portal-disclosure";
 import { ScrollTable } from "./scroll-table";
-import { inviteMember, type InviteState } from "./actions-organization";
+import { changeMemberLink, inviteMember, type InviteState, type MemberLinkState } from "./actions-organization";
 
 // Client pieces of the Organization and Personal Settings pages (Greptile's settings screens on Mobbin).
 
@@ -101,6 +101,26 @@ export function InvitePeople({ organizationId, email }: { organizationId: string
       {state.error && !pending && <p role="alert">{state.error}</p>}
       {sent && <p role="status">{state.note ?? "Invitation sent. It is listed as Pending."}</p>}
       <p className="muted">{email ? "An email address gets a single-use link that expires in 7 days. A GitHub login sees the invitation when that person signs in." : "The person sees the invitation when they sign in with that GitHub login. Email invitations need email delivery on this deployment."}</p>
+    </div>
+  </PortalDisclosure>;
+}
+
+/** Greptile's "Member link": one shareable link that joins as Member. Only its hash is stored, so the URL shows
+ *  once after Create or Reset; Reset also stops the old link. */
+export function MemberLink({ organizationId, active }: { organizationId: string; active: boolean }) {
+  const [state, action, pending] = useActionState(changeMemberLink, {} as MemberLinkState);
+  const on = state.url ? true : state.off ? false : active;
+  return <PortalDisclosure className="invite-people" label={<><Icon name="linkSimple" />Member link</>}>
+    <div className="menu invite-panel">
+      <header><h3>Member link</h3></header>
+      {state.url && <p className="member-link"><input readOnly value={state.url} aria-label="Member link" onFocus={(e) => e.target.select()} /><CopyButton value={state.url} label="Copy" /></p>}
+      <form action={action}>
+        <input type="hidden" name="organizationId" value={organizationId} />
+        <button name="op" value="create" disabled={pending}>{on ? "Reset link" : "Create link"}</button>
+        {on && <button name="op" value="disable" className="danger" disabled={pending}>Disable</button>}
+      </form>
+      {state.error && !pending && <p role="alert">{state.error}</p>}
+      <p className="muted">{state.url ? "Copy it now: the link is shown only once. " : on ? "A link is active. Reset it to get a new copy; the old one stops working. " : ""}Anyone with the link can join this organization as a Member, which uses a seat.</p>
     </div>
   </PortalDisclosure>;
 }

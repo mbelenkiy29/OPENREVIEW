@@ -11229,6 +11229,17 @@ form.chat-delete {
   flex: none;
   white-space: nowrap;
 }
+.invite-panel p.member-link {
+  display: flex;
+  gap: 8px;
+  padding: 16px 16px 0;
+}
+.invite-panel .member-link input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
 .invite-panel p {
   margin: 0;
   padding: 0 16px 12px;

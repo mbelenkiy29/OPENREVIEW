@@ -333,6 +333,14 @@ export default defineSchema({
   })
     .index("by_org", ["organizationId"])
     .index("by_login", ["githubLogin"]),
+  // "Join a team" requests (convex/joinRequests.ts); an org admin or that team's admin answers each.
+  joinRequests: defineTable({ organizationId: org, teamId: v.id("teams"), userId: v.id("users"), createdAt: v.number() })
+    .index("by_org", ["organizationId"])
+    .index("by_user_team", ["userId", "teamId"]),
+  // People → Member link: one reusable link per workspace that joins as Member; hash only, like emailInvitations.
+  memberLinks: defineTable({ organizationId: org, tokenHash: v.string(), createdBy: v.id("users"), createdAt: v.number() })
+    .index("by_token", ["tokenHash"])
+    .index("by_org", ["organizationId"]),
   githubInstallations: defineTable({
     organizationId: org,
     installationId: v.number(),
