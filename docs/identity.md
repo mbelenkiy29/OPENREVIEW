@@ -5,7 +5,7 @@
 | Method | Configure (web app) | Email trusted for account linking |
 | --- | --- | --- |
 | GitHub | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | Never (no email scope is requested) |
-| GitLab | `GITLAB_OAUTH_CLIENT_ID`, `GITLAB_OAUTH_CLIENT_SECRET`, optional `GITLAB_OAUTH_URL`; scope `read_user` for sign-in, and also allow `read_api` on the GitLab application for "Join a team" (only that re-authorization asks for it, to list the user's groups); redirect URI `<APP_URL>/api/auth/gitlab/callback` | Only confirmed gitlab.com accounts |
+| GitLab | `GITLAB_OAUTH_CLIENT_ID`, `GITLAB_OAUTH_CLIENT_SECRET`, optional `GITLAB_OAUTH_URL`; scope `read_user` for sign-in, and for "Join a team" also allow `read_api` on the GitLab application and set `GITLAB_JOIN_TEAMS=true` (only that re-authorization asks for it, to list the user's groups); redirect URI `<APP_URL>/api/auth/gitlab/callback` | Only confirmed gitlab.com accounts |
 | Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`; scopes `openid email profile`; redirect URI `<APP_URL>/api/auth/google/callback` | When Google reports `email_verified` |
 | Email link | `EMAIL_SIGN_IN=true` on the web app, plus `RESEND_API_KEY`/`EMAIL_FROM` on Convex | Always (clicking the link proves ownership) |
 

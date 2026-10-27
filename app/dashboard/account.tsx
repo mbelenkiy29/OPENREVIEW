@@ -93,7 +93,7 @@ export async function JoinTeams({ token, next, onlyFound = false }: { token: str
   } catch { proofs = undefined; }
   if (onlyFound && !teams.length) return null;
   if (!proofs) return <p role="alert" className="error">GitHub or GitLab didn’t return your organizations. Try again in a minute.</p>;
-  const checks = ([["github", "GitHub", "githubLogo", process.env.GITHUB_CLIENT_ID], ["gitlab", "GitLab", "gitlabLogo", process.env.GITLAB_OAUTH_CLIENT_ID]] as const).filter(([p, , , on]) => on && !proofs[p]);
+  const checks = ([["github", "GitHub", "githubLogo", process.env.GITHUB_CLIENT_ID], ["gitlab", "GitLab", "gitlabLogo", process.env.GITLAB_OAUTH_CLIENT_ID && process.env.GITLAB_JOIN_TEAMS === "true"]] as const).filter(([p, , , on]) => on && !proofs[p]);
   return <>
     {onlyFound && <p><strong>Your team may already use OpenReview.</strong> Ask to join it instead of creating a new workspace.</p>}
     {teams.length > 0 ? <ScrollTable label="Teams you can ask to join" className="table-box">
