@@ -1,4 +1,5 @@
 import {executionExplanation} from "../src/execution-claims";
+import { findingResolved, trackFinding } from "./issueLifecycle";
 import { notificationsEnabled } from "./notifications";
 import { reviewAllowance } from "./billing";
 import {
@@ -373,6 +374,7 @@ export const save = internalMutation({
         });
       else await ctx.db.patch(exists._id,{...f,outsideDiff:f.outsideDiff,reviewId:review._id,status:"open",updatedAt:Date.now()});
       await ctx.db.insert("reviewFindings",{reviewId:review._id,findingId:findingId!,snapshot:f});
+      await trackFinding(ctx,(await ctx.db.get(findingId!))!,!exists);
     }
     const addressed: Doc<"findings">[] = [];
     for (const fingerprint of args.resolved) {
@@ -390,6 +392,7 @@ export const save = internalMutation({
           status: "resolved",
           updatedAt: Date.now(),
         });
+        await findingResolved(ctx, f, review.headSha);
         if (args.addressed?.includes(fingerprint)) addressed.push(f);
       }
     }

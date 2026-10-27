@@ -35,7 +35,7 @@ export async function loadDashboard({
   if (billingConfig().enabled && organization.planRequired && !organization.planSelectedAt && !(section[0] === "settings" && ["billing", "account", "referrals"].includes(section[1] ?? ""))) redirect("/dashboard/onboarding/plan");
   // Admins of a workspace still in guided setup land there; deep links are never redirected.
   if (!section[0] && needsSetup(organization) && ["owner", "admin"].includes(organization.role)) redirect("/dashboard/onboarding");
-  const aliases: Record<string, string[]> = { overview: ["analytics"], repositories: ["settings", "repositories"], reviews: ["pulls"], findings: ["pulls", "findings"], knowledge: ["memory", "knowledge"], rules: ["memory", "rules"], team: ["settings", "people"], usage: ["settings", "usage"] };
+  const aliases: Record<string, string[]> = { overview: ["analytics"], repositories: ["settings", "repositories"], reviews: ["pulls"], findings: ["pulls", "findings"], issues: ["pulls", "issues"], knowledge: ["memory", "knowledge"], rules: ["memory", "rules"], team: ["settings", "people"], usage: ["settings", "usage"] };
   if (!section[0] || aliases[section[0]]) {
     const parts = aliases[section[0] ?? "overview"];
     const suffix = section.slice(1);
@@ -48,8 +48,8 @@ export async function loadDashboard({
     redirect(`/dashboard/settings/${filters.repository ? "review" : "repositories"}${query.size ? "?"+query : ""}`);
   }
   if(route === "settings" && !settingsNavigation().some(([key])=>key === section[1]))notFound();
-  const view = route === "analytics" ? "overview" : route === "pulls" ? section[1] === "findings" ? "findings" : "reviews" : route === "memory" ? section[1] === "knowledge" ? "knowledge" : "rules" : route === "settings" ? ({ repositories: "repositories", people: "team", usage: "usage" }[section[1] ?? ""] ?? "settings") : route;
-  const reviewDetailId = route === "pulls" && section[1] !== "findings" ? section[1] : undefined;
+  const view = route === "analytics" ? "overview" : route === "pulls" ? section[1] === "findings" ? "findings" : section[1] === "issues" ? "issues" : "reviews" : route === "memory" ? section[1] === "knowledge" ? "knowledge" : "rules" : route === "settings" ? ({ repositories: "repositories", people: "team", usage: "usage" }[section[1] ?? ""] ?? "settings") : route;
+  const reviewDetailId = route === "pulls" && !["findings", "issues"].includes(section[1] ?? "") ? section[1] : undefined;
   const requestedRepository = filters.repository;
   if (!navigation.some((n) => n.toLowerCase() === view)) notFound();
   const scopes=await backend().query(api.scopes.list,{token:user.token,organizationId:organization._id});
@@ -83,6 +83,16 @@ export async function loadDashboard({
               : undefined,
         })
       : null;
+  // Issues inbox (/dashboard/pulls/issues) and one issue (/dashboard/pulls/issues/<number>).
+  const issueNumber = view === "issues" && section[2] ? Number(section[2]) : undefined;
+  if (issueNumber !== undefined && !(Number.isInteger(issueNumber) && issueNumber > 0)) notFound();
+  const issuesPage = view === "issues" && issueNumber === undefined ? await backend().query(api.issues.list, {
+    token: user.token, organizationId: organization._id, cursor: filters.cursor,
+    ...(selectedTeam ? { teamId: selectedTeam._id } : {}),
+    ...(filters.repository ? { repositoryId: filters.repository as Id<"repositories"> } : {}),
+    status: filters.status || undefined, assignee: filters.assignee || undefined, severity: filters.severity || undefined, category: filters.category || undefined,
+  }) : null;
+  const issue = issueNumber !== undefined ? await backend().query(api.issues.get, { token: user.token, organizationId: organization._id, number: issueNumber }).catch(() => notFound()) : null;
   const visibleFindings = findingsPage?.page ?? data.findings.map(f=>({...f,canFix:false}));
   const ruleView=view==="rules"&&!["clusters","integrations","preferences"].includes(section[1]??"");
   if(ruleView&&requestedRepository&&!data.repositories.some(r=>r._id===requestedRepository))notFound();
@@ -150,6 +160,6 @@ export async function loadDashboard({
   const conventions = repoSettings ? await backend().query(api.conventions.list, { token: user.token, repositoryId: repoSettings.repo._id }) : [];
   // Narrowed above: a dashboard always has a workspace.
   const workspace = organization as typeof organization & { _id: Id<"organizations"> };
-  return { kind: "dashboard" as const, active, aliases, apiKeys, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, filters, findingsPage, isAdmin, unlocked, jar, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
+  return { kind: "dashboard" as const, active, aliases, apiKeys, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, filters, findingsPage, issue, issuesPage, isAdmin, unlocked, jar, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
 }
 export type DashboardContext = Extract<Awaited<ReturnType<typeof loadDashboard>>, { kind: "dashboard" }>;

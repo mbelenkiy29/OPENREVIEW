@@ -8,7 +8,7 @@ import type {QueryCtx} from "./_generated/server";
 import { effectiveSettings } from "./scopes";
 import { eligibleFixFinding } from "../src/fix-prompt";
 import { p4FixAuthority } from "./p4FixAuthority";
-function fixEligibility(ctx:QueryCtx,token:string){
+export function fixEligibility(ctx:QueryCtx,token:string){
  const access=new Map<Id<"repositories">,Promise<{repo:Doc<"repositories">;minimumConfidence:number}|null>>();
  const latest=new Map<string,Promise<Doc<"reviews">|null>>();
  const native=new Map<Id<"reviews">,Promise<boolean>>();
@@ -27,7 +27,7 @@ function fixEligibility(ctx:QueryCtx,token:string){
   return ready;
  };
 }
-function readableExplanation(finding:Doc<"findings">,review:Doc<"reviews">|null){
+export function readableExplanation(finding:Doc<"findings">,review:Doc<"reviews">|null){
  const evidence=review?.headSha===finding.commitSha&&review.runtimeEvidence?.headSha===review.headSha?review.runtimeEvidence:undefined;
  return {...finding,title:executionExplanation(finding.title,evidence),description:executionExplanation(finding.description,evidence),impact:executionExplanation(finding.impact,evidence),suggestedFix:executionExplanation(finding.suggestedFix,evidence)};
 }

@@ -1,4 +1,5 @@
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { findingRemoved } from "./issueLifecycle";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { Doc, Id, TableNames } from "./_generated/dataModel";
@@ -39,7 +40,7 @@ export const purgePlan: Step[] = [
   ...(["providerInstallRequests", "notificationDeliveries", "oauthCodes", "bridgeDevices"] as const).map((table) => ({ table, via: "scan" as const, match: "organizationId" as const })),
   { table: "providerIdentityGrants", via: "scan", match: "repositoryOrConnection" },
   // Workspace-indexed tables; repositories and members near the end, the audit log last.
-  ...([["integrationConnections", "by_org"], ["modelKeys", "by_org"], ["approvalPolicies", "by_org"], ["approvalJobs", "by_org_status"], ["runtimePolicies", "by_org"], ["runtimeWorkers", "by_org"], ["runtimeJobs", "by_org_status"], ["p4Polls", "by_org"], ["providerConnections", "by_org"], ["scopeSettings", "by_org"], ["repositoryClusters", "by_org"], ["clusterSuggestions", "by_org_status"], ["modelCache", "by_key"], ["ssoConnections", "by_org"], ["emailInvitations", "by_org"], ["analyticsDaily", "by_org_day"], ["invitations", "by_org"], ["pullRequests", "by_org"], ["findings", "by_org"], ["reviews", "by_org"], ["billingAccounts", "by_org"], ["billingUsage", "by_org_period"], ["notificationChannels", "by_org"], ["slackInstallations", "by_org"], ["notificationPreferences", "by_org"], ["chatThreads", "by_org_user"], ["learnedRules", "by_org"], ["commentReactions", "by_org_time"], ["findingFeedback", "by_org"], ["findingSignals", "by_org_time"], ["learnedPreferences", "by_org_scope"], ["customRules", "by_org"], ["ruleSuggestions", "by_org_status"], ["ruleAssistantRuns", "by_org_time"], ["usageEvents", "by_org"], ["oauthGrants", "by_org"], ["apiKeys", "by_org"], ["teams", "by_org"], ["githubInstallations", "by_org"], ["repositories", "by_org"], ["organizationMembers", "by_org"], ["auditEvents", "by_org"]] as const).map(([table, index]) => ({ table, via: "org" as const, index })),
+  ...([["integrationConnections", "by_org"], ["modelKeys", "by_org"], ["approvalPolicies", "by_org"], ["approvalJobs", "by_org_status"], ["runtimePolicies", "by_org"], ["runtimeWorkers", "by_org"], ["runtimeJobs", "by_org_status"], ["p4Polls", "by_org"], ["providerConnections", "by_org"], ["scopeSettings", "by_org"], ["repositoryClusters", "by_org"], ["clusterSuggestions", "by_org_status"], ["modelCache", "by_key"], ["ssoConnections", "by_org"], ["emailInvitations", "by_org"], ["analyticsDaily", "by_org_day"], ["invitations", "by_org"], ["pullRequests", "by_org"], ["findings", "by_org"], ["issueEvents", "by_org"], ["issues", "by_org_last"], ["reviews", "by_org"], ["billingAccounts", "by_org"], ["billingUsage", "by_org_period"], ["notificationChannels", "by_org"], ["slackInstallations", "by_org"], ["notificationPreferences", "by_org"], ["chatThreads", "by_org_user"], ["learnedRules", "by_org"], ["commentReactions", "by_org_time"], ["findingFeedback", "by_org"], ["findingSignals", "by_org_time"], ["learnedPreferences", "by_org_scope"], ["customRules", "by_org"], ["ruleSuggestions", "by_org_status"], ["ruleAssistantRuns", "by_org_time"], ["usageEvents", "by_org"], ["oauthGrants", "by_org"], ["apiKeys", "by_org"], ["teams", "by_org"], ["githubInstallations", "by_org"], ["repositories", "by_org"], ["organizationMembers", "by_org"], ["auditEvents", "by_org"]] as const).map(([table, index]) => ({ table, via: "org" as const, index })),
   { table: "organizations", via: "self" },
 ];
 // Not owned by a workspace: kept on deletion, with the reason.
@@ -193,6 +194,7 @@ async function removeReview(ctx: MutationCtx, review: Doc<"reviews">) {
   for (const f of await ctx.db.query("findings").withIndex("by_review", (q) => q.eq("reviewId", review._id)).take(1000)) {
     for (const t of ["findingFeedback", "commentReactions", "findingSignals"] as const) for (const r of await byField(ctx, t, "by_finding", "findingId", f._id).take(1000)) await remove(ctx, t, r);
     await remove(ctx, "findings", f as never);
+    await findingRemoved(ctx, f);
   }
   await remove(ctx, "reviews", review as never);
 }

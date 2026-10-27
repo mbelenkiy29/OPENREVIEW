@@ -12,7 +12,7 @@ import { status, priority, Empty } from "./shared";
 import type { DashboardContext } from "../load";
 
 export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
-  const { data, devinConfigured, filters, findingsPage, personalAgent, repoName, visibleFindings } = ctx;
+  const { data, filters, findingsPage, repoName, visibleFindings } = ctx;
   return (
 (
           <>
@@ -97,20 +97,7 @@ export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
                     .join("\n\n--- Next finding task: use its named repository, PR and revision ---\n\n")}
               />
             )}
-            {visibleFindings.map((f) => {
-              const prompt = fixPrompt(
-                repoName(f.repositoryId),
-                `PR #${f.prNumber}`,
-                [
-                  {
-                    ...findingSchema.parse(f),
-                    agent: f.agent,
-                    fingerprint: f.fingerprint,
-                    commitSha: f.commitSha,
-                  },
-                ],
-              );
-              return (
+            {visibleFindings.map((f) => (
                 <section className="finding" key={f._id}>
                   <div className="row">
                     <h2>{f.title}</h2>
@@ -122,6 +109,46 @@ export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
                     {repoName(f.repositoryId)} #{f.prNumber} · {f.filePath}:
                     {f.startLine} · {Math.round(f.confidence * 100)}% confidence
                   </p>
+                  <FindingBody f={f} ctx={ctx} />
+                  {data.writableRepositoryIds.includes(f.repositoryId) && <form action={feedback} className="feedback">
+                    <input type="hidden" name="findingId" value={f._id} />
+                    <label>
+                      Feedback
+                      <select name="value">
+                        <option value="useful">Useful</option>
+                        <option value="not_useful">Not useful</option>
+                        <option value="resolved">Resolved</option>
+                        <option value="wont_fix">Won’t fix</option>
+                        <option value="false_positive">False positive</option>
+                      </select>
+                    </label>
+                    <label>
+                      Reason
+                      <input name="comment" maxLength={5000} />
+                    </label>
+                    <button>Save feedback</button>
+                  </form>}
+                </section>
+            ))}
+            {findingsPage && !findingsPage.isDone && (
+              <Link
+                className="button"
+                href={`/dashboard/findings?${new URLSearchParams(Object.entries({ ...filters, cursor: findingsPage.continueCursor }).filter((entry): entry is [string, string] => typeof entry[1] === "string")).toString()}`}
+              >
+                Next findings
+              </Link>
+            )}
+          </>
+        )
+  );
+}
+
+type ListedFinding = DashboardContext["visibleFindings"][number];
+// A finding's details and fix actions, shared by the findings list and an issue's latest occurrence.
+export function FindingBody({ f, ctx }: { f: ListedFinding; ctx: DashboardContext }) {
+  const { data, devinConfigured, personalAgent, repoName } = ctx;
+  const prompt = fixPrompt(repoName(f.repositoryId), `PR #${f.prNumber}`, [{ ...findingSchema.parse(f), agent: f.agent, fingerprint: f.fingerprint, commitSha: f.commitSha }]);
+  return <>
                   <p>{f.description}</p>
                   {f.ruleId && (
                     <p className="muted">
@@ -157,36 +184,5 @@ export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
                     </summary>
                     <pre>{prompt}</pre>
                   </details>
-                  {data.writableRepositoryIds.includes(f.repositoryId) && <form action={feedback} className="feedback">
-                    <input type="hidden" name="findingId" value={f._id} />
-                    <label>
-                      Feedback
-                      <select name="value">
-                        <option value="useful">Useful</option>
-                        <option value="not_useful">Not useful</option>
-                        <option value="resolved">Resolved</option>
-                        <option value="wont_fix">Won’t fix</option>
-                        <option value="false_positive">False positive</option>
-                      </select>
-                    </label>
-                    <label>
-                      Reason
-                      <input name="comment" maxLength={5000} />
-                    </label>
-                    <button>Save feedback</button>
-                  </form>}
-                </section>
-              );
-            })}
-            {findingsPage && !findingsPage.isDone && (
-              <Link
-                className="button"
-                href={`/dashboard/findings?${new URLSearchParams(Object.entries({ ...filters, cursor: findingsPage.continueCursor }).filter((entry): entry is [string, string] => typeof entry[1] === "string")).toString()}`}
-              >
-                Next findings
-              </Link>
-            )}
-          </>
-        )
-  );
+  </>;
 }

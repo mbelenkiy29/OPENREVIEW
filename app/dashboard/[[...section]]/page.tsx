@@ -22,6 +22,7 @@ import { WorkspaceInvitations } from "../invitations";
 import { RepositoriesSection } from "../sections/repositories";
 import { ReviewsSection } from "../sections/reviews";
 import { FindingsSection } from "../sections/findings";
+import { IssuesSection } from "../sections/issues";
 import { RulesSection } from "../sections/rules";
 import { TeamSection } from "../sections/team";
 import { KnowledgeSection } from "../sections/knowledge";
@@ -56,6 +57,7 @@ export default async function Dashboard(props: {
         {view === "repositories" && <RepositoriesSection ctx={ctx} />}
         {view === "reviews" && <ReviewsSection ctx={ctx} />}
         {view === "findings" && <FindingsSection ctx={ctx} />}
+        {view === "issues" && <IssuesSection ctx={ctx} />}
         {view === "rules" && !["clusters","integrations","preferences"].includes(section[1] ?? "") && <RulesSection ctx={ctx} />}
         {view === "team" && <TeamSection ctx={ctx} />}
         {view === "knowledge" && <KnowledgeSection ctx={ctx} />}

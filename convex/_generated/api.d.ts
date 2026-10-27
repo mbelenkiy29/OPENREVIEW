@@ -54,6 +54,8 @@ import type * as indexAuthority from "../indexAuthority.js";
 import type * as inferenceBudget from "../inferenceBudget.js";
 import type * as integrationJobs from "../integrationJobs.js";
 import type * as integrations from "../integrations.js";
+import type * as issueLifecycle from "../issueLifecycle.js";
+import type * as issues from "../issues.js";
 import type * as jobs from "../jobs.js";
 import type * as knowledge from "../knowledge.js";
 import type * as knowledgeJobs from "../knowledgeJobs.js";
@@ -178,6 +180,8 @@ declare const fullApi: ApiFromModules<{
   inferenceBudget: typeof inferenceBudget;
   integrationJobs: typeof integrationJobs;
   integrations: typeof integrations;
+  issueLifecycle: typeof issueLifecycle;
+  issues: typeof issues;
   jobs: typeof jobs;
   knowledge: typeof knowledge;
   knowledgeJobs: typeof knowledgeJobs;
