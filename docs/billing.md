@@ -77,7 +77,7 @@ When billing is on and the new workspace did not start on Free (an owner already
 - **Continue on Free:** no card. Upgrade later in Organization Settings → Billing & Usage. Not offered when an owner already has a Free workspace: the card names it instead.
 - **Choose Starter** or **Start Pro trial:** opens Stripe Checkout and returns to the step.
 
-The trial clock starts when the workspace first opens Checkout (its Stripe customer is created), however long it was on Free; each workspace gets one trial. Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
+The trial clock starts when the workspace first opens Checkout, however long it was on Free; each workspace gets one trial. Checkout carries any remaining trial into the subscription (`subscription_data.trial_end`), so the card is not charged until the trial ends. Stripe requires a trial end at least 48 hours away, so a trial with less time left is charged at Checkout. Without billing, the step does not exist and setup has one step fewer.
 
 The dashboard's trial banner (days left, **Add Payment Method**) shows only while the subscription is trialing with no default payment method on file: neither the subscription's `default_payment_method` (from `customer.subscription.*`) nor the customer's `invoice_settings.default_payment_method` (from `customer.updated`, sent when a card is added in the Customer Portal). A subscription from before these were recorded counts as having one, because Checkout always collects a card. With a card on file the banner returns for the last 3 days of the trial, saying when the card will be charged, with **Manage billing**. Also turn on Stripe's own trial-ending reminder email (Stripe Dashboard → Settings → Billing → Subscriptions and emails), in test and live mode.
 
@@ -90,6 +90,21 @@ Conversion events (`conversionEvents`, see `convex/conversions.ts`) add `checkou
 Setup can't be skipped. Until a workspace finishes it, opening the dashboard takes owners and admins back to setup, and every dashboard page shows a **Setup isn't finished** bar (members see that an admin is completing it). Setup finishes only from its last step (`onboarding.complete`), which needs the plan and a selected repository that has started indexing. Workspaces that used the former **Exit setup** before any repository was indexing are reopened once per deployment with `npx convex run onboarding:reopenSkippedSetups '{"confirm":"reopen-skipped-setups"}' --prod`.
 
 When a review is blocked, it is recorded as failed with a `Billing:` reason, visible on the pull request's review page. Blocked reviews are also counted on **Organization Settings → Billing & Usage**.
+
+## Stripe customers
+
+Every workspace becomes a Stripe customer when it is created, Free ones too, so the Stripe Dashboard lists all of them. The customer is named after the workspace and carries its first owner's verified email (if there is one) and `metadata.organizationId`. The workspace keeps the ID in `organizations.stripeCustomerId`. Checkout reuses it, and linking it there (`billingAccounts.customerId`) is still what starts the trial and shows the billing portal. Operators' workspaces get no customer.
+
+Creating the customer is a scheduled job (`billingJobs.createCustomer`), so signup never waits on Stripe. If Stripe is down, the job logs `billing.customer_failed` and does not retry: Checkout still creates a customer, and the backfill below picks the workspace up.
+
+To give existing workspaces a customer, count them first, then create them. Rerunning is safe:
+
+```bash
+npx convex run billing:backfillCustomers '{}' --prod
+npx convex run billing:backfillCustomers '{"confirm":"create-stripe-customers"}' --prod
+```
+
+Deleting a workspace leaves its Stripe customer in place.
 
 ## Discounts and free months
 
@@ -117,7 +132,7 @@ The prospect enters the code at Checkout, from the setup plan step or Organizati
    - with the [referral program](#referral-program): `charge.refunded`, `charge.dispute.created` and `charge.dispute.closed`
 
    Set its signing secret as `STRIPE_WEBHOOK_SECRET`.
-4. **API key:** create a restricted key (`rk_test_…`) with write access to Customers, Checkout Sessions, Customer portal and Subscriptions. Set it as `STRIPE_SECRET_KEY` on Convex (a `sk_test_…` key also works).
+4. **API key:** create a restricted key (`rk_test_…`) with write access to Customers (every new workspace becomes one), Checkout Sessions, Customer portal and Subscriptions. Set it as `STRIPE_SECRET_KEY` on Convex (a `sk_test_…` key also works).
    - With the referral program, also give it read access to Charges, Disputes, Invoices and Invoice payments. Customers write already covers customer balance transactions (referral credit). Permission names vary in the Dashboard: make one credit and one refund in the sandbox and check the key's request log for denied calls.
 5. **Turn on billing:** set `BILLING_ENABLED=true` on Convex, and on the web app so the landing page shows pricing and the setup step count is right. Live keys (`rk_live_…`/`sk_live_…`) are refused unless `BILLING_ALLOW_LIVE=true`.
 6. **Customer Portal:** turn it on in Stripe so admins can manage their payment method, invoices and cancellation. Turn off quantity changes, because seats follow workspace membership.
@@ -134,7 +149,7 @@ On Vercel, Stripe can also be provisioned from the Vercel Marketplace. The keys 
    ```bash
    npx convex run billing:forgetStripeLinks '{"confirm":"switch-stripe-mode"}' --prod
    ```
-   Each workspace returns to Free, and its next Checkout creates a live customer with a fresh trial.
+   Each workspace returns to Free, and its next Checkout creates a live customer with a fresh trial. Then give every workspace a live customer with the backfill under [Stripe customers](#stripe-customers).
 5. **Old webhook:** cancel the test subscriptions and disable the test-mode webhook endpoint, so the sandbox stops sending events (and retries) that would now fail signature checks.
 6. **Referrals:** commissions, credits and payout accounts don't record the Stripe mode. Keep `REFERRALS_ENABLED` off on a deployment until it is live. A deployment where any test invoice earned a commission (any `referralCommissions` row) must not be switched to live, even after voiding them: its referrals stay marked as paid, so live Checkout gives no coupon, the commission window counts from the test invoice and the conversion email is not sent again. Use a separate deployment. If referrals were on but no commission was ever earned, only delete its `referralPayoutAccounts` rows (test `acct_…` IDs don't exist in live mode). Add the three charge events to the live webhook endpoint too, and enable Connect in live mode.
 

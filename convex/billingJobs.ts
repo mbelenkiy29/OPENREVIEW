@@ -19,7 +19,7 @@ export const checkout = action({ args: { token: v.string(), organizationId: v.id
   const key = stripeKey(), price = priceFor(a.plan ?? "starter");
   let customer = context.customerId;
   if (!customer) {
-    customer = (await stripe<{ id: string }>("/v1/customers", { metadata: { organizationId: a.organizationId } }, key, fetch, `customer:${a.organizationId}`)).id;
+    customer = context.signupCustomerId ?? (await stripe<{ id: string }>("/v1/customers", { metadata: { organizationId: a.organizationId } }, key, fetch, `customer:${a.organizationId}`)).id;
     await ctx.runMutation(internal.billing.linkCustomer, { organizationId: a.organizationId, customerId: customer });
   }
   await ctx.runMutation(internal.conversions.record, { name: "checkout_started", organizationId: a.organizationId, method: a.plan ?? "starter" });
@@ -41,6 +41,21 @@ export const checkout = action({ args: { token: v.string(), organizationId: v.id
     // shortcut: no referralOps:report coupon-health check; operators watch for this log line instead.
     console.log(JSON.stringify({ event: "referral.coupon_unavailable", code: error.code, param: error.param }));
     return (await create()).url;
+  }
+} });
+// The Stripe customer every workspace gets when it is created (users.createOrganization, billing.backfillCustomers).
+// Its own idempotency key: Stripe refuses Checkout's key with different parameters. A failure is only logged;
+// Checkout still creates a customer and the backfill picks the workspace up.
+export const createCustomer = internalAction({ args: { organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<string> => {
+  const context = await ctx.runQuery(internal.billing.customerContext, a);
+  if (!context) return "skipped";
+  try {
+    const { id } = await stripe<{ id: string }>("/v1/customers", { name: context.name, ...(context.email ? { email: context.email } : {}), metadata: { organizationId: a.organizationId } }, stripeKey(), fetch, `workspace-customer:${a.organizationId}`);
+    await ctx.runMutation(internal.billing.saveCustomer, { organizationId: a.organizationId, customerId: id });
+    return "created";
+  } catch (error) {
+    console.error(JSON.stringify({ event: "billing.customer_failed", organizationId: a.organizationId, error: error instanceof Error ? error.message : "Stripe error" }));
+    return "failed";
   }
 } });
 export const portal = action({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<string> => {

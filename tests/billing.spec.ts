@@ -102,6 +102,50 @@ test('switching Stripe modes drops test customers and subscriptions and returns 
  expect((await reviewOf(t,await enqueue(t,repo._id,1)))?.status).toBe('queued');
 });
 
+test('every new workspace becomes a Stripe customer that Checkout reuses, without starting the trial; the backfill covers the rest',async()=>{
+ const {t,alice,org}=await setup();
+ await t.run(ctx=>ctx.db.insert('identities',{userId:alice.id,provider:'email',providerUserId:'alice@example.com',email:'alice@example.com',emailVerified:true,createdAt:Date.now(),lastLoginAt:Date.now()}));
+ const calls:{url:string;body:string;key:string|null}[]=[];let down=false;
+ vi.spyOn(console,'error').mockImplementation(()=>{});
+ vi.spyOn(globalThis,'fetch').mockImplementation(async(input:string|URL|Request,init?:RequestInit)=>{const url=String(input);calls.push({url,body:String(init?.body),key:new Headers(init?.headers).get('idempotency-key')});
+  if(down)return Response.json({error:{type:'api_error'}},{status:500});
+  if(url.endsWith('/v1/customers'))return Response.json({id:`cus_${calls.length}`});
+  return Response.json({id:'cs_1',url:'https://checkout.stripe.com/c/pay/cs_1'});});
+ const customers=()=>calls.filter(c=>c.url.endsWith('/v1/customers'));
+ const stored=async(id:Id<'organizations'>)=>(await t.run(ctx=>ctx.db.get(id)))?.stripeCustomerId;
+ // createOrganization scheduled it; signup itself never waited on Stripe.
+ await t.finishAllScheduledFunctions(vi.runAllTimers);
+ expect(customers()).toHaveLength(1);
+ expect(customers()[0].key).toBe(`workspace-customer:${org}`);
+ expect(Object.fromEntries(new URLSearchParams(customers()[0].body))).toEqual({name:'Acme',email:'alice@example.com','metadata[organizationId]':org});
+ const customer=await stored(org);
+ expect(customer).toMatch(/^cus_/);
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({hasCustomer:false,trialStarted:false});
+ expect(await t.action(internal.billingJobs.createCustomer,{organizationId:org})).toBe('skipped');
+ // Checkout links that customer instead of creating one, and the paid trial starts now.
+ await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org});
+ expect(customers()).toHaveLength(1);
+ expect(new URLSearchParams(calls.at(-1)!.body).get('customer')).toBe(customer);
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({hasCustomer:true,trialStarted:true,trialEndsAt:Date.now()+14*86400000});
+ // A Stripe outage leaves the workspace without a customer, and nothing else.
+ down=true;
+ const side=await t.mutation(api.users.createOrganization,{token:alice.token,name:'Side'});
+ await t.finishAllScheduledFunctions(vi.runAllTimers);
+ expect(await t.action(internal.billingJobs.createCustomer,{organizationId:side})).toBe('failed');
+ expect(await stored(side)).toBeUndefined();
+ // The backfill counts first, creates on confirm, and then has nothing left.
+ down=false;
+ expect(await t.mutation(internal.billing.backfillCustomers,{})).toEqual({dryRun:true,workspaces:1});
+ expect(await stored(side)).toBeUndefined();
+ expect(await t.mutation(internal.billing.backfillCustomers,{confirm:'create-stripe-customers'})).toEqual({dryRun:false,workspaces:1});
+ await t.finishAllScheduledFunctions(vi.runAllTimers);
+ expect(await stored(side)).toMatch(/^cus_/);
+ expect(await t.mutation(internal.billing.backfillCustomers,{})).toEqual({dryRun:true,workspaces:0});
+ // Switching Stripe modes forgets these too, so live Checkout never reuses a test customer.
+ await t.mutation(internal.billing.forgetStripeLinks,{confirm:'switch-stripe-mode'});
+ expect([await stored(org),await stored(side)]).toEqual([undefined,undefined]);
+});
+
 test('without BILLING_ENABLED nothing is enforced and the webhook endpoint does not exist',async()=>{
  delete process.env.BILLING_ENABLED;
  const {t,alice,org,repo}=await setup();

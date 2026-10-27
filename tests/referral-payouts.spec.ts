@@ -28,6 +28,8 @@ async function setup(t: T) {
   const alice = await signIn(t, 1, "alice", "alice@example.com"), bob = await signIn(t, 2, "bob");
   const bobCo = await t.mutation(api.users.createOrganization, { token: bob.token, name: "Bob Co" });
   await t.run(async (ctx) => {
+    // Bob Co pays (in_1), so it already has its Stripe customer and the workspace-customer job sends nothing.
+    await ctx.db.patch(bobCo, { stripeCustomerId: "cus_bob" });
     const referralId = await ctx.db.insert("referrals", { referrerId: alice.userId, referredUserId: bob.userId, referredOrganizationId: bobCo, source: "link", status: "active", attributedAt: 1, updatedAt: 1 });
     await ctx.db.insert("referralCommissions", { referralId, referrerId: alice.userId, referredOrganizationId: bobCo, invoiceId: "in_1", subscriptionId: "sub_1", currency: "usd", base: 300000, rateBps: 2000, amount: 60000, reversed: 0, status: "accrued", invoiceCreated: 1, paidAt: 1, availableAt: 1, createdAt: 1, updatedAt: 1 });
   });
