@@ -10,6 +10,7 @@ import { turnstileConfig } from "../src/turnstile";
 import { ProviderIcon } from "./ui/provider-icons";
 import { Icon } from "./ui/icons";
 import { TurnstileField } from "./turnstile";
+import { SsoForm } from "./sso-form";
 
 export function SignInOptions({ next, mode = "login", referral }: { next?: string; mode?: AuthMode; referral?: string | null }) {
   const code = normalizeReferralCode(referral), q = authQuery({ next, referral: code });
@@ -28,11 +29,11 @@ export function SignInOptions({ next, mode = "login", referral }: { next?: strin
     {/* Without email sign-in, the first provider is the primary action. */}
     {providers.map((p, i) => <a key={p} className={`button sign-in-provider${!email && i === 0 ? " primary" : ""}`} href={providerLoginPaths[p] + q}><ProviderIcon provider={p} /> {verb} with {providerNames[p]}</a>)}
     <details className="sso-sign-in"><summary>Use single sign-on</summary>
-      <form action="/sso/start" method="get" className="sign-in-form">
+      <SsoForm>
         {next && <input type="hidden" name="next" value={next} />}
         <label>Work email<input type="email" name="email" required maxLength={254} autoComplete="email" placeholder="me@example.com" /></label>
         <button>Continue with SSO</button>
-      </form>
+      </SsoForm>
     </details>
     <p className="sign-in-legal">By {mode === "signup" ? "signing up" : "continuing"}, you agree to the <Link href="/terms">Terms of Service</Link> and <Link href="/privacy">Privacy Policy</Link>.</p>
   </div>;

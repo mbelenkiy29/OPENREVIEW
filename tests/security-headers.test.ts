@@ -8,6 +8,7 @@ import config from "../next.config";
 import { config as middlewareConfig, middleware } from "../middleware";
 import { contentSecurityPolicy, middlewareSkips, prefetchHeaders, securityHeaders } from "../src/security-headers";
 
+const formTargets = "'self' https://checkout.stripe.com https://billing.stripe.com https://connect.stripe.com https://app.devin.ai https://github.com https://gitlab.com";
 const fetchPolicy = [
   "style-src 'self' 'unsafe-inline' https://cdn.userjot.com https://fonts.googleapis.com",
   "img-src 'self' data: blob: https://media.userjot.com https://cdn.userjot.com https://alb.reddit.com https://avatars.githubusercontent.com https://*.googleusercontent.com https://gitlab.com https://secure.gravatar.com",
@@ -17,7 +18,7 @@ const fetchPolicy = [
   "media-src 'self'",
   "manifest-src 'self'",
   "worker-src 'self'",
-  "object-src 'none'; base-uri 'self'; form-action 'self' https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'",
+  `object-src 'none'; base-uri 'self'; form-action ${formTargets}; frame-ancestors 'none'`,
 ].join("; ");
 const staticPolicy = `default-src 'self'; ${fetchPolicy}`;
 
@@ -50,25 +51,34 @@ test("pages get a nonce script policy from middleware; everything it skips gets 
   const policy = response.headers.get("content-security-policy")!;
   const nonce = /'nonce-([A-Za-z0-9+/=]+)'/.exec(policy)?.[1];
   assert.ok(nonce && nonce.length >= 32, policy);
-  assert.equal(policy, contentSecurityPolicy(nonce));
+  assert.equal(policy, contentSecurityPolicy(nonce, true));
   // Next.js reads the nonce from the forwarded request headers; app/layout.tsx from x-nonce.
   assert.equal(response.headers.get("x-middleware-request-x-nonce"), nonce);
   assert.equal(response.headers.get("x-middleware-request-content-security-policy"), policy);
   assert.notEqual(nonce, /'nonce-([^']+)'/.exec(middleware(new NextRequest("https://openreview.tech/login")).headers.get("content-security-policy")!)?.[1]);
 
-  assert.equal(contentSecurityPolicy("abc", false), `default-src 'self'; script-src 'self' 'nonce-abc' 'strict-dynamic'; ${fetchPolicy}`);
-  assert.equal(contentSecurityPolicy("abc", true), `default-src 'self'; script-src 'self' 'nonce-abc' 'strict-dynamic' 'unsafe-eval'; ${fetchPolicy}`);
+  assert.equal(contentSecurityPolicy("abc", false, false), `default-src 'self'; script-src 'self' 'nonce-abc' 'strict-dynamic'; ${fetchPolicy}`);
+  assert.equal(contentSecurityPolicy("abc", false, true), `default-src 'self'; script-src 'self' 'nonce-abc' 'strict-dynamic' 'unsafe-eval'; ${fetchPolicy}`);
   // Inline styles are allowed (React style attributes); inline scripts and eval never are in production.
-  assert.doesNotMatch(/script-src [^;]*/.exec(contentSecurityPolicy("abc", false))![0], /unsafe-inline|unsafe-eval/);
+  assert.doesNotMatch(/script-src [^;]*/.exec(contentSecurityPolicy("abc", false, false))![0], /unsafe-inline|unsafe-eval/);
   // No directive falls back to "anything": every fetch directive is set, and none is a bare scheme or *.
   for (const directive of ["style-src", "img-src", "font-src", "connect-src", "frame-src", "media-src", "manifest-src", "worker-src"]) assert.match(staticPolicy, new RegExp(`(^|; )${directive} `), directive);
-  assert.doesNotMatch(staticPolicy.replace(/form-action [^;]*/, ""), /(\s|^)(https:|http:|\*)(\s|;|$)/);
+  assert.doesNotMatch(staticPolicy, /(\s|^)(https:|http:|\*)(\s|;|$)/);
   assert.equal(contentSecurityPolicy(), staticPolicy);
+});
+
+test("forms lead only to known hosts, except on pages with sign-in (any SSO IdP) and MCP OAuth consent (any redirect URI)", () => {
+  const formAction = (path: string) => /form-action ([^;]*)/.exec(middleware(new NextRequest(`https://openreview.tech${path}`)).headers.get("content-security-policy")!)![1];
+  const pages = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? pages(join(dir, e.name)) : e.name === "page.tsx" ? [dir] : []);
+  const signIn = pages("app").filter((dir) => /<(SignInOptions|AuthScreen)\b/.test(readFileSync(join(dir, "page.tsx"), "utf8"))).map((dir) => dir.slice("app".length).replace(/\[[^\]]+\]/g, "ABCD2345"));
+  assert.ok(signIn.includes("/login") && signIn.includes("/oauth/consent"), String(signIn));
+  for (const page of signIn) assert.equal(formAction(page), `${formTargets} https: http://localhost:* http://127.0.0.1:*`, page);
+  for (const page of ["/", "/dashboard", "/dashboard/organization/billing", "/dashboard/onboarding/plan", "/fix/abc", "/changelog", "/r", "/login/x", "/oauth/consent/x"]) assert.equal(formAction(page), formTargets, page);
 });
 
 test("profile pictures from GitHub, Google and GitLab sign-ins are allowed images", () => {
   // CSP host sources: an exact https origin, or https://*. for any subdomain of the rest.
-  const sources = /img-src ([^;]*)/.exec(contentSecurityPolicy("abc", false))![1].split(" ");
+  const sources = /img-src ([^;]*)/.exec(contentSecurityPolicy("abc"))![1].split(" ");
   const allowed = (url: string) => { const { protocol, host } = new URL(url); return protocol === "https:" && sources.some((s) => s === `https://${host}` || (s.startsWith("https://*.") && host.endsWith(s.slice("https://*".length)))); };
   for (const avatar of [
     "https://avatars.githubusercontent.com/u/1?v=4",

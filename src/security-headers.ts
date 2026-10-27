@@ -19,9 +19,11 @@ export const securityHeaders = [
 export const middlewareSkips = "api|_next/static|_next/image|favicon.ico|lantern|lighthouse";
 /** Prefetch requests middleware.ts never runs on: the Next.js router's and the browser's. */
 export const prefetchHeaders = [{ type: "header", key: "next-router-prefetch" }, { type: "header", key: "purpose", value: "prefetch" }] as const;
+/** Pages whose forms may lead to any host: sign-in (SSO goes to the workspace's IdP, app/sign-in.tsx) and MCP OAuth consent. */
+export const anyFormTargetPages = /^\/(login|signup|invite|r\/[^/]+|oauth\/consent)$/;
 
 /** The Content-Security-Policy value: pages pass their script nonce, other responses none. */
-export function contentSecurityPolicy(nonce?: string, development = process.env.NODE_ENV === "development") {
+export function contentSecurityPolicy(nonce?: string, anyFormTarget = false, development = process.env.NODE_ENV === "development") {
   return [
     "default-src 'self'",
     // Development builds evaluate code for Fast Refresh.
@@ -45,9 +47,10 @@ export function contentSecurityPolicy(nonce?: string, development = process.env.
     "worker-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
-    // Forms and the redirects they lead to: sign-in providers, SSO IdPs and Stripe are https; an MCP client's
-    // OAuth redirect URI may be loopback http (src/oauth-server.ts).
-    "form-action 'self' https: http://localhost:* http://127.0.0.1:*",
+    // Forms and the redirects they lead to. A server action submitted before hydration redirects with a 303:
+    // to Stripe Checkout, the billing portal and Connect, a Devin session, or GitHub and GitLab re-authorization.
+    // anyFormTargetPages add any https host and, for an MCP client's OAuth redirect URI, loopback http (src/oauth-server.ts).
+    `form-action 'self' https://checkout.stripe.com https://billing.stripe.com https://connect.stripe.com https://app.devin.ai https://github.com https://gitlab.com${anyFormTarget ? " https: http://localhost:* http://127.0.0.1:*" : ""}`,
     "frame-ancestors 'none'",
   ].filter(Boolean).join("; ");
 }
