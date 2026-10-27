@@ -7,7 +7,7 @@ import { audit, authorize } from "./auth";
 import { billingConfig, billingDecision, fixRunLimit, reviewsLeft, freeTakenReason, liveSubscription, nextPeriodStart, openSubscription, periodKey, resetText, seatCount, trialEndsFrom } from "../src/billing";
 import { entitled, entitlements, planCatalog, planEntitlements, planForPrice, upgradeNote, type Entitlement, type Plan } from "../src/plans";
 import { referralConfig } from "../src/referrals";
-import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus } from "./referralLedger";
+import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus, verifiedEmail } from "./referralLedger";
 import { lifecycleEmail } from "./lifecycleEmails";
 import { recordConversion } from "./conversions";
 import { operatorOwned } from "./operator";
@@ -222,7 +222,7 @@ export const checkoutContext = internalQuery({ args: { token: v.string(), organi
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
   if (!billingConfig().enabled) throw new Error("Billing is disabled on this deployment");
   const account = await accountOf(ctx, a.organizationId);
-  return { userId: user._id, customerId: account?.customerId ?? null, subscriptionId: account?.subscriptionId ?? null, subscriptionItemId: account?.subscriptionItemId ?? null, plan: account?.plan === "pro" ? "pro" as const : "starter" as const, status: account?.status ?? "trial", trialEndsAt: paidTrialEndsAt(account, Date.now()), seats: Math.max(1, seatCount(await members(ctx, a.organizationId))) };
+  return { userId: user._id, customerId: account?.customerId ?? null, signupCustomerId: (await ctx.db.get(a.organizationId))?.stripeCustomerId ?? null, subscriptionId: account?.subscriptionId ?? null, subscriptionItemId: account?.subscriptionItemId ?? null, plan: account?.plan === "pro" ? "pro" as const : "starter" as const, status: account?.status ?? "trial", trialEndsAt: paidTrialEndsAt(account, Date.now()), seats: Math.max(1, seatCount(await members(ctx, a.organizationId))) };
 } });
 // The webhook records the new plan from the seat price; this only audits who asked for it.
 export const auditPlanChange = internalMutation({ args: { organizationId: v.id("organizations"), userId: v.id("users"), plan: v.union(v.literal("starter"), v.literal("pro")) }, handler: (ctx, a) => audit(ctx, a.organizationId, a.userId, "billing.plan_change_requested", a.plan) });
@@ -233,6 +233,31 @@ export const linkCustomer = internalMutation({ args: { organizationId: v.id("org
   if (other && other._id !== account._id) throw new Error("Billing customer belongs to another workspace");
   // The paid-plan trial starts with the first Checkout, however long the workspace was on Free.
   await ctx.db.patch(account._id, { customerId: a.customerId, ...(account.customerId ? {} : { trialEndsAt: trialEndsFrom(Date.now(), billingConfig()) }), updatedAt: Date.now() });
+} });
+// A workspace without a Stripe customer yet, on a billing deployment and not an operator's (those bill like self-hosted).
+async function needsCustomer(ctx: QueryCtx, organization: Doc<"organizations">) {
+  return !organization.stripeCustomerId && !(await accountOf(ctx, organization._id))?.customerId && (await configFor(ctx, organization._id)).enabled;
+}
+// The workspace's name and first owner's verified email for its Stripe customer (billingJobs.createCustomer); null when it needs none.
+export const customerContext = internalQuery({ args: { organizationId: v.id("organizations") }, handler: async (ctx, a) => {
+  const organization = await ctx.db.get(a.organizationId);
+  if (!organization || !await needsCustomer(ctx, organization)) return null;
+  const owner = (await members(ctx, a.organizationId)).find((m) => m.role === "owner");
+  return { name: organization.name, email: owner ? await verifiedEmail(ctx, owner.userId) : null };
+} });
+export const saveCustomer = internalMutation({ args: { organizationId: v.id("organizations"), customerId: v.string() }, handler: async (ctx, a) => {
+  const organization = await ctx.db.get(a.organizationId);
+  if (organization && !organization.stripeCustomerId) await ctx.db.patch(a.organizationId, { stripeCustomerId: a.customerId });
+} });
+// Gives existing workspaces a Stripe customer (createCustomer, 200 ms apart, well under Stripe's rate limit); safe to rerun.
+// Without confirm it only counts them: `npx convex run billing:backfillCustomers '{}' --prod`, then
+// `npx convex run billing:backfillCustomers '{"confirm":"create-stripe-customers"}' --prod`.
+// shortcut: one transaction reads every workspace; page it if there are ever more than a few thousand.
+export const backfillCustomers = internalMutation({ args: { confirm: v.optional(v.literal("create-stripe-customers")) }, handler: async (ctx, a): Promise<{ dryRun: boolean; workspaces: number }> => {
+  const missing: Id<"organizations">[] = [];
+  for (const organization of await ctx.db.query("organizations").collect()) if (await needsCustomer(ctx, organization)) missing.push(organization._id);
+  if (a.confirm) for (const [i, organizationId] of missing.entries()) await ctx.scheduler.runAfter(i * 200, internal.billingJobs.createCustomer, { organizationId });
+  return { dryRun: !a.confirm, workspaces: missing.length };
 } });
 
 const subscriptionArgs = v.object({ id: v.string(), customer: v.string(), status: v.string(), quantity: v.number(), itemId: v.optional(v.string()), price: v.optional(v.string()), currentPeriodEnd: v.optional(v.number()), organizationId: v.optional(v.string()), paymentMethod: v.boolean() });
@@ -310,6 +335,7 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
 export const forgetStripeLinks = internalMutation({ args: { confirm: v.literal("switch-stripe-mode") }, handler: async (ctx): Promise<number> => {
   const accounts = await ctx.db.query("billingAccounts").collect();
   for (const account of accounts) await ctx.db.patch(account._id, { customerId: undefined, subscriptionId: undefined, plan: undefined, legacy: undefined, subscriptionItemId: undefined, currentPeriodEnd: undefined, pastDueSince: undefined, lastEventCreated: undefined, subscriptionPaymentMethod: undefined, customerPaymentMethod: undefined, customerEventCreated: undefined, status: "trial", seats: seatCount(await members(ctx, account.organizationId)), updatedAt: Date.now() });
+  for (const organization of await ctx.db.query("organizations").collect()) if (organization.stripeCustomerId) await ctx.db.patch(organization._id, { stripeCustomerId: undefined });
   return accounts.length;
 } });
 

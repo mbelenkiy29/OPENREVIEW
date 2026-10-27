@@ -4,6 +4,7 @@ import { planMissing, scheduleSeatSync, startOnFree } from "./billing";
 import { billingConfig } from "../src/billing";
 import { githubAccounts, linkIdentity } from "./identity";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import { authenticated, authorize, service, audit } from "./auth";
 import { rateLimit } from "./rateLimit";
 import { bindReferralOnWorkspace } from "./referralLedger";
@@ -82,7 +83,11 @@ export const createOrganization = mutation({
     });
     // The owner's first Free workspace starts on Free, so setup goes straight to connecting code; a
     // later one chooses Starter or Pro on the plan step (one Free workspace per owner).
-    if (billingConfig().enabled) await startOnFree(ctx, organizationId, user._id);
+    if (billingConfig().enabled) {
+      await startOnFree(ctx, organizationId, user._id);
+      // Every workspace is a Stripe customer, Free ones too; scheduled so a Stripe outage cannot fail the signup.
+      await ctx.scheduler.runAfter(0, internal.billingJobs.createCustomer, { organizationId });
+    }
     await bindReferralOnWorkspace(ctx, user._id, organizationId);
     return organizationId;
   },
