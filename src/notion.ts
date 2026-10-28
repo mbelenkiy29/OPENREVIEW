@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isoTimestamp } from "./iso-timestamp";
 import { assertEgress } from "./egress";
 
 // Notion public-integration OAuth (https://developers.notion.com/docs/authorization) and read-only
@@ -19,7 +20,7 @@ export function notionAuthorization(clientId: string, redirectUri: string, state
   return "https://api.notion.com/v1/oauth/authorize?" + new URLSearchParams({ client_id: clientId, redirect_uri: callback(redirectUri), response_type: "code", owner: "user", state });
 }
 const basic = (clientId: string, clientSecret: string) => "Basic " + Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-const tokenResponse = z.object({ access_token: z.string().min(10), token_type: z.literal("bearer"), refresh_token: z.string().min(10).nullish(), bot_id: z.string().min(1), workspace_id: z.string().uuid(), workspace_name: z.string().max(200).nullish() });
+const tokenResponse = z.object({ access_token: z.string().min(10), token_type: z.literal("bearer"), refresh_token: z.string().min(10).nullish(), bot_id: z.string().min(1), workspace_id: z.guid(), workspace_name: z.string().max(200).nullish() });
 // Notion does not report an access-token lifetime; a nominal one-year expiry is stored and a 401
 // triggers a refresh (when Notion issued a refresh token) or a reconnect prompt.
 export async function notionToken(clientId: string, clientSecret: string, grant: { code: string; redirectUri: string } | { refreshToken: string }, fetchImpl: typeof fetch = fetch) {
@@ -55,7 +56,7 @@ export function notionPageIds(text: string, limit = 10) {
 const richText = z.array(z.object({ plain_text: z.string() }).passthrough());
 const block = z.object({ id: z.string(), type: z.string(), has_children: z.boolean().optional() }).passthrough();
 const blockPage = z.object({ results: z.array(block).max(100), has_more: z.boolean(), next_cursor: z.string().nullable() });
-const pageSchema = z.object({ object: z.literal("page"), id: z.string().uuid(), url: z.string().url(), last_edited_time: z.string().datetime({ offset: true }), archived: z.boolean().optional(), in_trash: z.boolean().optional(), properties: z.record(z.object({ type: z.string() }).passthrough()) });
+const pageSchema = z.object({ object: z.literal("page"), id: z.guid(), url: z.string().url(), last_edited_time: isoTimestamp, archived: z.boolean().optional(), in_trash: z.boolean().optional(), properties: z.record(z.string(), z.object({ type: z.string() }).passthrough()) });
 const text = (value: unknown) => { const parsed = richText.safeParse(value); return parsed.success ? parsed.data.map((r) => r.plain_text).join("") : ""; };
 function blockLine(b: z.infer<typeof block>, depth: number) {
   const data = (b as Record<string, unknown>)[b.type] as { rich_text?: unknown; checked?: boolean; language?: string; title?: string } | undefined;
@@ -88,12 +89,12 @@ export class Notion {
   }
   // Pages shared with the integration (for the admin's review of what OpenReview can read).
   async sharedPages() {
-    const result = await this.request("/v1/search", z.object({ results: z.array(z.object({ object: z.string(), id: z.string(), url: z.string().optional(), properties: z.record(z.unknown()).optional() }).passthrough()).max(100) }), { filter: { property: "object", value: "page" }, page_size: 100 });
+    const result = await this.request("/v1/search", z.object({ results: z.array(z.object({ object: z.string(), id: z.string(), url: z.string().optional(), properties: z.record(z.string(), z.unknown()).optional() }).passthrough()).max(100) }), { filter: { property: "object", value: "page" }, page_size: 100 });
     return result.results.filter((r) => r.object === "page").map((r) => ({ id: r.id, url: r.url ?? "", title: Object.values(r.properties ?? {}).map((p) => (p as { type?: string; title?: unknown }).type === "title" ? text((p as { title?: unknown }).title) : "").join("").slice(0, 200) || "Untitled" }));
   }
-  // One page as plain text: up to 1,000 top-level blocks plus one nested level (50 parents), 100KB.
-  async page(id: string) {
-    z.string().uuid().parse(id);
+  // One page as plain text: up to 1,000 top-level blocks plus one nested level (50 parents), 100KB, stopping at `deadline`.
+  async page(id: string, deadline = Infinity) {
+    z.guid().parse(id);
     const page = await this.request(`/v1/pages/${id}`, pageSchema);
     if (page.archived || page.in_trash) throw new Error("Notion page is archived");
     const title = Object.values(page.properties).map((p) => p.type === "title" ? text((p as { title?: unknown }).title) : "").join("").slice(0, 2000) || "Untitled";
@@ -103,6 +104,7 @@ export class Notion {
     const children = async (parent: string, depth: number) => {
       let cursor: string | null = null;
       for (let pageNo = 0; pageNo < (depth ? 1 : 10) && !truncated; pageNo++) {
+        if (Date.now() > deadline) { truncated = true; return; }
         const result: z.infer<typeof blockPage> = await this.request(`/v1/blocks/${parent}/children?page_size=100${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ""}`, blockPage);
         for (const b of result.results) {
           push(blockLine(b, depth));

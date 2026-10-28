@@ -94,7 +94,7 @@ test("GitHub keeps exactly one summary comment, edited in place across runs, ret
   assert.equal(first.id, 201);
   assert.deepEqual([reviewPosts, summaryPosts, summaryEdits], [1, 1, 0]);
   const mine = () => issueComments.filter((c) => c.user.login === "openreview[bot]");
-  assert.match(mine()[0].body, /Run one summary[\s\S]*\*\*Last reviewed commit:\*\* \[`aaaaaaa`\]\(https:\/\/github\.com\/o\/r\/commit\/a{40}\)/);
+  assert.match(mine()[0].body, /Run one summary[\s\S]*<sub>Last reviewed commit: \[`aaaaaaa`\]\(https:\/\/github\.com\/o\/r\/commit\/a{40}\) · Reviewed by OpenReview<\/sub>/);
   assert.match(posted!.comments[0].body, /openreview-finding/);
   assert.match(reviews[0].body, /OpenReview posted 1 inline finding on `aaaaaaa`/);
   // Retrying the same run republishes nothing.

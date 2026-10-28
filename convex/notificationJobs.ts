@@ -36,7 +36,7 @@ async function deliver(ctx: ActionCtx, organizationId: Id<"organizations">, key:
 }
 
 // Fan-out for a completed review: each (event, target) is delivered at most once.
-export const reviewCompleted = internalAction({ args: { reviewId: v.id("reviews") }, handler: async (ctx, a): Promise<Record<string, string>> => {
+export const reviewCompleted = internalAction({ args: { reviewId: v.id("reviews"), attempt: v.optional(v.number()) }, handler: async (ctx, a): Promise<Record<string, string>> => {
   const targets = await ctx.runQuery(internal.notifications.reviewTargets, { reviewId: a.reviewId });
   if (!targets) return {};
   const origin = appOrigin(), notice = { ...targets.notice, ...(origin ? { reviewUrl: `${origin}/dashboard/pulls/${a.reviewId}` } : {}) };
@@ -52,7 +52,33 @@ export const reviewCompleted = internalAction({ args: { reviewId: v.id("reviews"
     const key = `${event}:${a.reviewId}:email:${recipient.userId}`;
     outcome[key] = await deliver(ctx, targets.organizationId, key, "email", () => sendEmail({ to: recipient.email, ...emailReview(event, notice) }));
   }
+  // A failed send (Resend or Slack rate limit, a brief outage) is tried again with backoff; sent ones are skipped.
+  // shortcut: each retry resends the failed ones at once, so a team far above the provider's per-second limit may
+  // still lose some after the last retry; pace the sends if that shows up.
+  const attempt = a.attempt ?? 0;
+  if (Object.values(outcome).includes("failed") && attempt < 5) await ctx.scheduler.runAfter(30000 * 2 ** attempt, internal.notificationJobs.reviewCompleted, { reviewId: a.reviewId, attempt: attempt + 1 });
   return outcome;
+} });
+
+// Monthly usage alert (80% / 100%): convex/billing.ts records the threshold first, so this runs once per threshold per period.
+export const usageAlert = internalAction({ args: { usageId: v.id("billingUsage"), threshold: v.number() }, handler: async (ctx, a): Promise<Record<string, string>> => {
+  const alert = await ctx.runQuery(internal.notifications.usageAlertTargets, { ...a, origin: appOrigin() });
+  const outcome: Record<string, string> = {};
+  for (const recipient of alert?.recipients ?? []) {
+    const key = `usage.${a.threshold}:${a.usageId}:email:${recipient.userId}`;
+    outcome[key] = await deliver(ctx, alert!.organizationId, key, "email", () => sendEmail({ to: recipient.email, subject: alert!.subject, text: alert!.text }));
+  }
+  return outcome;
+} });
+
+// "Ask an admin": one email to each owner and admin with a verified address, once per requester per day.
+export const upgradeRequest = internalAction({ args: { organizationId: v.id("organizations"), userId: v.id("users") }, handler: async (ctx, a): Promise<void> => {
+  const target = await ctx.runQuery(internal.notifications.upgradeRequestTargets, a), origin = appOrigin(), day = new Date().toISOString().slice(0, 10);
+  for (const recipient of target?.recipients ?? []) await deliver(ctx, a.organizationId, `upgrade-request:${a.userId}:${day}:email:${recipient.userId}`, "email", () => sendEmail({ to: recipient.email, subject: `${target!.login} asked to upgrade ${target!.workspace} on OpenReview`, text: `${target!.login} reached this month's plan limit in ${target!.workspace} and asked a workspace admin to upgrade.${origin ? `\n\nPlans and usage: ${origin}/dashboard/organization/billing` : ""}` }));
+} });
+export const joinRequest = internalAction({ args: { requestId: v.id("joinRequests") }, handler: async (ctx, a): Promise<void> => {
+  const target = await ctx.runQuery(internal.notifications.joinRequestTargets, a), origin = appOrigin();
+  for (const recipient of target?.recipients ?? []) await deliver(ctx, target!.organizationId, `join-request:${a.requestId}:email:${recipient.userId}`, "email", () => sendEmail({ to: recipient.email, subject: `@${target!.login} asked to join ${target!.team} in ${target!.workspace} on OpenReview`, text: `@${target!.login} asked to join the ${target!.team} team in ${target!.workspace}. Approving adds them to ${target!.workspace} as a Member, which uses a seat.${origin ? `\n\nApprove or decline in People (switch to ${target!.workspace} first if it isn't your current organization): ${origin}/dashboard/organization/people` : ""}` }));
 } });
 
 // Email verification: a random token (only its hash is stored) mailed as a one-hour link.

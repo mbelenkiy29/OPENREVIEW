@@ -2,6 +2,7 @@ import {changeMetadataSchema,catalogPageSize,numberedPage,validateChangePage,typ
 import { fixHandoffLink } from "./fix-command";
 import { reviewLinks } from "./review-summary";
 import { z } from "zod";
+import { isoTimestamp } from "./iso-timestamp";
 import { repositorySourceUrl } from "./source-url";
 import type { Finding, SourceFile } from "./engine/types";
 import { findingComment, summaryMarker, type Github } from "./github";
@@ -10,7 +11,7 @@ import { scmFetch, type ScmNetwork, type TransportDeps } from "./scm-transport";
 type ExternalId = string | number;
 type GithubChange = Awaited<ReturnType<Github["pullRequest"]>>;
 type WithId<T> = Omit<T,"id"> & {id:ExternalId};
-export type ScmChange = Omit<GithubChange,"comments"|"reviews"> & {revisionKey?:string;authorExternalId?:string;comments:WithId<GithubChange["comments"][number]>[];reviews:WithId<GithubChange["reviews"][number]>[]};
+export type ScmChange = Omit<GithubChange,"comments"|"reviews"|"labels"> & {labels?:string[];revisionKey?:string;authorExternalId?:string;comments:WithId<GithubChange["comments"][number]>[];reviews:WithId<GithubChange["reviews"][number]>[]};
 type GithubApprovalSnapshot=Awaited<ReturnType<Github["approvalSnapshot"]>>;
 export type ScmApprovalSnapshot = Omit<GithubApprovalSnapshot, "pr"|"reviews"> & {pr:ScmChange;reviews:WithId<GithubApprovalSnapshot["reviews"][number]>[]};
 export type Scm = Pick<Github,"tree"|"blob"|"branches"|"sourceUrl"> & {
@@ -32,19 +33,19 @@ export type Scm = Pick<Github,"tree"|"blob"|"branches"|"sourceUrl"> & {
   startCheckRun?(repository:string,sha:string,externalId:string,detailsUrl?:string):Promise<number|null>;
   reactions?(repository:string,commentIds:number[]):Promise<{commentId:string;user:string;reaction:"+1"|"-1";createdAt:number}[]>;
   mergedReviewComments?(repository:string,mergedAfter:number,maxPulls?:number):Promise<{comments:{body:string;path?:string;author:string;url:string;prNumber:number}[];cursor:number}>;
-  openFixPullRequest?(repository:string,number:number,fix:{branch:string;expectedHead:string;path:string;blobSha:string;content:string;title:string;body:string;message:string}):Promise<{url:string;reused:boolean}|{skipped:string}>;
+  openFixPullRequest?(repository:string,number:number,fix:{branch:string;expectedHead:string;files:{path:string;content:string;mode:string}[];title:string;body:string;message:string}):Promise<{url:string;reused:boolean}|{skipped:string}>;
   // Azure DevOps pull request statuses (other providers use check runs).
   reportStatus?(repository:string,number:number,state:"pending"|"succeeded"|"failed"|"notApplicable"|"error",description:string,targetUrl?:string):Promise<void>;
   // GitHub comment reactions: 👀 when a request is picked up, 👍 when it is done or acknowledged.
-  react?(repository:string,commentId:number,inline:boolean,content:"eyes"|"+1"):Promise<void>;
+  react?(repository:string,commentId:number,inline:boolean,content:"eyes"|"+1"|"confused"):Promise<void>;
   completeCheckRun?(repository:string,id:number,result:{conclusion:"success"|"failure"|"neutral"|"cancelled";title:string;summary:string;detailsUrl?:string}):Promise<void>;
 };
 const note=z.object({id:z.number(),body:z.string(),author:z.object({username:z.string()}),position:z.object({new_path:z.string(),new_line:z.number().nullable(),head_sha:z.string().optional()}).nullish()});
-const prSchema=z.object({iid:z.number(),title:z.string(),description:z.string().nullable(),draft:z.boolean(),state:z.string(),web_url:z.string(),author:z.object({id:z.number().int().positive().optional(),username:z.string()}),source_branch:z.string(),target_branch:z.string(),diff_refs:z.object({base_sha:z.string(),head_sha:z.string(),start_sha:z.string()})});
+const prSchema=z.object({iid:z.number(),title:z.string(),description:z.string().nullable(),draft:z.boolean(),state:z.string(),web_url:z.string(),author:z.object({id:z.number().int().positive().optional(),username:z.string()}),source_branch:z.string(),target_branch:z.string(),diff_refs:z.object({base_sha:z.string(),head_sha:z.string(),start_sha:z.string()}),labels:z.array(z.string()).optional()});
 const approvalUser=z.object({id:z.number().int().positive(),username:z.string().min(1)});
-const approvalState=z.object({approved_by:z.array(z.object({user:approvalUser,approved_at:z.string().datetime({offset:true}).optional()})),user_can_approve:z.boolean().optional()});
+const approvalState=z.object({approved_by:z.array(z.object({user:approvalUser,approved_at:isoTimestamp.optional()})),user_can_approve:z.boolean().optional()});
 const approvalNote=z.object({id:z.number().int().positive(),body:z.string(),author:approvalUser,system:z.boolean(),noteable_iid:z.number().int().positive(),noteable_type:z.literal("MergeRequest")});
-const approvalReceipt=z.object({head:z.string().regex(/^[a-f0-9]{40}$/),revisionKey:z.string().regex(/^[a-f0-9]{40}:[a-f0-9]{40}$/),approvedAt:z.string().datetime({offset:true}),botId:z.number().int().positive()}).strict();
+const approvalReceipt=z.object({head:z.string().regex(/^[a-f0-9]{40}$/),revisionKey:z.string().regex(/^[a-f0-9]{40}:[a-f0-9]{40}$/),approvedAt:isoTimestamp,botId:z.number().int().positive()}).strict();
 const approvalMarker=/^<!-- openreview:approval:[a-zA-Z0-9_-]+ -->$/;
 const receiptTitle="OpenReview native approval receipt. No merge was performed.";
 function receiptBody(receipt:z.infer<typeof approvalReceipt>,marker:string){return receiptTitle+"\n\n<!-- openreview-gitlab-approval:"+JSON.stringify(receipt)+" -->\n\n"+marker;}
@@ -174,7 +175,16 @@ export class Gitlab implements Scm {
   return bytes;
  }
  async tree(repo:string,sha:string){return (await this.paginate(this.prefix(repo)+"/repository/tree?recursive=true&ref="+encodeURIComponent(sha),z.object({id:z.string(),path:z.string(),type:z.string()}))).filter(f=>f.type==="blob").map(f=>({path:f.path,sha:f.id,type:f.type}));}
- async blob(repo:string,path:string,sha:string):Promise<SourceFile>{const file=await this.request(this.prefix(repo)+"/repository/blobs/"+encodeURIComponent(sha),z.object({content:z.string(),encoding:z.literal("base64"),size:z.number()}));if(file.size>200000)return {path,sha,size:file.size,content:""};return {path,sha,content:Buffer.from(file.content,"base64").toString("utf8")};}
+ async blob(repo:string,path:string,sha:string):Promise<SourceFile>{
+  const endpoint=this.prefix(repo)+"/repository/blobs/"+encodeURIComponent(sha)+"/raw";
+  const response=await this.send(this.api+"/api/v4"+endpoint,{headers:{"PRIVATE-TOKEN":this.token},signal:AbortSignal.timeout(60000)});
+  if(!response.ok){await response.body?.cancel();throw new GitlabError(response.status,endpoint);}
+  const reader=response.body?.getReader();if(!reader)throw new Error("GitLab source body missing");
+  // Raw bytes read only up to the 200 KB review limit, so a huge file is never downloaded in full.
+  const chunks:Uint8Array[]=[];let size=0;
+  try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>200000)return {path,sha,size:Number(response.headers.get("content-length"))||size,content:""};chunks.push(value);}}finally{await reader.cancel();}
+  return {path,sha,content:Buffer.concat(chunks).toString("utf8")};
+ }
  async branches(repo:string){const branches=await this.paginate(this.prefix(repo)+"/repository/branches",z.object({name:z.string(),protected:z.boolean(),commit:z.object({id:z.string()})}));return {branches:branches.slice(0,200).map(b=>({name:b.name,sha:b.commit.id,protected:b.protected})),limited:branches.length>200};}
  async changeMetadata(repo:string,number:number):Promise<ChangeMetadata>{
   const pr=await this.request(this.prefix(repo)+"/merge_requests/"+number,prSchema);
@@ -197,7 +207,7 @@ export class Gitlab implements Scm {
   if(files.some(f=>f.too_large||f.collapsed))throw new Error("GitLab omitted diffs; complete review unavailable");
   const latest=await this.request(prefix,prSchema);
   if(latest.state!==pr.state||latest.diff_refs.head_sha!==pr.diff_refs.head_sha||latest.diff_refs.base_sha!==pr.diff_refs.base_sha||latest.diff_refs.start_sha!==pr.diff_refs.start_sha)throw new Error("GitLab revision changed during ingestion");
-  return {number:pr.iid,title:pr.title,body:pr.description,draft:pr.draft,state:pr.state==="opened"?"open":"closed",html_url:pr.web_url,user:{login:pr.author.username},...(pr.author.id?{authorExternalId:String(pr.author.id)}:{}),head:{sha:pr.diff_refs.head_sha,ref:pr.source_branch},base:{sha:pr.diff_refs.base_sha,ref:pr.target_branch},revisionKey:pr.diff_refs.base_sha+":"+pr.diff_refs.start_sha,diff:files.map(f=>({path:f.new_path,previousPath:f.renamed_file?f.old_path:undefined,status:f.deleted_file?"removed":f.new_file?"added":f.renamed_file?"renamed":"modified",patch:f.diff})),comments:notes.map(n=>({id:n.id,body:n.body,path:n.position?.new_path??"",line:n.position?.new_line??null,user:{login:n.author.username}})),reviews:[],commits:commits.map(c=>({sha:c.id})),checks:pipelines.filter(p=>p.sha===pr.diff_refs.head_sha).map(p=>({name:"GitLab pipeline #"+p.id,status:["success","failed","canceled","skipped"].includes(p.status)?"completed":"in_progress",conclusion:p.status==="success"?"success":p.status}))};
+  return {number:pr.iid,title:pr.title,body:pr.description,...(pr.labels?.length?{labels:pr.labels}:{}),draft:pr.draft,state:pr.state==="opened"?"open":"closed",html_url:pr.web_url,user:{login:pr.author.username},...(pr.author.id?{authorExternalId:String(pr.author.id)}:{}),head:{sha:pr.diff_refs.head_sha,ref:pr.source_branch},base:{sha:pr.diff_refs.base_sha,ref:pr.target_branch},revisionKey:pr.diff_refs.base_sha+":"+pr.diff_refs.start_sha,diff:files.map(f=>({path:f.new_path,previousPath:f.renamed_file?f.old_path:undefined,status:f.deleted_file?"removed":f.new_file?"added":f.renamed_file?"renamed":"modified",patch:f.diff})),comments:notes.map(n=>({id:n.id,body:n.body,path:n.position?.new_path??"",line:n.position?.new_line??null,user:{login:n.author.username}})),reviews:[],commits:commits.map(c=>({sha:c.id})),checks:pipelines.filter(p=>p.sha===pr.diff_refs.head_sha).map(p=>({name:"GitLab pipeline #"+p.id,status:["success","failed","canceled","skipped"].includes(p.status)?"completed":"in_progress",conclusion:p.status==="success"?"success":p.status}))};
  }
  async publish(repo:string,number:number,sha:string,summary:string,findings:Finding[],marker:string,style="detailed",revisionKey?:string,unresolvedCount=findings.length,options:import("./github").PublishOptions={}){
   const prefix=this.prefix(repo)+"/merge_requests/"+number;

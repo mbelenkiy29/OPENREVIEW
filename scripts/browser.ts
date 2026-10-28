@@ -4,6 +4,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { SignJWT } from "jose";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
+import { createHmac } from "node:crypto";
 import { api } from "../convex/_generated/api";
 
 loadEnvFile(".env.local");
@@ -24,6 +25,21 @@ const token = await new SignJWT({})
   .setAudience("openreview")
   .setExpirationTime("1h")
   .sign(new TextEncoder().encode(process.env.SESSION_SECRET!));
+// Billing deployments: a new workspace pays per seat, so this stands in for Stripe confirming a Checkout trial,
+// signed like Stripe's webhook, instead of opening Checkout.
+async function confirmTrial(organizationId: string) {
+  const created = Math.floor(Date.now() / 1000), customer = `cus_e2e_${organizationId}`, subscription = `sub_e2e_${organizationId}`;
+  const events = [
+    { type: "checkout.session.completed", object: { mode: "subscription", client_reference_id: organizationId, customer, subscription } },
+    { type: "customer.subscription.updated", object: { id: subscription, customer, status: "trialing", metadata: { organizationId }, items: { data: [{ id: `si_e2e_${organizationId}`, quantity: 1, price: { id: process.env.STRIPE_SEAT_PRICE_ID } }] } } },
+  ];
+  for (const [i, { type, object }] of events.entries()) {
+    const body = JSON.stringify({ id: `evt_e2e_${organizationId}_${i}`, type, created, data: { object } });
+    const signature = createHmac("sha256", process.env.STRIPE_WEBHOOK_SECRET!).update(`${created}.${body}`).digest("hex");
+    const response = await fetch(`${process.env.NEXT_PUBLIC_CONVEX_SITE_URL}/stripe/webhook`, { method: "POST", headers: { "content-type": "application/json", "stripe-signature": `t=${created},v1=${signature}` }, body });
+    assert.equal(response.status, 200, `Stripe webhook answered ${response.status}`);
+  }
+}
 const browser = await chromium.launch();
 const context = await browser.newContext({
   viewport: { width: 1365, height: 900 },
@@ -43,6 +59,18 @@ try {
   // The landing demos are interactive: the hero window switches sections, chat answers a sample
   // question with citations, and the summary demo re-reviews a pushed fix.
   const hero = page.getByRole("figure", { name: /dashboard for a sample workspace/ });
+  // The review's tabs are ARIA tabs: the hero opens on the diff, and arrow keys move between tabs.
+  const reviewTabs = hero.getByRole("tablist", { name: "Review sections" });
+  // data-indicator appears once the tabs have hydrated and measured themselves; clicks before that are lost.
+  await hero.locator('[role="tablist"][data-indicator]').waitFor();
+  assert.equal(await reviewTabs.getByRole("tab", { name: "Code" }).getAttribute("aria-selected"), "true", "The hero review does not open on its Code tab");
+  // Keyboard, not a pointer click: the landing's scroll-linked hero motion can move the tab under a
+  // click that first scrolls it into view.
+  await reviewTabs.getByRole("tab", { name: "Overview" }).focus();
+  await page.keyboard.press("Enter");
+  await hero.getByRole("tabpanel", { name: "Overview" }).getByText("Needs changes", { exact: true }).waitFor();
+  await page.keyboard.press("ArrowRight");
+  assert.equal(await reviewTabs.getByRole("tab", { name: /^Findings/ }).getAttribute("aria-selected"), "true", "Arrow keys do not move between review tabs");
   await hero.getByRole("button", { name: "Analytics", exact: true }).click();
   await hero.getByLabel("Repository").selectOption("acme/api");
   await hero.getByText("$2.10").waitFor();
@@ -52,20 +80,48 @@ try {
   const summaryDemo = page.getByRole("figure", { name: /re-reviews a newly pushed fix/ });
   await summaryDemo.getByRole("button", { name: "Re-review current PR" }).click();
   await summaryDemo.getByText("0 findings · Score 5/5").first().waitFor();
+  // Landing motion (app/landing/motion.tsx), all on one running page so teardown is tested too: an
+  // in-page link glides to its section and scrolling reveals everything; turning on reduced motion
+  // mid-page removes the smoother, pin and hidden states without losing the reader's place; and a
+  // client-side link to the docs leaves no smoother or page height behind.
+  await page.goto(url);
+  await page.locator(".landing[data-motion='on']").waitFor({ state: "attached" });
+  await page.getByRole("navigation", { name: "Site" }).getByRole("link", { name: "How it works" }).click();
+  await page.waitForFunction(() => { const r = document.getElementById("how-heading")!.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
+  await page.mouse.move(600, 450);
+  for (let i = 0; i < 120 && await page.evaluate(() => scrollY + innerHeight < document.documentElement.scrollHeight - 2); i++) await page.mouse.wheel(0, 600);
+  await page.waitForFunction(() => [...document.querySelectorAll("[data-reveal], [data-stagger] > *")].every((e) => getComputedStyle(e).opacity === "1"));
+  const ctaTop = () => page.evaluate(() => document.getElementById("cta-heading")!.getBoundingClientRect().top);
+  await page.waitForTimeout(1500); // smoothing settles and the reader's place is noted
+  const place = await ctaTop();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.locator(".landing[data-motion='reduced']").waitFor({ state: "attached" });
+  assert.equal(await page.locator("#smooth-content").evaluate((e) => getComputedStyle(e).transform), "none", "Landing scrolls smoothly under reduced motion");
+  assert.equal(await page.locator(".pin-spacer").count(), 0, "Landing pins a section under reduced motion");
+  assert.equal(await page.evaluate(() => document.body.style.height), "", "Landing keeps the smoother's page height under reduced motion");
+  assert.equal(await page.locator(".hero h1 .line > span").first().evaluate((e) => getComputedStyle(e).animationName), "none", "Landing hero animates under reduced motion");
+  assert.ok(Math.abs(await ctaTop() - place) < 60, "Landing loses the reader's place when reduced motion turns on");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.locator(".landing[data-motion='on'].is-smooth").waitFor({ state: "attached" });
+  await page.getByRole("contentinfo").getByRole("link", { name: "Quickstart" }).click();
+  await page.getByRole("heading", { name: "Quickstart", level: 1 }).first().waitFor();
+  assert.equal(await page.evaluate(() => document.body.getAttribute("style") ?? ""), "", "Landing leaves smoother styles on the docs");
+  await page.mouse.wheel(0, 400);
+  await page.waitForFunction(() => scrollY > 0);
   for (const [path, heading] of [["/docs/quickstart", "Quickstart"], ["/docs/api", "Public API"], ["/docs/configuration", "Repository configuration as code"], ["/changelog", "Changelog"]]) {
     await page.goto(url + path);
     await page.getByRole("heading", { name: heading, level: 1 }).first().waitFor();
   }
   // Sign in and sign up: the same choices, linked to each other.
   await page.goto(url + "/login?error=link");
-  await page.getByRole("heading", { name: "Sign in to OpenReview", level: 1 }).waitFor();
-  await page.getByRole("link", { name: "Continue with GitHub" }).waitFor();
+  await page.getByRole("heading", { name: "Log into your account", level: 1 }).waitFor();
+  await page.getByRole("link", { name: "Sign in with GitHub" }).waitFor();
   await page.getByRole("alert").filter({ hasText: "expired or already used" }).waitFor();
   await page.screenshot({ path: "output/playwright/login.png", fullPage: true, caret: "initial" });
-  await page.getByRole("link", { name: "Create an account" }).click();
+  await page.getByRole("link", { name: "Sign up", exact: true }).click();
   await page.waitForURL("**/signup");
-  await page.getByRole("heading", { name: "Create your account", level: 1 }).waitFor();
-  await page.getByRole("link", { name: "Continue with GitHub" }).waitFor();
+  await page.getByRole("heading", { name: "Create an account", level: 1 }).waitFor();
+  await page.getByRole("link", { name: "Sign up with GitHub" }).waitFor();
   await page.goto(url + "/?error=signin");
   await page.waitForURL("**/login?error=signin");
   assert.equal((await page.request.get(`${url}/docs/openapi.yaml`)).status(), 200);
@@ -89,12 +145,18 @@ try {
       .getByLabel("Workspace name")
       .fill("Browser verification workspace");
     await page.getByRole("button", { name: "Create workspace" }).click();
-    // A new workspace continues into guided setup; this branch only runs on a fresh database.
-    await page.waitForURL("**/dashboard/onboarding/connect");
-    await page.getByRole("heading", { name: "Connect your code", level: 1 }).waitFor();
+    // A new workspace continues into guided setup, at the plan step where billing is on: Starter or Pro, no Free.
+    // This branch only runs on a fresh database.
+    await page.waitForURL(/\/dashboard\/onboarding\/(plan|connect)$/);
+    if (page.url().endsWith("/plan")) {
+      await page.getByRole("heading", { name: "Choose your plan", level: 1 }).waitFor();
+      await page.getByRole("button", { name: /Choose Starter/ }).waitFor();
+      assert.equal(await page.getByRole("heading", { name: "Free" }).count(), 0, "A new workspace offers Free");
+    } else await page.getByRole("heading", { name: "Connect your code", level: 1 }).waitFor();
   }
   const me = await backend.query(api.users.me, { token });
   const organizationId = me.organizations[0]._id!;
+  if (me.organizations[0].planMissing) await confirmTrial(organizationId);
   await backend.mutation(api.repositories.connect, {
     token,
     secret: process.env.SERVICE_SECRET!,
@@ -111,8 +173,9 @@ try {
     ],
   });
   await page.goto(`${url}/dashboard/repositories`);
+  // Repository names open their pull requests dialog.
   await page
-    .getByRole("heading", { name: "test-fixture/context-example", exact: true })
+    .getByRole("button", { name: "test-fixture/context-example", exact: true })
     .waitFor();
   // Guided setup: every step with the keyboard shortcut, live previews, reduced motion, 390 px, finish.
   await page.goto(`${url}/dashboard/onboarding/connect`);
@@ -152,10 +215,10 @@ try {
   await page.waitForURL("**/dashboard/onboarding/done");
   const billing = (await backend.query(api.billing.status, { token, organizationId })).enabled;
   if (billing) {
-    // A workspace from before plans were required keeps the optional plan step (trial without a card).
+    // Once the workspace has a plan (or keeps Free from before), the plan step stays open with Continue.
     await page.goto(`${url}/dashboard/onboarding/plan`);
     await page.getByRole("heading", { name: "Choose your plan", level: 1 }).waitFor();
-    await page.getByRole("button", { name: /Continue on the trial/ }).click();
+    await page.getByRole("button", { name: /^Continue/ }).click();
     await page.waitForURL("**/dashboard/onboarding/connect");
   }
   await page.setViewportSize({ width: 390, height: 844 });
@@ -170,8 +233,8 @@ try {
   await page.getByRole("button", { name: /^Go to dashboard/ }).click();
   await page.waitForURL("**/dashboard/analytics");
   assert.ok((await backend.query(api.onboarding.status, { token, organizationId })).onboarding?.completedAt, "Setup completion was not recorded");
-  // A new workspace on a billing deployment must choose a plan first: every dashboard page leads to the
-  // plan step, which only offers Checkout (card required). Then switch back to the fixture workspace.
+  // A new workspace has no Free plan, so it must choose a paid plan first: every dashboard page leads to the
+  // plan step, which offers only Checkout. Then switch back to the fixture workspace.
   if (billing) {
     const required = await backend.mutation(api.users.createOrganization, { token, name: "Plan gate check" });
     const asWorkspace = (id: string) => context.addCookies([{ name: "openreview_workspace", value: id, url, sameSite: "Lax" }]);
@@ -179,16 +242,41 @@ try {
     await page.goto(`${url}/dashboard/analytics`);
     await page.waitForURL("**/dashboard/onboarding/plan");
     await page.getByRole("heading", { name: "Choose your plan", level: 1 }).waitFor();
-    await page.getByRole("button", { name: /Start free trial/ }).waitFor();
-    assert.equal(await page.getByRole("button", { name: /Continue on the trial/ }).count(), 0, "A required plan can be skipped");
+    await page.getByRole("button", { name: /Choose Starter/ }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Free" }).count(), 0, "A new workspace offers Free");
     await page.goto(`${url}/dashboard/onboarding/connect`);
     await page.waitForURL("**/dashboard/onboarding/plan");
     await asWorkspace(organizationId);
   }
+  // An owner whose setup isn't finished is prompted on every visit: /dashboard and the logo lead to setup, every page
+  // carries the setup bar, and setup only offers Back to dashboard, never a way to skip it. This owner's workspace
+  // (on a trial where billing is on) never finishes setup, so the check holds on a reused database too.
+  const unfinishedId = await backend.mutation(api.users.login, { secret: process.env.SERVICE_SECRET!, githubId: -102, login: "openreview-setup-fixture", avatar: "" });
+  const unfinishedToken = await new SignJWT({}).setProtectedHeader({ alg: "HS256" }).setSubject(unfinishedId).setIssuer("openreview").setAudience("openreview").setExpirationTime("1h").sign(new TextEncoder().encode(process.env.SESSION_SECRET!));
+  if (!(await backend.query(api.users.me, { token: unfinishedToken })).organizations.length) {
+    const created = await backend.mutation(api.users.createOrganization, { token: unfinishedToken, name: "Unfinished setup" });
+    if (billing) await confirmTrial(created);
+  }
+  const unfinished = await browser.newContext({ viewport: { width: 1365, height: 900 } });
+  await unfinished.addCookies([{ name: "openreview_session", value: unfinishedToken, url, httpOnly: true, sameSite: "Lax" }]);
+  const unfinishedPage = await unfinished.newPage();
+  await unfinishedPage.goto(`${url}/dashboard`);
+  await unfinishedPage.waitForURL("**/dashboard/onboarding/connect");
+  assert.equal(await unfinishedPage.getByRole("button", { name: "Exit setup" }).count(), 0, "Setup can be skipped");
+  await unfinishedPage.getByRole("link", { name: "Back to dashboard" }).click();
+  await unfinishedPage.waitForURL("**/dashboard/analytics");
+  for (const path of ["/dashboard/analytics", "/dashboard/organization/people"]) {
+    await unfinishedPage.goto(url + path);
+    await unfinishedPage.getByRole("region", { name: "Workspace setup" }).getByRole("link", { name: "Resume setup" }).waitFor();
+  }
+  assert.equal(await unfinishedPage.getByRole("link", { name: "OpenReview home" }).getAttribute("href"), "/dashboard");
+  await unfinishedPage.screenshot({ path: "output/playwright/setup-unfinished.png", caret: "initial" });
+  await unfinished.close();
   // Fix agents: settings list the cloud agents and what each needs; the link page answers without a raw error.
-  await page.goto(`${url}/dashboard/settings/agents`);
+  await page.goto(`${url}/dashboard/account/review`);
   await page.getByRole("heading", { name: "Personal fix agent" }).waitFor();
   await page.getByRole("heading", { name: "Cloud agents" }).waitFor();
+  await page.getByText("Local bridge (Fix on your machine)", { exact: true }).waitFor();
   for (const mention of ["@claude", "@codex", "@copilot", "@cursor"]) await page.getByText(mention, { exact: true }).waitFor();
   const link = await page.request.get(`${url}/dashboard/github-link?organization=${organizationId}&returnTo=%2Fdashboard%2Frepositories`, { maxRedirects: 0 });
   assert.ok(link.status() === 200 || (link.status() === 307 && /purpose=github-install/.test(link.headers().location ?? "")), `Link page answered ${link.status()}`);
@@ -213,40 +301,86 @@ try {
     await page.waitForURL((u) => u.pathname.startsWith(href));
     await settled();
   };
+  // With analytics configured, the consent banner (bottom left) covers the lowest sidebar rows; a visitor
+  // answers it once, so the walk declines it first.
+  // Personal Settings (where the agents check ended) has no tabs, so the walk starts from Analytics.
+  await page.goto(`${url}/dashboard/analytics`);
+  await settled();
+  const consent = page.getByRole("region", { name: "Analytics cookie" });
+  if (await consent.count()) await consent.getByRole("button", { name: "Decline" }).click();
+  // The app chrome stays mounted while pages change: the Main navigation element must survive every
+  // click, the loading skeleton must never replace the page, and the tab bar must end under the tab.
+  await page.evaluate(() => {
+    const w = window as unknown as { __nav: Element | null; __flashed: boolean };
+    w.__nav = document.querySelector('nav[aria-label="Main navigation"]');
+    w.__flashed = false;
+    new MutationObserver(() => { if (document.querySelector('[aria-label="Loading dashboard"]')) w.__flashed = true; }).observe(document.body, { childList: true, subtree: true });
+  });
+  const stayed = async (label: string) => {
+    const { same, flashed } = await page.evaluate(() => {
+      const w = window as unknown as { __nav: Element | null; __flashed: boolean };
+      return { same: w.__nav !== null && w.__nav === document.querySelector('nav[aria-label="Main navigation"]'), flashed: w.__flashed };
+    });
+    assert.ok(same, `${label}: the main navigation was mounted again`);
+    assert.ok(!flashed, `${label}: the loading skeleton replaced the page`);
+    await page.waitForFunction(() => {
+      const nav = document.querySelector('nav[aria-label="Main navigation"]'), bar = nav?.querySelector<HTMLElement>(".tab-indicator"), tab = nav?.querySelector('[aria-current="page"]');
+      // Chat opens from the header, so no tab is current and the bar hides.
+      if (bar && !tab) return bar.hidden;
+      if (!bar || !tab) return false;
+      const a = bar.getBoundingClientRect(), b = tab.getBoundingClientRect();
+      return Math.abs(a.left - b.left) < 1 && Math.abs(a.width - b.width) < 1 && Math.abs(a.bottom - b.bottom) < 1;
+    });
+  };
   let dashboardPages = 0;
-  for (const name of [
-    "Analytics",
-    "Chat",
-    "Memory",
-    "Pull Requests",
-    "Settings",
-  ]) {
-    await visit(
-      page
-        .getByRole("navigation", { name: "Main navigation" })
-        .getByRole("link", { name, exact: true }),
-    );
+  // Greptile's eight tabs; settings-style tabs list their pages in a sub-navigation, Custom Context its views.
+  const subnavs: Record<string, string> = { "Code Review Settings": "Code Review Settings", "Custom Context": "Context views", "Organization Settings": "Organization Settings" };
+  for (const name of ["Analytics", "Repositories", "Code Review Settings", "Custom Context", "Pull Requests", "Code Providers", "Integrations", "Organization Settings"]) {
+    await visit(page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name, exact: true }));
     dashboardPages++;
-    const secondary = page.locator("aside.secondary-nav nav").first();
-    if (!(await secondary.count())) continue;
-    for (const label of await secondary.getByRole("link").allTextContents()) {
-      const link = secondary.getByRole("link", { name: label, exact: true });
+    await stayed(name);
+    if (!subnavs[name]) continue;
+    const pages = page.getByRole("navigation", { name: subnavs[name] }).first().locator('a[href^="/dashboard/"]');
+    for (const label of await pages.allTextContents()) {
+      const link = page.getByRole("navigation", { name: subnavs[name] }).first().getByRole("link", { name: label, exact: true });
       await visit(link);
-      assert.equal(
-        await link.getAttribute("aria-current"),
-        "page",
-        `${label} is not marked as the current page`,
-      );
+      assert.equal(await link.getAttribute("aria-current"), "page", `${label} is not marked as the current page`);
+      await stayed(label);
       dashboardPages++;
     }
+  }
+  // Bugs Caught opens from Analytics; Chat from the header.
+  await visit(page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Analytics", exact: true }));
+  await visit(page.getByRole("link", { name: "View all bugs" }).first());
+  await page.getByRole("button", { name: "Filter findings" }).waitFor();
+  await stayed("Bugs Caught");
+  await visit(page.getByRole("link", { name: "Chat", exact: true }).first());
+  await stayed("Chat");
+  dashboardPages += 2;
+  // Personal Settings, from the account menu, swaps the tabs for ‹ Back.
+  await page.locator(".profile > summary").click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.waitForURL("**/dashboard/account");
+  await settled();
+  assert.equal(await page.getByRole("navigation", { name: "Main navigation" }).count(), 0, "Personal Settings still shows the tabs");
+  for (const label of await page.getByRole("navigation", { name: "Personal Settings" }).locator("a").allTextContents()) {
+    await visit(page.getByRole("navigation", { name: "Personal Settings" }).getByRole("link", { name: label, exact: true }));
+    dashboardPages++;
+  }
+  await page.getByRole("link", { name: "Back", exact: true }).click();
+  await page.waitForURL("**/dashboard/chat");
+  // Findings moved to Analytics → Bugs Caught; old links still land there with their filters.
+  for (const old of ["/dashboard/pulls/findings", "/dashboard/findings"]) {
+    await page.goto(`${url}${old}?severity=high`);
+    await page.waitForURL((u) => u.pathname === "/dashboard/analytics/findings" && u.searchParams.get("severity") === "high");
   }
   const [repository] = await backend.query(api.repositories.list, {
     token,
     organizationId,
   });
-  await page.goto(`${url}/dashboard/settings?repository=${repository._id}`);
+  await page.goto(`${url}/dashboard/code-review?repository=${repository._id}`);
   await page.getByLabel("Minimum confidence", { exact: true }).fill("0.92");
-  await page.getByRole("button", { name: "Save review settings" }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
   await page.waitForTimeout(500);
   assert.equal(
     (
@@ -257,31 +391,26 @@ try {
     ).settings.minimumConfidence,
     0.92,
   );
-  await page.goto(`${url}/dashboard/rules`);
-  // Admins see the rule assistant; without a model run it has no suggestions to approve.
-  await page.getByRole("heading", { name: "Rule assistant" }).waitFor();
-  assert.equal(await page.getByRole("button", { name: "Draft rule" }).count(), 1);
-  await page
-    .getByLabel("Title", { exact: true })
-    .first()
-    .fill("Browser check membership");
-  await page
-    .getByLabel("Instructions", { exact: true })
-    .first()
-    .fill(
-      "All routes must validate organization membership before reading organization data.",
-    );
-  await page.getByRole("button", { name: "Create rule", exact: true }).click();
-  await page
-    .getByRole("heading", { name: /Browser check membership/ })
-    .last()
-    .waitFor();
+  // Code Review Settings lists the page's sections; a click scrolls to one and marks it.
+  await page.getByRole("navigation", { name: "Code Review Settings" }).getByRole("link", { name: "OpenReview Comments", exact: true }).click();
+  await page.waitForFunction(() => location.hash === "#review-categories" && document.querySelector('a[href="#review-categories"]')?.getAttribute("aria-current") === "location");
+  // Context is added in Greptile's stepped dialog (?add=1). Admins can have the rule assistant optimize the
+  // description; without a model run it has nothing to suggest.
+  await page.goto(`${url}/dashboard/rules?add=1`);
+  const addRule = page.getByRole("dialog", { name: "Add Context" });
+  // The dialog opens once the page hydrates.
+  await addRule.getByRole("button", { name: "Optimize" }).waitFor();
+  await addRule.getByLabel("Title", { exact: true }).fill("Browser check membership");
+  await addRule.getByLabel("Rule Description").fill("All routes must validate organization membership before reading organization data.");
+  await addRule.getByRole("button", { name: "Next" }).click();
+  await addRule.getByRole("button", { name: "Create Context" }).click();
+  await page.getByText("Browser check membership", { exact: true }).first().waitFor();
   await page.getByRole("link", { name: "Chat", exact: true }).first().click();
   await page.getByRole("heading", { name: "Chat", exact: true }).waitFor();
   await page.getByRole("link", { name: "New chat" }).waitFor();
   await page.getByRole("heading", { name: "No indexed repositories" }).waitFor();
   assert.equal((await page.request.get(`${url}/api/chat/abcdefghij/stream`)).status(), 404);
-  await page.goto(`${url}/dashboard/memory/preferences`);
+  await page.goto(`${url}/dashboard/context/learned`);
   await page.getByRole("heading", { name: "Learned team conventions" }).waitFor();
   await page.getByLabel("Convention status").selectOption("suggested");
   await page.getByLabel("Search memory").fill("pagination");
@@ -306,9 +435,13 @@ try {
     ),
     "Mobile page overflows horizontally",
   );
+  // Phones: the eight tabs stay at the top and scroll sideways inside their row.
+  const tabBar = await page.getByRole("navigation", { name: "Main navigation" }).boundingBox();
+  assert.ok(tabBar && tabBar.y < 120 && Math.abs(tabBar.width - 390) <= 1, `The phone tab row is out of place: ${JSON.stringify(tabBar)}`);
+  assert.ok(await page.getByRole("navigation", { name: "Main navigation" }).evaluate((nav) => nav.scrollWidth > nav.clientWidth), "The phone tab row does not scroll");
   // Dark theme at mobile and desktop widths: no overflow, no console errors.
   await page.emulateMedia({ colorScheme: "dark" });
-  for (const path of ["/", "/dashboard", "/dashboard/chat", "/dashboard/settings/billing", "/docs/quickstart"]) {
+  for (const path of ["/", "/dashboard", "/dashboard/chat", "/dashboard/organization/billing", "/docs/quickstart"]) {
     await page.goto(url + path);
     await settled();
     await page.screenshot({ path: `output/playwright/dark-mobile${path === "/" ? "-home" : path.replaceAll("/", "-")}.png`, fullPage: true, caret: "initial" });
@@ -320,7 +453,7 @@ try {
   await page.screenshot({ path: "output/playwright/dark-desktop.png", fullPage: true, caret: "initial" });
   assert.deepEqual(errors, [], `Browser errors: ${errors.join("; ")}`);
   console.log(
-    `Browser verification passed: landing (interactive demos), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px), repository selection, ${dashboardPages} dashboard pages (main and secondary navigation), persisted settings/rules, Memory page filters, Chat page, mobile layout and dark theme. GitHub OAuth and real indexing still require external credentials.`,
+    `Browser verification passed: landing (interactive demos, motion and reduced motion), docs, changelog, guided setup (all steps, previews, reduced motion, 390 px, and the prompt to finish it), repository selection, ${dashboardPages} dashboard pages (Greptile's eight tabs, their sub-navigation, Bugs Caught, Chat and Personal Settings, with the app chrome kept mounted and no loading flash), review tabs, Findings redirects, Code Review section links, persisted settings/context, learned preference filters, Chat page, the phone tab row, and dark theme. GitHub OAuth and real indexing still require external credentials.`,
   );
 } finally {
   await browser.close();

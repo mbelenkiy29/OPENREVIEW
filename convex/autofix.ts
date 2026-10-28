@@ -1,21 +1,22 @@
-import { internalMutation, internalQuery } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { audit } from "./auth";
-import { hasEntitlement } from "./billing";
+import { fixAllowance, hasEntitlement } from "./billing";
 import { effectiveSettings } from "./scopes";
-import { fixPullRequestOpened } from "./issueLifecycle";
 import { eligibleFixFinding } from "../src/fix-prompt";
 
-// Autofix (Pro, repository setting): when a review completes, fix pull requests open for its
-// critical and high findings without anyone asking. autofixJobs.run does the provider work.
+// Autofix (repository setting, plans with fix.pullRequests): when a review completes, OpenReview's fix
+// agent (fixPullRequestJobs.run) starts for its critical and high findings without anyone asking, for the
+// pull request's author. Each run counts toward the plan's monthly fix pull requests (fixAllowance).
 const severities = ["critical", "high"];
 // shortcut: fixed cap of 3 fix pull requests per review; make it a setting if users ask.
 const perReview = 3;
 
-/** Whether a completed review should start Autofix: GitHub App repositories with fix pull requests
- *  and Autofix on, on a plan that includes them, and at least one critical or high finding. */
+/** Whether a completed review should start Autofix: a GitHub App repository with fix pull requests and
+ *  Autofix on, a plan that includes them, and at least one open critical or high finding. */
 export async function autofixWanted(ctx: QueryCtx, review: Doc<"reviews">) {
   const repo = await ctx.db.get(review.repositoryId);
   if (!repo?.enabled || repo.connectionId || review.nativeP4) return false;
@@ -24,33 +25,34 @@ export async function autofixWanted(ctx: QueryCtx, review: Doc<"reviews">) {
   return (await ctx.db.query("findings").withIndex("by_review", (q) => q.eq("reviewId", review._id)).take(500)).some((f) => f.status === "open" && severities.includes(f.severity));
 }
 
-/** The review's findings to fix, re-checked when the job runs: still the latest completed review,
- *  fixable at its head, and no fix pull request on their issue yet. Critical first. */
-export const targets = internalQuery({
+/** Picks the findings again when it runs (still the latest completed review, fixable at its head, no fix
+ *  pull request on their issue yet; critical first) and starts one fix agent run for each. */
+export const start = internalMutation({
   args: { reviewId: v.id("reviews") },
-  handler: async (ctx, a) => {
+  handler: async (ctx, a): Promise<number> => {
     const review = await ctx.db.get(a.reviewId);
-    if (!review || review.status !== "completed" || !await autofixWanted(ctx, review)) return null;
+    if (!review || review.status !== "completed" || !await autofixWanted(ctx, review)) return 0;
     const repo = (await ctx.db.get(review.repositoryId))!;
+    const pr = await ctx.db.query("pullRequests").withIndex("by_repo_number", (q) => q.eq("repositoryId", repo._id).eq("number", review.prNumber)).unique();
+    if (!pr?.author) return 0;
     const latest = await ctx.db.query("reviews").withIndex("by_pr", (q) => q.eq("repositoryId", repo._id).eq("prNumber", review.prNumber)).order("desc").first();
     const minimumConfidence = (await effectiveSettings(ctx, repo)).minimumConfidence;
-    const findings: Doc<"findings">[] = [];
+    const targets: Doc<"findings">[] = [];
     for (const f of await ctx.db.query("findings").withIndex("by_review", (q) => q.eq("reviewId", review._id)).take(500)) {
       if (!severities.includes(f.severity) || !eligibleFixFinding(f, review, latest?._id, minimumConfidence)) continue;
       const issue = f.issueId ? await ctx.db.get(f.issueId) : null;
-      if (!issue?.fixPullRequestUrl) findings.push(f);
+      if (!issue?.fixPullRequestUrl) targets.push(f);
     }
-    findings.sort((x, y) => severities.indexOf(x.severity) - severities.indexOf(y.severity));
-    return { repo, prNumber: review.prNumber, headSha: review.headSha, findings: findings.slice(0, perReview) };
-  },
-});
-
-export const record = internalMutation({
-  args: { findingId: v.id("findings"), url: v.optional(v.string()), note: v.optional(v.string()) },
-  handler: async (ctx, a) => {
-    const finding = await ctx.db.get(a.findingId);
-    if (!finding) return;
-    if (a.url) await fixPullRequestOpened(ctx, finding, a.url, true);
-    await audit(ctx, finding.organizationId, undefined, a.url ? "fix_pull_request.autofix" : "fix_pull_request.autofix_skipped", `${finding._id}: ${(a.url ?? a.note ?? "").slice(0, 300)}`);
+    targets.sort((x, y) => severities.indexOf(x.severity) - severities.indexOf(y.severity));
+    let started = 0;
+    for (const finding of targets.slice(0, perReview)) {
+      // Stops at the plan's monthly fix pull requests; the agent run gives its fix back if it never reaches the model.
+      const allowance = await fixAllowance(ctx, review.organizationId);
+      if (!allowance.allowed) { await audit(ctx, review.organizationId, undefined, "fix_pull_request.autofix_skipped", `${finding._id}: ${allowance.reason.slice(0, 300)}`); break; }
+      await audit(ctx, review.organizationId, undefined, "fix_pull_request.autofix", `${finding._id} for @${pr.author.slice(0, 100)}`);
+      await ctx.scheduler.runAfter(0, internal.fixPullRequestJobs.run, { findingId: finding._id, author: pr.author, automatic: true });
+      started++;
+    }
+    return started;
   },
 });

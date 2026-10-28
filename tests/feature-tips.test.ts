@@ -15,7 +15,7 @@ test("tips are chosen from review data in priority order", () => {
   assert.deepEqual(eligibleTips({ ...quiet, recentFindings: 10, dismissedFindings: 5 }).map((t) => t.key), ["strictness"]);
   assert.deepEqual(eligibleTips({ ...quiet, recentFindings: 10, dismissedFindings: 4 }), []);
   assert.deepEqual(eligibleTips({ ...quiet, recentFindings: 9, dismissedFindings: 9 }), []);
-  assert.deepEqual(eligibleTips({ ...quiet, recentFindings: 10, dismissedFindings: 9, strictness: 3 }), []);
+  assert.deepEqual(eligibleTips({ ...quiet, recentFindings: 10, dismissedFindings: 9, strictness: 1 }), []);
   const all = eligibleTips({ ...quiet, references: "Fixes ENG-42", connected: { linear: false, atlassian: false }, rules: 0, recentFindings: 12, dismissedFindings: 8, engine: "pipeline" });
   assert.deepEqual(all.map((t) => t.key), ["ticket", "strictness", "rules", "agentic"]);
 });
@@ -28,7 +28,7 @@ test("ticket tips name the tracker that is referenced but not connected", () => 
   assert.equal(ticketReference("See https://linear.app/acme/issue/ENG-42", { linear: true, atlassian: false }), undefined);
   assert.equal(ticketReference("Fixes ENG-42", { linear: true, atlassian: false }), undefined, "a bare key may already be covered by the connected tracker");
   assert.equal(ticketReference("Bump utf-8 handling and sha-256 checks", none), undefined);
-  assert.match(tipLine("ticket", "jira"), /^\n\n💡 \*\*Tip:\*\* This pull request mentions a Jira issue\. Connect Jira under Settings → Integrations/);
+  assert.match(tipLine("ticket", "jira"), /^\n\n💡 \*\*Tip:\*\* This pull request mentions a Jira issue\. Connect Jira under Integrations/);
 });
 
 test("the Feature tips summary section toggles the footer tip; it never adds a summary section", () => {

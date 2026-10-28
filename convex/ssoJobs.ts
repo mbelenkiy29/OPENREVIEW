@@ -8,5 +8,5 @@ import { verifyDomainTxt } from "../src/sso";
 export const verifyDomain = action({ args: { token: v.string(), domainId: v.id("ssoDomains") }, handler: async (ctx, a): Promise<boolean> => {
   const d = await ctx.runQuery(internal.sso.domainCheck, a);
   if (!(await verifyDomainTxt(d.domain, d.token))) return false;
-  return ctx.runMutation(internal.sso.markVerified, { domainId: a.domainId });
+  return ctx.runMutation(internal.sso.markVerified, { domainId: a.domainId, token: d.token });
 } });

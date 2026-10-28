@@ -5,7 +5,7 @@ import {readTheme,themeCookieValue,type Theme} from "../src/theme";
 
 const ThemeContext=createContext<{theme:Theme;select:(theme:Theme)=>void}|null>(null);
 
-// Pages are prerendered, so the server renders System and the browser reads the saved choice. The
+// The server never reads the cookie, so it renders System and the browser reads the saved choice. The
 // <head> script in app/layout.tsx has already applied it to <html> before first paint.
 let chosen:Theme|undefined;
 const listeners=new Set<()=>void>();

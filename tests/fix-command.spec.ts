@@ -7,7 +7,7 @@ import {api,internal} from '../convex/_generated/api';
 import {Github} from '../src/github';
 import {HttpModel} from '../src/engine/model';
 import {defaults} from '../src/review-settings';
-import type {ModelRequest} from '../src/engine/types';
+import type {ModelRequest,ToolCall,ToolTurn} from '../src/engine/types';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='integration-session-secret-at-least-32-characters';
 const head='h'.repeat(40);
@@ -16,8 +16,8 @@ const patch='@@ -1,2 +1,3 @@\n const a = 1;\n+const total = price * 100;\n expor
 beforeEach(()=>{process.env.SESSION_SECRET=secret;process.env.SERVICE_SECRET='integration-service-secret';process.env.LLM_API_KEY='fixture';process.env.APP_URL='https://review.example.com';});
 afterEach(()=>{vi.restoreAllMocks();delete process.env.APP_URL;});
 
-async function setup(options:{suggestion?:boolean;permissions?:Record<string,string>}={}){
- const t=convexTest(schema,modules);
+async function setup(options:{suggestion?:boolean;permissions?:Record<string,string>;documentsRead?:number}={}){
+ const t=convexTest({schema,modules,...(options.documentsRead?{transactionLimits:{documentsRead:options.documentsRead}}:{})});
  const userId=await t.mutation(api.users.login,{secret:'integration-service-secret',githubId:81,login:'alice',avatar:''});
  const token=await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(userId).setExpirationTime('1h').sign(new TextEncoder().encode(secret));
  const organizationId=await t.mutation(api.users.createOrganization,{token,name:'Fixes'});
@@ -40,7 +40,7 @@ async function setup(options:{suggestion?:boolean;permissions?:Record<string,str
  const requests:ModelRequest[]=[];
  const model=(replacement:string,explanation='Round the converted total once.')=>vi.spyOn(HttpModel.prototype,'generate').mockImplementation(async function<T>(request:ModelRequest,validator:z.ZodType<T>){requests.push(request);return {value:validator.parse({replacement,explanation}),usage:{task:request.task,provider:'fixture',model:'fixture',inputTokens:10,outputTokens:5,latencyMs:1,estimatedCost:0.001,cached:false}};});
  const ask=(question:string,commentId=601)=>t.action(internal.conversationJobs.reply,{repositoryId:repo._id,prNumber:3,commentId,author:'carol',question,inline:true,parentCommentId:500});
- return {t,token,repo,reviewId,findingId,canReply,reply,openFix,model,requests,ask};
+ return {t,token,repo,reviewId,findingId,canReply,reply,openFix,model,requests,ask,scm};
 }
 
 test('a stored suggestion that still applies is replied with as a committable block and the Fix handoff link, without a model call',async()=>{
@@ -96,43 +96,63 @@ test('fix pull requests need the repository setting and contents:write, and only
  await s.ask('@openreview fix this in a new PR');
  expect(s.openFix).not.toHaveBeenCalled();
  expect(s.reply.mock.calls[0][2]).toContain('Fix pull requests are turned off for this repository');
- // Setting on, permission present: opens a PR from a new namespaced branch with the applied change.
- s=await setup({suggestion:true,permissions:{contents:'write',pull_requests:'write'}});
- await s.t.mutation(api.repositories.configure,{token:s.token,repositoryId:s.repo._id,enabled:true,settings:{...defaults,fixPullRequests:true}});
- s.openFix.mockResolvedValue({url:'https://github.com/alice/fixes/pull/4',reused:false});
- await s.ask('@openreview fix this in a new PR');
- const [repository,number,fix]=s.openFix.mock.calls[0];
- expect([repository,number]).toEqual(['alice/fixes',3]);
- expect(fix).toMatchObject({branch:'openreview/fix-3-fp0123456789',expectedHead:head,path:'src/a.ts',blobSha:'blob1',content:'const a = 1;\nconst total = Math.round(price * 100);\nexport { a };\n'});
- expect(fix.branch).not.toBe('feature/totals');
- expect(s.reply.mock.calls[0][2]).toContain('Opened a fix pull request on a new branch: https://github.com/alice/fixes/pull/4');
- // Setting on, permission missing: the real client skips itself without any write.
- s=await setup({suggestion:true,permissions:{contents:'read',pull_requests:'write'}});
- await s.t.mutation(api.repositories.configure,{token:s.token,repositoryId:s.repo._id,enabled:true,settings:{...defaults,fixPullRequests:true}});
- const fetchSpy=vi.spyOn(globalThis,'fetch');
- await s.ask('@openreview fix this in a new PR');
- expect(fetchSpy).not.toHaveBeenCalled();
- expect(s.reply.mock.calls[0][2]).toContain('No fix pull request was opened: the GitHub App does not have Contents: Read and write permission.');
- expect(s.reply.mock.calls[0][2]).toContain('```suggestion');
+ // Setting on, permission present: the reply says a fix pull request is coming, and OpenReview's fix agent
+ // then opens it from a new namespaced branch and replies in the same thread.
+ vi.useFakeTimers();
+ try{
+  s=await setup({suggestion:true,permissions:{contents:'write',pull_requests:'write'}});
+  await s.t.mutation(api.repositories.configure,{token:s.token,repositoryId:s.repo._id,enabled:true,settings:{...defaults,fixPullRequests:true}});
+  s.openFix.mockResolvedValue({url:'https://github.com/alice/fixes/pull/4',reused:false});
+  const turns:ToolCall[][]=[[{id:'e',name:'edit_file',input:{path:'src/a.ts',oldText:'const total = price * 100;',newText:'const total = Math.round(price * 100);'}}],[{id:'f',name:'finish',input:{summary:'Round once.'}}]];
+  vi.spyOn(HttpModel.prototype,'runTools').mockImplementation(async():Promise<ToolTurn>=>{const calls=turns.shift()??[];return {content:'',toolCalls:calls,stopReason:calls.length?'tool_use':'end_turn',usage:{task:'fix',provider:'fixture',model:'fixture',inputTokens:1,outputTokens:1,latencyMs:1,estimatedCost:0,cached:false},message:{role:'assistant',content:'',toolCalls:calls}};});
+  await s.ask('@openreview fix this in a new PR');
+  expect(s.reply.mock.calls[0][2]).toContain('```suggestion');
+  expect(s.reply.mock.calls[0][2]).toContain('preparing a fix pull request and will reply here with the link');
+  await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+  const [repository,number,fix]=s.openFix.mock.calls[0];
+  expect([repository,number]).toEqual(['alice/fixes',3]);
+  expect(fix).toMatchObject({branch:'openreview/fix-3-fp0123456789',expectedHead:head,files:[{path:'src/a.ts',content:'const a = 1;\nconst total = Math.round(price * 100);\nexport { a };\n',mode:'100644'}]});
+  expect(fix.branch).not.toBe('feature/totals');
+  expect(fix.body).toContain('Requested by @carol');
+  const [,,second,thread]=s.reply.mock.calls[1];
+  expect(second).toContain('Opened a fix pull request for **Totals become cents twice**: https://github.com/alice/fixes/pull/4');
+  expect(thread).toBe(500);
+  // Setting on, permission missing: the agent never runs and the thread hears why, without any write.
+  s=await setup({suggestion:true,permissions:{contents:'read',pull_requests:'write'}});
+  await s.t.mutation(api.repositories.configure,{token:s.token,repositoryId:s.repo._id,enabled:true,settings:{...defaults,fixPullRequests:true}});
+  const fetchSpy=vi.spyOn(globalThis,'fetch');
+  await s.ask('@openreview fix this in a new PR');
+  await s.t.finishAllScheduledFunctions(()=>vi.runAllTimersAsync());
+  // Scheduled repository jobs may read from GitHub; nothing writes.
+  expect(fetchSpy.mock.calls.filter(([,init])=>init?.method&&init.method!=='GET')).toEqual([]);
+  expect(s.openFix).not.toHaveBeenCalled();
+  expect(s.reply.mock.calls[0][2]).toContain('```suggestion');
+  expect(s.reply.mock.calls[1][2]).toContain('Contents: Read and write permission');
+ }finally{vi.useRealTimers();}
 });
 
-test('on Starter a fix command still suggests, but fix pull requests from a comment or the dashboard need Pro',async()=>{
+test('after a push moves the lines, a fix command asks for a re-review and publishes no suggestion or pull request',async()=>{
  const s=await setup({suggestion:true,permissions:{contents:'write',pull_requests:'write'}});
  await s.t.mutation(api.repositories.configure,{token:s.token,repositoryId:s.repo._id,enabled:true,settings:{...defaults,fixPullRequests:true}});
- const organizationId=s.repo.organizationId;
- await s.t.run(ctx=>ctx.db.insert('billingAccounts',{organizationId,status:'active',seats:1,trialEndsAt:0,subscriptionId:'sub_1',tier:'starter',updatedAt:0}));
- process.env.BILLING_ENABLED='true';
- try{
-  await s.ask('@openreview fix this in a new PR');
-  expect(s.openFix).not.toHaveBeenCalled();
-  expect(s.reply.mock.calls[0][2]).toContain('Fix pull requests are on the Pro plan; a workspace admin can upgrade in Settings → Billing.');
-  expect(s.reply.mock.calls[0][2]).toContain('```suggestion');
-  await expect(s.t.action(api.fixPullRequestJobs.open,{token:s.token,findingId:s.findingId})).rejects.toThrow('Upgrade required: Fix pull requests and Autofix');
-  expect((await s.t.query(api.fixPullRequests.availability,{token:s.token,reviewId:s.reviewId})).entitled).toBe(false);
-  // Pro opens it as before.
-  await s.t.run(async ctx=>{const account=(await ctx.db.query('billingAccounts').collect())[0];await ctx.db.patch(account._id,{tier:'pro'});});
-  s.openFix.mockResolvedValue({url:'https://github.com/alice/fixes/pull/4',reused:false});
-  await s.ask('@openreview fix this in a new PR',602);
-  expect(s.openFix).toHaveBeenCalledTimes(1);
- }finally{delete process.env.BILLING_ENABLED;}
+ const pushed=(await s.scm.pullRequest('alice/fixes',3)) as {head:{sha:string}};
+ vi.mocked(s.scm.pullRequest).mockResolvedValue({...pushed,head:{...pushed.head,sha:'n'.repeat(40)}} as never);
+ s.model('unused');
+ await s.ask('@openreview fix this in a new PR');
+ const body=s.reply.mock.calls[0][2];
+ expect(body).toContain('this finding is from an older revision');expect(body).toContain('re-review');
+ expect(body).not.toContain('```suggestion');
+ expect(s.openFix).not.toHaveBeenCalled();
+ expect(s.requests).toHaveLength(0);
+});
+
+test('a question on a pull request with many files looks up related code only for the paths it can fetch',async()=>{
+ const s=await setup({documentsRead:80});
+ const diff=Array.from({length:150},(_,i)=>({path:`src/f${i}.ts`,patch:'@@ -1 +1 @@\n+x',status:'modified'}));
+ const pr=(await s.scm.pullRequest('alice/fixes',3)) as object;
+ vi.mocked(s.scm.pullRequest).mockResolvedValue({...pr,diff} as never);
+ await s.t.run(async ctx=>{for(const {path} of diff)await ctx.db.insert('relationships',{organizationId:s.repo.organizationId,repositoryId:s.repo._id,from:path,sourcePath:path,to:'lib/'+path,kind:'import'});});
+ vi.spyOn(HttpModel.prototype,'generate').mockImplementation(async function<T>(request:ModelRequest,validator:z.ZodType<T>){s.requests.push(request);return {value:validator.parse({answer:'The total is multiplied by 100 twice.',citations:[{filePath:'src/a.ts',startLine:2,quote:'const total = price * 100;'}]}),usage:{task:request.task,provider:'fixture',model:'fixture',inputTokens:1,outputTokens:1,latencyMs:1,estimatedCost:0,cached:false}};});
+ await s.ask('why is this here?',620);
+ expect(s.requests[0].task).toBe('conversation');
+ expect(s.reply.mock.calls[0][2]).toContain('multiplied by 100 twice');
 });

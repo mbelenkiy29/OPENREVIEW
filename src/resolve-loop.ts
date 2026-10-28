@@ -50,7 +50,7 @@ export async function runResolveLoop(call: McpCall, git: LoopGit, o: LoopOptions
     for (;;) {
       const review = asObject(asObject(await call("get_review_status", { repositoryId: o.repositoryId, prNumber: o.prNumber })).review);
       if (review.headSha === sha && review.status === "completed") break;
-      if (review.headSha === sha && (review.status === "failed" || review.status === "cancelled")) return { outcome: "review-failed", iterations: iteration, remaining: open.length, commits };
+      if (review.headSha === sha && (review.status === "failed" || review.status === "cancelled" || review.status === "skipped")) return { outcome: "review-failed", iterations: iteration, remaining: open.length, commits };
       if (Date.now() >= deadline) return { outcome: "review-timeout", iterations: iteration, remaining: open.length, commits };
       await o.wait(o.pollMs ?? 15_000);
     }

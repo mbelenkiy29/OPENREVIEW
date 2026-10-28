@@ -55,7 +55,7 @@ test("Knowledge retries preserve scoped filters and safely encode search text", 
   });
   assert.deepEqual(seen, ["selected"]);
   const retry = new URL(view.retryUrl, "https://openreview.test");
-  assert.equal(retry.pathname, "/dashboard/memory/knowledge");
+  assert.equal(retry.pathname, "/dashboard/repositories/knowledge");
   assert.deepEqual(Object.fromEntries(retry.searchParams), filters);
-  assert.equal((await knowledgeView([], {}, async () => [])).retryUrl, "/dashboard/memory/knowledge");
+  assert.equal((await knowledgeView([], {}, async () => [])).retryUrl, "/dashboard/repositories/knowledge");
 });

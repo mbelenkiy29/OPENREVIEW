@@ -1,33 +1,46 @@
-// Paid tiers and the features each one unlocks (docs/roadmap/pricing-tiers.md). Security checks,
-// reviews and the Issues inbox are never gated, so they have no key. With billing disabled
-// (self-hosted) every key is granted.
-export const tiers = ["trial", "starter", "pro", "business"] as const;
-export type Tier = (typeof tiers)[number];
-export const entitlementKeys = ["engine.deep", "context.requirements", "fix.pullRequests", "review.reproTests", "memory.conventions", "api.access", "analytics.history", "auth.sso", "auth.scim", "audit.export", "billing.caps"] as const;
-export type EntitlementKey = (typeof entitlementKeys)[number];
-export const featureNames: Record<EntitlementKey, string> = {
-  "engine.deep": "Deeper review engines", "context.requirements": "Requirements check", "fix.pullRequests": "Fix pull requests and Autofix", "review.reproTests": "Generated reproduction tests",
-  "memory.conventions": "Learned conventions", "api.access": "API keys and the remote MCP server", "analytics.history": "Analytics beyond 30 days", "auth.sso": "SSO", "auth.scim": "SCIM provisioning", "audit.export": "Audit log export", "billing.caps": "Spending caps",
+// Cloud plans. Usage allowances live in billingConfig (env); this is which plan unlocks which feature.
+// With billing disabled (self-hosted) the plan is "disabled" and everything is unlocked.
+export const plans = ["free", "starter", "pro"] as const;
+export type Plan = (typeof plans)[number];
+// Pro features: the ones that cost us to run, plus the team and admin features. Security checks never are.
+// Starter also gets hosted fix pull requests, with a smaller monthly run limit (fixRunLimit in src/billing.ts), and the
+// workspace's own model key, whose calls are not metered (so Free stays bounded by its included usage).
+export const entitlements = ["review.deep", "review.reproTests", "fix.pullRequests", "context.requirements", "memory.conventions", "api.access", "analytics.history", "auth.sso", "audit.log", "model.ownKey"] as const;
+export type Entitlement = (typeof entitlements)[number];
+export const planCatalog: Record<Plan, { name: string; entitlements: readonly Entitlement[] }> = {
+  free: { name: "Free", entitlements: [] },
+  starter: { name: "Starter", entitlements: ["fix.pullRequests", "model.ownKey"] },
+  pro: { name: "Pro", entitlements },
 };
-const pro = ["engine.deep", "context.requirements", "fix.pullRequests", "review.reproTests", "memory.conventions", "api.access", "analytics.history"] as const;
-// reviewsPerSeat is the default monthly fair-use limit; the trial's is per workspace (BILLING_TRIAL_REVIEWS).
-export const planCatalog: Record<Tier, { name: string; reviewsPerSeat: number; entitlements: readonly EntitlementKey[] }> = {
-  trial: { name: "Free trial", reviewsPerSeat: 200, entitlements: pro },
-  starter: { name: "Starter", reviewsPerSeat: 500, entitlements: [] },
-  pro: { name: "Pro", reviewsPerSeat: 1500, entitlements: pro },
-  business: { name: "Business", reviewsPerSeat: 3000, entitlements: [...pro, "auth.sso", "auth.scim", "audit.export", "billing.caps"] },
+// legacy: a Starter subscription from before Pro existed keeps every feature it had (grandfathered).
+export const planEntitlements = (plan: Plan | "disabled", legacy = false): readonly Entitlement[] => plan === "disabled" || (legacy && plan === "starter") ? entitlements : planCatalog[plan].entitlements;
+export const entitled = (plan: Plan | "disabled", key: Entitlement, legacy = false) => planEntitlements(plan, legacy).includes(key);
+export const upgradeNote: Record<Entitlement, string> = {
+  "review.deep": "Deep reviews are on the Pro plan, so this review ran at the standard tier.",
+  "review.reproTests": "Generated reproduction tests are on the Pro plan.",
+  "fix.pullRequests": "Fix pull requests are on the Starter and Pro plans; a workspace admin can upgrade in Organization Settings → Billing & Usage.",
+  "context.requirements": "Linked Linear, Jira, Confluence and Notion requirements are on the Pro plan, so they were not checked in this review.",
+  "memory.conventions": "Learning conventions from review comments is on the Pro plan; approved conventions keep applying.",
+  "api.access": "API keys are on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage. Your keys are kept and work again after upgrading.",
+  "analytics.history": "Analytics older than 30 days are on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage.",
+  "auth.sso": "Single sign-on is on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage.",
+  "audit.log": "The audit log is on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage. Changes are still recorded.",
+  "model.ownKey": "Your own model key is on the Starter and Pro plans; a workspace admin can upgrade in Organization Settings → Billing & Usage. A saved key is kept and works again after upgrading.",
 };
-/** The cheapest paid tier that includes a feature, for upgrade prompts. */
-export const tierFor = (key: EntitlementKey): Tier => (["starter", "pro", "business"] as const).find((t) => planCatalog[t].entitlements.includes(key)) ?? "business";
-/** `tier` null means no plan (the trial ended and nothing is subscribed). */
-export const entitled = (tier: Tier | null, key: EntitlementKey, billingEnabled: boolean) => !billingEnabled || (tier !== null && planCatalog[tier].entitlements.includes(key));
-const paidTiers = ["starter", "pro", "business"] as const;
-/** Maps a subscription's Stripe price to its tier; undefined for a price this deployment does not sell. */
-export function tierForPrice(price: string, env: Record<string, string | undefined> = process.env): (typeof paidTiers)[number] | undefined {
-  const prices = { starter: env.STRIPE_SEAT_PRICE_ID, pro: env.STRIPE_PRO_PRICE_ID, business: env.STRIPE_BUSINESS_PRICE_ID };
-  return paidTiers.find((t) => prices[t] && prices[t] === price);
+// When the Pro gates shipped: SSO connections created before then stay fully editable on any plan.
+export const proGatesAt = Date.UTC(2026, 9, 21);
+// Without analytics.history, analytics reach back to the start of the UTC day 30 days ago.
+export const historyFloor = (now: number) => { const d = new Date(now); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - 30); };
+// The paid plan a Stripe seat price belongs to (monthly or annual); unknown prices map to nothing.
+export function planForPrice(price: string | undefined, env: Record<string, string | undefined> = process.env): "starter" | "pro" | undefined {
+  if (!price) return undefined;
+  if ([env.STRIPE_PRO_PRICE_ID, env.STRIPE_PRO_ANNUAL_PRICE_ID].includes(price)) return "pro";
+  if ([env.STRIPE_SEAT_PRICE_ID, env.STRIPE_SEAT_ANNUAL_PRICE_ID].includes(price)) return "starter";
+  return undefined;
 }
-/** Display name of a billing decision's plan. */
-export const planName = (plan: string) => (tiers as readonly string[]).includes(plan) ? planCatalog[plan as Tier].name : plan;
-/** What Pro adds over Starter, for plan cards. */
-export const proHighlights = ["Autofix: fix pull requests, on request or automatically for critical and high findings", "Deeper agentic and hypothesis reviews", "Requirements check against Linear, Jira, Confluence and Notion", "Generated reproduction tests, learned conventions, API keys and the remote MCP server"];
+// The monthly seat price Checkout uses for a plan; annual prices are switched to in the Customer Portal.
+export function priceFor(plan: "starter" | "pro", env: Record<string, string | undefined> = process.env) {
+  const name = plan === "pro" ? "STRIPE_PRO_PRICE_ID" : "STRIPE_SEAT_PRICE_ID", id = env[name];
+  if (!id || !/^price_[A-Za-z0-9]+$/.test(id)) throw new Error(`Configure ${name}`);
+  return id;
+}

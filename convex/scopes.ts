@@ -5,7 +5,10 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { v, type Infer } from "convex/values";
 import { authorize, authorizeRepository, visibleRepositories, repositoryAccess, audit } from "./auth";
 import { settingsValidator } from "./schema";
-import { defaults,deploymentDefaults,validSummarySections,validReviewEngine,validCheckFailureSeverity,validTriggerSettings,validPublicationSettings,scopeDefaults } from "../src/review-settings";
+import { hasEntitlement } from "./billing";
+import { upgradeNote } from "../src/plans";
+import { defaults,deploymentDefaults,validSummarySections,validReviewEngine,validCheckFailureSeverity,validTriggerSettings,validPublicationSettings,validModelSettings,scopeDefaults } from "../src/review-settings";
+import { allowedModels } from "../src/inference-billing";
 import { categories } from "../src/engine/types";
 const keys=Object.keys(defaults);
 export async function providerTeam(ctx:MutationCtx,organizationId:Id<"organizations">,kind:string,instance:string,group:{externalId:string;name:string},userId?:Id<"users">){
@@ -47,7 +50,7 @@ export const list=query({args:{token:v.string(),organizationId:v.id("organizatio
   return {...repo,provider:await repositoryIdentity(ctx,repo),settingsInheritance:{mode:local&&!local.inherit?"overrides" as const:"inherited" as const,effective:resolveSettings(repo,settings,local)}};
  }));
  const organization=await ctx.db.get(a.organizationId);
- return {autoEnableRepositories:organization?.autoEnableRepositories??false,teams:teams.filter(t=>allowed.has(t._id)),members:members.filter(m=>allowed.has(m.teamId)),settings:settings.filter(s=>!s.teamId||allowed.has(s.teamId)),clusters:clusters.filter(c=>c.repositoryIds.every(id=>repoIds.has(id))),repositories:configuredRepositories};
+ return {models:allowedModels(),autoEnableRepositories:organization?.autoEnableRepositories??false,teams:teams.filter(t=>allowed.has(t._id)),members:members.filter(m=>allowed.has(m.teamId)),settings:settings.filter(s=>!s.teamId||allowed.has(s.teamId)),clusters:clusters.filter(c=>c.repositoryIds.every(id=>repoIds.has(id))),repositories:configuredRepositories};
 }});
 export const createTeam=mutation({args:{token:v.string(),organizationId:v.id("organizations"),name:v.string()},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true);if(!a.name.trim()||a.name.length>100)throw new Error("Team name must be 1–100 characters");const id=await ctx.db.insert("teams",{organizationId:a.organizationId,name:a.name.trim(),createdAt:Date.now()});await audit(ctx,a.organizationId,user._id,"team.created",id);return id;
@@ -62,8 +65,31 @@ export const member=mutation({args:{token:v.string(),teamId:v.id("teams"),userId
 }});
 // Shared by workspace/team scope saves and guided setup.
 export function assertValidSettings(s:Infer<typeof settingsValidator>,overrideKeys:readonly string[]){
- if(overrideKeys.some(k=>!keys.includes(k))||!validSummarySections(s.summarySections)||!validReviewEngine(s.reviewEngine)||!validCheckFailureSeverity(s.checkFailureSeverity)||!validPublicationSettings(s)||!validTriggerSettings(s)||s.maxComments<0||s.maxComments>30||!Number.isInteger(s.maxComments)||!Number.isFinite(s.minimumConfidence)||s.minimumConfidence<.5||s.minimumConfidence>1||!["concise","detailed"].includes(s.commentStyle)||s.instructions.length>20000||!["fast","standard","deep"].includes(s.mode)||!["critical","high","medium","low"].includes(s.severityThreshold)||s.categories.some(c=>!(categories as readonly string[]).includes(c)))throw new Error("Invalid settings");
+ if(overrideKeys.some(k=>!keys.includes(k))||!validSummarySections(s.summarySections)||!validReviewEngine(s.reviewEngine)||!validCheckFailureSeverity(s.checkFailureSeverity)||!validPublicationSettings(s)||!validTriggerSettings(s)||s.maxComments<0||s.maxComments>30||!Number.isInteger(s.maxComments)||!Number.isFinite(s.minimumConfidence)||s.minimumConfidence<.5||s.minimumConfidence>1||!["concise","detailed","compact"].includes(s.commentStyle)||s.instructions.length>20000||!["fast","standard","deep","auto"].includes(s.mode)||!["critical","high","medium","low"].includes(s.severityThreshold)||s.categories.some(c=>!(categories as readonly string[]).includes(c)))throw new Error("Invalid settings");
+ if(!validModelSettings(s))throw new Error("Choose a model from this deployment's list");
 }
+// The workspace's chosen model for work without repository settings (chat, Slack answers, fixes, knowledge).
+export const workspaceModel=internalQuery({args:{organizationId:v.id("organizations")},handler:async(ctx,a)=>{
+ const scope=(await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect()).find(s=>!s.teamId);
+ return scope?.overrideKeys.includes("model")&&scope.settings.model||null;
+}});
+// Code Review Settings → AI Model: the workspace's pick from the operator's priced list (reviews, chat and fixes use it).
+export const modelChoice=query({args:{token:v.string(),organizationId:v.id("organizations")},handler:async(ctx,a)=>{
+ await authorize(ctx,a.token,a.organizationId);
+ const scope=(await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect()).find(s=>!s.teamId);
+ const ownKey=await ctx.db.query("modelKeys").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).first();
+ return {model:scope?.overrideKeys.includes("model")&&scope.settings.model||null,models:allowedModels(),defaultModel:process.env.LLM_MODEL||null,ownKey:Boolean(ownKey)&&await hasEntitlement(ctx,a.organizationId,"model.ownKey")};
+}});
+// An empty model returns the workspace to the operator's default. Teams and repositories can still override it.
+export const setWorkspaceModel=mutation({args:{token:v.string(),organizationId:v.id("organizations"),model:v.string()},handler:async(ctx,a)=>{
+ const {user}=await authorize(ctx,a.token,a.organizationId,true);
+ if(!validModelSettings({model:a.model}))throw new Error("Choose a model from this deployment's list");
+ const scope=(await ctx.db.query("scopeSettings").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).collect()).find(s=>!s.teamId);
+ const overrideKeys=[...(scope?.overrideKeys??[]).filter(k=>k!=="model"),...(a.model?["model"]:[])];
+ if(scope)await ctx.db.patch(scope._id,{settings:{...scope.settings,model:a.model},overrideKeys});
+ else await ctx.db.insert("scopeSettings",{organizationId:a.organizationId,settings:{...deploymentDefaults(),model:a.model},overrideKeys});
+ await audit(ctx,a.organizationId,user._id,"settings.model",a.model||"default");
+}});
 export const save=mutation({args:{token:v.string(),organizationId:v.id("organizations"),teamId:v.optional(v.id("teams")),settings:settingsValidator,overrideKeys:v.array(v.string())},handler:async(ctx,a)=>{
  const {user}=await authorize(ctx,a.token,a.organizationId,true);if(a.teamId&&(await ctx.db.get(a.teamId))?.organizationId!==a.organizationId)throw new Error("Team not accessible");
  const s=a.settings;assertValidSettings(s,a.overrideKeys);
@@ -94,11 +120,13 @@ export const related=internalQuery({args:{repositoryId:v.id("repositories"),acto
 }});
 export const activity=query({args:{token:v.string(),organizationId:v.id("organizations")},handler:async(ctx,a)=>{
  await authorize(ctx,a.token,a.organizationId,true);
+ if(!await hasEntitlement(ctx,a.organizationId,"audit.log"))throw new Error(upgradeNote["audit.log"]);
  const entries=await ctx.db.query("auditEvents").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).order("desc").take(100);
  return Promise.all(entries.map(async entry=>({...entry,actor:entry.userId?(await ctx.db.get(entry.userId))?.login??"Unavailable user":"OpenReview"})));
 }});
 export const activityPage=query({args:{token:v.string(),organizationId:v.id("organizations"),cursor:v.optional(v.string())},handler:async(ctx,a)=>{
  await authorize(ctx,a.token,a.organizationId,true);
+ if(!await hasEntitlement(ctx,a.organizationId,"audit.log"))throw new Error(upgradeNote["audit.log"]);
  const result=await ctx.db.query("auditEvents").withIndex("by_org",q=>q.eq("organizationId",a.organizationId)).order("desc").paginate({numItems:30,cursor:a.cursor??null});
  const page=await Promise.all(result.page.map(async entry=>({...entry,actor:entry.userId?(await ctx.db.get(entry.userId))?.login??"Unavailable user":"OpenReview"})));
  return {...result,page};

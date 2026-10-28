@@ -1,7 +1,8 @@
 import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs/config';
 import { posthogHosts, posthogProxyPath, posthogToken, sentryDsn, sentryTunnelPath } from './src/telemetry';
-import { securityHeaders } from './src/security-headers';
+import { contentSecurityPolicy, middlewareSkips, prefetchHeaders, securityHeaders } from './src/security-headers';
+import { movedPaths } from './app/dashboard/routes';
 
 const config: NextConfig = {
   output: 'standalone',
@@ -10,14 +11,28 @@ const config: NextConfig = {
   // PostHog proxying needs exact paths, only when analytics is configured (src/telemetry.ts).
   ...(posthogToken ? { skipTrailingSlashRedirect: true } : {}),
   async headers() {
-    return [{ source: '/:path*', headers: securityHeaders }];
+    // Content-Security-Policy only where middleware.ts does not set one (with its nonce): exactly one per
+    // response, since a second header would be enforced alongside it and platforms differ on which wins.
+    const csp = [{ key: 'Content-Security-Policy', value: contentSecurityPolicy() }];
+    return [
+      { source: '/:path*', headers: securityHeaders },
+      { source: `/(${middlewareSkips})(.*)`, headers: csp },
+      ...prefetchHeaders.map((header) => ({ source: '/:path*', has: [header], headers: csp })),
+    ];
   },
   async redirects() {
     // Sign-in results used to land on the home page; older links and bookmarks now go to the sign-in
-    // page with their query string. Redirecting here, not in app/page.tsx, keeps the home page static.
+    // page with their query string. Redirecting here keeps app/page.tsx free of query handling.
     const signIn = ['error', 'email', 'signedout'].map((key) => ({ source: '/', has: [{ type: 'query' as const, key }], destination: '/login', permanent: false }));
-    // The roadmap is a view of the feedback board (app/feedback).
-    return [...signIn, { source: '/roadmap', destination: '/feedback/roadmap', permanent: false }];
+    // The roadmap is a view of the feedback board (app/feedback). Findings moved under Analytics, and the
+    // Memory and Settings pages moved into Greptile's tabs (app/dashboard/routes.ts); query strings carry over.
+    return [
+      ...signIn,
+      { source: '/roadmap', destination: '/feedback/roadmap', permanent: false },
+      { source: '/dashboard/pulls/findings', destination: '/dashboard/analytics/findings', permanent: false },
+      { source: '/dashboard/settings', has: [{ type: 'query' as const, key: 'repository' }], destination: '/dashboard/code-review', permanent: false },
+      ...movedPaths.map(([source, destination]) => ({ source, destination, permanent: false })),
+    ];
   },
   async rewrites() {
     // OAuth discovery documents for the remote MCP endpoint (RFC 9728 and RFC 8414 well-known paths).

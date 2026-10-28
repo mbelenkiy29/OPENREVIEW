@@ -26,11 +26,11 @@ The first line of every summary is one of four verdicts. It is computed from rec
 
 The score is shown next to the verdict when the confidence-score summary section is enabled.
 
-The summary ends with a footer such as "Review 3 on this pull request · Comment `@openreview review` to re-run it.", followed by links to the dashboard. The number counts this pull request's published reviews and stays the same when a publication is retried. The command matches what each provider accepts: `@openreview review` on GitHub, GitHub Enterprise, GitLab, Gitea, Bitbucket and Origin, `@openreview review again` on Perforce, and the dashboard on Azure DevOps, which does not accept comment commands.
+The summary ends with a footer such as "Review 3 on this pull request · Comment `@openreview review` to re-run it.", followed by links to the dashboard. A comment that is only `@openreview` also re-runs the review. The number counts this pull request's published reviews and stays the same when a publication is retried. The command matches what each provider accepts: `@openreview review` on GitHub, GitHub Enterprise, GitLab, Gitea, Bitbucket and Origin, `@openreview review again` on Perforce, and the dashboard on Azure DevOps, which does not accept comment commands.
 
 ## Where the summary goes
 
-On GitHub the summary is written to the end of the pull request description, between two hidden markers. Each review replaces only that block; anything the author writes above or below it is kept. Reviews never read the block back as part of the description. If GitHub refuses the edit, or the description would exceed GitHub's size limit, the summary goes to one comment instead. To always use a comment, set **Review summary location** to "one comment" under Settings → Review (or per workspace and team defaults). When a pull request moves from one location to the other, the old summary comment becomes a short pointer and an old description block is removed.
+On GitHub the summary is written to the end of the pull request description, between two hidden markers. Each review replaces only that block; anything the author writes above or below it is kept. Reviews never read the block back as part of the description. If GitHub refuses the edit, or the description would exceed GitHub's size limit, the summary goes to one comment instead. To always use a comment, set **Review summary location** to "one comment" under Code Review Settings (or per workspace and team defaults). When a pull request moves from one location to the other, the old summary comment becomes a short pointer and an old description block is removed.
 
 On GitHub the summary is laid out for scanning:
 - The verdict and confidence score come first, with the score's one-sentence reason under them.
@@ -53,7 +53,7 @@ Reactions follow the same permission rules as replies: only people with write ac
 
 ## Check runs
 
-With the Checks: read and write permission, each GitHub review has an "OpenReview" check. It shows as in progress while the review runs, then reports the files reviewed, the findings, the verdict and the confidence score. By default the check is neutral. Two settings under Settings → Review can make it fail:
+With the Checks: read and write permission, each GitHub review has an "OpenReview" check. It shows as in progress while the review runs, then reports the files reviewed, the findings, the verdict and the confidence score. By default the check is neutral. Two settings under Code Review Settings can make it fail:
 - **GitHub check run:** fails when a finding reaches the chosen severity.
 - **Check run minimum confidence:** fails when the confidence score is below the chosen value (1–5). The check says the review itself completed, and it is not applied when no score was recorded.
 
@@ -61,14 +61,14 @@ A review that stops because a newer commit arrived ends neutral as "Superseded b
 
 ## When the plan blocks a review
 
-On the hosted cloud, if the workspace's plan does not cover another review, OpenReview posts one short comment on that pull request. The comment names no plan details and points admins to Settings → Billing. Later blocked reviews on the same pull request stay quiet, and reviews requested from the dashboard never post one.
+On the hosted cloud, if the workspace's plan does not cover another review, OpenReview posts one short comment on that pull request. The comment names no plan details and points admins to Organization Settings → Billing & Usage. Later blocked reviews on the same pull request stay quiet, and reviews requested from the dashboard never post one.
 
 ## Your own model key
 
-Workspace owners and admins can run the workspace on their own Anthropic, OpenAI or OpenRouter account under Settings → API Keys → **Model provider key**. OpenReview checks the key with the provider before saving it, stores it encrypted, and never shows it again.
+Workspace owners and admins can run the workspace on their own Anthropic, OpenAI or OpenRouter account under Organization Settings → API Keys → **Model provider key**. OpenReview checks the key with the provider before saving it, stores it encrypted, and never shows it again.
 
 - Reviews, chat, fixes, knowledge and rule suggestions for the workspace then use that key, and the provider bills the usage to your account.
-- Without a model, Anthropic keys use `claude-sonnet-5-5` (and `claude-haiku-5-5` for summaries), and OpenAI keys use `gpt-4.1`. OpenRouter needs a model, such as `anthropic/claude-sonnet-5-5`.
+- Without a model, Anthropic keys use `claude-sonnet-5-5` (and `claude-haiku-5-5` for summaries), and OpenAI keys use `gpt-4.1`. OpenRouter needs a model, such as `anthropic/claude-sonnet-5.5`.
 - Model choices in workspace, team and repository settings apply only to OpenReview's own model.
 - If the provider rejects the key or the account runs out of credit, reviews fail with the provider's error. They never fall back to OpenReview's model. Remove the key to switch back.
 
@@ -86,7 +86,7 @@ When the runtime worker is set up and an administrator opts in, OpenReview draft
 
 ## Security checks
 
-With **Security checks** on (the default, per repository under Settings → Review), every review whose categories include security adds deterministic checks to the model's review:
+With **Security checks** on (the default, per repository under Code Review Settings), every review whose categories include security adds deterministic checks to the model's review:
 - **Pattern checks** on added lines: private keys and provider tokens, secrets assigned as string literals, SQL built by string concatenation, disabled TLS certificate verification, code evaluated from non-literal values, shell commands built from variables, and unsafe deserialization. Secret values are masked in the published evidence. Test fixtures are exempt from the secret checks.
 - **Dependency advisories**: added or changed versions in `package.json`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `requirements*.txt`, `poetry.lock`, `Pipfile.lock`, `go.mod`, `go.sum`, `Cargo.lock`, `Cargo.toml` and `pom.xml` are looked up in [OSV.dev](https://osv.dev). A match becomes a finding on the changed line with the advisory links, the affected version and the fixed versions. Lockfiles of other ecosystems are listed as not checked.
 
@@ -94,7 +94,7 @@ These findings carry the 🔒 Security tag. They are not sent to the model verif
 
 ## Feature tips
 
-With the **Feature tips** summary section on, the footer can end with one 💡 tip when the review's data suggests a feature would help: a referenced Linear or Jira issue whose integration is not connected, many recently dismissed findings (try a higher strictness), no custom rules, or the agentic engine being available but off. A repository gets at most one tip every 3 days and never the same tip twice within 30 days, and a retried publication shows the same tip. Tips are on by default on the hosted cloud (`BILLING_ENABLED=true`) and off on self-hosted installs; turn them on or off under Settings → Review → Summary sections.
+With the **Feature tips** summary section on, the footer can end with one 💡 tip when the review's data suggests a feature would help: a referenced Linear or Jira issue whose integration is not connected, many recently dismissed findings (try a higher strictness), no custom rules, or the agentic engine being available but off. A repository gets at most one tip every 3 days and never the same tip twice within 30 days, and a retried publication shows the same tip. Tips are on by default on the hosted cloud (`BILLING_ENABLED=true`) and off on self-hosted installs; turn them on or off under Code Review Settings → Summary sections.
 
 ## Priorities and tags
 
@@ -115,7 +115,7 @@ A change can break code it did not touch, such as a caller in another file that 
 
 ## Review tier per pull request
 
-The tier (fast, standard or deep) comes from, in order: an `@openreview review fast|standard|deep` comment for that run, an `openreview:fast|standard|deep` label on the pull request (several labels: the highest wins; a tier label also starts reviews of labelled pull requests even when automatic reviews are off), then the configured tier, which touched `.openreview/` folders can raise. Admins can cap the tier with **Highest tier a request may use** (`maxReviewTier`); the cap applies to every source. The review page shows the tier used and where it came from.
+The tier (fast, standard or deep) comes from, in order: an `@openreview review fast|standard|deep` comment for that run, an `openreview:fast|standard|deep` label on the pull request (several labels: the highest wins; a tier label also starts reviews of labelled pull requests even when automatic reviews are off), then the configured tier, which touched `.openreview/` folders can raise. A configured tier of `auto` picks one per pull request: deep for 1,000+ changed lines, or 200+ lines when a file touches security- or data-sensitive code (the same risk score that orders files in large reviews); fast for 50 or fewer lines of low-risk changes; standard otherwise. Generated, lock and docs files don't count toward size. Any explicit tier (comment, label or folder) replaces `auto`. With a fixed configured tier, a comment or label can raise it for a pull request but never lower it. Admins can cap the tier with **Highest tier a request may use** (`maxReviewTier`); the cap applies to every source. The review page shows the tier used and where it came from.
 
 ## Commands in pull requests
 
@@ -125,7 +125,7 @@ Collaborators with write access can mention `@openreview`:
 | --- | --- |
 | `@openreview review again` | Re-review the current revision |
 | `@openreview review security` | Run a security-focused review |
-| `@openreview review fast` / `standard` / `deep` | Re-review at that tier for this run (an admin cap may lower it) |
+| `@openreview review fast` / `standard` / `deep` | Re-review at that tier for this run if it is higher than the configured tier (an admin cap may lower it) |
 | `@openreview explain this` | Explain a finding or code, citing current source |
 | `@openreview what code depends on this` | Show callers and dependents |
 | `@openreview fix this` | In a finding thread: reply with a validated suggestion and a fix-with-your-agent link |
@@ -140,7 +140,7 @@ On GitHub, a reply in a thread that OpenReview started (one of its inline findin
 - threads that a person started (mention `@openreview` there);
 - more than 3 replies per thread or 10 per pull request in an hour.
 
-Commands such as `fix this` and `ignore this pattern` still need the mention. Turn this off per repository under Settings → Review → Replies in OpenReview threads.
+Commands such as `fix this` and `ignore this pattern` still need the mention. Turn this off per repository under Code Review Settings → Replies in OpenReview threads.
 
 ### Questions for the author
 

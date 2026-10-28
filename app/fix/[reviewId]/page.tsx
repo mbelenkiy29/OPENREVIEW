@@ -25,7 +25,7 @@ export default async function Fix({params,searchParams}:{params:Promise<{reviewI
   if(latest.review.headSha===detail.review.headSha&&latest.review.revisionKey===detail.review.revisionKey&&(q.finding?finding?.canFix:latest.canFix))
    redirect(`/fix/${latest.review._id}`+(query.size?"?"+query.toString():""));
  }
- const [personal,credentials,fixPr,handoff]=await Promise.all([backend().query(api.bridge.personal,{token,organizationId:detail.review.organizationId}),backend().query(api.personalCredentials.status,{token}),backend().query(api.fixPullRequests.availability,{token,reviewId:detail.review._id}),q.handoff?backend().query(api.cloudHandoff.status,{token,requestId:q.handoff as Id<"fixRequests">}).catch(()=>null):Promise.resolve(null)]);const devin=credentials.devin.configured;const agent=isLocalAgent(q.agent)?q.agent:personal.agent;
+ const [personal,credentials,fixPr,billing,handoff]=await Promise.all([backend().query(api.bridge.personal,{token,organizationId:detail.review.organizationId}),backend().query(api.personalCredentials.status,{token}),backend().query(api.fixPullRequests.availability,{token,reviewId:detail.review._id}),backend().query(api.billing.status,{token,organizationId:detail.review.organizationId}).catch(()=>null),q.handoff?backend().query(api.cloudHandoff.status,{token,requestId:q.handoff as Id<"fixRequests">}).catch(()=>null):Promise.resolve(null)]);const devin=credentials.devin.configured;const agent=isLocalAgent(q.agent)?q.agent:personal.agent;
  // The same portable prompt the bridge would send, for copy or an official agent deep link.
  const eligible=(selected?[selected]:detail.findings).filter(f=>f.canFix);
  const repository=(await backend().query(api.repositories.list,{token,organizationId:detail.review.organizationId}).catch(()=>[])).find(r=>r._id===detail.review.repositoryId);
@@ -40,24 +40,24 @@ export default async function Fix({params,searchParams}:{params:Promise<{reviewI
   :!fixable?<p>No eligible unresolved findings are available for you at this revision. Check the latest review and repository settings.</p>
   :<><p>Your selected local agent receives the issue, evidence, file locations, and expected remediation. Review its changes before committing.</p><FixButton reviewId={reviewId} findingId={selected?._id} agent={agent} label={selected?"Fix this issue":"Fix All"}/><h2>No bridge? Hand the prompt to your agent</h2><Copy value={prompt}/><AgentLinks prompt={prompt} repo={repository??undefined} devin={devinHandoff(devin,eligible.length>0,detail.review._id,selected?.fingerprint)}/>
    {personal.handoff!=="cloud"&&cloud}
-   {fixPr.github&&<FixPullRequestSection findingId={selected?._id} enabled={fixPr.enabled} entitled={fixPr.entitled} admin={fixPr.admin} permission={fixPr.permission}/>}</>}
-  {detail.latestReviewId && <Link href={`/dashboard/pulls/${detail.latestReviewId}`}>Open latest review</Link>}<Link href="/dashboard/settings/agents">Set up your local bridge</Link></main>;
+   {fixPr.github&&<FixPullRequestSection findingId={selected?._id} enabled={fixPr.enabled} entitled={fixPr.entitled} permission={fixPr.permission} allowance={billing?.enabled&&billing.fixes.limit?`${Math.max(0,billing.fixes.limit-billing.fixes.used)} of ${billing.fixes.limit} agent fixes left this month.`:undefined}/>}</>}
+  {detail.latestReviewId && <Link href={`/dashboard/pulls/${detail.latestReviewId}`}>Open latest review</Link>}<Link href="/dashboard/account/review">Set up your local bridge</Link></main>;
 }
-// OpenReview's own fix: one validated suggestion committed to a new branch, opened as a pull request.
-function FixPullRequestSection({findingId,enabled,entitled,admin,permission}:{findingId?:string;enabled:boolean;entitled:boolean;admin:boolean;permission:"write"|"read"|"unknown"}){
- return <section aria-labelledby="fix-pr"><h2 id="fix-pr">Let OpenReview open a fix pull request</h2>
-  {!entitled?<Locked feature="fix.pullRequests" unlocked={false} admin={admin}><button>Open a fix PR</button></Locked>
-  :!enabled?<p className="muted">Fix pull requests are turned off for this repository. A workspace admin can allow them under Settings → Repositories → Fix pull requests.</p>
+// OpenReview's own fix: its fix agent edits the code on a new branch and opens a pull request.
+const fixPrIntro=<p className="muted">OpenReview’s fix agent reads the code, edits the files the fix needs, and opens a pull request from a new <code>openreview/fix-*</code> branch against this pull request’s branch. Your branch is never written, and no tests are run.</p>;
+function FixPullRequestSection({findingId,enabled,entitled,permission,allowance}:{findingId?:string;enabled:boolean;entitled:boolean;permission:"write"|"read"|"unknown";allowance?:string}){
+ return <section aria-labelledby="fix-pr"><h2 id="fix-pr">Let OpenReview fix it</h2>
+  {!entitled?<Locked feature="fix.pullRequests" locked={["fix.pullRequests"]}>{fixPrIntro}<button className="primary">Fix with OpenReview</button></Locked>:!enabled?<p className="muted">Fix pull requests are turned off for this repository. A workspace admin can allow them under Repositories → Fix pull requests.</p>
   :permission==="read"?<p className="muted">The OpenReview GitHub App has Contents: Read only on this account, so it cannot push a fix branch. The App must request Contents: Read and write, and an owner of the GitHub account accepts it under GitHub → Settings → Applications → Installed GitHub Apps.</p>
   :!findingId?<p className="muted">Fix pull requests change one finding at a time. Open a single finding’s Fix page to start one.</p>
-  :<><p className="muted">OpenReview commits its suggested change for this finding to a new <code>openreview/fix-*</code> branch and opens a pull request against this pull request’s branch. Your branch is never written, and no tests are run.</p><FixPullRequestButton findingId={findingId}/></>}
+  :<>{fixPrIntro}<FixPullRequestButton findingId={findingId} allowance={allowance}/></>}
  </section>;
 }
 // Cloud agents start from a pull request comment posted as you; each needs its own GitHub setup.
 function CloudAgentSection({reviewId,findingId,finding,preferred,prompt}:{reviewId:string;findingId?:string;finding?:string;preferred:CloudAgent;prompt:string}){
  let preview:string;try{preview=cloudComment({agent:preferred,prompt});}catch(error){preview=error instanceof Error?error.message:"Too long";}
  return <section aria-labelledby="cloud-agents"><h2 id="cloud-agents">Hand it to a cloud agent</h2>
-  <p className="muted">OpenReview posts a comment on the pull request <strong>as you</strong> that mentions the agent, so it starts working in its own cloud. The agent must be set up for this repository, and your GitHub account needs write access. <Link href="/dashboard/settings/agents">Setup for each agent</Link></p>
+  <p className="muted">OpenReview posts a comment on the pull request <strong>as you</strong> that mentions the agent, so it starts working in its own cloud. The agent must be set up for this repository, and your GitHub account needs write access. <Link href="/dashboard/account/review">Setup for each agent</Link></p>
   <div className="row agent-links">{[preferred,...cloudAgentIds.filter(a=>a!==preferred)].map(agent=><form key={agent} action={startCloudFix}><input type="hidden" name="reviewId" value={reviewId}/>{findingId&&<input type="hidden" name="findingId" value={findingId}/>}{finding&&<input type="hidden" name="finding" value={finding}/>}<input type="hidden" name="agent" value={agent}/><button className={agent===preferred?"primary":"small"}>Fix with {cloudAgents[agent].label}</button></form>)}</div>
   <details><summary>The comment that will be posted (for {cloudAgents[preferred].label})</summary><pre>{preview}</pre></details>
  </section>;

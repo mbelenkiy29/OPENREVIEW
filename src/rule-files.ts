@@ -61,12 +61,14 @@ export function parseRuleFile(path: string, content: string): ImportedRule[] {
   return out;
 }
 
+// Rule wording compared without case or punctuation, to spot the same rule from two sources.
+export const ruleText = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 // Candidates from every discovered file, deduplicated by wording, capped for one import request.
 export function importCandidates(files: { path: string; content: string }[], limit = 50): ImportedRule[] {
   const seen = new Set<string>();
   const out: ImportedRule[] = [];
   for (const file of files) for (const rule of parseRuleFile(file.path, file.content)) {
-    const key = rule.instructions.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const key = ruleText(rule.instructions);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(rule);

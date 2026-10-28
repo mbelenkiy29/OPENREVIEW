@@ -87,11 +87,11 @@ test("money, the billing fact and the conversion email", () => {
   assert.equal(referralFact({ invitedBy: "alice", discount: true }, "20% off the first 3 paid months"), "Invited by @alice · 20% off the first 3 paid months applies at checkout");
   assert.equal(referralFact({ invitedBy: null, discount: false }, null), "Invited by another OpenReview user");
   assert.equal(referralFact({ invitedBy: null, discount: true }, null), "Invited by another OpenReview user · the referral discount applies at checkout");
-  const email = conversionEmail({ name: "bob", rateBps: 2000, months: 12, holdDays: 30, url: "https://review.example.com/dashboard/settings/referrals" });
+  const email = conversionEmail({ name: "bob", rateBps: 2000, months: 12, holdDays: 30, url: "https://review.example.com/dashboard/account/referrals" });
   assert.equal(email.subject, "@bob subscribed to OpenReview");
   assert.match(email.text, /20% of what their workspace pays, excluding tax, for 12 months/);
   assert.match(email.text, /available 30 days after the payment/);
-  assert.match(email.text, /https:\/\/review\.example\.com\/dashboard\/settings\/referrals$/);
+  assert.match(email.text, /https:\/\/review\.example\.com\/dashboard\/account\/referrals$/);
   assert.equal(conversionEmail({ name: null, rateBps: 1250, months: 6, holdDays: 0, url: "u" }).subject, "Someone you referred subscribed to OpenReview");
   assert.match(conversionEmail({ name: null, rateBps: 1250, months: 6, holdDays: 0, url: "u" }).text, /12\.5%/);
 });

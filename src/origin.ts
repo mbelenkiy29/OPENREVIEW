@@ -2,6 +2,7 @@ import {changeMetadataSchema,catalogPageSize,validateChangePage,type ChangeMetad
 import { fixHandoffLink } from "./fix-command";
 import { reviewLinks } from "./review-summary";
 import { z } from "zod";
+import { isoTimestamp } from "./iso-timestamp";
 import { repositorySourceUrl } from "./source-url";
 import { originApi,originCredentials,originInstallationToken } from "./origin-auth";
 import type { Scm,ScmChange,ScmApprovalSnapshot } from "./gitlab";
@@ -17,7 +18,7 @@ const commentThreadSchema=z.object({id:z.string().min(1),version,path:z.string()
  .transform(thread=>({...thread,side:thread.side==="PULL_REQUEST_COMMENT_SIDE_UNSPECIFIED"?undefined:thread.side}));
 const commentSchema=z.object({id:z.string().min(1),body:z.string(),author:actor,thread:commentThreadSchema});
 const reviewSchema=z.object({id:z.string().min(1),author:actor,body:z.string().default(""),verdict:z.string(),pullRequestVersion:version,dismissal:z.unknown().optional()});
-const approvalReviewSchema=reviewSchema.extend({submittedAt:z.string().datetime({offset:true}).optional()});
+const approvalReviewSchema=reviewSchema.extend({submittedAt:isoTimestamp.optional()});
 const approvalMarker=/^<!-- openreview:approval:[a-zA-Z0-9_-]+ -->$/;
 const approvalBody=(marker:string)=>"OpenReview approved this exact native version after all configured approval gates passed. No merge was performed.\n\n"+marker;
 function inlineBody(f:Finding,style:string,marker:string){return findingComment(f,style)+"\n\n<!-- openreview-review:"+marker+" -->"+fixHandoffLink(process.env.APP_URL,marker,f.fingerprint);}
@@ -45,7 +46,9 @@ export class Origin implements Scm {
   if(!endpoint.startsWith("/")||endpoint.startsWith("//")||endpoint.includes("://"))throw new Error("Invalid Origin API path");
   const response=await fetch(originApi+endpoint,{method:method??(body===undefined?"GET":"POST"),redirect:"error",headers:{authorization:"Bearer "+await this.accessToken(),"content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(60000)});
   if(!response.ok){if(response.status===401)this.token=undefined;throw new OriginApiError(response.status,endpoint);}
-  return schema.parse(await response.json());
+  // shortcut: 20MB, not Atlassian's 2MB, because recursive trees and base64 blobs are legitimately large; stream if memory bites.
+  const text=await response.text();if(Buffer.byteLength(text,"utf8")>20000000)throw new Error("Origin response exceeds 20MB retrieval limit");
+  return schema.parse(JSON.parse(text));
  }
  private async paginate<S extends z.ZodTypeAny>(endpoint:string,key:string,schema:S,pullNumber?:number):Promise<z.output<S>[]>{
   const all:z.output<S>[]=[];let cursor="";const seen=new Set<string>();
@@ -112,7 +115,7 @@ export class Origin implements Scm {
   const reference=z.object({id:z.string().min(1),number:z.string(),repository:z.object({id:z.string()})});
   const [nativeReviews,mergeability,nativeChecks]=await Promise.all([
    this.paginate(prefix+"/reviews","reviews",approvalReviewSchema,number),
-   this.request(prefix+"/mergeability?expectedHeadSha="+encodeURIComponent(pr.head.sha),z.object({pullRequest:reference,verdict:z.string(),blockers:z.array(z.object({pullRequest:reference,kind:z.string().optional(),message:z.string().min(1)})),evaluatedPullRequests:z.array(reference).min(1),headSha:z.string(),baseRef:z.string(),baseSha:z.string().min(1),evaluatedAt:z.string().datetime({offset:true})})),
+   this.request(prefix+"/mergeability?expectedHeadSha="+encodeURIComponent(pr.head.sha),z.object({pullRequest:reference,verdict:z.string(),blockers:z.array(z.object({pullRequest:reference,kind:z.string().optional(),message:z.string().min(1)})),evaluatedPullRequests:z.array(reference).min(1),headSha:z.string(),baseRef:z.string(),baseSha:z.string().min(1),evaluatedAt:isoTimestamp})),
    this.paginate(this.prefix(repository)+"/commits/"+pr.head.sha+"/check-runs","checkRuns",z.object({id:z.string().min(1),repository:z.object({id:z.string()}),sha:z.string(),baseSha:z.string().optional(),name:z.string().min(1),status:z.string(),conclusion:z.string().nullish()}))
   ]);
   if(nativeChecks.some(check=>check.repository.id!==this.repositoryId||check.sha!==pr.head.sha))throw new Error("Origin approval check repository or revision mismatch");

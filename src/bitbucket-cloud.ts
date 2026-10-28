@@ -1,15 +1,17 @@
 import {changeMetadataSchema,catalogPageSize,numberedPage,validateChangePage,type ChangeMetadata,type ChangePage} from "./change-metadata";
 import { reviewLinks } from "./review-summary";
 import {z} from "zod";
+import {isoTimestamp} from "./iso-timestamp";
 import { repositorySourceUrl } from "./source-url";
 import {parseDiff,changedLines} from "./engine/diff";
 import {findingComment,findingFingerprint} from "./github";
 import type {Scm,ScmChange,ScmApprovalSnapshot} from "./gitlab";
 import type {Finding,SourceFile} from "./engine/types";
 import {runtimeTar} from "./runtime-tar";
+import {retrying} from "./scm-transport";
 
 const commit=z.string().regex(/^[a-f0-9]{40}$/);
-const uuid=z.string().transform(s=>s.replace(/^\{(.+)\}$/,"$1")).pipe(z.string().uuid());
+const uuid=z.string().transform(s=>s.replace(/^\{(.+)\}$/,"$1")).pipe(z.guid());
 const id=z.number().int().positive().safe();
 export function bitbucketCredential(value:string){
  const c=z.object({systemToken:z.string().min(10).max(20000).refine(s=>!/[\s\0]/.test(s)),publisherId:uuid,receivedAt:z.number().finite(),expiresAt:z.number().finite()}).parse(JSON.parse(value));
@@ -21,11 +23,11 @@ const encodedPath=(p:string)=>filePath.parse(p).split("/").map(encodeURIComponen
 const branch=z.object({name:z.string().min(1),target:z.object({hash:commit})});
 const repository=z.object({uuid,full_name:z.string(),workspace:z.object({uuid})});
 const ref=z.object({branch:z.object({name:z.string()}),commit:z.object({hash:commit}),repository});
-const participant=z.object({user:z.object({uuid,type:z.string()}),role:z.enum(["PARTICIPANT","REVIEWER"]),approved:z.boolean(),state:z.enum(["approved","changes_requested"]).nullish(),participated_on:z.string().datetime({offset:true}).nullish()}).superRefine((p,ctx)=>{
+const participant=z.object({user:z.object({uuid,type:z.string()}),role:z.enum(["PARTICIPANT","REVIEWER"]),approved:z.boolean(),state:z.enum(["approved","changes_requested"]).nullish(),participated_on:isoTimestamp.nullish()}).superRefine((p,ctx)=>{
  if(p.approved!==(p.state==="approved")||(p.state&& !p.participated_on))ctx.addIssue({code:"custom",message:"Bitbucket reviewer state or timestamp unavailable"});
 });
 const mergeCheck=z.object({type:z.enum(["pullrequest_state_check","current_user_permission_check","git_mergeability_check","standard_merge_check","custom_pre_merge_check","custom_on_merge_check","merge_queue_check"]),status:z.enum(["PASSED","FAILED","PENDING","SKIPPED","UNKNOWN"]),required:z.boolean(),blocking:z.boolean(),check:z.object({kind:z.string().min(1).optional(),id:z.string().min(1).optional()}).optional()});
-const receipt=z.object({head:commit,revisionKey:commit,approvedAt:z.string().datetime({offset:true}),botId:uuid}).strict();
+const receipt=z.object({head:commit,revisionKey:commit,approvedAt:isoTimestamp,botId:uuid}).strict();
 const approvalMarker=/^<!-- openreview:approval:[A-Za-z0-9_-]+ -->$/;
 function approvalBody(r:z.infer<typeof receipt>,marker:string){return "OpenReview native approval receipt. No merge was performed.\n\n<!-- openreview-bitbucket-approval:"+JSON.stringify(r)+" -->\n\n"+marker;}
 function approvalReceipt(body:string){const match=body.match(/^OpenReview native approval receipt\. No merge was performed\.\n\n<!-- openreview-bitbucket-approval:(\{[^\n]+\}) -->\n\n(<!-- openreview:approval:[A-Za-z0-9_-]+ -->)$/);if(!match)return;try{const r=receipt.parse(JSON.parse(match[1]));if(approvalBody(r,match[2])===body)return {...r,marker:match[2]};}catch{}}
@@ -52,7 +54,7 @@ export class BitbucketCloud implements Scm {
   return url;
  }
  private async raw(endpoint:string,limit:number,body?:unknown,method?:"DELETE"){
-  const response=await fetch(this.url(endpoint),{method:method??(body===undefined?"GET":"POST"),body:body===undefined?undefined:JSON.stringify(body),headers:{authorization:"Bearer "+this.token,accept:"application/json, text/plain","content-type":"application/json"},redirect:"error",signal:AbortSignal.timeout(60000)});
+  const verb=method??(body===undefined?"GET":"POST"),response=await retrying(verb,()=>fetch(this.url(endpoint),{method:verb,body:body===undefined?undefined:JSON.stringify(body),headers:{authorization:"Bearer "+this.token,accept:"application/json, text/plain","content-type":"application/json"},redirect:"error",signal:AbortSignal.timeout(60000)}));
   if(!response.ok)throw new Error("Bitbucket Cloud source access unavailable ("+response.status+")");
   if(method==="DELETE"){if(response.status!==204)throw new Error("Bitbucket approval withdrawal response unavailable");return Buffer.alloc(0);}
   const reader=response.body?.getReader();if(!reader)throw new Error("Bitbucket response missing");
@@ -64,8 +66,8 @@ export class BitbucketCloud implements Scm {
   const bytes=await this.raw(endpoint,limit,body);
   try{return new TextDecoder("utf-8",{fatal:true}).decode(bytes);}catch{throw new Error("Bitbucket response is not UTF-8");}
  }
- private async request<T>(endpoint:string,schema:z.ZodType<T,z.ZodTypeDef,unknown>,body?:unknown){return schema.parse(JSON.parse(await this.read(endpoint,4000000,body)));}
- private async paginate<T>(endpoint:string,schema:z.ZodType<T,z.ZodTypeDef,unknown>){
+ private async request<T>(endpoint:string,schema:z.ZodType<T,unknown>,body?:unknown){return schema.parse(JSON.parse(await this.read(endpoint,4000000,body)));}
+ private async paginate<T>(endpoint:string,schema:z.ZodType<T,unknown>){
   const initial=this.url(endpoint),seen=new Set<string>(),result:T[]=[];let next=initial.href;
   // ponytail: 10,000 records per listing; partition traversal if a directory or PR exceeds this ceiling.
   for(let page=0;page<100;page++){

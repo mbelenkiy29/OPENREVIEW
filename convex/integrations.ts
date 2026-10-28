@@ -2,6 +2,8 @@ import {query,mutation,internalQuery,internalMutation} from "./_generated/server
 import {v} from "convex/values";
 import {internal} from "./_generated/api";
 import {authorize,authorizeRepository,audit} from "./auth";
+import {hasEntitlement} from "./billing";
+import {upgradeNote} from "../src/plans";
 import type {QueryCtx,MutationCtx} from "./_generated/server";
 import type {Id} from "./_generated/dataModel";
 // Notion's resource scope is the set of pages the user shared with the integration in Notion itself.
@@ -15,7 +17,7 @@ export const validate=internalQuery({args:{repositoryId:v.id("repositories"),sco
 export const forRepository=internalQuery({args:{repositoryId:v.id("repositories"),kind:v.optional(v.union(v.literal("linear"),v.literal("atlassian"),v.literal("notion")))},handler:async(ctx,a)=>{
  const repo=await ctx.db.get(a.repositoryId);if(!repo)throw new Error("Repository unavailable");
  const connections=(await ctx.db.query("integrationConnections").withIndex("by_org",q=>q.eq("organizationId",repo.organizationId)).collect()).filter(c=>c.active&&hasResources(c)&&c.repositoryIds.includes(repo._id)&&(!a.kind||c.kind===a.kind));
- if(connections.length>5)throw new Error("Requirements context supports at most five requirements connections per repository");return connections.map(c=>({_id:c._id,generation:c.generation}));
+ if(connections.length>5)throw new Error("Requirements context supports at most five requirements connections per repository");return connections.map(c=>({_id:c._id,generation:c.generation,organizationId:c.organizationId}));
 }});
 
 export const list=query({args:{token:v.string(),organizationId:v.id("organizations")},handler:async(ctx,a)=>{
@@ -36,6 +38,8 @@ export const save=internalMutation({args:{token:v.string(),organizationId:v.id("
  if(!a.externalId||!a.name||a.name.length>200||a.credentials.length>20000||a.expiresAt<=Date.now())throw new Error("Invalid requirements connection");
  const kind=a.kind??"linear";
  const old=await ctx.db.query("integrationConnections").withIndex("by_account",q=>q.eq("organizationId",a.organizationId).eq("kind",kind).eq("externalId",a.externalId)).unique();
+ // Connecting a new workspace needs Pro; reconnecting an existing connection works on any plan (like approved conventions).
+ if(!old&&!await hasEntitlement(ctx,a.organizationId,"context.requirements"))throw new Error(upgradeNote["context.requirements"]);
  if(old?.active)throw new Error("Disconnect the existing requirements connection before reconnecting");
  if(old&&(await ctx.db.query("integrationRevocations").withIndex("by_connection",q=>q.eq("connectionId",old._id)).collect()).some(r=>r.status==="queued"))throw new Error("Linear revocation is pending; retry after it finishes");
  const data={sites:a.sites,jiraProjectIds:[],confluenceSpaceIds:[],externalId:a.externalId,name:a.name,credentials:a.credentials,expiresAt:a.expiresAt,active:true,generation:(old?.generation??0)+1,teamIds:[],projectIds:[],repositoryIds:[],error:undefined,refreshLease:undefined,refreshExpiresAt:undefined};

@@ -6,6 +6,9 @@ import { graphLayout, litCount } from "../src/onboarding-graph";
 import { installHref, installReturnPath } from "../src/github-install";
 import { pullRequestTrigger } from "../src/triggers";
 import { defaults } from "../src/review-settings";
+import React, { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { upgradeNote, type Entitlement } from "../src/plans";
 
 const ready = { hasWorkspace: true, connected: true, selected: 2, indexingStarted: true, completed: false, billing: false };
 
@@ -136,4 +139,25 @@ test("the install callback only accepts state from the same user who still admin
   assert.equal(installerGithubId({ githubUserId: 42 }, 7), 42);
   assert.equal(installerGithubId({ githubUserId: "42" }, 7), 7);
   assert.equal(installerGithubId({}, undefined), undefined);
+});
+
+test("the tools step shows fix pull requests and deep reviews as Pro, disabled, on lower plans", async () => {
+  // tsx compiles these components' JSX to React.createElement without importing React.
+  Object.assign(globalThis, { React });
+  const { ToolsStep } = await import("../app/dashboard/onboarding/configure");
+  const render = (locked: Entitlement[]) => renderToStaticMarkup(createElement(ToolsStep, { action: async () => ({}), organizationId: "org", admin: true, progress: null, heading: null, locked, defaults: { ...defaults, fixPullRequests: true, mode: "deep" } }));
+  const starter = render(["review.deep", "fix.pullRequests"]);
+  assert.ok(starter.includes(upgradeNote["fix.pullRequests"].replaceAll("&", "&amp;")), "the note names Billing & Usage, HTML-escaped");
+  assert.ok(starter.includes("Deep reviews are on the Pro plan"));
+  assert.ok(starter.includes('href="/dashboard/organization/billing"'));
+  // A disabled fieldset submits nothing, so the form saves fix pull requests off; Deep can't be picked.
+  assert.match(starter, /<fieldset disabled="" inert="">.*name="fixPullRequests"/s);
+  assert.doesNotMatch(starter, /name="fixPullRequests"[^>]*checked/);
+  assert.match(starter, /<option value="deep" disabled="">Deep<\/option>/);
+  assert.match(starter, /<option value="standard" selected="">/);
+  // Pro, or billing off: nothing is locked and the saved choices show.
+  const open = render([]);
+  assert.doesNotMatch(open, /Pro plan|disabled=""/);
+  assert.match(open, /<option value="deep" selected="">Deep<\/option>/);
+  assert.match(open, /name="fixPullRequests"[^>]*checked/);
 });

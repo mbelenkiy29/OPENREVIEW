@@ -1,4 +1,4 @@
-import {defaults} from './review-settings';
+import {defaults,sectionLayoutFromForm} from './review-settings';
 
 /** Preserve configured empty selections; older clients inherit existing defaults. */
 export function scopeSettingsFromForm(form:FormData){
@@ -11,6 +11,8 @@ export function scopeSettingsFromForm(form:FormData){
   model:value('model'),mode:value('mode')||defaults.mode,severityThreshold:value('severityThreshold')||defaults.severityThreshold,
   categories:form.has('categoriesConfigured')?form.getAll('categories').map(String):defaults.categories,
   summarySections:form.has('summaryConfigured')?form.getAll('summarySections').map(String):defaults.summarySections,
+  hideFooter:form.has('summaryConfigured')?form.has('hideFooter'):defaults.hideFooter,
+  sectionLayout:form.has('summaryConfigured')?sectionLayoutFromForm(form):defaults.sectionLayout,
   commentStyle:value('commentStyle')||defaults.commentStyle,
   reviewEngine:value('reviewEngine')||defaults.reviewEngine,
   checkFailureSeverity:value('checkFailureSeverity')||defaults.checkFailureSeverity,

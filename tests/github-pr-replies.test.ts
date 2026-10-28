@@ -36,13 +36,13 @@ test("the summary goes into the description, keeps the author's text, links the 
  await client.publish("o/r",1,head,summary,[finding],"run-1","concise",undefined,1,{placement:"description"});
  assert.equal(state.patches.length,1);
  const description=state.body!;
- assert.ok(description.startsWith("Moves prices to cents.\n\n"+descriptionStart+"\n## OpenReview\n\n**Needs changes** · Confidence score **2/5**\n\nEvery total is wrong.\n\n### Overview"));
+ assert.ok(description.startsWith("Moves prices to cents.\n\n"+descriptionStart+"\n<h2>Confidence Score: 2/5</h2>\n\n**Needs changes.** Every total is wrong.\n\n<details><summary><h3>Summary</h3></summary>"));
  assert.ok(description.endsWith(descriptionEnd));
  assert.match(description,/Wrong amount returned · \[thread\]\(https:\/\/github\.com\/o\/r\/pull\/1#discussion_r10\) \|/);
- assert.match(description,/<details><summary><strong>Coverage<\/strong><\/summary>/);
- assert.match(description,/\*\*Last reviewed commit:\*\* \[`aaaaaaa`\]/);
+ assert.match(description,/<details><summary><h3>More details<\/h3><\/summary>\n\n### Coverage/);
+ assert.match(description,/<sub>Reviews \(1\) · Last reviewed commit: \[`aaaaaaa`\]/);
  assert.match(state.reviewBody,/The review summary for this pull request is updated in place\./);
- assert.match(state.inline,/<details><summary>Prompt for your coding agent<\/summary>/);
+ assert.match(state.inline,/<details><summary>Prompt To Fix With AI<\/summary>/);
  assert.equal(state.issueComments.length,1,"no new summary comment");
  assert.match(state.issueComments[0].body,/summary for this pull request is in its description/);
  assert.ok(state.issueComments[0].body.includes(summaryMarker));
@@ -55,7 +55,7 @@ test("a description GitHub refuses falls back to the summary comment",async t=>{
  const {state,client}=fakeGithub(t,{descriptionStatus:422});
  await client.publish("o/r",1,head,summary,[],"run-2","concise",undefined,0,{placement:"description"});
  assert.equal(state.issueComments.length,1);
- assert.match(state.issueComments[0].body,/^## OpenReview\n\n\*\*Needs changes\*\*/);
+ assert.match(state.issueComments[0].body,/^<h2>Confidence Score: 2\/5<\/h2>\n\n\*\*Needs changes\.\*\*/);
  assert.ok(state.issueComments[0].body.includes(summaryMarker));
 });
 
@@ -108,7 +108,7 @@ test("check runs report what was reviewed and fail below a required confidence s
 });
 
 test("the billing notice links only to an HTTPS dashboard and names no plan details",()=>{
- assert.match(billingNoticeBody("https://openreview.tech"),/\[Settings → Billing\]\(https:\/\/openreview\.tech\/dashboard\/settings\/billing\)/);
+ assert.match(billingNoticeBody("https://openreview.tech"),/\[Organization Settings → Billing & Usage\]\(https:\/\/openreview\.tech\/dashboard\/organization\/billing\)/);
  assert.doesNotMatch(billingNoticeBody("http://localhost:3000"),/\]\(/);
  assert.doesNotMatch(billingNoticeBody(undefined),/\]\(|trial|limit/i);
 });

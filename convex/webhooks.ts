@@ -40,6 +40,10 @@ export const data = internalQuery({
   args: { deliveryId: v.id("webhookDeliveries") },
   handler: (ctx, args) => ctx.db.get(args.deliveryId),
 });
+// A failed delivery is retried for about half an hour (30s, 90s, 4.5m, 13.5m, 15m), so a provider outage of a
+// few minutes does not lose the pull requests opened during it.
+export const maxWebhookAttempts = 6;
+export const webhookRetryDelay = (attempts: number) => Math.min(30000 * 3 ** Math.max(0, attempts - 1), 15 * 60000);
 export const mark = internalMutation({
   args: {
     deliveryId: v.id("webhookDeliveries"),
@@ -67,12 +71,8 @@ export const mark = internalMutation({
           : delivery.attempts,
       updatedAt: Date.now(),
     });
-    if (args.status === "failed" && delivery.attempts < 3)
-      await ctx.scheduler.runAfter(
-        10000 * 2 ** delivery.attempts,
-        internal.webhookJobs.process,
-        { deliveryId: delivery._id },
-      );
+    if (args.status === "failed" && delivery.attempts < maxWebhookAttempts)
+      await ctx.scheduler.runAfter(webhookRetryDelay(delivery.attempts), internal.webhookJobs.process, { deliveryId: delivery._id });
   },
 });
 export const repository = internalQuery({
@@ -132,6 +132,7 @@ export const lifecycle = internalMutation({
         await ctx.db.patch(pr._id, {
           state: args.state,
           ...(args.observedAt !== undefined ? { nativeObservedAt: args.observedAt } : {}),
+          ...((args.state === "merged" || (args.state === "closed" && args.merged)) && pr.mergedAt === undefined ? { mergedAt: args.observedAt ?? Date.now() } : {}),
           updatedAt: Date.now(),
         });
       for (const review of await ctx.db
@@ -140,7 +141,7 @@ export const lifecycle = internalMutation({
           q.eq("repositoryId", repo._id).eq("prNumber", args.prNumber!),
         )
         .collect())
-        if (!["completed", "cancelled", "failed"].includes(review.status))
+        if (!["completed", "cancelled", "skipped", "failed"].includes(review.status))
           await cancelReview(ctx,review);
     }
   },

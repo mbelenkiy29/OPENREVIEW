@@ -1,6 +1,6 @@
 # Fix findings with an agent
 
-Every finding OpenReview posts has a **Fix with …** link. It opens the finding's Fix page, which offers four ways to fix it. Your preferred one comes first: choose it under **Settings → Agents**. A workspace admin sets the default for everyone else.
+Every finding OpenReview posts has a **Fix with …** link. It opens the finding's Fix page, which offers four ways to fix it. Your preferred one comes first: choose it under **Personal Settings → Review Settings**. A workspace admin sets the default for everyone else.
 
 ## Cloud agents (GitHub)
 
@@ -28,22 +28,25 @@ Cloud agents are available for repositories on the OpenReview GitHub App.
 
 ## Local agents (your machine)
 
-**Fix** buttons start Claude Code, Codex or Cursor Agent in your own checkout through the OpenReview bridge (`openreview bridge install`, then pair and register the repository under **Settings → Agents**). The agent leaves an uncommitted diff for you to review.
+**Fix** buttons start Claude Code, Codex or Cursor Agent in your own checkout through the OpenReview bridge (`openreview bridge install`, then pair and register the repository under **Personal Settings → Review Settings**). The agent leaves an uncommitted diff for you to review. The bridge comes with the [CLI](cli.md) (`npm install -g openreview-cli`).
 
 Without the bridge, use **Open in Claude Code / Cursor / Codex / Conductor**, which opens the app with the prompt filled in, or copy the prompt.
 
 ## Devin
 
-Add your Devin API key under **Settings → Agents** to show **Send to Devin**, which starts an unlisted Devin session.
+Add your Devin API key under **Personal Settings → Review Settings** to show **Send to Devin**, which starts an unlisted Devin session.
 
 ## OpenReview fix pull requests
 
-**Open a fix PR** on a finding's Fix page commits OpenReview's validated suggestion for that finding to a new `openreview/fix-*` branch, and opens a pull request against your pull request's branch. Your branch is never written. You can also ask for one by replying `@openreview fix this in a new PR` in the finding's thread.
+**Fix with OpenReview** on a finding's Fix page starts OpenReview's fix agent. It reads the code around the finding, edits the files the fix needs (up to 10), and opens a pull request from a new `openreview/fix-*` branch against your pull request's branch. Your branch is never written. The agent cannot run commands, so **no tests or builds are run**: review the pull request before merging. The Fix page shows its progress and links the pull request when it is ready, usually after a few minutes.
+
+You can also reply `@openreview fix this in a new PR` in the finding's thread. OpenReview replies with its suggestion right away, then replies again with the pull request link when the agent finishes.
+
+Agent fixes are counted each month: none on Free, 5 per seat on Starter and 20 per seat on Pro, pooled across the workspace. The agent's model calls also use the plan's included usage. Copy prompt, the local bridge, cloud agents and Devin are on every plan and are never counted.
 
 This needs:
-- **Fix pull requests** turned on for the repository (Settings → Repositories).
-- The GitHub App's **Contents: Read and write** permission, accepted by the owner of the GitHub account. **Settings → Code providers** shows which installations have it.
+- **Fix pull requests** turned on for the repository (Repositories).
+- The GitHub App's **Contents: Read and write** permission, accepted by the owner of the GitHub account. **Code Providers** shows which installations have it.
 - Write access for your linked GitHub account.
-- The **Pro** plan on the hosted cloud (the free trial includes it). On Starter, `@openreview fix this` still replies with a suggestion, and `… in a new PR` explains that fix pull requests are on Pro.
 
 To open them automatically for critical and high findings, turn on [Autofix](/docs/issues-and-autofix#autofix).

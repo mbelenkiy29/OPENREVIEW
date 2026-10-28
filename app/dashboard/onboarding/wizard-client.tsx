@@ -3,6 +3,7 @@ import { useActionState, useEffect, useMemo, useState, type ReactNode } from "re
 import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 import { ConnectArt, RepoTreeArt, Stage } from "./art";
+import { Icon } from "../../ui/icons";
 
 type Result = { error?: string; message?: string };
 type Action = (state: Result, form: FormData) => Promise<Result>;
@@ -22,8 +23,9 @@ export function StepForm({ action, pendingLabel = "Saving…", disabled, childre
   </form>;
 }
 
-/** ⌘/Ctrl+Enter advances; on each step focus moves to its heading for screen-reader users. */
-export function WizardShortcuts({ nextHref }: { nextHref?: string }) {
+/** ⌘/Ctrl+Enter advances and ⌘/Ctrl+Shift+Enter goes back; on each step focus moves to its heading
+ *  for screen-reader users. */
+export function WizardShortcuts({ nextHref, backHref }: { nextHref?: string; backHref?: string }) {
   const router = useRouter();
   useEffect(() => {
     document.querySelector<HTMLElement>("[data-wizard-heading]")?.focus({ preventScroll: true });
@@ -31,18 +33,21 @@ export function WizardShortcuts({ nextHref }: { nextHref?: string }) {
       if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey) || event.isComposing) return;
       const form = document.getElementById("wizard-form") as HTMLFormElement | null;
       event.preventDefault();
-      if (form && !form.querySelector("fieldset:disabled")) form.requestSubmit();
+      if (event.shiftKey) { if (backHref) router.push(backHref); }
+      // Only the step's own fieldset marks it read-only; a Pro-locked section inside it is disabled too.
+      else if (form && !form.querySelector(".wizard-fieldset:disabled")) form.requestSubmit();
       else if (nextHref) router.push(nextHref);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [nextHref, router]);
+  }, [nextHref, backHref, router]);
   return null;
 }
-export function ShortcutHint() {
+// The keys are named by aria-keyshortcuts on the button, so the glyphs stay out of its name.
+export function ShortcutHint({ shift }: { shift?: boolean }) {
   const [mac, setMac] = useState(true);
   useEffect(() => setMac(/Mac|iPhone|iPad/.test(navigator.platform)), []);
-  return <kbd>{mac ? "⌘" : "Ctrl"} ↵</kbd>;
+  return <kbd aria-hidden="true">{mac ? "⌘" : "Ctrl"}+{shift && "⇧+"}↵</kbd>;
 }
 
 type Repo = { _id: string; fullName: string; provider: string; detail: string; selected: boolean; setupError?: string | null; status: string };
@@ -66,8 +71,8 @@ export function ConnectStep({ action, organizationId, repositories, accounts, gi
         {error && <p role="alert" className="wizard-error">{error}</p>}
         <ol className="wizard-steps">
           <li data-state={state(1)}>
-            <span className="num">{connected ? "✓" : "1"}</span>
-            <div><strong>Connect a code provider</strong>
+            <span className="num" aria-hidden="true"><Icon name={connected ? "check" : "githubLogo"} /></span>
+            <div><strong>1. Connect a code provider{connected && <span className="sr-only"> (done)</span>}</strong>
               <p className="muted">{connected ? "Connected. OpenReview reads repositories through the access you granted." : "Install the GitHub App, or connect GitLab, Bitbucket, Azure DevOps, Gitea or Perforce."}</p>
               <div className="row">
                 {githubHref ? <a className={`button${connected ? "" : " primary"}`} href={githubHref}>{connected ? "Add a GitHub account" : "Install GitHub App"}</a>
@@ -79,25 +84,26 @@ export function ConnectStep({ action, organizationId, repositories, accounts, gi
             </div>
           </li>
           <li data-state={state(2)}>
-            <span className="num">{connected ? "✓" : "2"}</span>
-            <div><strong>Linked accounts</strong>
+            <span className="num" aria-hidden="true"><Icon name={connected ? "check" : "buildings"} /></span>
+            <div><strong>2. Linked accounts{connected && <span className="sr-only"> (done)</span>}</strong>
               {connected ? <ul className="wizard-accounts">{accounts.map((a) => <li key={a.kind + a.label}><span className="badge">{a.kind}</span> {a.label}</li>)}</ul>
                 : <p className="muted">Accounts and organizations appear here after you connect.</p>}
               {connected && githubHref && <p className="muted"><a href={githubHref}>Don’t see your organization? Install on another account.</a></p>}
             </div>
           </li>
           <li data-state={state(3)}>
-            <span className="num">3</span>
-            <div><strong>Choose repositories to review</strong>
+            <span className="num" aria-hidden="true"><Icon name="folders" /></span>
+            <div><strong>3. Choose repositories to review</strong>
               {repositories.length ? <div className="repo-picker">
                 <div className="toolbar">
-                  <label className="grow">Filter repositories<input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="owner/name" /></label>
-                  <button type="button" className="small" onClick={() => setSelected(new Set([...selected, ...selectable.map((r) => r._id)]))}>Select shown</button>
-                  <button type="button" className="small" onClick={() => setSelected(new Set())}>Clear</button>
+                  <label className="grow search"><span className="sr-only">Filter repositories</span><Icon name="magnifyingGlass" /><input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search repositories" /></label>
+                  <button type="button" onClick={() => setSelected(new Set())}>Clear</button>
+                  <button type="button" className="primary" onClick={() => setSelected(new Set([...selected, ...selectable.map((r) => r._id)]))}>Select shown</button>
                 </div>
+                <p className="repo-head" aria-hidden="true"><span>Repositories</span><span>Provider</span></p>
                 <ul>{visible.map((r) => <li key={r._id}><label className="check">
                   <input type="checkbox" name="repositoryIds" title={r.detail} value={r._id} checked={selected.has(r._id)} disabled={Boolean(r.setupError)} onChange={(e) => toggle(r._id, e.target.checked)} />
-                  <span><span className="mono">{r.fullName}</span> <span className="muted">{r.provider}{r.setupError ? ` · ${r.setupError}` : ""}</span></span>
+                  <span className="repo-name">{r.fullName}</span> <span className="muted">{r.provider}{r.setupError ? ` · ${r.setupError}` : ""}</span>
                 </label></li>)}
                 {!visible.length && <li className="muted">No repositories match “{query}”.</li>}</ul>
                 <p className="muted" aria-live="polite">{selected.size} of {repositories.length} selected. Indexing starts when you continue; automatic reviews stay paused until you choose when reviews run.</p>
@@ -113,18 +119,22 @@ export function ConnectStep({ action, organizationId, repositories, accounts, gi
   </>;
 }
 
-export function InviteForm({ action, organizationId, disabled }: { action: Action; organizationId: string; disabled?: boolean }) {
+const roles = [["member", "Member"], ["admin", "Admin"], ["viewer", "Viewer"]] as const;
+/** Greptile's invite card: the workspace, a default role as radio cards, then who to invite. */
+export function InviteForm({ action, organizationId, workspace, disabled }: { action: Action; organizationId: string; workspace: string; disabled?: boolean }) {
   const [state, formAction] = useActionState(action, {});
   return <form id="wizard-invite" action={formAction} className="wizard-invite">
     <input type="hidden" name="organizationId" value={organizationId} />
     <fieldset disabled={disabled} className="wizard-fieldset">
-      <div className="form-grid">
-        <label>GitHub username<input name="login" placeholder="octocat" autoComplete="off" /></label>
-        <label>Role<select name="role" defaultValue="member"><option value="member">Member</option><option value="admin">Admin</option><option value="viewer">Viewer</option></select></label>
-      </div>
-      <button>Send invitation</button>
+      <h2>Invite people to this workspace</h2>
+      <div className="wizard-team"><span className="wizard-icon"><Icon name="usersThree" /></span><span><strong>{workspace}</strong><span className="mono">OpenReview workspace</span></span></div>
+      <fieldset className="wizard-roles"><legend>Role for the invited people</legend>
+        {roles.map(([value, label]) => <label key={value}><input type="radio" name="role" value={value} defaultChecked={value === "member"} />{label}</label>)}
+      </fieldset>
+      <label>GitHub username<input name="login" placeholder="octocat" autoComplete="off" /></label>
+      <button><Icon name="plus" /> Send invitation</button>
     </fieldset>
     {state.error && <p role="alert" className="wizard-error">{state.error}</p>}
-    {state.message && <p role="status">{state.message}</p>}
+    {state.message && <p role="status" className="wizard-sent"><Icon name="checkCircle" /><span><strong>Invitation sent</strong>{state.message}</span></p>}
   </form>;
 }

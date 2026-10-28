@@ -12,9 +12,11 @@ if (sentryDsn)
     tracesSampleRate: tracesSampleRate(),
     // No session replay: signed-in pages show customers' private code.
     dataCollection: sentryDataCollection,
+    ignoreErrors: ["Object Not Found Matching Id:"], // Outlook Safe Links bot scanning emailed links, not our code
     beforeSend: scrubSentryEvent,
     beforeSendTransaction: scrubSentryTransaction,
     beforeBreadcrumb: scrubBreadcrumb,
+    denyUrls: [/\/sdk\/v3\/uj\.js/], // UserJot widget (cdn.userjot.com): its storage errors aren't ours
   });
 
 // PostHog sets a cookie, so it starts only for visitors who accepted analytics (the banner in

@@ -23,7 +23,10 @@ export type ApprovalState = {
   runtimeRequired:boolean; runtimePassed:boolean;
   // Grounded "not met" acceptance criteria from linked tickets.
   requirementsNotMet?:number;
+  // Pull request labels, where the provider has them.
+  labels?:string[];
 };
+export const approvalBlockingLabels=["do-not-merge","manual-review"];
 /** All inputs come from trusted settings, recorded review state, and fresh provider reads. */
 export function approvalBlockers(policy:z.infer<typeof approvalPolicySchema>,state:ApprovalState){
   const p=approvalPolicySchema.parse(policy),reasons:string[]=[];
@@ -45,5 +48,6 @@ export function approvalBlockers(policy:z.infer<typeof approvalPolicySchema>,sta
   if(required.some(required=>{const matches=state.checks.filter(c=>c.name===required.name&&(required.appId===undefined||required.appId===c.appId));return !matches.length||matches.some(c=>c.status!=="completed"||c.conclusion!=="success");}))reasons.push("Required checks have not passed");
   if(state.runtimeRequired&&!state.runtimePassed)reasons.push("Required runtime validation has not passed");
   if((state.requirementsNotMet??0)>0)reasons.push("Linked ticket requirements are not met");
+  if(state.labels?.some(l=>approvalBlockingLabels.includes(l.trim().toLowerCase())))reasons.push("A do-not-merge or manual-review label is present");
   return reasons;
 }

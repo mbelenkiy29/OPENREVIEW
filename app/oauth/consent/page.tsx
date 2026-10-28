@@ -24,9 +24,10 @@ export default async function Consent() {
       {loopbackRedirect(pending.redirectUri) && <p role="alert">This client redirects to your own computer ({redirect.hostname}). Approve only if you started this connection from an app you trust.</p>}
       <p className="muted">Client: <code>{pending.clientId}</code></p>
       <form action={approveAuthorization} className="form-grid">
+        <input type="hidden" name="request" value={pending.requestId} />
         <label>Workspace<select name="organizationId" required>{workspaces.map((o) => <option key={o._id} value={o._id!}>{o.name} ({o.role})</option>)}</select></label>
         <fieldset className="wide"><legend>Access</legend>{pending.scopes.map((s) => <label key={s} className="check"><input type="checkbox" name="scopes" value={s} defaultChecked />{s}: {scopeText[s]}</label>)}</fieldset>
-        <p className="muted wide">Access never exceeds your role in the workspace. Revoke it any time under Settings → API keys.</p>
+        <p className="muted wide">Access never exceeds your role in the workspace. Revoke it any time under Organization Settings → API Keys.</p>
         <button className="primary">Approve</button>
         <button formAction={denyAuthorization} formNoValidate>Deny</button>
       </form>

@@ -13,32 +13,31 @@ import {Gitea} from "../src/gitea";
 import {Gitlab, type Scm} from "../src/gitlab";
 import {commentRange} from "../src/engine/patch-lines";
 import {suggestionBlock} from "../src/suggestions";
-import {openFix,prepareFix} from "./fixPreparation";
+import {prepareFix} from "./fixPreparation";
 import {fixCommand,fixHandoffUrl,fixReplyBody} from "../src/fix-command";
 import type {ActionCtx} from "./_generated/server";
 import type {Doc} from "./_generated/dataModel";
 import type {ScmChange} from "../src/gitlab";
 
-export const fixPullRequestsUpgrade="Fix pull requests are on the Pro plan; a workspace admin can upgrade in Settings → Billing.";
 // `@openreview fix this`: a validated committable suggestion for the thread's finding, the Fix
 // handoff link and, when asked for and allowed, a fix pull request on a new branch.
-async function fixAnswer(ctx:ActionCtx,p:{github:Scm;repo:Doc<"repositories">;fixPullRequests:boolean;pr:ScmChange;tree:Map<string,{path:string;sha:string}>;target:Doc<"findings">|null;openPullRequest:boolean;author:string;prNumber:number}):Promise<string>{
+async function fixAnswer(ctx:ActionCtx,p:{github:Scm;repo:Doc<"repositories">;fixPullRequests:boolean;pr:ScmChange;tree:Map<string,{path:string;sha:string}>;target:Doc<"findings">|null;openPullRequest:boolean;author:string;prNumber:number;thread?:number|string}):Promise<string>{
   const {github,repo,pr,tree,target}=p;
   if(!target)return "`@openreview fix this` works as a reply in an OpenReview finding thread. Reply to the finding comment you want fixed.";
   const handoff=fixHandoffUrl(process.env.APP_URL,target.reviewId,target.fingerprint);
   if(target.status!=="open")return fixReplyBody({title:target.title,problem:`this finding is marked ${target.status}`,handoff,revision:pr.head.sha});
+  // Line numbers are from the finding's commit; after a push they may point at unrelated code.
+  if(target.commitSha!==pr.head.sha)return fixReplyBody({title:target.title,problem:"this finding is from an older revision of the pull request; request a re-review with `@openreview review` and reply to the new finding",revision:pr.head.sha});
   const prepared=await prepareFix(ctx,{github,repo,pr,tree,target});
   const {suggestion,changed}=prepared;
   // GitHub replies inherit the thread's line range; GitLab counts lines from the note's line.
   const syntax=github instanceof Gitlab?"gitlab" as const:github instanceof Github&&!(github instanceof Gitea)?"github" as const:undefined;
   const block=suggestion&&changed?syntax?suggestionBlock(suggestion,syntax,syntax==="github"?commentRange(changed.patch,target.startLine,target.endLine):{start:target.startLine,end:target.startLine}):`\n\nReplacement for lines ${suggestion.startLine}–${suggestion.endLine}:\n\n\`\`\`\n${suggestion.replacement}\n\`\`\``:undefined;
-  let pullRequest:{url:string;reused:boolean}|undefined,pullRequestNote:string|undefined;
-  if(p.openPullRequest){
-    if(!await ctx.runQuery(internal.billing.allows,{organizationId:repo.organizationId,key:"fix.pullRequests"}))pullRequestNote=fixPullRequestsUpgrade;
-    else if(!p.fixPullRequests)pullRequestNote="Fix pull requests are turned off for this repository; a workspace admin can allow them in repository settings.";
-    else{const opened=await openFix({github,repo,pr,target,prepared,author:p.author,prNumber:p.prNumber,requestedIn:`#${p.prNumber}`});pullRequest=opened.pullRequest;pullRequestNote=opened.note;}
-  }
-  return fixReplyBody({title:target.title,explanation:prepared.explanation,block,problem:prepared.problem,handoff,pullRequest,pullRequestNote,revision:pr.head.sha});
+  // The fix pull request comes from OpenReview's fix agent, which replies in this thread when it finishes.
+  let pullRequestNote:string|undefined;
+  if(p.openPullRequest)pullRequestNote=!p.fixPullRequests?"Fix pull requests are turned off for this repository; a workspace admin can allow them in repository settings."
+    :await ctx.runMutation(internal.fixPullRequests.startFromComment,{findingId:target._id,author:p.author,prNumber:p.prNumber,...(p.thread!==undefined?{commentId:p.thread}:{})});
+  return fixReplyBody({title:target.title,explanation:prepared.explanation,block,problem:prepared.problem,handoff,pullRequestNote,revision:pr.head.sha});
 }
 export const reply = internalAction({
   args: {
@@ -102,13 +101,13 @@ export const reply = internalAction({
       let body = conversation.answer;
       const fix = fixCommand(args.question);
       if (!body && fix) {
-        body = await fixAnswer(ctx,{github,repo:data.repo,fixPullRequests:data.settings.fixPullRequests===true,pr,tree,target,openPullRequest:fix.openPullRequest,author:args.author,prNumber:args.prNumber});
+        body = await fixAnswer(ctx,{github,repo:data.repo,fixPullRequests:data.settings.fixPullRequests===true,pr,tree,target,openPullRequest:fix.openPullRequest,author:args.author,prNumber:args.prNumber,thread:args.inline?(args.parentCommentId??args.commentId):undefined});
         await ctx.runMutation(internal.conversations.finish,{conversationId,answer:body,status:"answering"});
       }
       const sources: {path:string;content:string}[] = [];
       if (!body) {
       for(const file of pr.diff)paths.add(file.path);
-      const related=await ctx.runQuery(internal.context.related,{repositoryId:args.repositoryId,paths:[...paths],identifiers:[...new Set((args.question+"\n"+pr.diff.map(f=>f.patch).join("\n")).match(/[A-Za-z_]\w{3,}/g)??[])].slice(0,30)});
+      const related=await ctx.runQuery(internal.context.related,{repositoryId:args.repositoryId,paths:[...paths].slice(0,20),identifiers:[...new Set((args.question+"\n"+pr.diff.map(f=>f.patch).join("\n")).match(/[A-Za-z_]\w{3,}/g)??[])].slice(0,30)});
       for(const path of related.paths)paths.add(path);
       let remaining=40000;
       for (const path of [...paths].slice(0, 20)) {
@@ -165,7 +164,7 @@ export const reply = internalAction({
             conversationId,
           });
           body +=
-            "\n\nSaved a repository preference for this finding pattern. Inspect it in Memory → Learned preferences; workspace admins can disable it there.";
+            "\n\nSaved a repository preference for this finding pattern. Inspect it in Custom Context → Learned preferences; workspace admins can disable it there.";
         }
         await ctx.runMutation(internal.conversations.finish, {
           conversationId,

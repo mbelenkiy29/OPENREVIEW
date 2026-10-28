@@ -8,7 +8,7 @@ export async function knowledgeView<R extends { _id: string }, E>(
   for (const key of ["team", "repository", "q"] as const) {
     if (filters[key] !== undefined) params.set(key, filters[key]);
   }
-  const retryUrl = `/dashboard/memory/knowledge${params.size ? `?${params}` : ""}`;
+  const retryUrl = `/dashboard/repositories/knowledge${params.size ? `?${params}` : ""}`;
   const searchError = (filters.q?.length ?? 0) > 200;
   const results = searchError ? [] : await Promise.all(
     repositories.filter(repo => !filters.repository || repo._id === filters.repository).map(async repo => {

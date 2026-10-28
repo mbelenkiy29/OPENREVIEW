@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { authorizationRequest, mcpResource, oauthBase, redirectWith } from "../../../src/oauth-server";
+import { authorizationRequest, mcpResource, newSecret, oauthBase, redirectWith } from "../../../src/oauth-server";
 import { resolveClient } from "../../../src/oauth-clients";
 import { cookieOptions, seal } from "../../../src/server";
 
@@ -21,6 +21,6 @@ export async function GET(request: Request) {
   if (!parsed.success) return fail(parsed.error.issues.some((i) => i.path[0] === "scope") ? "invalid_scope" : "invalid_request", parsed.error.issues[0]?.message.slice(0, 200) ?? "Invalid request");
   const resource = mcpResource(base);
   if (parsed.data.resource && parsed.data.resource.replace(/\/+$/, "").toLowerCase() !== resource.toLowerCase()) return fail("invalid_target", `This server issues tokens only for ${resource}`);
-  (await cookies()).set("openreview_oauth_request", await seal({ clientId: resolved.client.clientId, clientName: resolved.client.name, redirectUri: parsed.data.redirect_uri, codeChallenge: parsed.data.code_challenge, scopes: parsed.data.scope ?? ["read"], state: parsed.data.state, resource, issuer: base }), { ...cookieOptions, maxAge: 600, path: "/oauth" });
+  (await cookies()).set("openreview_oauth_request", await seal({ requestId: newSecret("orq_"), clientId: resolved.client.clientId, clientName: resolved.client.name, redirectUri: parsed.data.redirect_uri, codeChallenge: parsed.data.code_challenge, scopes: parsed.data.scope ?? ["read"], state: parsed.data.state, resource, issuer: base }), { ...cookieOptions, maxAge: 600, path: "/oauth" });
   return NextResponse.redirect(`${base}/oauth/consent`, 302);
 }

@@ -28,8 +28,8 @@ export function eligibleTips(s: TipSignals): { key: TipKey; ticket?: TicketKind 
   const tips: { key: TipKey; ticket?: TicketKind }[] = [];
   const ticket = ticketReference(s.references, s.connected);
   if (ticket) tips.push({ key: "ticket", ticket });
-  // Half or more of at least ten recent rated findings dismissed, and strictness not already at its highest.
-  if (s.recentFindings >= 10 && s.dismissedFindings * 2 >= s.recentFindings && s.strictness < 3) tips.push({ key: "strictness" });
+  // Half or more of at least ten recent rated findings dismissed, and strictness not already 1 (fewest comments).
+  if (s.recentFindings >= 10 && s.dismissedFindings * 2 >= s.recentFindings && s.strictness !== 1) tips.push({ key: "strictness" });
   if (s.rules === 0) tips.push({ key: "rules" });
   if (s.agenticAvailable && s.engine !== "agentic") tips.push({ key: "agentic" });
   return tips;
@@ -37,10 +37,10 @@ export function eligibleTips(s: TipSignals): { key: TipKey; ticket?: TicketKind 
 const ticketNames: Record<TicketKind, string> = { linear: "Linear", jira: "Jira", either: "Linear or Jira" };
 export function tipText(key: TipKey, ticket?: TicketKind) {
   switch (key) {
-    case "ticket": return `This pull request mentions a ${ticketNames[ticket ?? "either"]} issue. Connect ${ticketNames[ticket ?? "either"]} under Settings → Integrations so reviews can check the change against the issue's requirements.`;
-    case "strictness": return "Many recent findings in this repository were dismissed. A higher strictness under Settings → Review reports fewer, higher-confidence issues.";
+    case "ticket": return `This pull request mentions a ${ticketNames[ticket ?? "either"]} issue. Connect ${ticketNames[ticket ?? "either"]} under Integrations so reviews can check the change against the issue's requirements.`;
+    case "strictness": return "Many recent findings in this repository were dismissed. Strictness 1 under Code Review Settings reports fewer, higher-confidence issues.";
     case "rules": return "This repository has no custom review rules. Add your team's conventions under Rules, or in `.openreview.json`, and reviews will check them.";
-    case "agentic": return "The agentic review engine follows callers and definitions across files with read-only tools before it reports. Try it under Settings → Review → Engine.";
+    case "agentic": return "The agentic review engine follows callers and definitions across files with read-only tools before it reports. Try it under Code Review Settings → Engine.";
   }
 }
 export const tipLine = (key: TipKey, ticket?: TicketKind) => "\n\n💡 **Tip:** " + tipText(key, ticket) + " Turn tips off with the Feature tips summary section.";

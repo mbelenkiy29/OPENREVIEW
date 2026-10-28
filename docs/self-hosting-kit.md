@@ -86,8 +86,8 @@ Everything else is turned off. Each feature tells people why:
 | Turned off | What people see |
 |---|---|
 | OSV advisory lookups (`api.osv.dev` or `OSV_API_URL`) | Dependency checks fall back to the local patterns, the same as `OSV_ENABLED=false` |
-| Linear, Atlassian (Jira, Confluence) and Notion | Settings → Integrations shows an offline notice and no connect buttons. Reviews skip ticket lookups and add a coverage note. Existing connections are kept as they are. |
-| Slack | Settings → Notifications shows that Slack is off. No Slack messages are sent. |
+| Linear, Atlassian (Jira, Confluence) and Notion | Integrations shows an offline notice and no connect buttons. Reviews skip ticket lookups and add a coverage note. Existing connections are kept as they are. |
+| Slack | Organization Settings → Notifications shows that Slack is off. No Slack messages are sent. |
 | Email (Resend) | Email sign-in, invitations and notification emails are hidden or skipped |
 | Stripe billing | Stripe calls fail with an offline error. Leave `BILLING_ENABLED` off when self-hosting. |
 | Send to Devin | The button is hidden |

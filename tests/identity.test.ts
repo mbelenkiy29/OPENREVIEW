@@ -1,13 +1,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { gitlabAuthorizeUrl, gitlabProfile, googleAuthorizeUrl, googleProfile, newSession, safeNext } from "../src/identity";
+import { gitlabAuthorizeUrl, gitlabGroupIds, gitlabProfile, googleAuthorizeUrl, googleProfile, newSession, safeNext } from "../src/identity";
+import { signInAgain } from "../convex/referralLedger";
 
 const fake = (routes: Record<string, unknown>) => (async (input: string | URL | Request) => { const url = String(input).split("?")[0]; return url in routes ? Response.json(routes[url]) : new Response("no", { status: 404 }); }) as typeof fetch;
 
 test("post-sign-in redirects stay on this origin", () => {
   assert.equal(safeNext("/invite?token=abc_123"), "/invite?token=abc_123");
   for (const bad of ["//evil.example", "https://evil.example", "/\\evil.example", "javascript:alert(1)", "/a b", "", null, undefined]) assert.equal(safeNext(bad), "/dashboard", String(bad));
+  // endSession (app/dashboard/actions.ts) redirects through safeNext; its real targets must pass unchanged.
+  for (const ok of ["/", signInAgain.signIn]) assert.equal(safeNext(ok), ok);
+});
+
+test("Join a team's GitLab re-authorization asks for read_api, keeps the granted token, and lists every group page", async () => {
+  delete process.env.GITLAB_OAUTH_URL;
+  assert.equal(new URL(gitlabAuthorizeUrl("cid", "https://r/cb", "st", "read_user read_api")).searchParams.get("scope"), "read_user read_api");
+  const kept: string[] = [];
+  const user = { id: 42, username: "dev", avatar_url: null, email: null, confirmed_at: null };
+  await gitlabProfile("code", "https://r/cb", fake({ "https://gitlab.com/oauth/token": { access_token: "t", scope: "read_user read_api" }, "https://gitlab.com/api/v4/user": user }), (token, scope) => kept.push(token, scope));
+  assert.deepEqual(kept, ["t", "read_user read_api"]);
+  const pages: string[] = [];
+  const groups = (async (input: string | URL | Request) => { const url = new URL(String(input)); pages.push(url.searchParams.get("page")!); return Response.json(url.searchParams.get("page") === "1" ? Array.from({ length: 100 }, (_, i) => ({ id: i + 1 })) : [{ id: 501 }]); }) as typeof fetch;
+  const ids = await gitlabGroupIds("t", groups);
+  assert.deepEqual([ids.length, ids[0], ids.at(-1), pages], [101, "1", "501", ["1", "2"]]);
 });
 
 test("session IDs are random and stored only as their SHA-256", () => {

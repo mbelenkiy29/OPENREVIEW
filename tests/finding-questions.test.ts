@@ -28,7 +28,7 @@ test("a finding may carry one short question for the author, rendered under the 
   assert.equal(findingSchema.safeParse({ ...candidate, question: "x".repeat(301) }).success, false);
   assert.equal(findingSchema.safeParse({ ...candidate, question: "why" }).success, false);
   const comment = findingComment({ ...base, question: "Should @alice confirm whether\nguests count as active?" });
-  assert.match(comment, /\*\*Fix:\*\* Require a present user and active === true\.\n\n\*\*Question for the author:\*\* Should @​alice confirm whether guests count as active\?\n\nEvidence:/);
+  assert.match(comment, /Require a present user and active === true\.\n\n\*\*Question for the author:\*\* Should @​alice confirm whether guests count as active\?\n\n<!-- openreview-finding:/);
   assert.doesNotMatch(findingComment(base), /Question for the author/);
 });
 
@@ -57,4 +57,13 @@ test("a question never counts as a finding or changes the verdict on its own", a
 test("unmentioned replies skip bare acknowledgements and quoted-only text", () => {
   for (const text of ["Why is this a problem when the caller checks first?", "This is intentional: guests are active by design.", "fixed in the next commit, but why does the retry matter?"]) assert.equal(wantsAnswer(text), true, text);
   for (const text of ["Thanks!", "thank you 🙏", "LGTM", "fixed.", "done, thanks", "👍", "> quoted\nok", "", " k "]) assert.equal(wantsAnswer(text), false, text);
+});
+
+test("a model's null for an optional field means absent, not an invalid finding", () => {
+  // Claude Haiku 5.5 through OpenRouter answers "ruleId": null; the whole specialist used to fail on it.
+  const parsed = findingSchema.parse({ ...candidate, ruleId: null, question: null, suggestion: null, evidence: candidate.evidence.map((e) => ({ ...e, repository: null })) });
+  assert.equal("ruleId" in parsed, false);
+  assert.equal("question" in parsed, false);
+  assert.equal("repository" in parsed.evidence[0], false);
+  assert.equal(findingSchema.safeParse({ ...candidate, title: null }).success, false, "a required field is still required");
 });

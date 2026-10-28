@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Suggestion } from "./suggestions";
+import { localAgentLabels, localAgents } from "./fix-agents";
 
 // `@openreview fix this` in a finding thread: reply with a validated committable suggestion and
 // the Fix handoff link. Asking for a pull request ("fix this in a new PR") additionally opens a fix
@@ -18,13 +18,6 @@ export const fixSuggestionSchema = z.object({ replacement: z.string().max(4000),
 export function rangeText(content: string, startLine: number, endLine: number) {
   return content.replace(/\r\n/g, "\n").split("\n").slice(startLine - 1, endLine).join("\n");
 }
-// Replaces exactly the suggestion's lines; the caller has already validated it against this content.
-export function applySuggestion(content: string, s: Suggestion) {
-  const lines = content.replace(/\r\n/g, "\n").split("\n");
-  if (lines.slice(s.startLine - 1, s.endLine).join("\n") !== s.original.replace(/\r\n/g, "\n")) throw new Error("Suggestion no longer matches the file");
-  lines.splice(s.startLine - 1, s.endLine - s.startLine + 1, ...s.replacement.replace(/\r\n/g, "\n").split("\n"));
-  return lines.join("\n");
-}
 
 export function fixBranchName(prNumber: number, fingerprint: string) {
   return `openreview/fix-${prNumber}-${fingerprint.replace(/[^a-z0-9]/gi, "").slice(0, 12).toLowerCase()}`;
@@ -41,16 +34,21 @@ export function fixHandoffUrl(appUrl: string | undefined, reviewId: string, fing
   return `${origin.origin}/fix/${encodeURIComponent(reviewId)}?finding=${encodeURIComponent(fingerprint)}`;
 }
 /** The "Fix with …" link under an inline finding, or "" when APP_URL is unset or not a plain web origin. */
+/** Greptile-style "Fix in …" row under an inline finding: each opens the finding's Fix page with that agent
+ * selected (GitHub keeps only https links in comments, so agent deep links are offered from that page). */
+export function fixAgentButtons(appUrl: string | undefined, reviewId: string, fingerprint: string) {
+  const url = fixHandoffUrl(appUrl, reviewId, fingerprint);
+  return url ? "\n\n" + localAgents.map((agent) => `[Fix in ${localAgentLabels[agent]}](${url}&agent=${agent})`).join(" · ") : "";
+}
 export function fixHandoffLink(appUrl: string | undefined, reviewId: string, fingerprint: string, label = "Fix with your agent") {
   const url = fixHandoffUrl(appUrl, reviewId, fingerprint);
   return url ? `\n\n[${label.replace(/[[\]\r\n]/g, "")}](${url})` : "";
 }
 
-export function fixReplyBody(p: { title: string; explanation?: string; block?: string; problem?: string; handoff?: string; pullRequest?: { url: string; reused: boolean }; pullRequestNote?: string; revision: string }) {
+export function fixReplyBody(p: { title: string; explanation?: string; block?: string; problem?: string; handoff?: string; pullRequestNote?: string; revision: string }) {
   const parts = [`**Fix for:** ${p.title.replace(/[\r\n]+/g, " ").slice(0, 200)}`];
   if (p.block) parts.push((p.explanation ? p.explanation + "\n" : "") + p.block.trim());
   else parts.push(`No committable suggestion was published${p.problem ? ` (${p.problem.replace(/[\r\n]+/g, " ")})` : ""}.${p.explanation ? " " + p.explanation : ""}`);
-  if (p.pullRequest) parts.push(`${p.pullRequest.reused ? "A fix pull request already exists" : "Opened a fix pull request"} on a new branch: ${p.pullRequest.url}. It targets this pull request's branch; nothing was pushed to this branch.`);
   if (p.pullRequestNote) parts.push(p.pullRequestNote);
   if (p.handoff) parts.push(`[Fix with your agent](${p.handoff})`);
   parts.push(`Checked against source revision ${p.revision}. No test execution evidence was supplied for this fix.`);

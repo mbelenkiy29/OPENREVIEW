@@ -1,7 +1,7 @@
 {
   "name": "openreview",
   "version": "0.3.0",
-  "description": "OpenReview for Claude Code: the OpenReview MCP server plus skills to check a pull request's review and fix its findings until a re-review is clean.",
+  "description": "OpenReview for Claude Code: the OpenReview MCP server plus skills to review local commits before pushing, check a pull request's review and fix its findings until a re-review is clean.",
   "author": {
     "name": "OpenReview contributors"
   },

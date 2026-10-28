@@ -1,6 +1,6 @@
 # Analytics filters and recovery acceptance
 
-October 4, 2026. Hosted release `dpl_CEQshwemhSJoSe9pWnMBSLkVr7TS`, https://openreview-flame-two.vercel.app, Convex `tidy-ocelot-457`.
+October 4, 2026. Hosted release `<deployment-id>`, `<vercel-url>`, Convex `<prod-deployment>`.
 
 ## Change
 

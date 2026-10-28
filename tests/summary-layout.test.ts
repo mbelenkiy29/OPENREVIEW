@@ -1,24 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {disclosureLayout,threadLinks,withDescriptionSummary,withoutDescriptionSummary,descriptionStart,descriptionEnd} from "../src/summary-layout";
+import {compactLayout,disclosureLayout,threadLinks,withDescriptionSummary,withoutDescriptionSummary,descriptionStart,descriptionEnd} from "../src/summary-layout";
 import {agentPrompt,codeSpan,fenced,findingComment,reviewFooter,reviewSummary} from "../src/review-summary";
 import type {Finding} from "../src/engine/types";
 
 const finding=(over:Partial<Finding>={}):Finding=>({symbol:"lines",title:"Totals become dollars",description:"`total()` now divides cents by 100.",severity:"high",confidence:0.95,category:"correctness",filePath:"src/cart.ts",startLine:6,endLine:8,evidence:[{filePath:"src/cart.ts",startLine:6,quote:"lines.push(`${item.qty} × ${item.name}`)"}],impact:"Customers are charged a hundredth.",suggestedFix:"Keep integer cents.",fingerprint:"ab12",agent:"correctness",commitSha:"a".repeat(40),...over});
 const data=(findings:Finding[])=>({overview:"Adds receipt lines.",files:[{path:"src/cart.ts",status:"modified",patch:"@@ -1 +1 @@\n-a\n+b"}],findings,resolved:[],score:{value:2,reason:"A high-severity defect changes every total. More text."},assessment:{risk:"high" as const,confidence:0.9,reason:"Money paths changed."},runtimeEvidence:undefined,coverageLimits:[],contextCount:1,candidates:1,suppressed:0,diagram:"sequenceDiagram\n  cart->>receipt: lines()"});
 
-test("GitHub layout: verdict with the confidence reason first, details collapsed, diagram open, footer outside",()=>{
+test("GitHub layout follows Greptile: score heading and verdict, folded summary, issues, open diagram, one details block, small footer",()=>{
  const summary=reviewSummary(data([finding()]))+reviewFooter(3,"other");
- const layout=disclosureLayout(summary);
- assert.match(layout,/^\*\*Needs changes\*\* · Confidence score \*\*2\/5\*\*\n\nA high-severity defect changes every total\.\n\n### Overview\nAdds receipt lines\./);
- assert.doesNotMatch(layout,/### Confidence score/);
+ const layout=disclosureLayout(summary,["Last reviewed commit: [`abc1234`](https://github.com/o/r/commit/abc)","[View in OpenReview](https://review.example.com/dashboard/pulls/r1)"]);
+ assert.match(layout,/^<h2>Confidence Score: 2\/5<\/h2>\n\n\*\*Needs changes\.\*\* A high-severity defect changes every total\.\n\n<details><summary><h3>Summary<\/h3><\/summary>\n\nAdds receipt lines\.\n\n<\/details>/);
+ assert.doesNotMatch(layout,/### Confidence score|### Overview/);
  assert.match(layout,/### Issues\n\| Priority \| Location \| Issue \|/);
- for(const label of ["Files changed","Prompt for your coding agent","Risk assessment","Resolved findings","Skipped files","Test source","Test execution","Coverage"])assert.match(layout,new RegExp("<details><summary><strong>"+label+"</strong></summary>\\n\\n"),label);
- assert.match(layout,/<details open><summary><strong>Sequence diagram<\/strong><\/summary>\n\n```mermaid/);
- assert.match(layout,/<\/details>\n\nReview 3 on this pull request · Comment `@openreview review` to re-run it\.$/);
- const order=["### Overview","### Issues","<strong>Sequence diagram","<strong>Prompt for your coding agent","<strong>Files changed","<strong>Risk assessment","<strong>Coverage"].map(h=>layout.indexOf(h));
- assert.deepEqual([...order].sort((a,b)=>a-b),order,"verdict, overview and issues first; then the open diagram; then the collapsed details, prompt first");
+ assert.match(layout,/<details open><summary><h3>Diagram<\/h3><\/summary>\n\n```mermaid\n%%\{init: \{'theme': 'neutral'\}\}%%\n/);
+ // Everything Greptile does not show sits in one folded block, still in summary order.
+ assert.equal((layout.match(/<details>/g)??[]).length,2,"Summary and More details are the only folded blocks");
+ const more=layout.slice(layout.indexOf("<details><summary><h3>More details</h3></summary>"));
+ for(const label of ["Files changed","Prompt for your coding agent","Risk assessment","Resolved findings","Skipped files","Test source","Test execution","Coverage"])assert.match(more,new RegExp("### "+label+"\\n"),label);
+ assert.match(layout,/<\/details>\n\n<sub>Reviews \(3\) · Last reviewed commit: \[`abc1234`\]\(https:\/\/github\.com\/o\/r\/commit\/abc\) · \[View in OpenReview\]\([^)]+\) · Comment `@openreview review` to re-run · Reviewed by OpenReview<\/sub>$/);
+ const order=["<h2>","<h3>Summary","### Issues","<h3>Diagram","<h3>More details","<sub>"].map(h=>layout.indexOf(h));
+ assert.deepEqual([...order].sort((a,b)=>a-b),order);
  assert.equal((layout.match(/<details/g)??[]).length,(layout.match(/<\/details>/g)??[]).length);
+ // Without a recorded score the heading is the product name and the verdict stays.
+ assert.match(disclosureLayout("**Review incomplete**\n\n### Overview\nx"),/^<h2>OpenReview<\/h2>\n\n\*\*Review incomplete\.\*\*/);
 });
 
 test("model text cannot close a disclosure early, but code fences are left alone",()=>{
@@ -26,7 +31,7 @@ test("model text cannot close a disclosure early, but code fences are left alone
  const layout=disclosureLayout(summary);
  assert.match(layout,/Done\.&lt;\/details>&lt;details open>/);
  const fencedSummary="**Ready to merge**\n\n### Coverage\n```\n</details>\n```";
- assert.match(disclosureLayout(fencedSummary),/```\n<\/details>\n```\n\n<\/details>$/);
+ assert.match(disclosureLayout(fencedSummary),/```\n<\/details>\n```\n\n<\/details>\n\n<sub>Reviewed by OpenReview<\/sub>$/);
 });
 
 test("issue rows link to their inline threads; unknown or unsafe links are dropped",()=>{
@@ -63,15 +68,16 @@ test("agent prompts keep code intact, list priorities first and cap the list",()
  assert.equal(fenced("plain"),"```\nplain\n```");
 });
 
-test("inline comments keep backticks in evidence and can carry a per-finding agent prompt",()=>{
+test("inline comments read like Greptile's and can carry a folded Prompt To Fix With AI",()=>{
  assert.equal(codeSpan("a `b` c"),"``a `b` c``");
  assert.equal(codeSpan("`edge`"),"`` `edge` ``");
- const plain=findingComment(finding(),"concise");
- assert.match(plain,/Evidence: `src\/cart\.ts:6` — ``lines\.push\(`\$\{item\.qty\} × \$\{item\.name\}`\)``/);
- assert.doesNotMatch(plain,/<details>/);
- const withPrompt=findingComment(finding(),"concise",undefined,{agentPrompt:true});
- assert.match(withPrompt,/<details><summary>Prompt for your coding agent<\/summary>\n\n```text\n/);
- assert.match(withPrompt,/<\/details>\n\n<!-- openreview-finding:ab12 -->$/);
+ const plain=findingComment(finding());
+ assert.equal(plain,"🟠 P1 **Totals become dollars**\n\n`total()` now divides cents by 100. Customers are charged a hundredth.\n\nKeep integer cents.\n\n<!-- openreview-finding:ab12 -->");
+ const withPrompt=findingComment(finding(),"detailed",undefined,{agentPrompt:true});
+ assert.match(withPrompt,/\n\n<details><summary>Prompt To Fix With AI<\/summary>\n\n```markdown\nThis is a comment left during a code review\.\nPath: src\/cart\.ts\nLine: 6-8\n\nComment:\n\*\*Totals become dollars\*\*\n\n`total\(\)` now divides cents by 100\. Customers are charged a hundredth\.\n\nKeep integer cents\.\n\n---\n\nFor each issue above, determine whether it is valid and should be fixed\. If so, fix it directly\.\n```\n<\/details>\n\n<!-- openreview-finding:ab12 -->$/);
+ // A fence inside the finding cannot end the prompt block early.
+ const fenced=findingComment(finding({description:"Uses ```js\nx``` here."}),"detailed",undefined,{agentPrompt:true});
+ assert.match(fenced,/\n(`{4,})markdown\n[\s\S]*\n\1\n<\/details>/);
 });
 
 test("summary counts read naturally and the risk line has one confidence number",()=>{
@@ -80,4 +86,41 @@ test("summary counts read naturally and the risk line has one confidence number"
  assert.match(summary,/### Risk assessment\nhigh risk\n\nMoney paths changed\./);
  assert.match(summary,/### Prompt for your coding agent\n```text\n/);
  assert.doesNotMatch(reviewSummary(data([])),/Prompt for your coding agent/,"no prompt without findings");
+});
+
+test("section layout overrides: a section can be shown plainly, expanded or collapsed",()=>{
+ const summary=reviewSummary(data([finding()]))+reviewFooter(3,"other");
+ const layout=disclosureLayout(summary,[],{diagram:"collapsed",affectedAreas:"plain",overview:"open"});
+ assert.match(layout,/<details><summary><h3>Diagram<\/h3><\/summary>/);
+ assert.match(layout,/<details open><summary><h3>Summary<\/h3><\/summary>/);
+ assert.ok(layout.indexOf("### Files changed\n")<layout.indexOf("<h3>Diagram"),"a plain section moves up with the issues, out of More details");
+ assert.equal(disclosureLayout(summary,[],{}),disclosureLayout(summary),"no overrides keeps the default layout");
+});
+
+test("compact layout: summary, score, important files and diagram first; the rest collapsed; prompt and one-line footer last",()=>{
+ const summary=reviewSummary(data([finding(),finding({fingerprint:"cd34",title:"Old caller breaks",outsideDiff:true})]))+reviewFooter(3,"other");
+ const layout=compactLayout(summary,"[`abc1234`](https://github.com/o/r/commit/abc1234)","\n\n[View review](https://x)");
+ assert.match(layout,/^### OpenReview Summary\n\nAdds receipt lines\.\n\n### Confidence Score: 2\/5\n\n\*\*Needs changes\*\*\n\nA high-severity defect changes every total\./);
+ assert.match(layout,/### Important Files Changed\n\n\| Filename \| Overview \|/);
+ assert.match(layout,/### Sequence Diagram\n\n```mermaid/);
+ assert.match(layout,/<details open><summary><strong>Comments Outside Diff<\/strong><\/summary>/);
+ for(const label of ["Issues","Risk assessment","Coverage"])assert.match(layout,new RegExp("<details><summary><strong>"+label+"</strong></summary>"),label);
+ // Sections holding only reviewSummary's "nothing recorded" text are left out.
+ for(const label of ["Resolved findings","Skipped files","Test source","Test execution"])assert.doesNotMatch(layout,new RegExp("<strong>"+label+"</strong>"),label);
+ const empty=compactLayout(reviewSummary({...data([]),assessment:undefined}),"`abc1234`");
+ for(const label of ["Issues","Risk assessment","Resolved findings","Skipped files","Test source","Test execution"])assert.doesNotMatch(empty,new RegExp("<strong>"+label+"</strong>"),label);
+ assert.match(empty,/<strong>Coverage<\/strong>/);
+ assert.match(layout,/<details><summary>Prompt To Fix All With AI<\/summary>\n\n```text/);
+ assert.match(layout,/\n\n\[View review\]\(https:\/\/x\)\n\n<sub>Reviews \(3\): Last reviewed commit: \[`abc1234`\]\(https:\/\/github\.com\/o\/r\/commit\/abc1234\) · Comment `@openreview review` to re-run it\.<\/sub>$/);
+ const order=["### OpenReview Summary","### Confidence Score","### Important Files Changed","### Sequence Diagram","Comments Outside Diff","<strong>Issues","Prompt To Fix All","<sub>"].map(h=>layout.indexOf(h));
+ assert.deepEqual([...order].sort((a,b)=>a-b),order);
+ assert.match(compactLayout(reviewSummary(data([]),["overview"]),"`abc1234`"),/^### OpenReview Summary\n\nAdds receipt lines\.\n\n\*\*Needs changes\*\*\n\n<details>/,"no score section: the verdict line stays");
+});
+
+test("compact inline comment: badge and title, prose, folded fix prompt; no labels, evidence or confidence",()=>{
+ const body=findingComment(finding(),"compact",undefined,{agentPrompt:true});
+ assert.match(body,/^\*\*🟠 P1 · Totals become dollars\*\*\n\n`total\(\)` now divides cents by 100\. Customers are charged a hundredth\.\n\nKeep integer cents\./);
+ assert.match(body,/<details><summary>Prompt To Fix With AI<\/summary>\n\n```text/);
+ assert.match(body,/<!-- openreview-finding:ab12 -->$/);
+ for(const absent of [/\*\*Impact:\*\*/,/\*\*Fix:\*\*/,/Evidence:/,/% confidence/])assert.doesNotMatch(body,absent);
 });

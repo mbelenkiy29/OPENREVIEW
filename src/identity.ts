@@ -15,19 +15,33 @@ export function gitlabBase() {
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) throw new Error("GITLAB_OAUTH_URL must be an HTTPS origin");
   return url.origin;
 }
-export function gitlabAuthorizeUrl(clientId: string, redirectUri: string, state: string) {
-  return `${gitlabBase()}/oauth/authorize?` + new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: "code", state, scope: "read_user" });
+export function gitlabAuthorizeUrl(clientId: string, redirectUri: string, state: string, scope = "read_user") {
+  return `${gitlabBase()}/oauth/authorize?` + new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: "code", state, scope });
 }
-export async function gitlabProfile(code: string, redirectUri: string, fetchImpl: typeof fetch = fetch): Promise<Profile> {
+/** `keep` receives the access token and its granted scopes, for the "Join a team" re-authorization (read_api). */
+export async function gitlabProfile(code: string, redirectUri: string, fetchImpl: typeof fetch = fetch, keep?: (token: string, scope: string) => void): Promise<Profile> {
   const base = gitlabBase();
   const token = await fetchImpl(`${base}/oauth/token`, { method: "POST", redirect: "error", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body: new URLSearchParams({ client_id: process.env.GITLAB_OAUTH_CLIENT_ID ?? "", client_secret: process.env.GITLAB_OAUTH_CLIENT_SECRET ?? "", code, grant_type: "authorization_code", redirect_uri: redirectUri }), signal: timeout() });
   if (!token.ok) throw new Error("GitLab OAuth exchange failed");
-  const access = z.object({ access_token: z.string().min(1) }).parse(await token.json()).access_token;
+  const granted = z.object({ access_token: z.string().min(1), scope: z.string().optional() }).parse(await token.json()), access = granted.access_token;
+  keep?.(access, granted.scope ?? "");
   const response = await fetchImpl(`${base}/api/v4/user`, { redirect: "error", headers: { authorization: `Bearer ${access}` }, signal: timeout() });
   if (!response.ok) throw new Error("GitLab profile request failed");
   const user = z.object({ id: z.number().int().positive(), username: z.string().min(1).max(255), avatar_url: z.string().nullish(), email: z.string().nullish(), confirmed_at: z.string().nullish() }).parse(await response.json());
   // Self-managed instances may skip confirmation, so only gitlab.com emails are trusted for linking.
   return { providerUserId: String(user.id), login: user.username, avatar: user.avatar_url ?? "", ...(user.email ? { email: user.email } : {}), emailVerified: Boolean(user.email && user.confirmed_at && base === "https://gitlab.com") };
+}
+/** The ids of the GitLab groups (and subgroups) the token's user belongs to; needs read_api. */
+export async function gitlabGroupIds(token: string, fetchImpl: typeof fetch = fetch) {
+  const ids: string[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const response = await fetchImpl(`${gitlabBase()}/api/v4/groups?min_access_level=10&per_page=100&page=${page}`, { redirect: "error", headers: { authorization: `Bearer ${token}` }, signal: timeout() });
+    if (!response.ok) throw new Error("GitLab groups request failed");
+    const groups = z.array(z.object({ id: z.number().int().positive() })).parse(await response.json());
+    ids.push(...groups.map((g) => String(g.id)));
+    if (groups.length < 100) break;
+  }
+  return ids;
 }
 
 export function googleAuthorizeUrl(clientId: string, redirectUri: string, state: string) {

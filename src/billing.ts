@@ -1,46 +1,90 @@
 import { assertEgress } from "./egress";
-import { planCatalog, type Tier } from "./plans";
+import type { Plan } from "./plans";
 // Cloud billing (Stripe). Disabled unless BILLING_ENABLED=true, which is the self-host default.
-// New workspaces start the trial through Stripe Checkout with a card (planRequired); workspaces from
-// before that keep an app-level trial that starts with the first review or checkout.
-// Paid tiers (src/plans.ts) are per-seat subscriptions with unlimited reviews under a monthly fair-use limit.
-export type BillingConfig = { enabled: boolean; trialDays: number; trialReviews: number; reviewsPerSeat: number; proReviewsPerSeat: number; businessReviewsPerSeat: number; graceDays: number };
+// Plans (src/plans.ts): Free has a small monthly usage allowance per workspace and never expires, but only
+// workspaces from before paid-only signups keep it (keepsFree); Starter and Pro are per-seat subscriptions that
+// include model usage each month, metered in micro-dollars of inference cost (pricier models use it faster).
+// Past it, an admin-set monthly cap allows extra usage, reported to Stripe as meter events. Paid plans start with
+// a trial at Checkout (trialDays).
+export type BillingConfig = { enabled: boolean; trialDays: number; freeUsageMicros: number; usagePerSeatMicros: number; proUsagePerSeatMicros: number; graceDays: number; starterFixesPerSeat: number; proFixesPerSeat: number };
 export const int = (value: string | undefined, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isInteger(n) && n >= min && n <= max ? n : fallback; };
+const usd = (value: string | undefined, fallback: number) => { const n = Number(value); return Math.round((value?.trim() && Number.isFinite(n) && n >= 0 && n <= 100_000 ? n : fallback) * 1e6); };
 export function billingConfig(env: Record<string, string | undefined> = process.env): BillingConfig {
-  return { enabled: env.BILLING_ENABLED === "true", trialDays: int(env.BILLING_TRIAL_DAYS, 14, 0, 365), trialReviews: int(env.BILLING_TRIAL_REVIEWS, 200, 0, 1_000_000), reviewsPerSeat: int(env.BILLING_REVIEWS_PER_SEAT, planCatalog.starter.reviewsPerSeat, 1, 1_000_000), proReviewsPerSeat: int(env.BILLING_PRO_REVIEWS_PER_SEAT, planCatalog.pro.reviewsPerSeat, 1, 1_000_000), businessReviewsPerSeat: int(env.BILLING_BUSINESS_REVIEWS_PER_SEAT, planCatalog.business.reviewsPerSeat, 1, 1_000_000), graceDays: int(env.BILLING_GRACE_DAYS, 7, 0, 60) };
+  return { enabled: env.BILLING_ENABLED === "true", trialDays: int(env.BILLING_TRIAL_DAYS, 14, 0, 365), freeUsageMicros: usd(env.BILLING_FREE_USAGE_USD, 3), usagePerSeatMicros: usd(env.BILLING_USAGE_PER_SEAT_USD, 6), proUsagePerSeatMicros: usd(env.BILLING_PRO_USAGE_PER_SEAT_USD, 12), graceDays: int(env.BILLING_GRACE_DAYS, 7, 0, 60), starterFixesPerSeat: int(env.BILLING_STARTER_FIXES_PER_SEAT, 5, 0, 10_000), proFixesPerSeat: int(env.BILLING_PRO_FIXES_PER_SEAT, 20, 0, 10_000) };
 }
 // Billed seats: owners, admins and members; viewers are free.
 export const seatCount = (members: { role: string }[]) => members.filter((m) => m.role !== "viewer").length;
 export const periodKey = (now: number) => new Date(now).toISOString().slice(0, 7);
+/** When the current usage period (UTC calendar month) resets. */
+export const nextPeriodStart = (now: number) => { const d = new Date(now); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1); };
+export const usdText = (micros: number) => `$${(micros / 1e6).toFixed(2)}`;
+export const resetText = (now: number) => new Date(nextPeriodStart(now)).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
 
-export type PaidTier = Exclude<Tier, "trial">;
-// `tier` is absent on accounts from before tiers (Starter while subscribed).
-export type BillingAccount = { status: string; seats: number; trialEndsAt: number; pastDueSince?: number; subscriptionId?: string; tier?: string };
-export type BillingDecision = { allowed: boolean; plan: "disabled" | "trial" | PaidTier; limit: number | null; used: number; reason?: string };
+export type BillingAccount = { status: string; seats: number; trialEndsAt: number; pastDueSince?: number; subscriptionId?: string; spendCapUsd?: number; plan?: string };
+// limit, used and capMicros are micro-dollars; overage is true when this request runs past the included usage.
+export type BillingDecision = { allowed: boolean; plan: "disabled" | Plan; limit: number | null; used: number; capMicros: number; overage: boolean; reason?: string };
 const paying = new Set(["active", "trialing", "past_due"]);
-const paidTier = (tier: string | undefined): PaidTier => tier === "pro" || tier === "business" ? tier : "starter";
-const perSeat = (tier: PaidTier, config: BillingConfig) => ({ starter: config.reviewsPerSeat, pro: config.proReviewsPerSeat, business: config.businessReviewsPerSeat })[tier];
-export function billingDecision(account: BillingAccount, used: number, now: number, config: BillingConfig): BillingDecision {
-  if (!config.enabled) return { allowed: true, plan: "disabled", limit: null, used };
+/** Free is only for workspaces created before plans were required or that started on Free; every newer one pays per seat. */
+export const keepsFree = (organization: { planRequired?: boolean; plan?: string } | null | undefined) => !organization?.planRequired || organization.plan === "free";
+export const paidPlanReason = "This workspace has no paid plan. A workspace admin can choose Starter or Pro in Organization Settings → Billing & Usage.";
+export const freeTakenReason = (workspace: string) => `Free is one workspace per owner, and an owner of this workspace already has "${workspace}" on Free. A workspace admin can choose Starter or Pro in Organization Settings → Billing & Usage, or use "${workspace}" for free reviews.`;
+/** used includes in-flight reservations; request is the next call's reservation (0 for the pre-check at enqueue).
+ * blocked is why this workspace gets no Free allowance (convex/billing.ts): it does not keep Free, or its owner's Free workspace is another one. */
+export function billingDecision(account: BillingAccount, used: number, now: number, config: BillingConfig, request = 0, blocked?: string): BillingDecision {
+  if (!config.enabled) return { allowed: true, plan: "disabled", limit: null, used, capMicros: 0, overage: false };
+  const over = (room: number) => (request ? used + request > room : used >= room);
   if (account.subscriptionId && paying.has(account.status)) {
-    const plan = paidTier(account.tier), seatLimit = perSeat(plan, config), limit = Math.max(1, account.seats) * seatLimit;
-    if (account.status === "past_due" && (account.pastDueSince ?? now) + config.graceDays * 86400000 <= now) return { allowed: false, plan, limit, used, reason: "Payment is past due and the grace period has ended. Update the payment method in Settings → Billing." };
-    if (used >= limit) return { allowed: false, plan, limit, used, reason: `This workspace reached its fair-use limit of ${limit} reviews this month (${seatLimit} per seat). Reviews resume at the start of next month.` };
-    return { allowed: true, plan, limit, used };
+    // A subscription without a recorded plan predates Pro, so it is Starter.
+    const plan = account.plan === "pro" ? "pro" as const : "starter" as const;
+    // Stripe does not bill metered usage recorded during a trial, so extra usage starts with the paid period.
+    const trialing = account.status === "trialing";
+    const limit = Math.max(1, account.seats) * (plan === "pro" ? config.proUsagePerSeatMicros : config.usagePerSeatMicros), capMicros = trialing ? 0 : Math.round((account.spendCapUsd ?? 0) * 1e6), base = { plan, limit, used, capMicros };
+    if (account.status === "past_due" && (account.pastDueSince ?? now) + config.graceDays * 86400000 <= now) return { ...base, allowed: false, overage: false, reason: "Payment is past due and the grace period has ended. Update the payment method in Organization Settings → Billing & Usage." };
+    if (!over(limit)) return { ...base, allowed: true, overage: false };
+    if (capMicros && !over(limit + capMicros)) return { ...base, allowed: true, overage: true };
+    return { ...base, allowed: false, overage: false, reason: capMicros
+      ? `This workspace reached its extra usage cap of ${usdText(capMicros)} this month. Usage resets on ${resetText(now)}; a workspace admin can raise the cap in Organization Settings → Billing & Usage.`
+      : trialing ? `This workspace used its included usage for this month. Usage resets on ${resetText(now)}; extra usage can start once the trial ends.`
+      : `This workspace used its included usage for this month. Usage resets on ${resetText(now)}; a workspace admin can turn on extra usage in Organization Settings → Billing & Usage.` };
   }
-  if (now >= account.trialEndsAt) return { allowed: false, plan: "trial", limit: config.trialReviews, used, reason: "The free trial has ended. Subscribe in Settings → Billing to keep reviewing." };
-  if (used >= config.trialReviews) return { allowed: false, plan: "trial", limit: config.trialReviews, used, reason: `The trial includes ${config.trialReviews} reviews per month. Subscribe in Settings → Billing for more.` };
-  return { allowed: true, plan: "trial", limit: config.trialReviews, used };
+  // Free: no subscription (or a lapsed one). The allowance resets each month and has no extra usage.
+  const base = { plan: "free" as const, limit: config.freeUsageMicros, used, capMicros: 0, overage: false };
+  if (blocked) return { ...base, limit: 0, allowed: false, reason: blocked };
+  if (over(config.freeUsageMicros)) return { ...base, allowed: false, reason: `This workspace used the Free plan's ${usdText(config.freeUsageMicros)} of usage for this month. Usage resets on ${resetText(now)}; a workspace admin can upgrade in Organization Settings → Billing & Usage.` };
+  return { ...base, allowed: true };
 }
-/** The tiers whose features a workspace has now: a subscription's tier, plus the trial's (Pro)
- *  features while Stripe or the app trial is running. Empty once the trial ended with no subscription. */
-export function accountTiers(account: BillingAccount, now: number): Tier[] {
-  const subscribed = Boolean(account.subscriptionId && paying.has(account.status));
-  return [...(subscribed ? [paidTier(account.tier)] : []), ...(account.status === "trialing" || (!subscribed && now < account.trialEndsAt) ? ["trial" as const] : [])];
+
+/** About how many more reviews the included usage covers: the workspace's own average over its recent reviews (at least
+ * five, from per-call usage rows), else $0.065, a typical standard review. null when there is no limit. */
+export function reviewsLeft(limitMicros: number | null, usedMicros: number, calls: { reviewId?: string; estimatedCost: number }[]) {
+  if (limitMicros === null) return null;
+  const reviews = new Set(calls.flatMap((c) => c.reviewId ? [c.reviewId] : [])).size;
+  const average = reviews >= 5 ? calls.reduce((sum, c) => sum + c.estimatedCost, 0) / reviews * 1e6 : 65_000;
+  return Math.max(0, Math.floor((limitMicros - usedMicros) / Math.max(1, average)));
+}
+/** Hosted agent fix runs a workspace gets each month, pooled across seats; null is unlimited (billing off). */
+export function fixRunLimit(decision: BillingDecision, seats: number, config: BillingConfig): number | null {
+  if (decision.plan === "disabled") return null;
+  if (decision.plan === "free") return 0;
+  return Math.max(1, seats) * (decision.plan === "pro" ? config.proFixesPerSeat : config.starterFixesPerSeat);
+}
+
+/** The 80% / 100% usage alert email; `used` is settled usage and `now` falls in the alert's period. */
+export function usageAlertEmail(workspace: string, threshold: number, d: BillingDecision, overageMicros: number, now: number, billingUrl?: string) {
+  const reset = resetText(now), pause = threshold >= 100 ? `are paused until ${reset}` : "pause when it runs out";
+  const next = d.plan === "free" ? `Reviews ${pause}. A workspace admin can upgrade to Starter or Pro in Organization Settings → Billing & Usage for more usage.`
+    : d.capMicros ? `Extra usage is on: ${usdText(Math.max(0, d.capMicros - overageMicros))} of the ${usdText(d.capMicros)} monthly cap is left. A workspace admin can change the cap in Organization Settings → Billing & Usage.`
+    : `Extra usage is off, so reviews ${pause}. A workspace admin can turn on extra usage in Organization Settings → Billing & Usage.`;
+  return {
+    subject: `${workspace} used ${threshold >= 100 ? "all" : `${threshold}%`} of this month's included OpenReview usage`,
+    text: `${workspace} has used ${usdText(d.used)} of its ${usdText(d.limit ?? 0)} of included model usage this month. Usage resets on ${reset}.\n\n${next}${billingUrl ? `\n\n${billingUrl}` : ""}`,
+  };
 }
 
 /** A linked Stripe subscription that has not ended yet, so Stripe can still charge for it. */
 export const openSubscription = (account: { subscriptionId?: string; status: string } | null | undefined) => Boolean(account?.subscriptionId) && !["canceled", "incomplete_expired"].includes(account!.status);
+/** A subscription in good standing: Checkout refuses a second one, and the webhook keeps it over another. */
+export const liveSubscription = (account: { subscriptionId?: string | null; status: string }) => Boolean(account.subscriptionId) && ["active", "trialing", "past_due"].includes(account.status);
 /** When a trial that has not started yet would end if it started now. */
 export const trialEndsFrom = (now: number, config: BillingConfig) => now + config.trialDays * 86400000;
 /** Checkout carries the remaining app trial into the subscription; Stripe needs it 48+ hours out. */

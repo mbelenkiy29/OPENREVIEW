@@ -26,7 +26,7 @@ export default async function Referral({ params }: { params: Promise<{ code: str
     <p>{referralInvite(referrer.login, discount)}</p>
     {signedIn ? <>
       <p>You’re already signed in. Referral links count when someone creates a new account.</p>
-      <Link className="button primary" href={`/dashboard/settings/billing?referral=${code}`}>Go to billing</Link>
+      <Link className="button primary" href={`/dashboard/organization/billing?referral=${code}`}>Go to billing</Link>
     </> : <>
       <p>OpenReview reviews pull requests with the whole repository in view.</p>
       <p className="muted">{referralDisclosure(referrer.login)}</p>

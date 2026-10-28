@@ -1,13 +1,14 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { planCatalog, tierFor, type EntitlementKey } from "../../src/plans";
+import { planCatalog, plans, upgradeNote, type Entitlement } from "../../src/plans";
 
-// A paid feature the workspace's plan does not include (pricing-tiers P0.4): its controls stay
-// visible but disabled, with one line naming the plan that has it. Unlocked, children render as is.
-export function Locked({ feature, unlocked, admin, children }: { feature: EntitlementKey; unlocked: boolean; admin: boolean; children: ReactNode }) {
-  if (unlocked) return children;
-  return <fieldset className="locked" disabled>
-    {children}
-    <p className="locked-note">Included in the {planCatalog[tierFor(feature)].name} plan. {admin ? <Link href="/dashboard/settings/billing">Upgrade in Settings → Billing</Link> : "Ask a workspace admin to upgrade."}</p>
-  </fieldset>;
+// A paid setting on a lower plan stays visible but disabled (links too, via inert), with the way to upgrade.
+// `locked` is billing.locked: empty with billing off, so everything renders as usual.
+// `note` replaces the default upgradeNote, whose wording some features word for a finished review.
+export function Locked({ feature, locked, note, className, children }: { feature: Entitlement; locked: readonly Entitlement[]; note?: string; className?: string; children?: ReactNode }) {
+  if (!locked.includes(feature)) return children;
+  return <div className={`locked ${className ?? ""}`}>
+    <p className="muted"><span className="badge">{planCatalog[plans.find((p) => planCatalog[p].entitlements.includes(feature)) ?? "pro"].name}</span> {note ?? upgradeNote[feature]} <Link href="/dashboard/organization/billing">Open Billing</Link></p>
+    {children && <fieldset disabled inert>{children}</fieldset>}
+  </div>;
 }

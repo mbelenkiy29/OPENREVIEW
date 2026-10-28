@@ -8,6 +8,7 @@ import { findingComment, summaryMarker } from "./github";
 import { changedLines } from "./engine/diff";
 import { unifiedPatch } from "./text-diff";
 import type { Scm, ScmChange } from "./gitlab";
+import { retrying } from "./scm-transport";
 
 // Azure DevOps Services / Server (REST 7.1). Repositories are "<project>/<repo>" with the repo GUID
 // as externalId. Credentials: a PAT, or JSON {tenantId, clientId, clientSecret} for a Microsoft
@@ -16,7 +17,7 @@ import type { Scm, ScmChange } from "./gitlab";
 const apiVersion = "7.1";
 const devOpsScope = "499b84ac-1321-427f-aa17-267ca6975798/.default";
 export class AzureDevOpsError extends Error { constructor(readonly status: number, path: string) { super(`Azure DevOps ${status} at ${path.split("?")[0]}`); } }
-const entra = z.object({ tenantId: z.string().uuid(), clientId: z.string().uuid(), clientSecret: z.string().min(8) });
+const entra = z.object({ tenantId: z.guid(), clientId: z.guid(), clientSecret: z.string().min(8) });
 const identity = z.object({ id: z.string(), uniqueName: z.string().optional(), displayName: z.string().optional() });
 const commit = z.object({ commitId: z.string().regex(/^[a-f0-9]{40}$/) });
 const prSchema = z.object({ pullRequestId: z.number().int().positive(), title: z.string(), description: z.string().nullish(), isDraft: z.boolean().optional(), status: z.enum(["active", "completed", "abandoned", "notSet", "all"]), createdBy: identity, sourceRefName: z.string(), targetRefName: z.string(), lastMergeSourceCommit: commit, lastMergeTargetCommit: commit, repository: z.object({ id: z.string(), name: z.string(), project: z.object({ name: z.string() }) }) });
@@ -42,7 +43,7 @@ export class AzureDevOps implements Scm {
   }
   private url(path: string) { if (path.includes("://") || path.startsWith("/")) throw new Error("Invalid Azure DevOps API path"); return `${this.base}/${path}${path.includes("?") ? "&" : "?"}api-version=${apiVersion}`; }
   private async send(path: string, init: RequestInit = {}) {
-    const response = await this.fetchImpl(this.url(path), { ...init, redirect: "error", headers: { authorization: await this.authorization(), accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers as Record<string, string> | undefined) }, signal: AbortSignal.timeout(60000) });
+    const response = await retrying(init.method, async () => this.fetchImpl(this.url(path), { ...init, redirect: "error", headers: { authorization: await this.authorization(), accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers as Record<string, string> | undefined) }, signal: AbortSignal.timeout(60000) }));
     if (!response.ok) throw new AzureDevOpsError(response.status, path);
     return response;
   }

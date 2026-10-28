@@ -6,12 +6,12 @@ import schema from "../convex/schema";
 import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 
-// Phase 2 of the referral program: the Checkout coupon, codes added in Settings → Billing, and the
+// Phase 2 of the referral program: the Checkout coupon, codes added in Organization Settings → Billing & Usage, and the
 // commission ledger fed by invoice.paid. Stripe is mocked through fetch; nothing calls the network.
 const modules = import.meta.glob("../convex/**/*.ts");
 const secret = "referral-ledger-session-secret-at-least-32-chars", svc = "referral-ledger-service", whsec = "whsec_referral_fixture";
 const env = { SESSION_SECRET: secret, SERVICE_SECRET: svc, APP_URL: "https://review.example.com", BILLING_ENABLED: "true", REFERRALS_ENABLED: "true", STRIPE_REFERRAL_COUPON_ID: "referral-20-3mo", STRIPE_WEBHOOK_SECRET: whsec, STRIPE_SECRET_KEY: "sk_test_fixture", STRIPE_SEAT_PRICE_ID: "price_seat" };
-beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }); vi.setSystemTime(Date.UTC(2026, 9, 14, 12)); Object.assign(process.env, env); });
+beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }); vi.setSystemTime(Date.UTC(2026, 9, 14, 12)); Object.assign(process.env, env); vi.spyOn(globalThis, "fetch").mockImplementation(async (input: string | URL | Request) => noPayments(String(input)) ?? new Response("unexpected", { status: 500 })); });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); for (const key of [...Object.keys(env), "RESEND_API_KEY", "EMAIL_FROM"]) if (key !== "SESSION_SECRET" && key !== "SERVICE_SECRET") delete process.env[key]; });
 
 type T = ReturnType<typeof convexTest>;
@@ -29,6 +29,8 @@ const memberOf = async (t: T, org: Id<"organizations">, userId: Id<"users">) => 
 const referralOf = async (t: T, userId: Id<"users">) => (await t.run((ctx) => ctx.db.query("referrals").collect())).find((r) => r.referredUserId === userId)!;
 const commissions = (t: T) => t.run((ctx) => ctx.db.query("referralCommissions").collect());
 const run = (t: T) => t.finishAllScheduledFunctions(() => vi.runAllTimersAsync());
+// Each accrued commission schedules a look at its invoice's payments (referralJobs.checkInvoiceCharges): none here.
+const noPayments = (url: string) => url.includes("/v1/invoice_payments") ? Response.json({ object: "list", data: [], has_more: false }) : null;
 // Alice refers Bob, who signs up through her link and creates his first workspace.
 async function referred(t: T) {
   const alice = await signIn(t, 1, "alice"), code = (await t.mutation(api.referrals.ensureCode, { token: alice.token }))!;
@@ -44,6 +46,8 @@ function mockStripe(sessions: ((body: URLSearchParams) => Response)[] = []) {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input), body = new URLSearchParams(String(init?.body ?? ""));
     calls.push({ url, body });
+    const payments = noPayments(url);
+    if (payments) return payments;
     if (url.endsWith("/v1/customers")) return Response.json({ id: `cus_new${++customers}` });
     if (url.endsWith("/v1/checkout/sessions")) return (sessions.shift() ?? (() => Response.json({ id: "cs_1", url: "https://checkout.stripe.com/c/pay/cs_1" })))(body);
     return new Response("unexpected", { status: 500 });
@@ -219,7 +223,7 @@ test("billing status shows the referral to owners and admins only, and offers th
   expect(await status(bob, org)).toEqual({ enabled: false });
 });
 
-test("referral codes added in Settings → Billing follow the anti-abuse rules, and every attempt counts against the limit", async () => {
+test("referral codes added in Organization Settings → Billing & Usage follow the anti-abuse rules, and every attempt counts against the limit", async () => {
   const t = convexTest(schema, modules);
   const { alice, code } = await referred(t);
   const frank = await signIn(t, 10, "frank"), frankCode = (await t.mutation(api.referrals.ensureCode, { token: frank.token }))!;
@@ -232,9 +236,9 @@ test("referral codes added in Settings → Billing follow the anti-abuse rules, 
   const errors = [];
   for (const [org, value] of [[frankCo, "nope"], [frankCo, frankCode], [frankCo, ginaCode], [frankCo, code], [paidCo, hankCode]] as const) errors.push(await apply(frank, org, value));
   expect(errors).toEqual([
-    { ok: false, error: "That referral code doesn’t exist. Check it and try again." },
+    { ok: false, error: "That referral code doesn’t exist. A discount code goes on the Stripe checkout page instead: choose Starter or Pro, then Add promotion code." },
     { ok: false, error: "You can’t use your own referral code." },
-    { ok: false, error: "You referred the code’s owner, so you can’t use their code." },
+    { ok: false, error: "Someone in this workspace referred the code’s owner, so their code can’t be used here." },
     { ok: false, error: "The code’s owner is or was a member of this workspace." },
     { ok: false, error: "A referral code can’t be added to a workspace that has subscribed." },
   ]);
@@ -262,6 +266,10 @@ test("referral codes added in Settings → Billing follow the anti-abuse rules, 
   const lee = await signIn(t, 16, "lee");
   await join(t, kim, kimCo, lee, "lee", "member");
   await expect(apply(lee, kimCo, hankCode)).rejects.toThrow(/Forbidden/);
+  // The reciprocal-code block is per workspace: Frank's co-admin can't use the code of Gina, whom Frank referred.
+  const mia = await signIn(t, 17, "mia");
+  await join(t, frank, oldCo, mia, "mia", "admin");
+  expect(await apply(mia, oldCo, ginaCode)).toEqual({ ok: false, error: "Someone in this workspace referred the code’s owner, so their code can’t be used here." });
   vi.advanceTimersByTime(31 * 86400000);
   expect(await apply(frank, oldCo, code)).toEqual({ ok: false, error: "A referral code can be added only in a workspace’s first 30 days." });
   process.env.REFERRALS_ENABLED = "false";
@@ -271,13 +279,12 @@ test("referral codes added in Settings → Billing follow the anti-abuse rules, 
 test("commissions accrue in a scheduled job, so a failure there never touches billing", async () => {
   const t = convexTest(schema, modules);
   const { alice, bob, org } = await referred(t);
-  const accountId = await linkStripe(t, org, "past_due");
+  const accountId = await linkStripe(t, org);
   // Duplicate membership rows make the job's member check throw.
   for (let i = 0; i < 2; i++) await t.run((ctx) => ctx.db.insert("organizationMembers", { organizationId: org, userId: alice.userId, role: "member" }));
   vi.spyOn(console, "error").mockImplementation(() => {});
   expect((await deliver(t, paid("in_1", Date.now()))).status).toBe(200);
   expect(await t.run((ctx) => ctx.db.get(accountId))).toMatchObject({ status: "active" });
-  expect((await t.run((ctx) => ctx.db.get(accountId)))?.pastDueSince).toBeUndefined();
   const jobs = async () => (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).filter((j) => j.name.includes("referrals:accrue"));
   expect((await jobs()).map((j) => j.state.kind)).toEqual(["pending"]);
   expect(await commissions(t)).toEqual([]);
@@ -319,7 +326,7 @@ test("each paid subscription invoice earns 20% of its pre-tax cash once; others 
   await run(t);
   expect(await commissions(t)).toEqual([expect.objectContaining({ invoiceId: "in_1", referrerId: alice.userId, currency: "usd", base: 10000, rateBps: 2000, amount: 2000, reversed: 0, status: "accrued", invoiceCreated: created, paidAt, availableAt: paidAt + 30 * 86400000 })]);
   expect(await referralOf(t, bob.userId)).toMatchObject({ status: "active", firstPaidAt: paidAt, windowStart: created, commissionEndsAt: Date.UTC(2027, 9, 14, 11) });
-  expect(await t.query(api.referrals.overview, { token: alice.token })).toMatchObject({ subscribed: 1, available: 0, onHold: 2000, currency: "usd", people: [{ name: "bob", earned: 2000, commissionEndsAt: Date.UTC(2027, 9, 14, 11) }] });
+  expect(await t.query(api.referrals.overview, { token: alice.token })).toMatchObject({ subscribed: 1, available: 0, onHold: 2000, currency: "usd", rateBps: 2000, months: 12, people: [{ name: "bob", earned: 2000, commissionEndsAt: Date.UTC(2027, 9, 14, 11) }] });
   // Once the hold passes it no longer counts as on hold.
   vi.setSystemTime(paidAt + 30 * 86400000);
   expect(await t.query(api.referrals.overview, { token: alice.token })).toMatchObject({ available: 2000, onHold: 0 });
@@ -371,6 +378,24 @@ test("the 12-month window starts at the earliest paid invoice and ends the refer
   expect(await commissions(t)).toHaveLength(3);
 });
 
+test("a renewal invoice created seconds before the window's end, as Stripe's lag allows, never earns a 13th month", async () => {
+  const t = convexTest(schema, modules);
+  const { bob, org } = await referred(t);
+  await linkStripe(t, org);
+  // The subscription renews on the 14th at midnight UTC, and Stripe creates each invoice some seconds later.
+  const renewal = (month: number, lagSeconds: number) => Date.UTC(2026, 9 + month, 14) + lagSeconds * 1000;
+  await deliver(t, paid("in_m1", renewal(0, 40)));
+  await run(t);
+  expect(await referralOf(t, bob.userId)).toMatchObject({ windowStart: renewal(0, 40), commissionEndsAt: renewal(12, 40) });
+  vi.setSystemTime(Date.UTC(2027, 9, 14, 12));
+  // Month 12 earns, though created later in its day than month 1; month 13, created before the anniversary of month 1, does not.
+  await deliver(t, paid("in_m12", renewal(11, 90)));
+  await deliver(t, paid("in_m13", renewal(12, 5)));
+  await run(t);
+  expect((await commissions(t)).map((c) => c.invoiceId).sort()).toEqual(["in_m1", "in_m12"]);
+  expect((await referralOf(t, bob.userId)).status).toBe("ended");
+});
+
 test("a referrer who is or was a member of the workspace voids the referral and its commissions on hold", async () => {
   const t = convexTest(schema, modules);
   const { alice, bob, org } = await referred(t);
@@ -404,7 +429,7 @@ test("the referrer gets exactly one email when a workspace they referred first p
   await linkStripe(t, org);
   Object.assign(process.env, { RESEND_API_KEY: "re_fixture", EMAIL_FROM: "OpenReview <noreply@example.com>" });
   const mails: { to: string[]; subject: string; text: string }[] = [];
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url: string | URL | Request, init?: RequestInit) => { mails.push(JSON.parse(String(init?.body))); return Response.json({ id: `m${mails.length}` }); });
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url: string | URL | Request, init?: RequestInit) => { const payments = noPayments(String(url)); if (payments) return payments; mails.push(JSON.parse(String(init?.body))); return Response.json({ id: `m${mails.length}` }); });
   // Alice signed in with GitHub, so her address comes from a verified notification email.
   await t.run((ctx) => ctx.db.insert("notificationPreferences", { organizationId: org, userId: alice.userId, email: "alice@example.com", emailVerifiedAt: 1, reviewCompleted: "mine", highSeverity: "mine", updatedAt: 1 }));
   expect(await t.query(api.referrals.overview, { token: alice.token })).toMatchObject({ notified: true });
@@ -414,7 +439,7 @@ test("the referrer gets exactly one email when a workspace they referred first p
   await run(t);
   expect(mails).toHaveLength(1);
   expect(mails[0]).toMatchObject({ to: ["alice@example.com"], subject: "@bob subscribed to OpenReview" });
-  expect(mails[0].text).toMatch(/https:\/\/review\.example\.com\/dashboard\/settings\/referrals/);
+  expect(mails[0].text).toMatch(/https:\/\/review\.example\.com\/dashboard\/account\/referrals/);
   const referral = await referralOf(t, bob.userId);
   expect(referral.noticeSentAt).toBe(Date.now());
   expect(await t.action(internal.referralJobs.sendConversionNotice, { referralId: referral._id })).toBe("skipped");

@@ -21,7 +21,8 @@ import { validSequence } from "../src/diagrams";
 import { incrementalDiff } from "../src/incremental";
 import { addressedFindings } from "../src/commit-signals";
 import { effectiveThresholds, sizeLimitIssue } from "../src/triggers";
-import { applyRepoConfig, cascadeSummary, fileSettings, loadRepoConfig, type LoadedRepoConfig } from "../src/repo-config";
+import { applyRepoConfig, cascadeSummary, configSnapshot, fileSettings, loadRepoConfig, type LoadedRepoConfig } from "../src/repo-config";
+import { ruleText } from "../src/rule-files";
 import { type CheckConclusion } from "../src/github";
 import { billingNoticeBody, checkOutcome, supersededCheck } from "../src/check-run";
 import { AgentSuspended } from "../src/engine/agent";
@@ -38,7 +39,8 @@ import { osvClient, osvEnabled } from "../src/osv";
 import { applyGeneratedTests, reproduceSystem, testCandidates, testDraftSchema } from "../src/generated-tests";
 import { knowledgeTokenBudgets, selectKnowledge } from "../src/knowledge-context";
 import { detectAiAuthored, reviewModelFor } from "../src/ai-authored";
-import { resolveTier, tiers } from "../src/review-tier";
+import { modes, resolveTier, tiers } from "../src/review-tier";
+import { upgradeNote } from "../src/plans";
 import { repositoryGuidance, selectPacks } from "../src/guidance-packs";
 import { AzureDevOps } from "../src/azure-devops";
 import { semanticChunks, sourceChunks } from "../src/engine/chunks";
@@ -71,6 +73,8 @@ async function draftGeneratedTests(ctx: ActionCtx, a: { reviewId: Id<"reviews">;
   }
   return tests.length > 0 && await ctx.runMutation(internal.runtime.requestTests, { reviewId: a.reviewId, tests });
 }
+// hideFooter drops the footer after its review number is assigned, so numbering stays continuous.
+const footer = (hide: boolean | undefined, text: string) => (hide ? "" : text);
 // One feature tip for the summary footer when the Feature tips section is on; the choice is recorded
 // for the per-repository cooldown, and a publish retry reuses it.
 async function chooseTip(ctx: ActionCtx, reviewId: Id<"reviews">, sections: readonly string[] | undefined, signals: { references: string; rules: number; strictness: number; engine: string; agenticAvailable: boolean }) {
@@ -150,7 +154,7 @@ export const index = internalAction({
 export const indexBatch = internalAction({
   args: { jobId: v.id("indexJobs") },
   handler: async (ctx, args) => {
-    const leaseId=crypto.randomUUID();
+    const leaseId=crypto.randomUUID(),started=Date.now();
     const job = await ctx.runMutation(internal.repositories.claimIndexBatch, {...args,leaseId});
     if (!job || job.status !== "running") return;
     try {
@@ -171,7 +175,7 @@ export const indexBatch = internalAction({
       })
       .parse(JSON.parse(await blob.text()));
     if(manifest.sha!==job.sha)throw new Error("Index manifest revision does not match its job");
-    const cursor = job.cursor ?? 0;
+    let cursor = job.cursor ?? 0;
       const inventory=job.nativeDepot?parseP4SubmittedInventory(manifest.inventory):null;
       let p4:P4CodeReview|undefined;
       if(inventory){
@@ -184,6 +188,9 @@ export const indexBatch = internalAction({
       const github = inventory?undefined:await provider(ctx,data.repo);
       const allPaths = manifest.entries.map((f) => f.path);
       const pathSet=new Set(allPaths);
+      const p4Files=new Map(inventory?.manifest.map(f=>[f.depotFile.slice(2),f]));
+      // Several 20-file batches per invocation, so the manifest is read once per ~4 minutes rather than per batch.
+      for(;;){
       const batch=manifest.entries.slice(cursor,cursor+20);
       const known = new Map((await indexedFiles(ctx, data.repo._id, batch.map((f) => f.path))).map((f) => [f.path, f]));
       const receipts=await ctx.runQuery(internal.repositories.indexModuleReferences,{repositoryId:data.repo._id,paths:batch.map(f=>f.path)});
@@ -196,7 +203,7 @@ export const indexBatch = internalAction({
           const embedded = await ctx.runQuery(internal.embeddings.chunkState, { repositoryId: data.repo._id, path: entry.path });
           if (embedded?.sha === entry.sha && embedded.model === process.env.EMBEDDING_MODEL) continue;
         }
-        const expected=inventory?.manifest.find(f=>f.depotFile.slice(2)===entry.path);
+        const expected=p4Files.get(entry.path);
         if(inventory&&!expected)throw new Error("P4 index entry outside pinned inventory");
         const file = inventory?await p4!.submittedContent(inventory.project,expected!,inventory.serverId,inventory.change):await github!.blob(data.repo.fullName,entry.path,entry.sha);
         if(file.sha!==entry.sha)throw new Error("Index source identity mismatch");
@@ -217,7 +224,7 @@ export const indexBatch = internalAction({
         if (process.env.EMBEDDING_MODEL) {
           // Chunk-level embeddings at definition boundaries; unchanged blobs with the current
           // model are skipped, so re-index backfills are idempotent.
-          const embedder = new Embeddings(inferenceBilling(ctx)), started = Date.now();
+          const embedder = new Embeddings(inferenceBilling(ctx, data.repo.organizationId)), started = Date.now();
           const state = await ctx.runQuery(internal.embeddings.chunkState, { repositoryId: data.repo._id, path: file.path });
           if (state?.sha !== file.sha || state.model !== embedder.model) {
             // Variable declarations (including locals) are not chunk boundaries.
@@ -258,13 +265,13 @@ export const indexBatch = internalAction({
         });
       }
       const next = Math.min(cursor + 20, manifest.entries.length);
-      if (next < manifest.entries.length)
-        await ctx.runMutation(internal.repositories.indexProgress, {
-          jobId: job._id,
-          cursor: next,
-          leaseId,
-        });
-      else {
+      if (next >= manifest.entries.length) break;
+      // Past ~4 minutes the run hands off (lease released, continuation queued); otherwise it checkpoints under its own
+      // lease and carries on. indexProgress refuses cancelled, revoked or re-leased jobs, which stops this run.
+      const handOff = Date.now() - started > 4 * 60000;
+      if (!await ctx.runMutation(internal.repositories.indexProgress, { jobId: job._id, cursor: next, leaseId, ...(handOff ? {} : { keepLease: true }) }) || handOff) return;
+      cursor = next;
+      }
         if(inventory&&JSON.stringify(await p4!.project(inventory.project.id))!==JSON.stringify(inventory.project))throw new Error("P4 project views changed before index completion");
         // Sweep stored files missing from this revision in small batches before completing.
         const stale=[...(await fileInventory(ctx,data.repo._id)).keys()].filter(path=>!pathSet.has(path));
@@ -289,7 +296,6 @@ export const indexBatch = internalAction({
             files: allPaths.length,
           }),
         );
-      }
     } catch (error) {
       await ctx.runMutation(internal.repositories.finishIndex, {
         repositoryId: job.repositoryId,
@@ -326,7 +332,7 @@ export const review = internalAction({
   handler: async (ctx, args) => {
     const stepStarted = Date.now();
     const state = await ctx.runQuery(internal.reviews.data, args);
-    if (["completed", "cancelled"].includes(state.review.status)) return;
+    if (["completed", "cancelled", "skipped"].includes(state.review.status)) return;
     if(state.review.nativeP4){await ctx.runAction(internal.p4ReviewJobs.run,args);return;}
     const indexState = await ctx.runQuery(internal.repositories.data, {
       repositoryId: state.review.repositoryId,
@@ -341,7 +347,7 @@ export const review = internalAction({
       });
       return;
     }
-    let check: { scm: Scm; repository: string; id: number } | null = null;
+    let check: { scm: Scm; repository: string; id: number } | null = null, requester: { scm: Scm; repository: string } | undefined;
     try {
       const claimed = await ctx.runMutation(internal.reviews.stage, {
         ...args,
@@ -354,6 +360,7 @@ export const review = internalAction({
       );
       if (!repo.enabled) throw new Error("Repository disabled");
       const github = await provider(ctx,repo);
+      requester = { scm: github, repository: repo.fullName };
       const pr = await github.pullRequest(repo.fullName, state.review.prNumber);
       if (pr.head.sha !== state.review.headSha || pr.state !== "open" || pr.revisionKey !== state.review.revisionKey) {
         await ctx.runMutation(internal.reviews.stage, {...args,status:"cancelled",detail:"Obsolete revision or closed change"});
@@ -399,13 +406,13 @@ export const review = internalAction({
           repo.fullName,
           pr.number,
           state.review.headSha,
-          result.summary + reviewFooter(await ctx.runMutation(internal.reviews.assignNumber, { reviewId: args.reviewId }), github instanceof AzureDevOps ? "azure-devops" : "other", await chooseTip(ctx, args.reviewId, settings.summarySections, { references: [pr.title, pr.body ?? "", pr.head.ref].join("\n"), rules: rules.length, strictness: settings.strictness ?? 0, engine: settings.reviewEngine, agenticAvailable: false })),
+          result.summary + footer(settings.hideFooter, reviewFooter(await ctx.runMutation(internal.reviews.assignNumber, { reviewId: args.reviewId }), github instanceof AzureDevOps ? "azure-devops" : "other", settings.hideFooter ? null : await chooseTip(ctx, args.reviewId, settings.summarySections, { references: [pr.title, pr.body ?? "", pr.head.ref].join("\n"), rules: rules.length, strictness: settings.strictness ?? 0, engine: settings.reviewEngine, agenticAvailable: false }))),
           inlineFindings(result.findings).slice(0, settings.maxComments),
           args.reviewId,
           settings.commentStyle,
           state.review.revisionKey,
           result.findings.length+(result.metadata?.carriedForward?.length??0),
-          { placement: settings.summaryPlacement === "comment" ? "comment" : "description", fixLabel: await ctx.runQuery(internal.repositories.fixLabel, { repositoryId: state.review.repositoryId }) },
+          { placement: settings.summaryPlacement === "comment" ? "comment" : "description", fixLabel: await ctx.runQuery(internal.repositories.fixLabel, { repositoryId: state.review.repositoryId }), sectionLayout: settings.sectionLayout },
         );
         if(result.repositoryContext)await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:result.repositoryContext});
         await ctx.runMutation(internal.reviews.finished, {
@@ -426,16 +433,18 @@ export const review = internalAction({
         });
         return;
       }
-      const limit = state.review.trigger === "mention" || state.review.trigger === "manual" ? undefined : sizeLimitIssue(pr.diff, settings);
+      // Explicit requests bypass the size limits and the drafts setting.
+      const explicit = state.review.trigger === "mention" || state.review.trigger === "manual";
+      const limit = explicit ? undefined : sizeLimitIssue(pr.diff, settings);
       if (limit) {
-        await ctx.runMutation(internal.reviews.stage, { ...args, status: "cancelled", detail: limit });
+        await ctx.runMutation(internal.reviews.stage, { ...args, status: "skipped", detail: limit });
         return;
       }
-      if (pr.draft && !settings.drafts) {
+      if (pr.draft && !settings.drafts && !explicit) {
         await ctx.runMutation(internal.reviews.stage, {
           ...args,
-          status: "cancelled",
-          detail: "Draft reviews disabled",
+          status: "skipped",
+          detail: "Skipped: draft reviews are off. Mark the pull request ready for review, or turn on draft reviews.",
         });
         return;
       }
@@ -458,7 +467,7 @@ export const review = internalAction({
       const configured = applyRepoConfig(settings, repoConfig, pr.diff.map((f) => f.path));
       const effective = configured.settings;
       if (repoConfig.files.length || repoConfig.warnings.length || repo.configFile)
-        await ctx.runMutation(internal.repositories.recordConfigFile, { repositoryId: repo._id, sha: pr.base.sha, files: repoConfig.files, applied: configured.applied, blocked: configured.blocked, warnings: repoConfig.warnings, values: JSON.stringify(repoConfig.settings).slice(0, 4000), rules: repoConfig.rules.length, ...(repoConfig.levels?.length ? { cascade: JSON.stringify(cascadeSummary(repoConfig.levels)) } : {}) });
+        await ctx.runMutation(internal.repositories.recordConfigFile, { repositoryId: repo._id, sha: pr.base.sha, files: repoConfig.files, applied: configured.applied, blocked: configured.blocked, warnings: repoConfig.warnings, values: configSnapshot(repoConfig.settings), rules: repoConfig.rules.length, ...(repoConfig.levels?.length ? { cascade: JSON.stringify(cascadeSummary(repoConfig.levels)) } : {}) });
       const guidance = repositoryGuidance(repoConfig.guides ?? []);
       const directorySettings = (path: string) => {
         const resolved = fileSettings(repoConfig.levels ?? [], path, settings.lockedKeys ?? []);
@@ -466,10 +475,18 @@ export const review = internalAction({
         const thresholds = effectiveThresholds({ ...effective, ...resolved.settings });
         return { ...(resolved.settings.categories ? { categories: resolved.settings.categories } : {}), minimumConfidence: thresholds.minimumConfidence, severityThreshold: z.enum(severities).parse(thresholds.severityThreshold), ignored: resolved.ignored, ...(resolved.ignoredBy ? { ignoredBy: resolved.ignoredBy } : {}) };
       };
-      // K2: comment > label > configured tier (raised by touched folders); the admin cap applies last.
-      const tier = resolveTier({ configured: z.enum(tiers).parse(effective.mode), requested: state.review.requestedMode ? { mode: state.review.requestedMode, source: state.review.requestedModeSource ?? "comment" } : undefined, cap: z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep") });
+      // K2: comment > label > configured tier (raised by touched folders); a request only raises a fixed tier
+      // ("auto" counts as no tier); the admin cap applies last.
+      // A plan without deep reviews caps the tier at standard, below any admin cap, and runs the standard pipeline
+      // instead of the agentic engines with the workspace's default model (deep reviews are the Pro feature).
+      const deepAllowed = await ctx.runQuery(internal.billing.entitlement, { organizationId: repo.organizationId, key: "review.deep" }), adminCap = z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep");
+      const tier = resolveTier({ configured: z.enum(modes).parse(effective.mode), diff: pr.diff, requested: state.review.requestedMode ? { mode: state.review.requestedMode, source: state.review.requestedModeSource ?? "comment" } : undefined, cap: deepAllowed || adminCap !== "deep" ? adminCap : "standard" });
+      const agenticEngine = effective.reviewEngine === "agentic" || effective.reviewEngine === "hypotheses" ? effective.reviewEngine : undefined;
+      const planCapped = !deepAllowed && (tier.requested === "deep" || Boolean(agenticEngine));
+      const testsLocked = await ctx.runQuery(internal.runtime.testsLocked, { repositoryId: repo._id });
+      for (const method of [...(planCapped ? ["review.deep"] : []), ...(testsLocked ? ["review.reproTests"] : [])]) await ctx.runMutation(internal.conversions.record, { name: "paywall", organizationId: repo.organizationId, method });
       const touchedDirectories = pr.diff.flatMap((f) => { const d = directorySettings(f.path); return d && !d.ignored ? [d] : []; });
-      const configNotes = [...repoConfig.warnings, ...guidance.rejected, ...(configured.blocked.length ? [`Repository config values for ${configured.blocked.join(", ")} were not applied because an administrator locked them.`] : [])];
+      const configNotes = [...repoConfig.warnings, ...guidance.rejected, ...(planCapped ? [upgradeNote["review.deep"]] : []), ...(testsLocked ? [upgradeNote["review.reproTests"]] : []), ...(configured.blocked.length ? [`Repository config values for ${configured.blocked.join(", ")} were not applied because an administrator locked them.`] : [])];
       // Incremental review when the last reviewed head is an ancestor of this head.
       const previousHead = await ctx.runQuery(internal.reviews.previousHead, args);
       const comparison = previousHead && github.compare ? await github.compare(repo.fullName, previousHead, pr.head.sha).catch(() => "unavailable" as const) : undefined;
@@ -529,7 +546,8 @@ export const review = internalAction({
       const cached = new Map((await indexedFiles(ctx, repo._id, paths.filter((path) => head.has(path)))).map((f) => [f.path, f]));
       for (const path of paths) {
         const entry = head.get(path);
-        if (!entry || bytes > 500000) continue;
+        // Known-oversized files would be refused after download anyway.
+        if (!entry || bytes > 500000 || (entry.size ?? 0) > 200000) continue;
         const old = cached.get(path);
         const blob =
           old?.sha === entry.sha ? await ctx.storage.get(old.storageId) : null;
@@ -544,7 +562,7 @@ export const review = internalAction({
       const permittedHistory=new Set(history.filter(f=>hasCurrentRepositoryEvidence(f,cross.files)).map(f=>f.title+"\0"+f.filePath));
       historicalFindings=historicalFindings.filter(f=>permittedHistory.has(f.title+"\0"+f.filePath));
       const clusterHints=cross.hints;
-      const requirements=await ctx.runAction(internal.integrationJobs.requirements,{repositoryId:repo._id,references:[pr.title,pr.body??"",pr.head.ref].join("\n")});
+      const requirements=await ctx.runAction(internal.integrationJobs.requirements,{repositoryId:repo._id,references:[pr.title,pr.body??"",pr.head.ref].join("\n"),actor:pr.user.login,authorExternalId:pr.authorExternalId});
       sources.push(...requirements.files);
       const integrationContext={repositoryId:repo._id,scopes:requirements.scopes,repositoryContext:cross.receipt??undefined};
       const existingFindings = state.findings.filter(f=>hasCurrentRepositoryEvidence(f,cross.files)).map((f) => ({
@@ -556,7 +574,7 @@ export const review = internalAction({
       // Agent-authored pull requests (explicit signals only) may be routed to a dedicated model.
       const aiAuthored = detectAiAuthored({ author: pr.user.login, branch: pr.head.ref, body: pr.body, commits: pr.commits });
       const routed = reviewModelFor({ model: settings.model, aiAuthoredModel: effective.aiAuthoredModel }, aiAuthored);
-      const modelProvider = await budgetModel(ctx,repo.organizationId,routed.model, {
+      const modelProvider = await budgetModel(ctx,repo.organizationId,deepAllowed?routed.model:undefined, {
         get: (key) =>
           ctx.runQuery(internal.cache.get, {
             organizationId: repo.organizationId,
@@ -572,8 +590,12 @@ export const review = internalAction({
           });
         },
       });
+      // A newer push cancels this row; stop before each further model call instead of at the next stage.
+      const cancel = new AbortController();
+      const live = async () => { if ((await ctx.runQuery(internal.reviews.agentStatus, args))?.status === "cancelled") { cancel.abort(new Error("Review cancelled")); cancel.signal.throwIfAborted(); } };
       const model: ModelProvider = {
         generate: async (request, validator) => {
+          await live();
           if(cross.receipt)await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:cross.receipt});
           const started = Date.now();
           const result = await modelProvider
@@ -605,6 +627,7 @@ export const review = internalAction({
           return result;
         },
         runTools: async (request) => {
+          await live();
           if(cross.receipt)await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:cross.receipt});
           try {
             const turn = await modelProvider.runTools(request);
@@ -616,7 +639,7 @@ export const review = internalAction({
           }
         },
       };
-      const engine = effective.reviewEngine === "agentic" || effective.reviewEngine === "hypotheses" ? effective.reviewEngine : undefined;
+      const engine = deepAllowed ? agenticEngine : undefined;
       const result = {...await reviewChange(
         {
           repository: repo.fullName,
@@ -658,7 +681,7 @@ export const review = internalAction({
             category: r.category,
             globs: r.globs,
             enabled: r.enabled,
-          })), ...repoConfig.rules],
+          })), ...repoConfig.rules, ...(effective.assistantRules ? (repoConfig.assistantRules ?? []).filter((r) => !rules.some((d) => ruleText(d.instructions) === ruleText(r.instructions))) : [])],
           preferences: [...preferences, ...(await ctx.runQuery(internal.conventions.approvedForRepo, { repositoryId: repo._id }))],
           guidance: selectPacks(guidance.packs, scope.diff, sources).map(({ id, version, title, body, source }) => ({ id, version, title, body, source })),
           knowledge: selectKnowledge(await ctx.runQuery(internal.knowledge.forReview, { repositoryId: repo._id }), scope.diff.map((f) => f.path), new Set(head.keys()), knowledgeTokenBudgets[tier.mode]).selected,
@@ -685,9 +708,9 @@ export const review = internalAction({
         async (status) => {
           await ctx.runMutation(internal.reviews.stage, { ...args, status });
         },
-        undefined,
-        // Hypothesis runs fit in one action and do not suspend; they only honour cancellation.
-        { budgets: { agentTurns: effective.agentTurns, agentToolCalls: effective.agentToolCalls, hypothesisTurns: effective.hypothesisTurns, hypothesisToolCalls: effective.hypothesisToolCalls }, ...(osvEnabled() ? { advisories: osvClient({ base: process.env.OSV_API_URL || undefined }) } : {}), ...(engine ? { engine, tools: reviewToolbox(ctx, repo, pr.head.sha, head, (repository, path, sha) => github.blob(repository, path, sha), sources), agent: engine === "agentic" ? reviewAgentHooks(ctx, args.reviewId, stepStarted) : { checkpoint: reviewAgentHooks(ctx, args.reviewId, stepStarted).checkpoint } } : {}) },
+        cancel.signal,
+        // Hypothesis runs fit in one action and do not suspend; they only honour cancellation and stop by the action start time.
+        { startedAt: stepStarted, budgets: { agentTurns: effective.agentTurns, agentToolCalls: effective.agentToolCalls, hypothesisTurns: effective.hypothesisTurns, hypothesisToolCalls: effective.hypothesisToolCalls }, ...(osvEnabled() ? { advisories: osvClient({ base: process.env.OSV_API_URL || undefined }) } : {}), ...(engine ? { engine, tools: reviewToolbox(ctx, repo, pr.head.sha, head, (repository, path, sha) => github.blob(repository, path, sha), sources), agent: engine === "agentic" ? reviewAgentHooks(ctx, args.reviewId, stepStarted) : { checkpoint: reviewAgentHooks(ctx, args.reviewId, stepStarted).checkpoint } } : {}) },
       ),integrationScopes:requirements.scopes,repositoryContext:cross.receipt??undefined};
       const storageId = await ctx.storage.store(
         new Blob([JSON.stringify(result)], { type: "application/json" }),
@@ -703,7 +726,8 @@ export const review = internalAction({
         verdict: result.metadata.verdict,
         requirementsNotMet: result.metadata.requirementsNotMet,
         modeDecision: tier,
-        aiAuthored: aiAuthored ? { ...aiAuthored, ...(routed.routed ? { model: routed.model } : {}) } : undefined,
+        // The model that ran: a workspace's own key keeps its own model whatever the routing asked for.
+        aiAuthored: aiAuthored ? { ...aiAuthored, ...(deepAllowed && routed.routed ? { model: modelProvider.modelFor("review") } : {}) } : undefined,
         coverageLimits: result.metadata.coverageLimits,
         findings: [...result.findings,...(result.metadata.carriedForward??[])],
         resolved: result.metadata.resolvedFingerprints,
@@ -722,13 +746,13 @@ export const review = internalAction({
         repo.fullName,
         pr.number,
         pr.head.sha,
-        result.summary + reviewFooter(await ctx.runMutation(internal.reviews.assignNumber, { reviewId: args.reviewId }), github instanceof AzureDevOps ? "azure-devops" : "other", await chooseTip(ctx, args.reviewId, effective.summarySections, { references: [pr.title, pr.body ?? "", pr.head.ref].join("\n"), rules: rules.length + repoConfig.rules.length, strictness: effective.strictness ?? 0, engine: effective.reviewEngine, agenticAvailable: typeof modelProvider.runTools === "function" })),
+        result.summary + footer(effective.hideFooter, reviewFooter(await ctx.runMutation(internal.reviews.assignNumber, { reviewId: args.reviewId }), github instanceof AzureDevOps ? "azure-devops" : "other", effective.hideFooter ? null : await chooseTip(ctx, args.reviewId, effective.summarySections, { references: [pr.title, pr.body ?? "", pr.head.ref].join("\n"), rules: rules.length + repoConfig.rules.length, strictness: effective.strictness ?? 0, engine: effective.reviewEngine, agenticAvailable: typeof modelProvider.runTools === "function" }))),
         inlineFindings(result.findings).slice(0, effective.maxComments),
         args.reviewId,
         effective.commentStyle,
           state.review.revisionKey,
           result.findings.length+(result.metadata.carriedForward?.length??0),
-          { placement: settings.summaryPlacement === "comment" ? "comment" : "description", fixLabel: await ctx.runQuery(internal.repositories.fixLabel, { repositoryId: state.review.repositoryId }) },
+          { placement: settings.summaryPlacement === "comment" ? "comment" : "description", fixLabel: await ctx.runQuery(internal.repositories.fixLabel, { repositoryId: state.review.repositoryId }), sectionLayout: effective.sectionLayout },
       );
       if(result.repositoryContext)await ctx.runAction(internal.repositoryContextJobs.validate,{receipt:result.repositoryContext});
       await ctx.runMutation(internal.reviews.finished, {
@@ -747,7 +771,7 @@ export const review = internalAction({
         return;
       }
       const message = error instanceof Error ? error.message : "Review failed";
-      await finishCheck(check, supersededCheck(message) ? { conclusion: "neutral", title: "Superseded by a newer revision", summary: "This review stopped because the pull request changed or closed while it ran. A review of the newer revision replaces it.", detailsUrl: dashboardUrl(args.reviewId) } : { conclusion: "neutral", title: "Review could not be completed", summary: "OpenReview could not complete this review: " + redact(message).slice(0, 500), detailsUrl: dashboardUrl(args.reviewId) });
+      await finishCheck(check, supersededCheck(message) ? { conclusion: "neutral", title: "Superseded by a newer revision", summary: "This review stopped because the pull request changed or closed while it ran. A review of the newer revision replaces it.", detailsUrl: dashboardUrl(args.reviewId) } : { conclusion: "neutral", title: "Review could not be completed", summary: /Billing: /.test(message) ? billingNoticeBody(process.env.APP_URL) : "OpenReview could not complete this review: " + redact(message).slice(0, 500), detailsUrl: dashboardUrl(args.reviewId) });
       console.error(
         JSON.stringify({
           event: "review.failed",
@@ -755,6 +779,7 @@ export const review = internalAction({
           error: message,
         }),
       );
+      if (requester && !supersededCheck(message)) await confirmRequest(requester.scm, requester.repository, state.review.triggerComment, "confused");
       await ctx.runMutation(internal.reviews.finished, {
         ...args,
         error: message,
@@ -791,10 +816,10 @@ async function resolveFixedThreads(ctx: ActionCtx, scm: Scm, repositoryId: Id<"r
   }
 }
 
-// 👍 on the comment that asked for this review, once the review is published.
-async function confirmRequest(scm: Scm, repository: string, comment?: { id: number; inline: boolean }) {
+// 👍 on the comment that asked for this review once it is published, or 😕 when it fails.
+async function confirmRequest(scm: Scm, repository: string, comment?: { id: number; inline: boolean }, content: "+1" | "confused" = "+1") {
   if (!comment || !scm.react) return;
-  try { await scm.react(repository, comment.id, comment.inline, "+1"); }
+  try { await scm.react(repository, comment.id, comment.inline, content); }
   catch (error) { console.error(JSON.stringify({ event: "github.reaction_failed", repository, error: redact(error instanceof Error ? error.message : "failed").slice(0, 300) })); }
 }
 

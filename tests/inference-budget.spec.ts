@@ -5,6 +5,8 @@ import type {Id} from '../convex/_generated/dataModel';
 import {internal} from '../convex/_generated/api';
 import {HttpModel,ModelFailure} from '../src/engine/model';
 import {InferenceBudgetError} from '../src/inference-billing';
+import {STALE_RESERVATION_MS} from '../convex/inferenceBudget';
+import {Embeddings} from '../src/engine/embeddings';
 const modules=import.meta.glob('../convex/**/*.ts');
 const quote={provider:'openai',model:'gpt-4.1',baseUrl:'https://api.openai.com/v1',inputTokenCeiling:1000,outputTokenCeiling:1000};
 afterEach(()=>vi.restoreAllMocks());
@@ -40,6 +42,30 @@ test('all inner and outer generation retries reserve before transmission and exh
  for(let worker=0;worker<3;worker++)await expect(new HttpModel({provider:'openai',apiKey:'fixture',model:'gpt-4.1'},undefined,billing).generate({task:'conversation',system:'fixture',input:{}},(await import('zod')).z.object({answer:(await import('zod')).z.string()}))).rejects.toBeInstanceOf(ModelFailure);
  expect(sends).toBe(2);const state=await t.query(internal.inferenceBudget.status,{});expect(state!.reservedMicros).toBeGreaterThan(96000);expect(state!.reservedMicros+state!.committedMicros).toBeLessThanOrEqual(120000);
 });
+test('attempts that end without a provider answer release their reservation; timeouts keep it',async()=>{
+ const t=convexTest(schema,modules);await t.mutation(internal.inferenceBudget.initialize,{limitMicros:1000000,baselineMicros:0,source:'release fixture'});
+ const billing={async reserve(q:typeof quote){return t.mutation(internal.inferenceBudget.reserve,q);},async settle(id:string,usage:{inputTokens:number;outputTokens:number}){await t.mutation(internal.inferenceBudget.settle,{id:id as Id<"inferenceReservations">,...usage});}};
+ const state=async()=>(await t.query(internal.inferenceBudget.status,{}))!,model=new HttpModel({provider:'openai',apiKey:'fixture',model:'gpt-4.1'},undefined,billing);
+ const answer=(content:string)=>Response.json({choices:[{message:{content}}],usage:{prompt_tokens:100,completion_tokens:10}});
+ // Rejected schema (400, then prompt-only JSON), network error, rate limit, then success: only the success is billed.
+ const replies:(()=>Response)[]=[()=>new Response('schema',{status:400}),()=>{throw new TypeError('fetch failed');},()=>new Response('busy',{status:429,headers:{'retry-after':'0'}}),()=>answer('{"answer":"42"}'),()=>new Response('down',{status:503,headers:{'retry-after':'0'}}),()=>answer('done')];
+ const fetchMock=vi.spyOn(globalThis,'fetch').mockImplementation(async()=>replies.shift()!());
+ const {z}=await import('zod');
+ await model.generate({task:'conversation',system:'fixture',input:{}},z.object({answer:z.string()}));
+ expect(await state()).toMatchObject({reservedMicros:0,committedMicros:100*2+10*8});
+ await model.runTools({task:'agent',system:'fixture',messages:[{role:'user',content:'Investigate.'}],tools:[{name:'read',description:'Read a file',inputSchema:{type:'object'}}]});
+ expect(await state()).toMatchObject({reservedMicros:0,committedMicros:2*(100*2+10*8)});
+ // Embeddings: an error status is released; a timeout may still be billed, so it keeps its reservation.
+ const old=process.env.EMBEDDING_MODEL;process.env.EMBEDDING_MODEL='text-embedding-3-small';
+ try{
+  fetchMock.mockImplementation(async()=>new Response('down',{status:500}));
+  await expect(new Embeddings(billing).embed(['source'])).rejects.toThrow('HTTP 500');
+  expect((await state()).reservedMicros).toBe(0);
+  fetchMock.mockImplementation(async()=>{throw new DOMException('timed out','TimeoutError');});
+  await expect(new Embeddings(billing).embed(['source'])).rejects.toThrow('timed out');
+  expect((await state()).reservedMicros).toBeGreaterThan(0);
+ }finally{if(old===undefined)delete process.env.EMBEDDING_MODEL;else process.env.EMBEDDING_MODEL=old;}
+});
 test('cached Anthropic receipts reserve at the cache-write premium and settle cache reads/writes idempotently',async()=>{
  const t=convexTest(schema,modules);await t.mutation(internal.inferenceBudget.initialize,{limitMicros:100000,baselineMicros:0,source:'cache fixture'});
  const sonnet={provider:'anthropic',model:'claude-sonnet-5-5',baseUrl:'https://api.anthropic.com/v1',inputTokenCeiling:10000,outputTokenCeiling:1000};
@@ -51,4 +77,19 @@ test('cached Anthropic receipts reserve at the cache-write premium and settle ca
  await expect(t.mutation(internal.inferenceBudget.settle,{...receipt,cacheReadTokens:7000})).rejects.toThrow('differently');
  const next=await t.mutation(internal.inferenceBudget.reserve,sonnet);if(!next)throw Error();
  await expect(t.mutation(internal.inferenceBudget.settle,{id:next,inputTokens:10,outputTokens:1,cacheReadTokens:8,cacheWriteTokens:8})).rejects.toThrow('Invalid');
+});
+test('reservations never settled expire after 15 minutes: the cap commits them in full and late receipts are refused',async()=>{
+ const t=convexTest(schema,modules);await t.mutation(internal.inferenceBudget.initialize,{limitMicros:20000,baselineMicros:0,source:'expiry fixture'});
+ const old=await t.mutation(internal.inferenceBudget.reserve,quote),fresh=await t.mutation(internal.inferenceBudget.reserve,quote);if(!old||!fresh)throw Error();
+ await expect(t.mutation(internal.inferenceBudget.reserve,quote)).rejects.toThrow('exhausted');
+ // `old` timed out just past the cutoff; `fresh` may still be in flight.
+ await t.run(ctx=>ctx.db.patch(old,{createdAt:Date.now()-STALE_RESERVATION_MS-1}));
+ expect(await t.mutation(internal.inferenceBudget.expireStale,{})).toBe(1);
+ expect(await t.run(async ctx=>[(await ctx.db.get(old))!.status,(await ctx.db.get(fresh))!.status])).toEqual(['expired','reserved']);
+ expect(await t.query(internal.inferenceBudget.status,{})).toMatchObject({reservedMicros:10000,committedMicros:10000});
+ // A receipt arriving after expiry cannot release or count the call a second time.
+ await expect(t.mutation(internal.inferenceBudget.settle,{id:old,inputTokens:100,outputTokens:10})).rejects.toThrow('expired');
+ expect(await t.mutation(internal.inferenceBudget.expireStale,{})).toBe(0);
+ await t.mutation(internal.inferenceBudget.settle,{id:fresh,inputTokens:100,outputTokens:10});
+ expect(await t.query(internal.inferenceBudget.status,{})).toMatchObject({reservedMicros:0,committedMicros:10280});
 });

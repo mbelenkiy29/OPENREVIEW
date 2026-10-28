@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { localReviewFields } from "./cli-review";
 
 // OpenReview MCP tools, shared by the stdio server (src/mcp.ts, calls the REST API over HTTPS)
 // and the remote Streamable HTTP endpoint (app/api/mcp, dispatches to the same route handlers
@@ -17,9 +18,9 @@ function result(response: { status: number; body: unknown }) {
 }
 const id = z.string().regex(/^[A-Za-z0-9]{20,64}$/, "Use an OpenReview ID");
 const q = (value: string) => encodeURIComponent(value);
-export const mcpToolNames = ["get_review", "get_findings", "get_finding", "get_repository_context", "search_codebase", "get_related_files", "get_custom_rules", "mark_finding_resolved", "list_repositories", "ask_codebase", "search_code", "trigger_review", "list_unresolved_comments", "get_review_status", "add_custom_context", "report"] as const;
+export const mcpToolNames = ["get_review", "get_findings", "get_finding", "get_repository_context", "search_codebase", "get_related_files", "get_custom_rules", "mark_finding_resolved", "list_repositories", "ask_codebase", "search_code", "trigger_review", "list_unresolved_comments", "get_review_status", "add_custom_context", "report", "review_local_changes", "get_local_review"] as const;
 // Tools that change something need more than read; the remote endpoint challenges for the scope up front.
-export const toolScopes: Partial<Record<string, "write" | "admin">> = { mark_finding_resolved: "write", trigger_review: "write", add_custom_context: "write" };
+export const toolScopes: Partial<Record<string, "write" | "admin">> = { mark_finding_resolved: "write", trigger_review: "write", add_custom_context: "write", review_local_changes: "write" };
 
 export function registerOpenReviewTools(server: McpServer, call: ApiCall) {
   server.registerTool("get_review", { description: "Get review lifecycle, summary, findings and model calls", inputSchema: { reviewId: id } }, async ({ reviewId }) => result(await call(`/api/reviews/${q(reviewId)}`)));
@@ -45,6 +46,8 @@ export function registerOpenReviewTools(server: McpServer, call: ApiCall) {
   server.registerTool("list_unresolved_comments", { description: "Open OpenReview findings on your own open pull requests, with file, line, priority and suggested fix", inputSchema: { repositoryId: id.optional() } }, async ({ repositoryId }) => result(await call(`/api/findings/unresolved${repositoryId ? `?repositoryId=${q(repositoryId)}` : ""}`)));
   server.registerTool("get_review_status", { description: "Latest review of a pull request: status, verdict, whether it covers the current head, and open findings", inputSchema: { repositoryId: id, prNumber: z.number().int().positive() } }, async ({ repositoryId, prNumber }) => result(await call(`/api/reviews/status?repositoryId=${q(repositoryId)}&prNumber=${prNumber}`)));
   server.registerTool("add_custom_context", { description: "Suggest a custom review rule for this workspace or one repository (needs write). An admin approves it before reviews use it.", inputSchema: { title: z.string().min(3).max(120), instructions: z.string().min(20).max(2000), repositoryId: id.optional() } }, async (input) => result(await call("/api/rules/suggestions", { method: "POST", body: input })));
+  server.registerTool("review_local_changes", { description: "Review local commits before they are pushed (needs write). Send the unified diff from the merge base to HEAD and the changed files' contents at HEAD; OpenReview reviews them with the repository's index, rules and model, and counts it as a review. Returns a reviewId for get_local_review.", inputSchema: localReviewFields.shape }, async (args) => result(await call("/api/reviews/local", { method: "POST", body: args })));
+  server.registerTool("get_local_review", { description: "Status and stage of a review_local_changes request, with the summary and findings once it is completed", inputSchema: { reviewId: id } }, async ({ reviewId }) => result(await call(`/api/reviews/local/${q(reviewId)}`)));
   server.registerTool("report", { description: "Reports: pr_status (one pull request), weekly_summary (reviews, findings, addressed rate and cost for the last days) or team_metrics (the same for one team)", inputSchema: { kind: z.enum(["pr_status", "weekly_summary", "team_metrics"]), repositoryId: id.optional(), prNumber: z.number().int().positive().optional(), teamId: id.optional(), days: z.number().int().min(1).max(90).optional() } }, async ({ kind, repositoryId, prNumber, teamId, days }) => {
     if (kind === "pr_status") return repositoryId && prNumber ? result(await call(`/api/reviews/status?repositoryId=${q(repositoryId)}&prNumber=${prNumber}`)) : { content: [text("pr_status needs repositoryId and prNumber")], isError: true };
     if (kind === "team_metrics" && !teamId) return { content: [text("team_metrics needs teamId")], isError: true };

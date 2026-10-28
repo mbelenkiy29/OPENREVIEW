@@ -29,8 +29,8 @@ function IssueList({ ctx }: { ctx: DashboardContext }) {
       <label>Severity<select name="severity" defaultValue={filters.severity ?? ""}><option value="">All</option>{["critical", "high", "medium", "low"].map((v) => <option key={v}>{v}</option>)}</select></label>
       <label>Category<select name="category" defaultValue={filters.category ?? ""}><option value="">All</option>{["security", "correctness", "data", "compatibility", "testing", "performance", "rules"].map((v) => <option key={v}>{v}</option>)}</select></label>
       <button>Filter issues</button>
-      <Link href="/dashboard/pulls/issues?category=security">Security issues</Link>
-      {filtered && <Link href="/dashboard/pulls/issues">Reset filters</Link>}
+      <Link href="/dashboard/analytics/issues?category=security">Security issues</Link>
+      {filtered && <Link href="/dashboard/analytics/issues">Reset filters</Link>}
     </form>
     {!issues.length ? <Empty title={filtered ? "No issues match these filters" : "No open issues"} text="Every verified finding becomes an issue. The same problem on several pull requests is one issue; fixing it, closing the pull request or marking it resolved closes it." />
       : <ScrollTable label="Issues table">
@@ -39,7 +39,7 @@ function IssueList({ ctx }: { ctx: DashboardContext }) {
           <tbody>
             {issues.map((i) => <tr key={i._id}>
               <td className="mono">#{i.number}</td>
-              <td><Link href={`/dashboard/pulls/issues/${i.number}`}>{i.title}</Link><br /><span className="muted">{repoName(i.repositoryId)} · {i.filePath}:{i.startLine}</span></td>
+              <td><Link href={`/dashboard/analytics/issues/${i.number}`}>{i.title}</Link><br /><span className="muted">{repoName(i.repositoryId)} · {i.filePath}:{i.startLine}</span></td>
               <td>{priority(i)}</td>
               <td>{status(i.status)}{i.mergedAt && ["open", "in_progress"].includes(i.status) && <>{" "}<span className="badge high" title="The pull request merged while this issue was open">merged</span></>}</td>
               <td>{i.assignee ? `@${i.assignee}` : <span className="muted">Unassigned</span>}</td>
@@ -50,16 +50,16 @@ function IssueList({ ctx }: { ctx: DashboardContext }) {
           </tbody>
         </table>
       </ScrollTable>}
-    {issuesPage && !issuesPage.isDone && <Link className="button" href={`/dashboard/pulls/issues?${new URLSearchParams(Object.entries({ ...filters, cursor: issuesPage.continueCursor }).filter((e): e is [string, string] => typeof e[1] === "string")).toString()}`}>Next issues</Link>}
+    {issuesPage && !issuesPage.isDone && <Link className="button" href={`/dashboard/analytics/issues?${new URLSearchParams(Object.entries({ ...filters, cursor: issuesPage.continueCursor }).filter((e): e is [string, string] => typeof e[1] === "string")).toString()}`}>Next issues</Link>}
   </>;
 }
 
 function IssueDetail({ ctx }: { ctx: DashboardContext }) {
-  const { data, isAdmin, repoName, unlocked } = ctx;
+  const { data, locked, repoName } = ctx;
   const { issue, finding, occurrences, events, members, canWrite } = ctx.issue!;
   const repo = data.repositories.find((r) => r._id === issue.repositoryId);
   return <>
-    <p><Link href="/dashboard/pulls/issues">← All issues</Link></p>
+    <p><Link href="/dashboard/analytics/issues">All issues</Link></p>
     <section className="finding" aria-labelledby="issue-title">
       <div className="row">
         <h2 id="issue-title"><span className="mono muted">#{issue.number}</span> {issue.title}</h2>
@@ -85,7 +85,7 @@ function IssueDetail({ ctx }: { ctx: DashboardContext }) {
       <h2 id="issue-latest">Latest occurrence: PR #{finding.prNumber}</h2>
       <FindingBody f={finding} ctx={ctx} />
       {issue.fixPullRequestUrl && <p>Fix pull request: <a href={issue.fixPullRequestUrl} target="_blank" rel="noreferrer">{issue.fixPullRequestUrl.replace(/^https:\/\/github\.com\//, "")}</a></p>}
-      {finding.canFix && repo && !repo.connectionId && <Locked feature="fix.pullRequests" unlocked={unlocked("fix.pullRequests")} admin={isAdmin}><FixPullRequestButton findingId={finding._id} /></Locked>}
+      {finding.canFix && repo && !repo.connectionId && <Locked feature="fix.pullRequests" locked={locked}><FixPullRequestButton findingId={finding._id} /></Locked>}
     </section>
     <section aria-labelledby="issue-occurrences">
       <h2 id="issue-occurrences">Occurrences</h2>

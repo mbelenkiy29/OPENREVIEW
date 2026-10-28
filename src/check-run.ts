@@ -39,6 +39,6 @@ export const supersededCheck = (message: string) => /Review cancelled|Review is 
 // trial dates) stay on the billing page; anyone who can read the pull request sees this text.
 export function billingNoticeBody(appUrl: string | undefined) {
   let link = "";
-  try { const url = appUrl ? new URL("/dashboard/settings/billing", appUrl) : undefined; if (url?.protocol === "https:") link = ` in [Settings → Billing](${url.href})`; } catch {}
+  try { const url = appUrl ? new URL("/dashboard/organization/billing", appUrl) : undefined; if (url?.protocol === "https:") link = ` in [Organization Settings → Billing & Usage](${url.href})`; } catch {}
   return `OpenReview did not review this pull request because the workspace's plan does not cover more reviews right now. A workspace admin can check the plan${link}. Reviews start again automatically on the next push once the plan allows them, or comment \`@openreview review\`.`;
 }

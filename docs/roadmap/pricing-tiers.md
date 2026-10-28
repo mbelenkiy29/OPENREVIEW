@@ -24,52 +24,64 @@ A build checklist for adding paid tiers above **Starter**. It is written so an A
 
 ## Pricing
 
-| Tier | Price (per seat / month) | Fair-use reviews (per seat / month) | Status |
+Positioning: well under Greptile, which charges $30 per seat per month for 50 review credits, $1 for each extra credit, and gates SSO and audit logs to Enterprise.
+
+| Plan | Price (per seat / month) | Included model usage | Status |
 |---|---|---|---|
-| Trial | Free for 14 days, starting at the first review | 200 per workspace | Live |
-| **Starter** | $12 | 500 | Live: `STRIPE_SEAT_PRICE_ID` |
-| **Pro** | $29 | 1,500 | Planned |
-| **Business** | $49 | 3,000 | Planned |
+| **Free** | $0, no card | $3 per workspace per month (about 40 standard reviews) | Existing workspaces only: new workspaces choose Starter or Pro, with a 14-day trial |
+| **Starter** | $12 ($10 billed annually) | $6 per seat, pooled | Live: `STRIPE_SEAT_PRICE_ID` |
+| **Pro** | $24 ($20 billed annually) | $12 per seat, pooled | Live: `STRIPE_PRO_PRICE_ID` |
+| Enterprise | Contact | Custom | Process only: SCIM, custom DPA, invoicing, self-host help |
 
 - **Seats:** owners, admins and members count as seats; viewers are free.
-- **Annual billing:** two months free (pay for 10 of 12). Planned in P3.2.
-- **Unit economics:** a review costs about $0.06–0.07 in inference. At ten reviews per developer per week, Starter costs about $3 per seat in inference, so the fair-use limits only stop abuse.
+- **Extra usage:** billed at model cost × 1.3 (set in the Stripe metered price), up to the admin cap.
+- **Unit economics:**
+  - A standard review costs about $0.06–0.07 in inference.
+  - The worst case, with all included usage used, leaves about 47% margin after Stripe fees on both Starter and Pro.
+  - At 10 reviews per developer per week, Starter's margin is about 72%.
+  - Free costs at most $3 per workspace per month, and the deployment-wide `inferenceBudgets` cap bounds the total.
 - **Spend ceiling:** the global inference budget (`convex/inferenceBudget.ts`) is the hard ceiling for the whole deployment.
 
 ## Feature matrix
 
-Status: **exists** = built and on main today (every tier gets it until P0 lands); **build** = not built yet.
+Status: **gated** = enforced by `src/plans.ts` today; **planned** = on Pro by design, but every plan still gets it until it is gated.
 
-| Feature | Starter | Pro | Business | Status | Entitlement key |
+| Feature | Free | Starter | Pro | Status | Entitlement key |
 |---|---|---|---|---|---|
-| Unlimited reviews (fair use), summary comment, inline findings, committable suggestions | ✓ | ✓ | ✓ | exists | (always on) |
-| Incremental re-reviews, thread resolution, triggers, `.openreview.json` | ✓ | ✓ | ✓ | exists | (always on) |
-| Security checks and OSV advisories | ✓ | ✓ | ✓ | exists | (always on, never gated) |
-| Issues inbox (findings as tickets across pull requests) | ✓ | ✓ | ✓ | exists | (always on, never gated) |
-| All providers (GitHub, GitLab, Azure DevOps, Bitbucket, Gitea, Perforce) | ✓ | ✓ | ✓ | exists | (always on) |
-| Codebase chat in the dashboard | ✓ | ✓ | ✓ | exists | (always on) |
-| 👍/👎 learning and the Memory page | ✓ | ✓ | ✓ | exists | (always on) |
-| Slack and email notifications | ✓ | ✓ | ✓ | exists | (always on) |
-| Agentic and hypothesis review engines (deeper reviews) |  | ✓ | ✓ | exists | `engine.deep` |
-| Requirements check from Linear, Jira, Confluence and Notion |  | ✓ | ✓ | exists | `context.requirements` |
-| Fix pull requests (`@openreview fix this … in a new PR`) |  | ✓ | ✓ | exists | `fix.pullRequests` |
-| Autofix: fix pull requests opened automatically for critical and high findings |  | ✓ | ✓ | exists | `fix.pullRequests` |
-| Generated reproduction tests in the sandbox |  | ✓ | ✓ | exists | `review.reproTests` |
-| Learned conventions from human reviewers |  | ✓ | ✓ | exists | `memory.conventions` |
-| Public API keys and the remote MCP server |  | ✓ | ✓ | exists | `api.access` |
-| Analytics trends beyond 30 days |  | ✓ | ✓ | build (the limit is new) | `analytics.history` |
-| SSO (SAML / OIDC) and enforced SSO |  |  | ✓ | build | `auth.sso` |
-| SCIM user provisioning |  |  | ✓ | build | `auth.scim` |
-| Audit log export (CSV / JSON) and 1-year retention |  |  | ✓ | build | `audit.export` |
-| Spending caps and usage alerts | ✓ (alerts) | ✓ | ✓ (caps) | build | `billing.caps` |
-| Priority support | | | ✓ | process (not code) | none |
+| Reviews, summaries, inline findings, suggestions, re-reviews, `.openreview.json` | ✓ | ✓ | ✓ | always on | none |
+| Security checks and OSV advisories | ✓ | ✓ | ✓ | never gated | none |
+| Issues inbox (findings as tickets across pull requests) | ✓ | ✓ | ✓ | never gated | none |
+| All providers, CLI, MCP, Claude Code/Codex plugins, chat, custom rules, 👍/👎 learning, Slack and email | ✓ | ✓ | ✓ | always on | none |
+| Extra usage up to an admin cap |  | ✓ | ✓ | live | none |
+| Deep reviews (deep tier, agentic and hypothesis engines, agent budgets, model overrides) |  |  | ✓ | gated | `review.deep` |
+| Your own model key (not metered) |  | ✓ | ✓ | gated | `model.ownKey` |
+| Generated reproduction tests |  |  | ✓ | gated | `review.reproTests` |
+| Fix prompts, local bridge, your own cloud agents and Devin | ✓ | ✓ | ✓ | always on | none |
+| OpenReview agent fixes (fix pull requests), monthly per seat |  | 5 | 20 | gated + counted (`billingUsage.fixes`) | `fix.pullRequests` |
+| Autofix: agent fix pull requests opened automatically for critical and high findings (uses the same monthly fixes) |  | ✓ | ✓ | gated + counted | `fix.pullRequests` |
+| Requirements check from Linear, Jira, Confluence and Notion |  |  | ✓ | gated | `context.requirements` |
+| Learned conventions from human reviewers |  |  | ✓ | gated | `memory.conventions` |
+| Public API keys |  |  | ✓ | gated | `api.access` |
+| Analytics beyond 30 days |  |  | ✓ | gated | `analytics.history` |
+| SSO (SAML / OIDC) and the audit log |  |  | ✓ | gated (SSO configured earlier keeps working) | `auth.sso`, `audit.log` |
+
+**Potential Pro features to build later:**
+- Scheduled full-repository security audits.
+- A merge gate that requires a minimum confidence score.
+- A priority review queue.
+- A model choice per repository.
+- A weekly team quality digest.
+- A cheaper bring-your-own-key seat (`convex/modelKeys.ts` already skips metering).
+
+The phases below are the original build checklist. P0.1, P0.2, P1.1, P1.3 and P1.5 shipped with the Free/Starter/Pro plans (`src/plans.ts`, `billingAccounts.plan`, Checkout per plan, and the deep, repro-test and fix-PR gates). The Business tier is dropped: its SSO and audit items move to Pro.
+
+The second pass gated the rest of Pro (P1.4, P1.6, plus `analytics.history`, `auth.sso` and `audit.log`). Settings for a locked feature stay visible but disabled inside `<Locked>` (`app/dashboard/locked.tsx`), which links to Organization Settings → Billing & Usage. Grandfathering is limited to SSO: a connection configured before keeps working and stays editable. The Perforce watcher and trigger keep working with their admin API key, because they are a code provider, not the public API.
 
 ---
 
 ## Phase 0: Entitlements foundation
 
-### - [x] P0.1 Plan catalog and entitlement keys
-done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/plans.test.ts, tests/billing.test.ts
+### - [ ] P0.1 Plan catalog and entitlement keys
 **Why:** features need one place that says which tier includes them.
 **Files:** `src/billing.ts`, new `src/plans.ts`, `tests/billing.test.ts`, new `tests/plans.test.ts`.
 **Build:**
@@ -85,8 +97,7 @@ done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/plans.te
 - [ ] Unit tests: every matrix row maps to the right tiers, disabled billing grants everything, and unknown keys are a type error.
 - [ ] `billingDecision` uses the tier's fair-use limit. Existing Starter behaviour and tests are unchanged.
 
-### - [x] P0.2 Store the tier on the billing account
-done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.spec.ts
+### - [ ] P0.2 Store the tier on the billing account
 **Depends on:** P0.1
 **Files:** `convex/schema.ts` (`billingAccounts`), `convex/billing.ts` (`applyStripeEvent`, `status`), `convex/http.ts` (webhook parsing), `tests/billing.spec.ts`.
 **Build:**
@@ -103,8 +114,7 @@ done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.
   - An unknown price is ignored.
   - Cancellation falls back to the trial or locked state.
 
-### - [x] P0.3 Server-side gate helper
-done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.spec.ts
+### - [ ] P0.3 Server-side gate helper
 **Depends on:** P0.2
 **Files:** `convex/billing.ts`, plus each feature entry point listed in P1.
 **Build:**
@@ -115,12 +125,11 @@ done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.
 **Acceptance:**
 - [ ] Tests: allowed and denied for every tier, always allowed with billing disabled, and a member of another workspace cannot probe the entitlements.
 
-### - [x] P0.4 Locked-feature UI pattern
-done: 2026-10-27 · see git log feat(billing): Pro tier · tests: checked in a local preview with Playwright (desktop and 390px, both themes, disabled controls); not yet part of scripts/browser.ts
+### - [ ] P0.4 Locked-feature UI pattern
 **Depends on:** P0.2
 **Files:** new `app/dashboard/locked.tsx`, `app/globals.css`, DESIGN.md.
 **Build:**
-- A `<Locked tier="pro" feature="Fix pull requests">` wrapper. It keeps the settings visible but disabled, adds one line saying which tier includes the feature, and links to Settings → Billing (admins) or tells members to ask an admin.
+- A `<Locked tier="pro" feature="Fix pull requests">` wrapper. It keeps the settings visible but disabled, adds one line saying which tier includes the feature, and links to Organization Settings → Billing & Usage (admins) or tells members to ask an admin.
 - No gradients and no modal upsell. The ember accent appears only on the upgrade link.
 
 **Acceptance:**
@@ -128,12 +137,11 @@ done: 2026-10-27 · see git log feat(billing): Pro tier · tests: checked in a l
 
 ## Phase 1: Pro tier
 
-### - [x] P1.1 Pro product, Checkout and plan choice
-done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.spec.ts
+### - [ ] P1.1 Pro product, Checkout and plan choice
 **Depends on:** P0.2
 **Files:** `convex/billingJobs.ts` (`checkout` gets a `tier` argument), `app/dashboard/billing.tsx`, `app/dashboard/onboarding/[step]/page.tsx` (plan step), `app/page.tsx` (pricing section).
 **Build:**
-- The plan step and Settings → Billing show Starter and Pro cards side by side. Each card's button opens Checkout for that tier's price. The remaining trial still carries over (`checkoutTrialEnd`).
+- The plan step and Organization Settings → Billing & Usage show Starter and Pro cards side by side. Each card's button opens Checkout for that tier's price. The remaining trial still carries over (`checkoutTrialEnd`).
 - Prices are shown from `BILLING_<TIER>_PRICE_LABEL` and are display only. Stripe is the source of truth at Checkout.
 
 **Acceptance:**
@@ -143,8 +151,7 @@ done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.
 - In Stripe, create the Product "OpenReview Pro" with a monthly per-unit price of $29.
 - Set `STRIPE_PRO_PRICE_ID` on Convex.
 
-### - [x] P1.2 Upgrades and downgrades in the Customer Portal
-done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.spec.ts
+### - [ ] P1.2 Upgrades and downgrades in the Customer Portal
 **Depends on:** P1.1
 **Files:** `convex/billingJobs.ts` (`portal`), `docs/billing.md`.
 **Build:**
@@ -164,7 +171,7 @@ done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.
 **Acceptance:**
 - [ ] Tests: the engine falls back on Starter, runs as chosen on Pro, and security checks run in both.
 
-### - [ ] P1.4 Gate requirements context (`context.requirements`)
+### - [x] P1.4 Gate requirements context (`context.requirements`)
 **Depends on:** P0.3
 **Files:** the requirements check entry points (search `requirements` in `convex/` and `src/`), the integrations settings UI.
 **Build:**
@@ -175,7 +182,6 @@ done: 2026-10-27 · see git log feat(billing): Pro tier · tests: tests/billing.
 - [ ] Tests: no ticket fetch on Starter (the fake fetch is not called), and a normal check on Pro.
 
 ### - [ ] P1.5 Gate fix pull requests and reproduction tests (`fix.pullRequests`, `review.reproTests`)
-partial: 2026-10-27 · `fix.pullRequests` is gated (comment command, dashboard, Fix page, settings and onboarding toggles; tests: tests/fix-command.spec.ts, tests/fix-pull-requests.spec.ts). `review.reproTests` is not gated yet.
 **Depends on:** P0.3
 **Files:** the fix handling (search `fixPullRequests`), the repro test runner, `app/dashboard/onboarding/configure.tsx` (tools step).
 **Build:**
@@ -185,7 +191,7 @@ partial: 2026-10-27 · `fix.pullRequests` is gated (comment command, dashboard, 
 **Acceptance:**
 - [ ] Tests: no branch is created on Starter, the reply text is correct, and Pro works as before.
 
-### - [ ] P1.6 Gate learned conventions and API/MCP access (`memory.conventions`, `api.access`)
+### - [x] P1.6 Gate learned conventions and API/MCP access (`memory.conventions`, `api.access`)
 **Depends on:** P0.3
 **Files:** `convex/conventionJobs.ts`, `convex/conventions.ts`, `convex/apiKeys.ts`, `app/api/mcp`, `app/api/query`, `app/api/search`.
 **Build:**
@@ -195,14 +201,14 @@ partial: 2026-10-27 · `fix.pullRequests` is gated (comment command, dashboard, 
 **Acceptance:**
 - [ ] Tests: ingestion is skipped, existing rules still apply, key creation is denied, and the API returns 402 with an upgrade message.
 
-### - [ ] P1.7 Fair-use alerts
+### - [x] P1.7 Fair-use alerts
 **Depends on:** P0.1
 **Files:** `convex/billing.ts` (`reviewAllowance`), `convex/notifications.ts`, the email templates.
 **Build:**
-- When a workspace crosses 80% and then 100% of its monthly fair-use limit, email the admins once per threshold per month and show a banner in Settings → Billing.
+- When a workspace crosses 80% and then 100% of its monthly fair-use limit, email the admins once per threshold per month and show a banner in Organization Settings → Billing & Usage.
 
 **Acceptance:**
-- [ ] Tests: each alert is sent exactly once per threshold per month and never to viewers.
+- [x] Tests: each alert is sent exactly once per threshold per month and never to viewers.
 
 ## Phase 2: Business tier
 
@@ -239,7 +245,7 @@ Same as P1.1, for "OpenReview Business" at $49.
 
 ### - [ ] P2.4 Audit log export and retention (`audit.export`)
 **Depends on:** P0.3
-**Files:** `app/dashboard` (Settings → Audit), the Convex audit queries.
+**Files:** `app/dashboard` (Organization Settings → Audit Log), the Convex audit queries.
 **Build:**
 - Admins export CSV or JSON for a date range, streamed and paginated.
 - Business keeps 1 year of audit history; other tiers keep 90 days. Pruning runs in a cron.

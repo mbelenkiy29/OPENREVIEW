@@ -42,7 +42,7 @@ export async function linkInstallation(a: { token: string; organizationId: strin
   if (!installation) throw new Error("Installation is not accessible to the signed-in GitHub user");
   // Saving repository access for an account that already has the App changes that installation; it
   // stays with the workspace it belongs to. Say so plainly instead of failing deep in linking.
-  const owner = await backend().query(api.repositories.installationOwnership, { token: a.token, organizationId: a.organizationId as Id<"organizations">, installationIds: [a.installationId] });
+  const owner = await backend().query(api.repositories.installationOwnership, { token: a.token, secret: process.env.SERVICE_SECRET ?? "", organizationId: a.organizationId as Id<"organizations">, installationIds: [a.installationId] });
   if (owner[String(a.installationId)] === "elsewhere") throw new Error(alreadyLinkedMessage(installation.account.login));
   if (installation.suspended_at) throw new Error("This installation is suspended on GitHub; unsuspend it there first");
   const github = await Github.installation(a.installationId),

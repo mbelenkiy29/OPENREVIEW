@@ -19,15 +19,15 @@ async function setup(){
 test("never-reviewed changes paginate and filter without scheduling a review; stale intake and review cannot replace current metadata",async()=>{
  const s=await setup();
  for(let number=1;number<=31;number++)await s.t.mutation(internal.pulls.observe,{...s.observation,number});
- const first=await s.t.query(api.pulls.list,{token:s.token,organizationId:s.organizationId,paginationOpts:{numItems:30,cursor:null}});
- expect(first.page).toHaveLength(30);expect(first.isDone).toBe(false);expect(first.page.every(p=>p.latest===null)).toBe(true);
- const second=await s.t.query(api.pulls.list,{token:s.token,organizationId:s.organizationId,paginationOpts:{numItems:30,cursor:first.continueCursor}});expect(second.page).toHaveLength(1);expect(second.isDone).toBe(true);
+ const first=await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,page:1,pageSize:30});
+ expect(first.page).toHaveLength(30);expect(first.total).toBe(31);expect(first.page.every(p=>p.latest===null)).toBe(true);
+ const second=await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,page:2,pageSize:30});expect(second.page).toHaveLength(1);
  await s.t.mutation(internal.pulls.observe,{...s.observation,title:"New revision",headSha:"c".repeat(40),revisionKey:"native-new",observedAt:300});
  await s.t.mutation(internal.pulls.observe,{...s.observation,state:"closed",observedAt:250});
  await s.t.mutation(internal.webhooks.lifecycle,{repositoryId:s.repo._id,prNumber:1,action:"closed",state:"closed",observedAt:250});
  const reviewId=await s.t.run(ctx=>ctx.db.insert("reviews",{organizationId:s.organizationId,repositoryId:s.repo._id,prNumber:1,headSha:s.observation.headSha,status:"ingesting",mode:"standard",attempts:1,createdAt:Date.now(),updatedAt:Date.now()}));
  await s.t.mutation(internal.reviews.recordPr,{reviewId,title:"Old title",author:"alice",url:s.observation.url,headSha:s.observation.headSha,baseSha:s.observation.baseSha,state:"closed",commits:[s.observation.headSha]});
- const filtered=await s.t.query(api.pulls.list,{token:s.token,organizationId:s.organizationId,search:"New revision",state:"open",author:"alice",paginationOpts:{numItems:30,cursor:null}});
+ const filtered=await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,search:"New revision",state:"open",author:"alice",page:1,pageSize:30});
  expect(filtered.page).toHaveLength(1);expect(filtered.page[0]).toMatchObject({headSha:"c".repeat(40),state:"open",title:"New revision",revisionKey:"native-new"});
  expect(await s.t.run(ctx=>ctx.db.query("reviews").collect())).toHaveLength(1);
 });
@@ -39,7 +39,7 @@ test("GitHub automatic-off intake uses native current metadata even for an obsol
  const deliveryId=await s.t.run(async ctx=>{const payloadStorageId=await ctx.storage.store(new Blob([JSON.stringify({action:"closed",installation:{id:9401},repository:{id:9410},pull_request:{number:1,draft:false,state:"closed",head:{sha:s.observation.headSha,ref:"feature"},base:{ref:"main"}}})]));return ctx.db.insert("webhookDeliveries",{deliveryId:"intake-stale-close",event:"pull_request",payloadStorageId,status:"queued",attempts:0,createdAt:Date.now(),updatedAt:Date.now()});});
  await s.t.action(internal.webhookJobs.process,{deliveryId});
  expect(await s.t.query(internal.webhooks.data,{deliveryId})).toMatchObject({status:"completed"});
- const rows=await s.t.query(api.pulls.list,{token:s.token,organizationId:s.organizationId,paginationOpts:{numItems:30,cursor:null}});
+ const rows=await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,page:1,pageSize:30});
  expect(rows.page[0]).toMatchObject({title:"Reopened manually",state:"open",headSha:"c".repeat(40),latest:null});
  expect(request).toHaveBeenCalledTimes(1);expect(await s.t.run(ctx=>ctx.db.query("reviews").collect())).toHaveLength(0);
 });
@@ -133,4 +133,87 @@ test('catalog Git requests reject stale native revisions, coalesce duplicate cli
  nativeHead='c'.repeat(40);const next=await s.t.action(api.providerJobs.rereview,{token:s.token,repositoryId:s.repo._id,prNumber:1});expect(next).not.toBe(id);expect(await s.t.run(ctx=>ctx.db.get(next!))).toMatchObject({status:'queued',headSha:nativeHead});
  expect(await s.t.run(ctx=>ctx.db.query('modelCalls').collect())).toHaveLength(0);
  await s.t.mutation(api.reviews.cancel,{token:s.token,reviewId:next!});await s.t.finishAllScheduledFunctions(vi.runAllTimers);
+});
+test("browse filters before paging, counts the total and filters on the current review",async()=>{
+ const s=await setup();
+ for(let number=1;number<=25;number++)await s.t.mutation(internal.pulls.observe,{...s.observation,number,author:number%2?"alice":"Bob",state:number<=20?"open":"merged",observedAt:200+number});
+ const args={token:s.token,organizationId:s.organizationId,pageSize:10};
+ const first=await s.t.query(api.pulls.browse,{...args,page:1,state:"open"});
+ expect(first.total).toBe(20);expect(first.page).toHaveLength(10);expect(first.capped).toBe(false);
+ expect((await s.t.query(api.pulls.browse,{...args,page:2,state:"open"})).page).toHaveLength(10);
+ // Author matches case-insensitively and short pages never happen.
+ const bob=await s.t.query(api.pulls.browse,{...args,page:1,author:"bob"});expect(bob.total).toBe(12);expect(bob.page).toHaveLength(10);
+ const now=Date.now(),review=(number:number,value:number,risk:"low"|"high")=>s.t.run(ctx=>ctx.db.insert("reviews",{organizationId:s.organizationId,repositoryId:s.repo._id,prNumber:number,headSha:s.observation.headSha,status:"completed",mode:"standard",attempts:1,reviewScore:{value,reason:"r"},approvalAssessment:{risk,confidence:.9,reason:"r"},createdAt:now,updatedAt:now}));
+ await review(1,5,"low");await review(2,2,"high");await review(3,4,"high");
+ expect((await s.t.query(api.pulls.browse,{...args,page:1,scoreMin:4})).page.map(p=>p.number).sort()).toEqual([1,3]);
+ expect((await s.t.query(api.pulls.browse,{...args,page:1,impact:"high",scoreMax:3})).page.map(p=>p.number)).toEqual([2]);
+ // The list's "# Reviews" column counts each pull request's reviews.
+ await review(1,4,"low");
+ expect((await s.t.query(api.pulls.browse,{...args,page:1,scoreMin:4})).page.map(p=>[p.number,p.reviewCount]).sort()).toEqual([[1,2],[3,1]]);
+ expect((await s.t.query(api.pulls.browse,{...args,page:1,status:"unreviewed",state:"open"})).total).toBe(17);
+ expect((await s.t.query(api.pulls.browse,{...args,page:1,state:"closed"})).total).toBe(5);
+ await expect(s.t.query(api.pulls.browse,{...args,page:0})).rejects.toThrow("Invalid page");
+});
+test("GitHub size, draft and requested reviewers are kept on the pull request row",async()=>{
+ const s=await setup();
+ const {changeMetadataSchema,pullObservation}=await import("../src/change-metadata");
+ const pr=changeMetadataSchema.parse({number:7,title:"Sized",html_url:s.observation.url,state:"open",draft:true,user:{login:"alice"},head:{sha:"c".repeat(40),ref:"feature"},base:{sha:"b".repeat(40),ref:"main"},additions:120,deletions:4,changed_files:3,requested_reviewers:[{login:"bob"}],mergeable:true});
+ await s.t.mutation(internal.pulls.observe,pullObservation(s.repo._id,pr,500));
+ const [row]=(await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,page:1,pageSize:10})).page;
+ expect(row).toMatchObject({number:7,isDraft:true,additions:120,deletions:4,changedFiles:3,requestedReviewers:["bob"]});
+ expect((await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,page:1,pageSize:10,reviewer:"BOB"})).page.map(p=>p.number)).toEqual([7]);
+ // Providers without these fields (or Gitea's nulls) still parse.
+ expect(pullObservation(s.repo._id,changeMetadataSchema.parse({...pr,additions:null,requested_reviewers:null}),1)).toMatchObject({additions:undefined,requestedReviewers:undefined});
+});
+test("dashboard actions need write access on a GitHub.com repository and report the linked GitHub accounts",async()=>{
+ const s=await setup();
+ const pullRequestId=await s.t.mutation(internal.pulls.observe,s.observation);
+ const target=await s.t.query(api.pulls.actionTarget,{token:s.token,pullRequestId:pullRequestId!});
+ expect(target).toMatchObject({fullName:"intake/example",number:1,headSha:"a".repeat(40)});expect(target.githubIds).toContain(4001);
+ await s.t.mutation(api.pulls.recordAction,{token:s.token,pullRequestId:pullRequestId!,action:"merge"});
+ expect((await s.t.run(ctx=>ctx.db.query("auditEvents").collect())).some(e=>e.action==="pull.merge")).toBe(true);
+ // Another workspace's user cannot act on it.
+ const other=await s.t.mutation(api.users.login,{secret:process.env.SERVICE_SECRET!,githubId:4002,login:"outsider",avatar:""});
+ const otherToken=await new SignJWT({}).setSubject(other).setProtectedHeader({alg:"HS256"}).setIssuer("openreview").setAudience("openreview").setExpirationTime("1h").sign(new TextEncoder().encode(process.env.SESSION_SECRET));
+ await expect(s.t.query(api.pulls.actionTarget,{token:otherToken,pullRequestId:pullRequestId!})).rejects.toThrow();
+ // Repositories behind other provider connections keep their own UI for these actions.
+ const connectionId=await s.t.run(ctx=>ctx.db.insert("providerConnections",{organizationId:s.organizationId,kind:"gitlab",instance:"https://gitlab.example",name:"GitLab",credentials:"x",webhookSecret:"x",active:true,createdAt:1}));
+ await s.t.run(ctx=>ctx.db.patch(s.repo._id,{connectionId}));
+ await expect(s.t.query(api.pulls.actionTarget,{token:s.token,pullRequestId:pullRequestId!})).rejects.toThrow("GitHub.com");
+});
+test("Reviewed marks are per developer and stop counting once the head moves",async()=>{
+ const s=await setup(),now=Date.now();
+ const reviewId=await s.t.run(ctx=>ctx.db.insert("reviews",{organizationId:s.organizationId,repositoryId:s.repo._id,prNumber:1,headSha:"a".repeat(40),status:"completed",mode:"standard",attempts:1,createdAt:now,updatedAt:now}));
+ await s.t.mutation(api.fileReviews.mark,{token:s.token,reviewId,path:"src/a.ts",reviewed:true});
+ await s.t.mutation(api.fileReviews.mark,{token:s.token,reviewId,path:"src/b.ts",reviewed:true});
+ await s.t.mutation(api.fileReviews.mark,{token:s.token,reviewId,path:"src/b.ts",reviewed:false});
+ expect(await s.t.query(api.fileReviews.list,{token:s.token,reviewId})).toEqual(["src/a.ts"]);
+ const next=await s.t.run(ctx=>ctx.db.insert("reviews",{organizationId:s.organizationId,repositoryId:s.repo._id,prNumber:1,headSha:"c".repeat(40),status:"completed",mode:"standard",attempts:1,createdAt:now,updatedAt:now}));
+ expect(await s.t.query(api.fileReviews.list,{token:s.token,reviewId:next})).toEqual([]);
+ await expect(s.t.mutation(api.fileReviews.mark,{token:s.token,reviewId,path:"",reviewed:true})).rejects.toThrow("Invalid path");
+});
+
+test("the Open tab reads open changes through the state index, not by scanning merged ones; Closed lists closed and merged newest first",async()=>{
+ // convex-test does not count rows a .filter() drops, so this checks the results; the indexes are in convex/schema.ts.
+ const s=await setup();
+ const base={organizationId:s.organizationId,repositoryId:s.repo._id,title:"Change",author:"alice",url:s.observation.url,headSha:s.observation.headSha,baseSha:s.observation.baseSha,updatedAt:1};
+ await s.t.run(async ctx=>{
+  await ctx.db.insert("pullRequests",{...base,number:1,state:"open"});
+  await ctx.db.insert("pullRequests",{...base,number:2,state:"closed"});
+  for(let number=3;number<4003;number++)await ctx.db.insert("pullRequests",{...base,number,state:"merged"});
+  await ctx.db.insert("pullRequests",{...base,number:4003,state:"open"});
+ });
+ const args={token:s.token,organizationId:s.organizationId,pageSize:10,page:1};
+ const open=await s.t.query(api.pulls.browse,{...args,state:"open"});
+ expect(open.page.map(p=>p.number)).toEqual([4003,1]);expect(open.total).toBe(2);
+ const closed=await s.t.query(api.pulls.browse,{...args,state:"closed"});
+ expect(closed.capped).toBe(true);expect(closed.page.map(p=>p.number)).toEqual([4002,4001,4000,3999,3998,3997,3996,3995,3994,3993]);
+ expect((await s.t.query(api.pulls.browse,{...args,repositoryId:s.repo._id,state:"open"})).page.map(p=>p.number)).toEqual([4003,1]);
+});
+test("a list cut off at the read limit is reported capped even when the author filter drops most rows",async()=>{
+ const s=await setup();
+ const base={organizationId:s.organizationId,repositoryId:s.repo._id,title:"Change",url:s.observation.url,headSha:s.observation.headSha,baseSha:s.observation.baseSha,state:"open",updatedAt:1};
+ await s.t.run(async ctx=>{for(let number=1;number<=1001;number++)await ctx.db.insert("pullRequests",{...base,number,author:number%100?"bob":"alice"});});
+ const alice=await s.t.query(api.pulls.browse,{token:s.token,organizationId:s.organizationId,author:"alice",page:1,pageSize:30});
+ expect(alice.capped).toBe(true);expect(alice.total).toBeLessThanOrEqual(10);
 });

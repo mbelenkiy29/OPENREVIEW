@@ -15,7 +15,7 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
-      securityContext: { runAsNonRoot: true, runAsUser: 1001 }
+      securityContext: { runAsNonRoot: true, runAsUser: 1001, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: web
           image: "{{ .Values.web.image.repository }}:{{ default .Chart.AppVersion .Values.web.image.tag }}"
@@ -36,7 +36,14 @@ spec:
             httpGet: { path: /api/health, port: http }
             periodSeconds: 30
           resources: {{- toYaml .Values.web.resources | nindent 12 }}
-          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: false }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          # Next.js writes its image/fetch cache under .next/cache; with a read-only root it and /tmp need volumes.
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: next-cache, mountPath: /app/.next/cache }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        - { name: next-cache, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service

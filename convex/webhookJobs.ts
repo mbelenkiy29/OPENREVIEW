@@ -1,16 +1,17 @@
 "use node";
 import { internalAction } from "./_generated/server";
+import { pullObservation } from "../src/change-metadata";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { z } from "zod";
 import { Github } from "../src/github";
 import { pullRequestTrigger } from "../src/triggers";
 import { isAgentHandoff, wantsAnswer } from "../src/thread-replies";
-import { labelTier, tiers } from "../src/review-tier";
+import { labelTier, tiers, wantsReview } from "../src/review-tier";
 
 const payloadSchema = z.object({
   action: z.string().optional(),
-  installation: z.object({ id: z.number(), permissions: z.record(z.string()).optional() }).optional(),
+  installation: z.object({ id: z.number(), permissions: z.record(z.string(), z.string()).optional() }).optional(),
   repository: z
     .object({
       id: z.number(),
@@ -51,6 +52,10 @@ const payloadSchema = z.object({
     })
     .optional(),
   ref: z.string().optional(),
+  check_run: z.object({ head_sha: z.string(), app: z.object({ id: z.number() }).nullish() }).optional(),
+  check_suite: z.object({ head_sha: z.string() }).optional(),
+  sha: z.string().optional(),
+  state: z.string().optional(),
   repositories: z
     .array(
       z.object({
@@ -149,13 +154,17 @@ export const process = internalAction({
           const { repo, settings } = data;
           if(payload.pull_request&&["pull_request","pull_request_review"].includes(delivery.event))
             await ctx.runMutation(internal.approvals.forChange,{repositoryId:repo._id,prNumber:payload.pull_request.number});
+          // A check re-run on the same head sends no pull_request event; recheck approvals pinned to that head.
+          // Only finished checks can change the gates; OpenReview's own check runs never do and would only cost GitHub reads.
+          const checkedSha=delivery.event==="check_run"&&payload.action==="completed"&&payload.check_run?.app?.id!==Number(globalThis.process.env.GITHUB_APP_ID)?payload.check_run?.head_sha:delivery.event==="check_suite"&&payload.action==="completed"?payload.check_suite?.head_sha:delivery.event==="status"&&payload.state!=="pending"?payload.sha:undefined;
+          if(checkedSha)await ctx.runMutation(internal.approvals.forRevision,{repositoryId:repo._id,headSha:checkedSha});
           if (delivery.event === "pull_request" && payload.pull_request) {
             // Read current metadata rather than replaying a potentially stale webhook snapshot.
             // A metadata-only request must not require a complete reviewable diff.
             const github = await Github.installation(repo.installationId!);
             const pr = await github.changeMetadata(repo.fullName,payload.pull_request.number);
             payload.pull_request = {...payload.pull_request,state:pr.state,draft:pr.draft,head:pr.head,base:pr.base};
-            await ctx.runMutation(internal.pulls.observe,{repositoryId:repo._id,number:pr.number,title:pr.title,author:pr.user.login,url:pr.html_url,headSha:pr.head.sha,baseSha:pr.base.sha,state:pr.state,observedAt});
+            await ctx.runMutation(internal.pulls.observe,pullObservation(repo._id,pr,observedAt));
           }
           if (
             delivery.event === "repository" ||
@@ -242,7 +251,7 @@ export const process = internalAction({
                     await ctx.scheduler.runAfter(0, internal.conversationJobs.reply, { repositoryId: repo._id, prNumber: number, commentId: comment.id, author: comment.user.login, question: comment.body, inline: true, parentCommentId: comment.in_reply_to_id });
                   }
                 } else if (
-                  /@openreview\s+review(?:\s+again|\s+security)?\b/i.test(
+                  wantsReview(
                     comment.body,
                   )
                 ) {

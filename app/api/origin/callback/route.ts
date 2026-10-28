@@ -21,6 +21,6 @@ export async function GET(request:Request){
   const credentials=originCredentials.parse({appId,privateKey:process.env.ORIGIN_APP_PRIVATE_KEY,installationId:verified.sub});
   await new Origin(credentials).repositories();
   const connection=await backend().mutation(api.providerConnections.connectOrigin,{token:identity.token,secret:process.env.SERVICE_SECRET??"",organizationId:saved.organizationId as Id<"organizations">,installationId:verified.sub,namespaceId:verified.namespace_id,jti:verified.jti,expiresAt:verified.exp*1000,credentials:encryptCredential(JSON.stringify(credentials),saved.organizationId+":origin")});
-  return NextResponse.redirect(origin()+"/dashboard/settings/providers?connection="+connection);
+  return NextResponse.redirect(origin()+"/dashboard/providers?connection="+connection);
  }catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Origin installation failed"},{status:400});}
 }

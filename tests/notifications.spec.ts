@@ -92,6 +92,15 @@ test('a completed review fans out to matching Slack channels and opted-in verifi
  expect(slackPosts(sent)).toHaveLength(3);expect(emails(sent)).toHaveLength(2);
 });
 
+test('members who cannot read a repository the review drew context from get no email about it',async()=>{
+ const {t,alice,bob,org,shop,billing,reviewId}=await setup();
+ await verify(t,org,alice.id,'alice@example.com',{reviewCompleted:'all',highSeverity:'all'});
+ await verify(t,org,bob.id,'bob@example.com',{reviewCompleted:'all',highSeverity:'all'});
+ // The shop review read code from acme/billing, which only the Billing team (and admins) can open.
+ await t.run(ctx=>ctx.db.patch(reviewId,{status:'completed',repositoryContext:{repositoryId:shop._id,userId:alice.id,actor:'alice',clusters:[],sources:[{repositoryId:billing._id,revision:head,fullName:'acme/billing'}]}}));
+ const targets=await t.query(internal.notifications.reviewTargets,{reviewId});
+ expect(targets!.recipients.map(r=>r.email)).toEqual(['alice@example.com']);
+});
 test('nothing is scheduled or sent for workspaces without notifications; unconfigured email is skipped, not failed',async()=>{
  const {t,alice,org,reviewId}=await setup();
  const sent=fakeNetwork();
@@ -159,6 +168,11 @@ test('Slack events: signatures are required; mentions route to Q&A only in linke
  const answers=await scheduled('slackAnswer');
  expect(answers).toHaveLength(1);
  expect(answers[0].args[0]).toEqual({installationId,channelId:'C0SHOP0001',threadTs:'1700000000.000100',question:'where is the total computed?',repositoryIds:[shop._id]});
+ // Slack Connect: a member of another workspace in the shared channel gets nothing; our own members still do.
+ expect((await post('/slack/events',event({event_id:'Ev04'},{user_team:'T0CONTRACT'}))).status).toBe(200);
+ expect(await scheduled('slackAnswer')).toHaveLength(1);
+ await post('/slack/events',event({event_id:'Ev05'},{user_team:'T0ACME123'}));
+ expect(await scheduled('slackAnswer')).toHaveLength(2);
  // Slash command: ephemeral status for the channel.
  const form=new URLSearchParams({team_id:'T0ACME123',channel_id:'C0SHOP0001',command:'/openreview',text:'status'}).toString();
  const status=await (await t.fetch('/slack/commands',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded',...signed(form)},body:form})).json();
@@ -204,4 +218,21 @@ test('Slack install exchanges the code once, stores the bot token encrypted, and
  await expect(t.action(api.notificationJobs.installSlack,{...args,token:bob.token,organizationId:other,jti:'slack:'+'t'.repeat(43)})).rejects.toThrow(/another OpenReview workspace/);
  await t.mutation(api.notifications.disconnectSlack,{token:alice.token,organizationId:org});
  expect(await t.run(ctx=>ctx.db.get(id))).toMatchObject({active:false,credentials:''});
+});
+
+test('an email the provider rate-limits is retried with backoff; emails already sent are not sent again',async()=>{
+ const {t,alice,bob,org,reviewId}=await setup();
+ process.env.RESEND_API_KEY='re_fixture';process.env.EMAIL_FROM='OpenReview <noreply@example.com>';
+ await verify(t,org,alice.id,'alice@example.com',{reviewCompleted:'all',highSeverity:'off'});
+ await verify(t,org,bob.id,'bob@example.com',{reviewCompleted:'all',highSeverity:'off'});
+ const sent:string[]=[];let limited=true;
+ vi.spyOn(globalThis,'fetch').mockImplementation(async(_input:string|URL|Request,init?:RequestInit)=>{const to=(JSON.parse(String(init?.body)).to as string[])[0];if(to==='bob@example.com'&&limited){limited=false;return new Response('rate limited',{status:429});}sent.push(to);return Response.json({id:'email'});});
+ await t.mutation(internal.reviews.finished,{reviewId});
+ const first=await t.action(internal.notificationJobs.reviewCompleted,{reviewId});
+ expect(Object.values(first).sort()).toEqual(['failed','sent']);
+ const retry=(await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).filter(j=>j.name.includes('notificationJobs:reviewCompleted'));
+ expect(retry.map(j=>j.args[0]).filter(a=>(a as {attempt?:number}).attempt)).toEqual([{reviewId,attempt:1}]);
+ const second=await t.action(internal.notificationJobs.reviewCompleted,{reviewId,attempt:1});
+ expect(Object.values(second).sort()).toEqual(['duplicate','sent']);
+ expect(sent).toEqual(['alice@example.com','bob@example.com']);
 });

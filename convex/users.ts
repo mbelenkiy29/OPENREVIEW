@@ -1,11 +1,14 @@
-import { mutation, query } from "./_generated/server";
-import { scheduleSeatSync } from "./billing";
+import { mutation, query, type QueryCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
+import { planMissing, scheduleSeatSync } from "./billing";
 import { billingConfig } from "../src/billing";
-import { linkIdentity } from "./identity";
+import { githubAccounts, linkIdentity } from "./identity";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import { authenticated, authorize, service, audit } from "./auth";
 import { rateLimit } from "./rateLimit";
 import { bindReferralOnWorkspace } from "./referralLedger";
+import { isOperator } from "./operator";
 
 export const login = mutation({
   args: {
@@ -20,6 +23,7 @@ export const login = mutation({
     return linkIdentity(ctx, { provider: "github", providerUserId: String(args.githubId), login: args.login, avatar: args.avatar, emailVerified: false });
   },
 });
+const githubLogins = async (ctx: QueryCtx, user: Doc<"users">) => new Set((await githubAccounts(ctx, user)).flatMap((g) => (g.login ? [g.login.toLowerCase()] : [])));
 export const me = query({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
@@ -32,19 +36,22 @@ export const me = query({
       members.map(async (m) => ({
         ...(await ctx.db.get(m.organizationId)),
         role: m.role,
+        // The dashboard's plan gate (app/dashboard/load.ts) uses the server's rule, which exempts operators' workspaces.
+        planMissing: await planMissing(ctx, m.organizationId),
       })),
     );
-    const invitations = await ctx.db
+    // Invitations name a GitHub login, so only logins GitHub reported count (other sign-ins choose `login`).
+    const invitations = (await Promise.all([...await githubLogins(ctx, user)].map((login) => ctx.db
       .query("invitations")
-      .withIndex("by_login", (q) =>
-        q.eq("githubLogin", user.login.toLowerCase()),
-      )
-      .collect();
+      .withIndex("by_login", (q) => q.eq("githubLogin", login))
+      .collect()))).flat();
     // The first verified sign-in email, for the feedback widget's profile (src/userjot.ts).
     const identities = await ctx.db.query("identities").withIndex("by_user", (q) => q.eq("userId", user._id)).take(20);
     return {
       user,
       email: identities.find((i) => i.emailVerified && i.email)?.email,
+      // Shows the Operator link; the operator page checks again on the server.
+      operator: await isOperator(ctx, user._id),
       organizations,
       invitations: (await Promise.all(invitations.filter((i) => i.expiresAt > Date.now()).map(async i => {
         const organization = await ctx.db.get(i.organizationId);
@@ -63,7 +70,9 @@ export const createOrganization = mutation({
     const organizationId = await ctx.db.insert("organizations", {
       name: args.name.trim(),
       onboarding: { startedAt: Date.now() },
-      // On billing deployments a new workspace chooses a plan before anything else runs.
+      // Opts the workspace into one-time emails (convex/lifecycleEmails.ts); older workspaces have none.
+      lifecycleEmails: [],
+      // On billing deployments a new workspace needs Starter or Pro before anything else runs; only older ones keep Free.
       ...(billingConfig().enabled ? { planRequired: true } : {}),
       createdAt: Date.now(),
     });
@@ -72,6 +81,8 @@ export const createOrganization = mutation({
       userId: user._id,
       role: "owner",
     });
+    // Every workspace is a Stripe customer from the start; scheduled so a Stripe outage cannot fail the signup.
+    if (billingConfig().enabled) await ctx.scheduler.runAfter(0, internal.billingJobs.createCustomer, { organizationId });
     await bindReferralOnWorkspace(ctx, user._id, organizationId);
     return organizationId;
   },
@@ -130,7 +141,7 @@ export const acceptInvitation = mutation({
       invitation = await ctx.db.get(args.invitationId);
     if (
       !invitation ||
-      invitation.githubLogin !== user.login.toLowerCase() ||
+      !(await githubLogins(ctx, user)).has(invitation.githubLogin) ||
       invitation.expiresAt <= Date.now() ||
       !(await ctx.db.get(invitation.organizationId))
     )

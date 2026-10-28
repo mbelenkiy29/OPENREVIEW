@@ -21,8 +21,8 @@ export function pullRequestTrigger(event: PullRequestEvent, settings: TriggerSet
   const labelled = labels.length > 0 && (pr.labels ?? []).some((l) => labels.includes(l.name.toLowerCase()));
   const author = pr.user?.login;
   if (author && (settings.excludedAuthors ?? []).length && picomatch(settings.excludedAuthors!, { nocase: true })(author)) return { review: false, reason: `Author ${author} is excluded` };
-  if (settings.targetBranches.length && !picomatch(settings.targetBranches)(pr.base.ref)) return { review: false, reason: "Target branch is not configured for review" };
-  if (settings.ignoredBranches.length && picomatch(settings.ignoredBranches)(pr.head.ref)) return { review: false, reason: "Source branch is ignored" };
+  if (settings.targetBranches.length && !picomatch(settings.targetBranches, { nocase: true })(pr.base.ref)) return { review: false, reason: "Target branch is not configured for review" };
+  if (settings.ignoredBranches.length && picomatch(settings.ignoredBranches, { nocase: true })(pr.head.ref)) return { review: false, reason: "Source branch is ignored" };
   if (pr.draft && !settings.drafts) return { review: false, reason: "Draft reviews are disabled" };
   if (action === "labeled") return event.label && labels.includes(event.label.toLowerCase()) ? { review: true, trigger: "label" } : { review: false, reason: "Label is not a review trigger" };
   if (["opened", "reopened", "ready_for_review"].includes(action)) return settings.automatic ? { review: true, trigger: "automatic" } : labelled ? { review: true, trigger: "label" } : { review: false, reason: "Automatic reviews are off" };

@@ -36,8 +36,16 @@ export const references = internalQuery({ args: { repositoryId, symbol: v.string
 
 export const directory = internalQuery({ args: { repositoryId, path: v.string() }, handler: async (ctx, a) => {
   const prefix = a.path ? a.path.replace(/\/+$/, "") + "/" : "";
-  const rows = await ctx.db.query("repositoryFiles").withIndex("by_path", (q) => (prefix ? q.eq("repositoryId", a.repositoryId).gte("path", prefix).lt("path", prefix + "￿") : q.eq("repositoryId", a.repositoryId))).take(3000);
-  return [...new Set(rows.map((r) => prefix + r.path.slice(prefix.length).split("/")[0]))].slice(0, 200);
+  // Jump past each folder with an index range, so one folder with thousands of files cannot hide the rest.
+  const out = new Set<string>();
+  for (let i = 0, after = prefix; i < 1000 && out.size < 200; i++) {
+    const row = await ctx.db.query("repositoryFiles").withIndex("by_path", (q) => { const r = q.eq("repositoryId", a.repositoryId).gt("path", after); return prefix ? r.lt("path", prefix + "￿") : r; }).first();
+    if (!row) break;
+    const [name, ...rest] = row.path.slice(prefix.length).split("/");
+    out.add(prefix + name);
+    after = rest.length ? prefix + name + "/￿" : row.path;
+  }
+  return [...out];
 } });
 
 export const related = internalQuery({ args: { repositoryId, path: v.string() }, handler: async (ctx, a) => {

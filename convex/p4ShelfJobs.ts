@@ -14,7 +14,7 @@ export const prepare=internalAction({args:{repositoryId:v.id("repositories"),req
  const before=await ctx.runQuery(internal.p4Index.baseline,{repositoryId:a.repositoryId,requestedBy:a.requestedBy,baselineJobId:a.baselineJobId});
  const blob=await ctx.storage.get(before.job.manifestStorageId!);
  if(!blob||blob.size>1000000)throw new Error("P4 baseline manifest unavailable or exceeds coverage");
- const manifest=z.object({sha:z.string(),inventory:z.unknown()}).parse(JSON.parse(await blob.text()));
+ const manifest=z.object({sha:z.string(),inventory:z.unknown().optional()}).parse(JSON.parse(await blob.text()));
  if(manifest.sha!==before.job.sha)throw new Error("P4 baseline manifest revision mismatch");
  const files:SourceFile[]=[];let bytes=0;
  for(const file of before.files){

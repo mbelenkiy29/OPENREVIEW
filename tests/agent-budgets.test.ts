@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { agentBudgets, agentHardCaps, configuredBudget, memoryToolbox } from "../src/engine/agent";
+import { agentBudgets, agentHardCaps, configuredBudget, maxSourceBytes, memoryToolbox, runReviewAgent } from "../src/engine/agent";
 import { scopeDefaults, validTriggerSettings } from "../src/review-settings";
 import { reviewChange } from "../src/engine/review";
 import type { ModelProvider, ModelRequest, ReviewInput, ToolRequest, ToolTurn } from "../src/engine/types";
@@ -66,4 +66,25 @@ test("hypothesis investigations use the per-hypothesis budget", async () => {
   assert.deepEqual(result.metadata.hypotheses?.map((h) => [h.turns, h.toolCalls, h.stopReason]), [[2, 1, "turn budget exhausted"], [2, 1, "turn budget exhausted"]]);
   assert.deepEqual(result.metadata.agentBudget, { turns: 2, toolCalls: 1, perHypothesis: true });
   assert.deepEqual(model.turns, { "hypothesis:1": 2, "hypothesis:2": 2 });
+});
+
+test("memoized file text stops at the byte cap so the saved state stays loadable; reads past it still succeed", async () => {
+  const files = Array.from({ length: 25 }, (_, i) => ({ path: `big${i}.ts`, sha: "1", content: `export const v${i} = ${i};\n`.repeat(8_000) }));
+  let results: { content: string; isError?: boolean }[] = [];
+  const model: ModelProvider = {
+    async runTools(request: ToolRequest): Promise<ToolTurn> {
+      const last = request.messages.at(-1);
+      if (last?.role === "tool") results = last.results;
+      const toolCalls = last?.role === "tool" ? [] : files.map((f, i) => ({ id: "r" + i, name: "read_file", input: { path: f.path } }));
+      return { content: toolCalls.length ? "" : "Refuted: nothing", toolCalls, stopReason: toolCalls.length ? "tool_use" : "end_turn", message: { role: "assistant", content: "", toolCalls }, usage: { task: request.task, provider: "f", model: "f", inputTokens: 1, outputTokens: 1, latencyMs: 1, estimatedCost: 0, cached: false } };
+    },
+    async generate() { throw new Error("unused"); },
+  };
+  const run = await runReviewAgent({ input, payload: {}, model, tools: memoryToolbox(files, input.headSha), categories: ["correctness"], rules: [], budget: { toolCalls: 50, tokens: 1e9, wallMs: 1e9, turns: 5 } });
+  const kept = run.state.sources.reduce((n, s) => n + Buffer.byteLength(JSON.stringify(s.content)), 0);
+  assert.ok(run.state.sources.length > 0 && run.state.sources.length < files.length, String(run.state.sources.length));
+  assert.ok(kept <= maxSourceBytes, String(kept));
+  assert.equal(results.length, files.length);
+  assert.ok(results.every((r) => !r.isError));
+  assert.ok(run.limits.some((l) => l.includes("more file text than it keeps")));
 });

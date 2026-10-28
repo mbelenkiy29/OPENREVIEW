@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     await backend().action(api.notificationJobs.installSlack, { token: identity.token, secret: process.env.SERVICE_SECRET ?? "", organizationId: saved.organizationId as Id<"organizations">, code, redirectUri: origin() + "/api/slack/callback", jti: "slack:" + saved.state, expiresAt: saved.expiresAt });
   } catch {
     // OAuth responses may contain credentials; never echo them.
-    return NextResponse.redirect(origin() + "/dashboard/settings/notifications?slack=error");
+    return NextResponse.redirect(origin() + "/dashboard/organization/notifications?slack=error");
   }
-  return NextResponse.redirect(origin() + "/dashboard/settings/notifications?slack=connected");
+  return NextResponse.redirect(origin() + "/dashboard/organization/notifications?slack=connected");
 }

@@ -2,10 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { findingTags, priorityBadge, priorityOf } from "../src/priority";
+import { findingTags, priorityBadge, priorityOf, findingCounts } from "../src/priority";
 import { findingComment, reviewSummary } from "../src/review-summary";
 import { emailReview, slackReviewText, type ReviewNotice } from "../src/notifications";
-import { priority } from "../app/dashboard/sections/shared";
+import { priority, severityCounts, ago } from "../app/dashboard/sections/shared";
 import type { Finding } from "../src/engine/types";
 
 const finding = (severity: Finding["severity"], category: Finding["category"], title: string): Finding => ({
@@ -22,10 +22,11 @@ test("severities map to P0–P3 with text and emoji only; security findings get 
   assert.deepEqual(findingTags({}), []);
 });
 
-test("inline comments lead with the priority badge, then the Security tag, severity and confidence", () => {
+test("inline comments lead with the priority badge and a bold title, then the Security tag (Greptile's shape)", () => {
   const security = finding("high", "security", "Deleted accounts stay authorized");
-  for (const style of ["detailed", "concise"]) assert.match(findingComment(security, style), /^\*\*🟠 P1 · Deleted accounts stay authorized\*\* · 🔒 Security \(high, 95% confidence\)\n/);
-  assert.match(findingComment(finding("medium", "correctness", "Rounding drops a cent")), /^\*\*🟡 P2 · Rounding drops a cent\*\* \(medium, 95% confidence\)\n/);
+  for (const style of ["detailed", "concise"]) assert.match(findingComment(security, style), /^🟠 P1 \*\*Deleted accounts stay authorized\*\* · 🔒 Security\n\n/);
+  assert.match(findingComment(finding("medium", "correctness", "Rounding drops a cent")), /^🟡 P2 \*\*Rounding drops a cent\*\*\n\n/);
+  assert.doesNotMatch(findingComment(security), /% confidence|\*\*Impact:\*\*|Evidence:/, "confidence, impact label and evidence stay on the dashboard");
   assert.doesNotMatch(findingComment(security), /<img|https?:\/\/[^\s)]*\.(?:svg|png)/, "no hosted badge images");
 });
 
@@ -50,4 +51,19 @@ test("the dashboard renders a priority badge colored by severity, with a Securit
   const html = renderToStaticMarkup(createElement(Fragment, null, priority({ severity: "critical", category: "security" })));
   assert.equal(html, '<span class="badge critical" title="Severity: critical">🔴 P0</span> <span class="badge">🔒 Security</span>');
   assert.equal(renderToStaticMarkup(createElement(Fragment, null, priority({ severity: "low" }))), '<span class="badge low" title="Severity: low">🔵 P3</span>');
+});
+
+test("finding counts group by priority and add a security count", () => {
+  assert.deepEqual(findingCounts([{ severity: "high" }, { severity: "high", category: "security" }, { severity: "medium" }]), { P1: 2, security: 1, P2: 1 });
+  assert.deepEqual(findingCounts([]), {});
+  const html = renderToStaticMarkup(createElement(Fragment, null, severityCounts({ P2: 1, P0: 1, security: 1 })));
+  assert.equal(html, '<span class="badge critical" title="1 P0 finding">P0 ×1</span> <span class="badge medium" title="1 P2 finding">P2 ×1</span> <span class="badge security" title="1 security finding">🔒 ×1</span>');
+});
+
+test("relative times read like a person would say them", () => {
+  const now = Date.UTC(2026, 9, 21);
+  assert.equal(ago(now - 28 * 864e5, now), "4 weeks ago");
+  assert.equal(ago(now - 3 * 36e5, now), "3 hours ago");
+  assert.equal(ago(now - 864e5, now), "yesterday");
+  assert.equal(ago(now - 5000, now), "just now");
 });
