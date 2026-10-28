@@ -6034,6 +6034,25 @@ dialog.modal::backdrop {
 .modal-footer.split > * {
   flex: 1;
 }
+/* "What's new" pop-up (app/dashboard/whats-new.tsx): the demo clip, then what changed and where to go. */
+.whats-new video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface-2);
+}
+.whats-new ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+.whats-new .modal-footer {
+  flex-wrap: wrap;
+}
 .confirm-phrase {
   gap: 8px;
   font-weight: 400;

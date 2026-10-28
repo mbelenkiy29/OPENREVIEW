@@ -178,6 +178,13 @@ export async function feedback(form: FormData) {
   revalidatePath("/dashboard", "layout");
 }
 // Issues inbox: status, assignee and comments (the backend checks repository write access).
+// "What's new": closing the pop-up records it, so it never opens on its own again for this person.
+// Called without awaiting from the dialog's close, so a failure stays silent like analytics milestones.
+export async function dismissAnnouncement(id: string) {
+  const token = (await cookies()).get("openreview_session")?.value;
+  if (!token || typeof id !== "string" || id.length > 100) return;
+  await backend().mutation(api.announcements.dismiss, { token, id }).catch(() => undefined);
+}
 export async function setIssueStatus(form: FormData) {
   const { token } = await current();
   await backend().mutation(api.issues.setStatus, { token, issueId: text(form, "issueId") as Id<"issues">, status: text(form, "status"), ...(text(form, "comment") ? { comment: text(form, "comment") } : {}) });

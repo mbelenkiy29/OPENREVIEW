@@ -12,7 +12,7 @@ const CloseContext = createContext<() => void>(() => {});
 /** Closes the enclosing Dialog, e.g. from a form's onSubmit or a Cancel button. */
 export const useCloseDialog = () => useContext(CloseContext);
 
-export function Dialog({ trigger, triggerClassName, triggerLabel, title, description, size = "standard", open: openOnMount = false, children }: {
+export function Dialog({ trigger, triggerClassName, triggerLabel, title, description, size = "standard", open: openOnMount = false, onClose, children }: {
   /** The trigger button's content. */
   trigger: ReactNode;
   triggerClassName?: string;
@@ -24,6 +24,8 @@ export function Dialog({ trigger, triggerClassName, triggerLabel, title, descrip
   size?: "confirm" | "standard" | "wide";
   /** Open on first render (dialogs driven by the URL). */
   open?: boolean;
+  /** Runs on every close: the X, Escape, the backdrop or useCloseDialog. */
+  onClose?: () => void;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null), id = useId(), [body, setBody] = useState<HTMLElement | null>(null);
@@ -34,7 +36,7 @@ export function Dialog({ trigger, triggerClassName, triggerLabel, title, descrip
     <button type="button" className={triggerClassName} aria-label={triggerLabel} aria-haspopup="dialog" onClick={() => ref.current?.showModal()}>{trigger}</button>
     {body && createPortal(
       // A click on the dialog itself (not its content) is a click on the backdrop.
-      <dialog ref={ref} className={`modal ${size}`} aria-labelledby={`${id}-title`} onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
+      <dialog ref={ref} className={`modal ${size}`} aria-labelledby={`${id}-title`} onClose={onClose} onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
         <div className="modal-box">
           {size !== "confirm" && <header className="modal-header">
             <div><h2 id={`${id}-title`}>{title}</h2>{description && <p>{description}</p>}</div>

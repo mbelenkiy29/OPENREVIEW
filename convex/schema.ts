@@ -220,6 +220,8 @@ export default defineSchema({
     analyticsMilestones: v.optional(v.array(v.string())),
     // One-time emails already sent to this user (convex/lifecycleEmails.ts); workspace ones are on the organization.
     lifecycleEmails: v.optional(v.array(v.string())),
+    // "What's new" announcements this user closed (convex/announcements.ts), so each opens once.
+    dismissedAnnouncements: v.optional(v.array(v.string())),
     createdAt: v.number(),
   }).index("by_github", ["githubId"]),
   // Sign-in identities: one row per provider account. Accounts link only through a verified

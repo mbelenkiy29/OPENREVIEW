@@ -172,7 +172,18 @@ try {
       },
     ],
   });
+  // "What's new" opens by itself once per person and blocks the page while open. The fixture user is
+  // reused across runs, so the walk closes it whenever it shows and checks that closing is remembered.
+  const whatsNew = page.getByRole("dialog", { name: /^New: / });
+  await page.addLocatorHandler(whatsNew, (dialog) => dialog.getByRole("button", { name: "Close" }).click());
   await page.goto(`${url}/dashboard/repositories`);
+  if (await whatsNew.waitFor({ timeout: 5000 }).then(() => true, () => false)) {
+    await whatsNew.getByRole("button", { name: "Close" }).click();
+    await page.waitForLoadState("networkidle");
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+  }
+  assert.equal(await whatsNew.waitFor({ timeout: 2000 }).then(() => true, () => false), false, "a closed announcement does not open again");
   // Repository names open their pull requests dialog.
   await page
     .getByRole("button", { name: "test-fixture/context-example", exact: true })
