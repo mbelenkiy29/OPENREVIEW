@@ -31,7 +31,7 @@ export default async function PortalLayout({ children }: { children: React.React
   return <div className="shell portal">
     <PortalNav login={user.user.login} avatar={user.user.avatar || undefined} email={user.email} role={organization.role} organizationId={organization._id} name={organization.name ?? "Workspace"}
       organizations={user.organizations.flatMap((o) => o._id ? [{ _id: o._id, name: o.name ?? "Workspace" }] : [])}
-      teams={teamChoices(scopes).map((t) => ({ _id: t._id, name: t.name }))} savedTeam={jar.get("openreview_team")?.value} trialDaysLeft={trialDaysLeft} trialCharge={trialCharge} usage={usage} billingPortal={Boolean(billing?.enabled && billing.admin && billing.hasCustomer)} operator={user.operator} />
+      teams={teamChoices(scopes).map((t) => ({ _id: t._id, name: t.name }))} savedTeam={jar.get("openreview_team")?.value} trialDaysLeft={trialDaysLeft} trialCharge={trialCharge} usage={usage} billingPortal={Boolean(billing?.enabled && billing.admin && billing.hasCustomer)} operator={user.operator} dismissedAnnouncements={user.user.dismissedAnnouncements ?? []} />
     {children}
   </div>;
 }

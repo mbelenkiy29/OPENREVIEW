@@ -14,6 +14,7 @@ import type * as agentTools from "../agentTools.js";
 import type * as analytics from "../analytics.js";
 import type * as analyticsMilestones from "../analyticsMilestones.js";
 import type * as analyticsRollup from "../analyticsRollup.js";
+import type * as announcements from "../announcements.js";
 import type * as apiKeys from "../apiKeys.js";
 import type * as approvalJobs from "../approvalJobs.js";
 import type * as approvals from "../approvals.js";
@@ -156,6 +157,7 @@ declare const fullApi: ApiFromModules<{
   analytics: typeof analytics;
   analyticsMilestones: typeof analyticsMilestones;
   analyticsRollup: typeof analyticsRollup;
+  announcements: typeof announcements;
   apiKeys: typeof apiKeys;
   approvalJobs: typeof approvalJobs;
   approvals: typeof approvals;

@@ -8,12 +8,13 @@ import {ThemePicker} from "../theme";
 import { SignOutForm } from "../telemetry-identity";
 import { Mark } from "../ui/logo";
 import { Icon } from "../ui/icons";
+import { WhatsNew } from "./whats-new";
 import { logout, openBillingPortal, requestUpgrade } from "./actions";
 import { referralConfig } from "../../src/referrals";
 
 // The app chrome, rendered once by the portal layout and kept mounted across navigations: Greptile's
 // trial banner, identity row (organization menu, icon buttons, account menu) and the eight tabs.
-export function PortalNav({ login, avatar, email, role, organizationId, name, organizations, teams, savedTeam, trialDaysLeft, trialCharge, usage, billingPortal, operator }: { login: string; avatar?: string; email?: string; role: string; organizationId: string; name: string; organizations: { _id: string; name: string }[]; teams: { _id: string; name: string }[]; savedTeam?: string; trialDaysLeft?: number; trialCharge?: { plan: string; date: string }; usage?: { text: string; admin: boolean; free: boolean }; billingPortal?: boolean; operator?: boolean }) {
+export function PortalNav({ login, avatar, email, role, organizationId, name, organizations, teams, savedTeam, trialDaysLeft, trialCharge, usage, billingPortal, operator, dismissedAnnouncements }: { login: string; avatar?: string; email?: string; role: string; organizationId: string; name: string; organizations: { _id: string; name: string }[]; teams: { _id: string; name: string }[]; savedTeam?: string; trialDaysLeft?: number; trialCharge?: { plan: string; date: string }; usage?: { text: string; admin: boolean; free: boolean }; billingPortal?: boolean; operator?: boolean; dismissedAnnouncements: string[] }) {
   const feedback = Boolean(userJotConfig()), referrals = referralConfig().enabled;
   // The provider's avatar, at most 45px: next/image would need every avatar host allow-listed for no gain.
   // eslint-disable-next-line @next/next/no-img-element
@@ -36,6 +37,7 @@ export function PortalNav({ login, avatar, email, role, organizationId, name, or
       <div className="header-actions">
         <Link className="header-button" href="/dashboard/chat" title="Chat"><Icon name="chatCircle" /><span className="sr-only">Chat</span></Link>
         <Link className="header-button" href="/docs" title="Docs"><Icon name="bookOpen" /><span className="sr-only">Docs</span></Link>
+        <WhatsNew dismissed={dismissedAnnouncements} />
         {referrals && <Link className="header-button" href="/dashboard/account/referrals" title="Refer someone"><Icon name="gift" /><span className="sr-only">Refer someone</span></Link>}
         <PortalDisclosure className="profile" label={<>{photo(27)}<span className="sr-only">Account menu for @{login}</span></>}>
           <div className="menu user-menu">
