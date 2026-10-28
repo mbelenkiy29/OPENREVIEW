@@ -25,6 +25,8 @@ export const run = internalAction({
     requestId: v.optional(v.id("fixRequests")), userId: v.optional(v.id("users")), githubId: v.optional(v.number()),
     // Comment runs: the comment author and the thread to answer.
     author: v.optional(v.string()), replyTo: v.optional(v.object({ prNumber: v.number(), commentId: v.optional(v.union(v.number(), v.string())) })),
+    // Autofix runs (convex/autofix.ts): opened for the pull request's author without a request.
+    automatic: v.optional(v.boolean()),
   },
   handler: async (ctx, a) => {
     const finding = (await ctx.runQuery(internal.fixPullRequests.finding, { findingId: a.findingId })) as Doc<"findings"> | null;
@@ -35,6 +37,7 @@ export const run = internalAction({
       if (!usedModel) await ctx.runMutation(internal.fixPullRequests.release, { organizationId: repo.organizationId });
       if (a.requestId) await ctx.runMutation(internal.fixPullRequests.progress, result.url ? { requestId: a.requestId, status: "opened", pullRequestUrl: result.url } : { requestId: a.requestId, status: "failed", error: result.note ?? "The fix did not finish" });
       await ctx.runMutation(internal.fixPullRequests.recordResult, { organizationId: repo.organizationId, userId: a.userId, findingId: a.findingId, opened: Boolean(result.url), detail: result.url ?? result.note ?? "" });
+      if (result.url) await ctx.runMutation(internal.issues.recordFixPullRequest, { findingId: a.findingId, url: result.url, automatic: a.automatic === true });
       if (a.replyTo && github) {
         const body = result.url ? `${result.reused ? "A fix pull request already exists" : "Opened a fix pull request"} for **${finding.title.replace(/[\r\n]+/g, " ").slice(0, 200)}**: ${result.url}. It targets this pull request's branch; nothing was pushed to this branch. No tests were run by OpenReview, so review it before merging.` : (result.note ?? "The fix did not finish.");
         await github.reply(repo.fullName, a.replyTo.prNumber, body, a.replyTo.commentId, `fix-pull-request:${a.findingId}:${a.replyTo.commentId ?? "pr"}`);
@@ -69,7 +72,7 @@ export const run = internalAction({
         branch: fixBranchName(finding.prNumber, finding.fingerprint), expectedHead: pr.head.sha,
         files: fix.edits.map((e) => ({ ...e, mode: tree.get(e.path)?.mode ?? "100644" })),
         title: ("OpenReview fix: " + title).slice(0, 120),
-        body: `Requested by @${login} for the finding in \`${finding.filePath}:${finding.startLine}\`. OpenReview's fix agent changed:\n\n${fix.edits.map((e) => `- \`${e.path}\``).join("\n")}\n\n${summary ?? ""}\n\nThis pull request targets the branch of #${finding.prNumber}. No tests were run by OpenReview; review the change before merging.`.replace(/\n{3,}/g, "\n\n"),
+        body: `${a.automatic ? "Opened automatically by OpenReview Autofix (repository setting)" : `Requested by @${login}`} for the finding in \`${finding.filePath}:${finding.startLine}\`. OpenReview's fix agent changed:\n\n${fix.edits.map((e) => `- \`${e.path}\``).join("\n")}\n\n${summary ?? ""}\n\nThis pull request targets the branch of #${finding.prNumber}. No tests were run by OpenReview; review the change before merging.`.replace(/\n{3,}/g, "\n\n"),
         message: ("Fix: " + title).slice(0, 200),
       });
       return "skipped" in opened ? { note: `No fix pull request was opened: ${opened.skipped}.` } : { url: opened.url, reused: opened.reused };

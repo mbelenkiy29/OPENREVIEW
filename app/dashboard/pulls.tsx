@@ -54,6 +54,7 @@ export async function PullList({token,organizationId,repositories,filters,admin,
    </form>
    <nav className="segmented state-toggle" aria-label="Pull request state">{([["open","Open","gitPullRequest"],["closed","Closed","gitMerge"]] as const).map(([value,label,icon])=><Link key={value} href={link({state:value==="open"?undefined:value,q:withoutToken(q,"state")||undefined,p:undefined})} aria-current={(state==="open"?"open":"closed")===value?"page":undefined}><Icon name={icon}/>{label}</Link>)}</nav>
    <Link className="button" href="/dashboard/analytics/findings"><Icon name="bug"/>Findings</Link>
+   <Link className="button" href="/dashboard/analytics/issues"><Icon name="listChecks"/>Issues</Link>
   </div>
   <BulkBar/>
   <div className="table-box pulls-wrap"><table className="pulls-table"><thead><tr><th className="row-select"><SelectAll/></th><th className="num-col">PR #</th><th className="name-col">PR Name</th><th className="repo-col">Repo</th><th className="branch-col">Branch</th><th className="status-col">Status</th><th className="count-col"># Reviews</th><th className="updated-col">Last updated</th></tr></thead><tbody>{result.page.map(pr=>{

@@ -21,7 +21,7 @@ const chip = (value: string) => { const [icon, tone] = chips[value] ?? ["info", 
 // Analytics → Bugs Caught: Greptile's toolbar (author search and filter menus) over a DataTable whose rows
 // expand into the full finding with its fix, agent hand-offs and feedback.
 export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
-  const { data, devinConfigured, filters, findingsPage, personalAgent, repoName, visibleFindings } = ctx;
+  const { data, filters, findingsPage, repoName, visibleFindings } = ctx;
   const keys = ["team", "repository", "severity", "category", "status", "usefulness", "author", "since", "until"];
   const current = Object.fromEntries(keys.map((k) => [k, k === "team" ? filters.team : filters[k] || undefined]));
   const href = (patch: Record<string, string | undefined> = {}) => filterHref(path, current, patch);
@@ -62,7 +62,6 @@ export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
         ? <><strong>No matches in this part of the list</strong><p>Choose Next findings to keep searching older findings.</p></>
         : <><strong>No findings yet</strong><p>Open a pull request in an enabled repository. Verified findings will appear here.</p></>}</div>}
       {visibleFindings.map((f) => {
-        const prompt = fixPrompt(repoName(f.repositoryId), `PR #${f.prNumber}`, [{ ...findingSchema.parse(f), agent: f.agent, fingerprint: f.fingerprint, commitSha: f.commitSha }]);
         return <details className="finding" key={f._id}>
           <summary>
             <span className="finding-name"><Icon name="caretRight" /><span><strong>{f.title}</strong><small>{repoName(f.repositoryId)} #{f.prNumber} · {f.filePath}:{f.startLine}</small></span></span>
@@ -72,19 +71,7 @@ export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
             <span className="finding-mono" title={when(f.createdAt)}>{ago(f.createdAt)}</span>
           </summary>
           <div className="finding-detail">
-            <p>{f.description}</p>
-            {f.ruleId && <p className="muted">Rule: {data.rules.find((rule) => rule._id === f.ruleId)?.title ?? f.ruleId}</p>}
-            <p><strong>Impact:</strong> {f.impact}</p>
-            {f.evidence.map((e, i) => <div key={i} className="finding-evidence">
-              {e.sourceUrl && <a href={e.sourceUrl} target="_blank" rel="noreferrer">{e.repository} · {e.revision?.slice(0, 8)} · source</a>}
-              <p className="muted">{e.filePath}:{e.startLine}</p>
-              <pre><code>{e.quote}</code></pre>
-            </div>)}
-            <p><strong>Suggested fix:</strong> {f.suggestedFix}</p>
-            {f.canFix && <FixButton reviewId={f.reviewId} agent={personalAgent} findingId={f._id} />}
-            {f.status === "open" && !f.canFix && data.writableRepositoryIds.includes(f.repositoryId) && <p className="muted">Fix requires this finding to belong to the latest completed review, meet the current confidence threshold, and have current repository access.</p>}
-            <div className="page-actions"><Copy value={prompt} />{f.status === "open" && <AgentLinks prompt={prompt} repo={data.repositories.find((r) => r._id === f.repositoryId)} devin={devinHandoff(devinConfigured, f.canFix, f.reviewId, f.fingerprint)} />}</div>
-            <details><summary>Portable prompt for Codex, Claude Code, or Cursor</summary><pre>{prompt}</pre></details>
+            <FindingBody f={f} ctx={ctx} />
             {data.writableRepositoryIds.includes(f.repositoryId) && <form action={feedback} className="feedback">
               <input type="hidden" name="findingId" value={f._id} />
               <label>Feedback<select name="value"><option value="useful">Useful</option><option value="not_useful">Not useful</option><option value="resolved">Resolved</option><option value="wont_fix">Won’t fix</option><option value="false_positive">False positive</option></select></label>
@@ -102,5 +89,27 @@ export function FindingsSection({ ctx }: { ctx: DashboardContext }) {
         {findingsPage && !findingsPage.isDone && <Link href={href({ cursor: findingsPage.continueCursor })}>Next findings<Icon name="caretRight" /></Link>}
       </nav>
     </div>}
+  </>;
+}
+
+type ListedFinding = DashboardContext["visibleFindings"][number];
+// A finding's details and fix actions, shared by Bugs Caught and an issue's latest occurrence.
+export function FindingBody({ f, ctx }: { f: ListedFinding; ctx: DashboardContext }) {
+  const { data, devinConfigured, personalAgent, repoName } = ctx;
+  const prompt = fixPrompt(repoName(f.repositoryId), `PR #${f.prNumber}`, [{ ...findingSchema.parse(f), agent: f.agent, fingerprint: f.fingerprint, commitSha: f.commitSha }]);
+  return <>
+    <p>{f.description}</p>
+    {f.ruleId && <p className="muted">Rule: {data.rules.find((rule) => rule._id === f.ruleId)?.title ?? f.ruleId}</p>}
+    <p><strong>Impact:</strong> {f.impact}</p>
+    {f.evidence.map((e, i) => <div key={i} className="finding-evidence">
+      {e.sourceUrl && <a href={e.sourceUrl} target="_blank" rel="noreferrer">{e.repository} · {e.revision?.slice(0, 8)} · source</a>}
+      <p className="muted">{e.filePath}:{e.startLine}</p>
+      <pre><code>{e.quote}</code></pre>
+    </div>)}
+    <p><strong>Suggested fix:</strong> {f.suggestedFix}</p>
+    {f.canFix && <FixButton reviewId={f.reviewId} agent={personalAgent} findingId={f._id} />}
+    {f.status === "open" && !f.canFix && data.writableRepositoryIds.includes(f.repositoryId) && <p className="muted">Fix requires this finding to belong to the latest completed review, meet the current confidence threshold, and have current repository access.</p>}
+    <div className="page-actions"><Copy value={prompt} />{f.status === "open" && <AgentLinks prompt={prompt} repo={data.repositories.find((r) => r._id === f.repositoryId)} devin={devinHandoff(devinConfigured, f.canFix, f.reviewId, f.fingerprint)} />}</div>
+    <details><summary>Portable prompt for Codex, Claude Code, or Cursor</summary><pre>{prompt}</pre></details>
   </>;
 }

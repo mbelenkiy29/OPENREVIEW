@@ -24,6 +24,7 @@ import { WorkspaceInvitations } from "../../invitations";
 import { RepositoriesSection } from "../../sections/repositories";
 import { ReviewsSection } from "../../sections/reviews";
 import { FindingsSection } from "../../sections/findings";
+import { IssuesSection } from "../../sections/issues";
 import { RulesSection } from "../../sections/rules";
 import { TeamSection } from "../../sections/team";
 import { KnowledgeSection } from "../../sections/knowledge";
@@ -43,7 +44,7 @@ export default async function Dashboard(props: {
   const ctx = await loadDashboard(props);
   const { active, data, filters, isAdmin, organization, page, route, savedTeam, section, selectedTeam, user, view } = ctx;
   const title = page?.title ?? (view === "findings" ? "Bugs Caught" : view === "overview" ? "Analytics" : view === "reviews" ? "Pull Requests" : route === "chat" ? "Chat" : navigation.find((n) => n.toLowerCase() === view));
-  const subtitle = page?.tab === "context" ? `Manage context for ${organization.name ?? "this organization"}` : page?.subtitle ?? (view === "findings" ? "Every finding OpenReview raised, with its priority and status." : route === "chat" ? "Ask questions about your repositories." : view === "reviews" ? "Review history across your repositories." : undefined);
+  const subtitle = page?.tab === "context" ? `Manage context for ${organization.name ?? "this organization"}` : page?.subtitle ?? (view === "findings" ? "Every finding OpenReview raised, with its priority and status." : view === "issues" ? "Every problem OpenReview found, as a ticket that follows it across pull requests." : route === "chat" ? "Ask questions about your repositories." : view === "reviews" ? "Review history across your repositories." : undefined);
   // Every page carries the setup prompt until the workspace finishes guided setup (there is no skipping it).
   const notices = <>
     {needsSetup(organization) && <section className="setup-banner" aria-label="Workspace setup"><p><strong>Setup isn’t finished.</strong> {organization.onboarding?.reviewsPaused ? "Automatic reviews are paused until you choose when reviews run." : "Finish connecting repositories and choosing review behavior."}</p>{isAdmin ? <Link className="button primary small" href="/dashboard/onboarding">Resume setup</Link> : <p className="muted">A workspace admin is completing setup.</p>}</section>}
@@ -58,6 +59,7 @@ export default async function Dashboard(props: {
       {notices}
     </AnalyticsView>}
     {view === "findings" && <FindingsSection ctx={ctx} />}
+    {view === "issues" && <IssuesSection ctx={ctx} />}
     {view === "repositories" && <RepositoriesSection ctx={ctx} />}
     {view === "reviews" && <ReviewsSection ctx={ctx} />}
     {view === "rules" && !["clusters","integrations","preferences"].includes(section[1] ?? "") && <RulesSection ctx={ctx} />}
@@ -93,6 +95,7 @@ export default async function Dashboard(props: {
         {view === "reviews" && (ctx.detail || ctx.pull) ? <><h1 className="sr-only">Pull Requests</h1><div className="pulls-live"><Live active={active} /></div></> : view === "overview" ? null : <header className="page-header">
           <div>
             {view === "findings" && <Link className="back-link" href="/dashboard/analytics"><Icon name="caretLeft" />Analytics</Link>}
+            {view === "issues" && <Link className="back-link" href="/dashboard/pulls"><Icon name="caretLeft" />Pull Requests</Link>}
             {view === "knowledge" && <Link className="back-link" href="/dashboard/repositories"><Icon name="caretLeft" />Repositories</Link>}
             <h1>{title}</h1>
             {subtitle && <p>{subtitle}</p>}

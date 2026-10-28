@@ -177,6 +177,22 @@ export async function feedback(form: FormData) {
   });
   revalidatePath("/dashboard", "layout");
 }
+// Issues inbox: status, assignee and comments (the backend checks repository write access).
+export async function setIssueStatus(form: FormData) {
+  const { token } = await current();
+  await backend().mutation(api.issues.setStatus, { token, issueId: text(form, "issueId") as Id<"issues">, status: text(form, "status"), ...(text(form, "comment") ? { comment: text(form, "comment") } : {}) });
+  revalidatePath("/dashboard", "layout");
+}
+export async function assignIssue(form: FormData) {
+  const { token } = await current();
+  await backend().mutation(api.issues.assign, { token, issueId: text(form, "issueId") as Id<"issues">, ...(text(form, "assigneeId") ? { assigneeId: text(form, "assigneeId") as Id<"users"> } : {}) });
+  revalidatePath("/dashboard", "layout");
+}
+export async function commentOnIssue(form: FormData) {
+  const { token } = await current();
+  await backend().mutation(api.issues.comment, { token, issueId: text(form, "issueId") as Id<"issues">, body: text(form, "body") });
+  revalidatePath("/dashboard", "layout");
+}
 export async function invite(form: FormData) {
   const { token } = await current();
   await backend().mutation(api.users.invite, {
@@ -314,6 +330,7 @@ export async function saveSettings(form: FormData) {
       lockedKeys: form.has("lockedConfigured") ? form.getAll("lockedKeys").map(String) : previous.settings.lockedKeys ?? [],
       autoApproveConventions: form.has("conventionsConfigured") ? form.has("autoApproveConventions") : previous.settings.autoApproveConventions ?? false,
       fixPullRequests: form.has("fixConfigured") ? form.has("fixPullRequests") : previous.settings.fixPullRequests ?? false,
+      autofix: form.has("fixConfigured") ? form.has("autofix") : previous.settings.autofix ?? false,
       threadReplies: form.has("threadRepliesConfigured") ? form.has("threadReplies") : previous.settings.threadReplies ?? true,
       securityScan: form.has("securityScanConfigured") ? form.has("securityScan") : previous.settings.securityScan ?? true,
       aiAuthoredModel: form.has("aiAuthoredModel") ? text(form, "aiAuthoredModel").trim() : previous.settings.aiAuthoredModel ?? "",

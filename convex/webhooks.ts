@@ -1,4 +1,5 @@
 import { effectiveSettings } from "./scopes";
+import { pullRequestClosed } from "./issueLifecycle";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
@@ -124,7 +125,9 @@ export const lifecycle = internalMutation({
         )
         .unique();
       if (args.observedAt!==undefined&&pr?.nativeObservedAt!==undefined&&pr.nativeObservedAt>args.observedAt)return;
-      if (args.state === "merged" || (args.state === "closed" && args.merged)) await ctx.scheduler.runAfter(0, internal.commitSignals.recordMerge, { repositoryId: repo._id, prNumber: args.prNumber });
+      const merged = args.state === "merged" || (args.state === "closed" && args.merged === true);
+      if (merged) await ctx.scheduler.runAfter(0, internal.commitSignals.recordMerge, { repositoryId: repo._id, prNumber: args.prNumber });
+      await pullRequestClosed(ctx, repo._id, args.prNumber, merged);
       if (pr)
         await ctx.db.patch(pr._id, {
           state: args.state,

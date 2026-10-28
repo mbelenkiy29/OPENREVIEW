@@ -19,6 +19,7 @@ export const docPages: DocPage[] = [
   { slug: "perforce", title: "Perforce", description: "Perforce shelves and submitted revisions.", section: "Providers", file: "perforce.md" },
   { slug: "origin", title: "Origin", description: "Origin repositories.", section: "Providers", file: "origin.md" },
   { slug: "fix-with-agents", title: "Fix with agents", description: "Cloud agents, local agents, Devin and OpenReview fix pull requests.", section: "Use", file: "public/fix-with-agents.md" },
+  { slug: "issues-and-autofix", title: "Issues and Autofix", description: "Findings as tickets across pull requests, and fix pull requests that open automatically.", section: "Use", file: "public/issues-and-autofix.md" },
   { slug: "chat", title: "Codebase chat", description: "Cited answers about your repositories.", section: "Use", file: "public/chat.md" },
   { slug: "referrals", title: "Referral program", description: "Refer people, earn a share of what their workspaces pay, and apply it as credit.", section: "Use", file: "public/referrals.md" },
   { slug: "notifications", title: "Slack and email", description: "Notifications, Slack Q&A and email.", section: "Use", file: "notifications.md" },

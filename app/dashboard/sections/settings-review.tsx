@@ -165,7 +165,8 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
               <ModelSelect id="rs-aiAuthoredModel" name="aiAuthoredModel" value={s.aiAuthoredModel} models={models} empty="The usual model" />
             </Row></Locked>
             <Locked feature="fix.pullRequests" locked={locked}><input type="hidden" name="fixConfigured" value="true" />
-            <Row id="rs-fixPullRequests" title="Fix pull requests" help="Allow “@openreview fix this in a new PR” to open a fix pull request on a new branch (GitHub, needs the Contents: Read and write permission; the pull request’s own branch is never written)."><Switch id="rs-fixPullRequests" name="fixPullRequests" on={s.fixPullRequests ?? false} /></Row></Locked>
+            <Row id="rs-fixPullRequests" title="Fix pull requests" help="Allow “@openreview fix this in a new PR” to open a fix pull request on a new branch (GitHub, needs the Contents: Read and write permission; the pull request’s own branch is never written)."><Switch id="rs-fixPullRequests" name="fixPullRequests" on={s.fixPullRequests ?? false} /></Row>
+            <Row id="rs-autofix" title="Autofix" help="When a review completes, open fix pull requests automatically for its critical and high findings: at most 3 per review and one per issue. Needs fix pull requests on; each run counts toward the plan's monthly fix pull requests."><Switch id="rs-autofix" name="autofix" on={s.autofix ?? false} /></Row></Locked>
           </div>
         </div>
 

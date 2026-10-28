@@ -1,5 +1,6 @@
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import { syncIssueStatus } from "./issueLifecycle";
 
 export const feedbackValues = ["useful", "not_useful", "resolved", "wont_fix", "false_positive"] as const;
 // Records feedback on a finding and updates the learned preference it derives (dashboard
@@ -14,15 +15,11 @@ export async function recordFindingFeedback(ctx: MutationCtx, finding: Doc<"find
     comment: input.comment,
     createdAt: Date.now(),
   });
-  await ctx.db.patch(finding._id, {
-    lastFeedback: input.value,
-    ...(["resolved", "wont_fix", "false_positive"].includes(input.value)
-      ? { status: input.value }
-      : input.value === "useful" && ["wont_fix", "false_positive"].includes(finding.status)
-        ? { status: "open" }
-        : {}),
-    updatedAt: Date.now(),
-  });
+  const status = ["resolved", "wont_fix", "false_positive"].includes(input.value)
+    ? input.value
+    : input.value === "useful" && ["wont_fix", "false_positive"].includes(finding.status) ? "open" : finding.status;
+  await ctx.db.patch(finding._id, { lastFeedback: input.value, status, updatedAt: Date.now() });
+  if (status !== finding.status) await syncIssueStatus(ctx, finding, status, input.userId);
   const previousPreference = await ctx.db
     .query("learnedPreferences")
     .withIndex("by_source", (q) => q.eq("repositoryId", finding.repositoryId).eq("source", finding._id))

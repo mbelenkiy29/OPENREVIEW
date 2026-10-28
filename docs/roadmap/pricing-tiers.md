@@ -50,6 +50,7 @@ Status: **gated** = enforced by `src/plans.ts` today; **planned** = on Pro by de
 |---|---|---|---|---|---|
 | Reviews, summaries, inline findings, suggestions, re-reviews, `.openreview.json` | ✓ | ✓ | ✓ | always on | none |
 | Security checks and OSV advisories | ✓ | ✓ | ✓ | never gated | none |
+| Issues inbox (findings as tickets across pull requests) | ✓ | ✓ | ✓ | never gated | none |
 | All providers, CLI, MCP, Claude Code/Codex plugins, chat, custom rules, 👍/👎 learning, Slack and email | ✓ | ✓ | ✓ | always on | none |
 | Extra usage up to an admin cap |  | ✓ | ✓ | live | none |
 | Deep reviews (deep tier, agentic and hypothesis engines, agent budgets, model overrides) |  |  | ✓ | gated | `review.deep` |
@@ -57,6 +58,7 @@ Status: **gated** = enforced by `src/plans.ts` today; **planned** = on Pro by de
 | Generated reproduction tests |  |  | ✓ | gated | `review.reproTests` |
 | Fix prompts, local bridge, your own cloud agents and Devin | ✓ | ✓ | ✓ | always on | none |
 | OpenReview agent fixes (fix pull requests), monthly per seat |  | 5 | 20 | gated + counted (`billingUsage.fixes`) | `fix.pullRequests` |
+| Autofix: agent fix pull requests opened automatically for critical and high findings (uses the same monthly fixes) |  | ✓ | ✓ | gated + counted | `fix.pullRequests` |
 | Requirements check from Linear, Jira, Confluence and Notion |  |  | ✓ | gated | `context.requirements` |
 | Learned conventions from human reviewers |  |  | ✓ | gated | `memory.conventions` |
 | Public API keys |  |  | ✓ | gated | `api.access` |

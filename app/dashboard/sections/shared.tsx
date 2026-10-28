@@ -7,6 +7,7 @@ export const navigation = [
   "Repositories",
   "Reviews",
   "Findings",
+  "Issues",
   "Knowledge",
   "Rules",
   "Team",

@@ -4,6 +4,10 @@
 
 ## October 2026
 
+### Issues and Autofix
+- **Issues:** the **Issues** button on Pull Requests lists every problem as a ticket, with a number, priority, status, assignee, comments and an activity log. The same problem on several pull requests is one issue. Fixing commits and closed pull requests resolve issues; a merged pull request marks an open issue **merged**.
+- **Autofix (Starter and Pro):** turn it on per repository and OpenReview's fix agent opens fix pull requests for a completed review's critical and high findings, at most three per review. Each run counts toward the plan's monthly fix pull requests.
+
 ### Security and billing fixes
 - **Sign out everywhere** now ends every earlier session, however many there are.
 - Connecting an MCP client approves only the request the consent page showed, even if another tab started a different one.

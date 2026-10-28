@@ -45,6 +45,8 @@ export const defaults = {
   autoApproveConventions: false,
   // "@openreview fix this in a new PR" may open a fix pull request on a new branch (needs contents:write).
   fixPullRequests: false,
+  // Autofix (Pro): fix pull requests open automatically for a completed review's critical and high findings.
+  autofix: false,
   // Human replies in threads OpenReview started are answered without an @openreview mention.
   threadReplies: true,
   // Deterministic security checks on added lines and OSV advisories for changed dependencies.

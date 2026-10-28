@@ -48,7 +48,7 @@ export async function loadDashboard({
   if (organization.planMissing && !(section[0] === "settings" && ["billing", "account", "referrals"].includes(section[1] ?? ""))) redirect("/dashboard/onboarding/plan");
   // Admins of a workspace still in guided setup land there; deep links are never redirected.
   if (!section[0] && needsSetup(organization) && ["owner", "admin"].includes(organization.role)) redirect("/dashboard/onboarding");
-  const aliases: Record<string, string[]> = { overview: ["analytics"], reviews: ["pulls"], findings: ["analytics", "findings"], knowledge: ["repositories", "knowledge"], rules: ["context"], team: ["organization", "people"], usage: ["organization", "billing"] };
+  const aliases: Record<string, string[]> = { overview: ["analytics"], reviews: ["pulls"], findings: ["analytics", "findings"], issues: ["analytics", "issues"], knowledge: ["repositories", "knowledge"], rules: ["context"], team: ["organization", "people"], usage: ["organization", "billing"] };
   if (!section[0] || aliases[section[0]]) {
     const parts = aliases[section[0] ?? "overview"];
     const suffix = section.slice(1);
@@ -61,7 +61,7 @@ export async function loadDashboard({
   // Referrals exists only while the referral program is on.
   if (route === "settings" && section[1] === "referrals" && !referralConfig().enabled) notFound();
   // Findings live under Analytics → Bugs Caught; /dashboard/pulls/findings redirects there (next.config.ts).
-  const view = route === "analytics" ? section[1] === "findings" ? "findings" : "overview" : route === "pulls" ? "reviews" : route === "memory" ? section[1] === "knowledge" ? "knowledge" : "rules" : route === "settings" ? ({ repositories: "repositories", people: "team", usage: "usage" }[section[1] ?? ""] ?? "settings") : route;
+  const view = route === "analytics" ? section[1] === "findings" ? "findings" : section[1] === "issues" ? "issues" : "overview" : route === "pulls" ? "reviews" : route === "memory" ? section[1] === "knowledge" ? "knowledge" : "rules" : route === "settings" ? ({ repositories: "repositories", people: "team", usage: "usage" }[section[1] ?? ""] ?? "settings") : route;
   const reviewDetailId = route === "pulls" && section[1] !== "findings" && section[1] !== "pr" ? section[1] : undefined;
   const pullDetailId = route === "pulls" && section[1] === "pr" ? section[2] : undefined;
   const requestedRepository = filters.repository;
@@ -133,6 +133,16 @@ export async function loadDashboard({
     // "Join a team" requests this user can answer (org admins: all; team admins: their teams).
     backend().query(api.joinRequests.pending, { token: user.token, organizationId: organization._id }),
   ]);
+  // Issues inbox (/dashboard/analytics/issues) and one issue (/dashboard/analytics/issues/<number>).
+  const issueNumber = view === "issues" && section[2] ? Number(section[2]) : undefined;
+  if (issueNumber !== undefined && !(Number.isInteger(issueNumber) && issueNumber > 0)) notFound();
+  const issuesPage = view === "issues" && issueNumber === undefined ? await backend().query(api.issues.list, {
+    token: user.token, organizationId: organization._id, cursor: filters.cursor,
+    ...(selectedTeam ? { teamId: selectedTeam._id } : {}),
+    ...(filters.repository ? { repositoryId: filters.repository as Id<"repositories"> } : {}),
+    status: filters.status || undefined, assignee: filters.assignee || undefined, severity: filters.severity || undefined, category: filters.category || undefined,
+  }) : null;
+  const issue = issueNumber !== undefined ? await backend().query(api.issues.get, { token: user.token, organizationId: organization._id, number: issueNumber }).catch(() => notFound()) : null;
   const visibleFindings = findingsPage?.page ?? data.findings.map(f=>({...f,canFix:false}));
   const repoName = (id: string) =>
     data.repositories.find((r) => r._id === id)?.fullName ?? id;
@@ -186,6 +196,6 @@ export async function loadDashboard({
   ]);
   // Narrowed above: a dashboard always has a workspace.
   const workspace = organization as typeof organization & { _id: Id<"organizations"> };
-  return { kind: "dashboard" as const, page, active, aliases, apiKeys, locked, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, pull, checks, filters, findingsPage, isAdmin, jar, joinRequests, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleUsage, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
+  return { kind: "dashboard" as const, page, active, aliases, apiKeys, locked, devinConfigured, mcpConnections, modelKey, conventions, data, detail, diagnostics, pull, checks, filters, findingsPage, issue, issuesPage, isAdmin, jar, joinRequests, knowledge, knowledgeState, organization: workspace, pendingInvitations, personalAgent, repoLabel, repoName, repoSettings, requestedRepository, reviewDetailId, route, ruleAssistant, ruleUsage, ruleView, rulesPage, savedTeam, scopes, section, selectedTeam, semantic, user, view, visibleFindings, visibleRules };
 }
 export type DashboardContext = Extract<Awaited<ReturnType<typeof loadDashboard>>, { kind: "dashboard" }>;

@@ -48,3 +48,5 @@ This needs:
 - **Fix pull requests** turned on for the repository (Repositories).
 - The GitHub App's **Contents: Read and write** permission, accepted by the owner of the GitHub account. **Code Providers** shows which installations have it.
 - Write access for your linked GitHub account.
+
+To open them automatically for critical and high findings, turn on [Autofix](/docs/issues-and-autofix#autofix).
