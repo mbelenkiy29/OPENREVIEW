@@ -1,0 +1,20 @@
+{
+  "source": "Greptile's public AI code review benchmark (greptile.com/benchmarks, July 2025). Each PR reintroduces a real bug that was later fixed upstream. Expected bugs are Greptile's published descriptions.",
+  "cases": [
+    { "id": "sentry-01", "repo": "ai-code-review-evaluation/sentry-greptile", "pr": 1, "severity": "High", "expected": "Imports a non-existent OptimizedCursorPaginator" },
+    { "id": "sentry-02", "repo": "ai-code-review-evaluation/sentry-greptile", "pr": 2, "severity": "Critical", "expected": "Negative offset cursor manipulation bypasses pagination boundaries" },
+    { "id": "sentry-03", "repo": "ai-code-review-evaluation/sentry-greptile", "pr": 3, "severity": "Low", "expected": "sample_rate = 0.0 is falsy and skipped" },
+    { "id": "sentry-04", "repo": "ai-code-review-evaluation/sentry-greptile", "pr": 4, "severity": "Critical", "expected": "Null reference if github_authenticated_user state is missing" },
+    { "id": "sentry-05", "repo": "ai-code-review-evaluation/sentry-greptile", "pr": 5, "severity": "Critical", "expected": "Breaking change in error response format" },
+    { "id": "sentry-06", "repo": "ai-code-review-evaluation/sentry-greptile", "pr": 6, "severity": "Medium", "expected": "Inconsistent metric tagging with 'shard' and 'shards'" },
+    { "id": "sentry-07", "repo": "ai-code-review-evaluation/sentry-greptile", "pr": 7, "severity": "Medium", "expected": "Shared mutable default in dataclass timestamp" },
+    { "id": "sentry-08", "repo": "ai-code-review-evaluation/sentry-greptile", "pr": 8, "severity": "High", "expected": "Uses a stale config variable instead of the updated one" },
+    { "id": "sentry-09", "repo": "ai-code-review-evaluation/sentry-greptile", "pr": 9, "severity": "High", "expected": "Invalid queue.ShutDown exception handling" },
+    { "id": "sentry-10", "repo": "ai-code-review-evaluation/sentry-greptile", "pr": 10, "severity": "High", "expected": "Incomplete implementation (body only contains pass)" },
+    { "id": "calcom-01", "repo": "ai-code-review-evaluation/cal.com-greptile", "pr": 2, "expected": null },
+    { "id": "calcom-02", "repo": "ai-code-review-evaluation/cal.com-greptile", "pr": 3, "expected": null },
+    { "id": "calcom-03", "repo": "ai-code-review-evaluation/cal.com-greptile", "pr": 4, "expected": null },
+    { "id": "calcom-04", "repo": "ai-code-review-evaluation/cal.com-greptile", "pr": 5, "expected": null },
+    { "id": "calcom-05", "repo": "ai-code-review-evaluation/cal.com-greptile", "pr": 6, "expected": null }
+  ]
+}
