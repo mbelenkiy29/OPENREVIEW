@@ -137,7 +137,8 @@ test('a join request is emailed to owners, admins and the team\'s admins with a 
 test('a member link stops working after 30 days',async()=>{
  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(Date.UTC(2026,9,27));
  const t=harness();
- let {owner,organizationId}=await workspace(t);
+ const created=await workspace(t);
+ let owner=created.owner;const {organizationId}=created;
  await t.mutation(api.identity.setMemberLink,{token:owner.token,organizationId,tokenHash:hash('soon-stale')});
  expect(await t.query(api.identity.invitationPreview,{tokenHash:hash('soon-stale')})).toMatchObject({role:'member',expiresAt:Date.UTC(2026,10,26)});
  vi.setSystemTime(Date.UTC(2026,10,26,0,0,1));
