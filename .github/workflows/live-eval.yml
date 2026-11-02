@@ -33,10 +33,21 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check the model key is configured (presence only)
         id: key
+        env:
+          P_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          P_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          P_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          P_LLM_KEY: ${{ secrets.LLM_KEY }}
+          P_OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+          P_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_KEY }}
+          P_VAR_LLM_API_KEY: ${{ vars.LLM_API_KEY }}
         run: |
+          for n in P_OPENAI_API_KEY P_ANTHROPIC_API_KEY P_OPENROUTER_API_KEY P_LLM_KEY P_OPENAI_KEY P_ANTHROPIC_KEY P_VAR_LLM_API_KEY; do
+            if [ -n "${!n}" ]; then echo "${n#P_}: present"; else echo "${n#P_}: absent"; fi
+          done | tee reports-presence.txt
           mkdir -p reports/live
           if [ -n "$LLM_API_KEY" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
-          echo "{\"checkedAt\":\"$(date -u +%FT%TZ)\",\"LLM_API_KEY\":$([ -n "$LLM_API_KEY" ] && echo true || echo false),\"LLM_PROVIDER\":\"$LLM_PROVIDER\",\"LLM_MODEL\":\"$LLM_MODEL\"}" > reports/live/secret-probe.json
+          echo "{\"checkedAt\":\"$(date -u +%FT%TZ)\",\"otherNames\":$(jq -Rn '[inputs]' < reports-presence.txt),\"LLM_API_KEY\":$([ -n "$LLM_API_KEY" ] && echo true || echo false),\"LLM_PROVIDER\":\"$LLM_PROVIDER\",\"LLM_MODEL\":\"$LLM_MODEL\"}" > reports/live/secret-probe.json
           cat reports/live/secret-probe.json
       - uses: pnpm/action-setup@v4
         if: steps.key.outputs.present == 'true'
