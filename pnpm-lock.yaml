@@ -42,7 +42,7 @@ importers:
         version: 5.1.0
       '@sentry/nextjs':
         specifier: 11.6.0
-        version: 11.6.0(@babel/core@7.29.7)(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)
+        version: 11.6.0(@babel/core@7.29.7)(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)
       convex:
         specifier: ^1.46.0
         version: 1.46.0(react@19.3.0)
@@ -60,7 +60,7 @@ importers:
         version: 12.2.0
       next:
         specifier: ^16.4.3
-        version: 16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        version: 16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       openid-client:
         specifier: 6.8.8
         version: 6.8.8
@@ -102,8 +102,8 @@ importers:
         version: 4.6.7
     devDependencies:
       '@types/node':
-        specifier: ^22.20.1
-        version: 22.20.4
+        specifier: ^26.6.6
+        version: 26.6.6
       '@types/picomatch':
         specifier: ^4.0.3
         version: 4.0.3
@@ -130,10 +130,10 @@ importers:
         version: 1.63.0
       vite:
         specifier: ^8.3.1
-        version: 8.3.1(@types/node@22.20.4)(esbuild@0.28.2)(tsx@4.23.15)
+        version: 8.3.1(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)
       vitest:
         specifier: ^5.0.3
-        version: 5.0.3(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(vite@8.3.1(@types/node@22.20.4)(esbuild@0.28.2)(tsx@4.23.15))
+        version: 5.0.3(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(vite@8.3.1(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15))
       xml-crypto:
         specifier: 6.3.3
         version: 6.3.3
@@ -1557,8 +1557,8 @@ packages:
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
 
-  '@types/node@22.20.4':
-    resolution: {integrity: sha512-zJRE40jpHtKqE/C4fgHrAKQLJuSpzEnP9ff9Y7YtoR3Wd2pwqzlekDeEuUQXjRd+QCYnVnNwuJYmhdk9XV8gvA==}
+  '@types/node@26.6.6':
+    resolution: {integrity: sha512-MzQj+8Kx3XI40OmUAE6Qoh58ZMNstNNMwn2nfd3qWsfe7nDNSqJNzes4njhz6AHwrSHOffSLwXU6yb474Q4aog==}
 
   '@types/picomatch@4.0.3':
     resolution: {integrity: sha512-iG0T6+nYJ9FAPmx9SsUlnwcq1ZVRuCXcVEvWnntoPlrOpwtSTKNDC9uVAxTsC3PUvJ+99n4RpAcNgBbHX3JSnQ==}
@@ -3910,8 +3910,8 @@ packages:
     resolution: {integrity: sha512-nWJ91DjeOkej/TA8pXQ3myruKpKEYgqvpw9lz4OPHj/NWFNluYrjbz9j01CJ8yKQd2g4jFoOkINCTW2I5LEEyw==}
     engines: {node: '>= 0.4'}
 
-  undici-types@6.21.0:
-    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
+  undici-types@8.9.0:
+    resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
 
   undici@8.12.3:
     resolution: {integrity: sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==}
@@ -5040,7 +5040,7 @@ snapshots:
     dependencies:
       '@sentry/core': 11.6.0
 
-  '@sentry/nextjs@11.6.0(@babel/core@7.29.7)(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)':
+  '@sentry/nextjs@11.6.0(@babel/core@7.29.7)(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@rollup/plugin-commonjs': 28.0.1(rollup@4.64.6)
@@ -5055,7 +5055,7 @@ snapshots:
       '@sentry/server-runtime-injection': 11.6.0
       '@sentry/server-utils': 11.6.0
       '@sentry/vercel-edge': 11.6.0
-      next: 16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      next: 16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       rollup: 4.64.6
       stacktrace-parser: 0.1.11
     transitivePeerDependencies:
@@ -5279,9 +5279,9 @@ snapshots:
 
   '@types/ms@2.1.0': {}
 
-  '@types/node@22.20.4':
+  '@types/node@26.6.6':
     dependencies:
-      undici-types: 6.21.0
+      undici-types: 8.9.0
 
   '@types/picomatch@4.0.3': {}
 
@@ -5304,11 +5304,11 @@ snapshots:
 
   '@types/xml-encryption@1.2.4':
     dependencies:
-      '@types/node': 22.20.4
+      '@types/node': 26.6.6
 
   '@types/xml2js@0.4.14':
     dependencies:
-      '@types/node': 22.20.4
+      '@types/node': 26.6.6
 
   '@typescript-eslint/eslint-plugin@8.72.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5)(typescript@5.9.3))(eslint@9.39.5)(typescript@5.9.3)':
     dependencies:
@@ -5478,14 +5478,14 @@ snapshots:
       d3-selection: 3.0.0
       d3-transition: 3.0.1(d3-selection@3.0.0)
 
-  '@vitest/mocker@5.0.3(vite@8.3.1(@types/node@22.20.4)(esbuild@0.28.2)(tsx@4.23.15))':
+  '@vitest/mocker@5.0.3(vite@8.3.1(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.3
       estree-walker: 3.0.3
       magic-string: 1.4.2
     optionalDependencies:
-      vite: 8.3.1(@types/node@22.20.4)(esbuild@0.28.2)(tsx@4.23.15)
+      vite: 8.3.1(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)
 
   '@vitest/spy@5.0.3': {}
 
@@ -6231,7 +6231,7 @@ snapshots:
       eslint: 9.39.5
       eslint-import-resolver-node: 0.3.10
       eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5)(typescript@5.9.3))(eslint@9.39.5))(eslint@9.39.5)
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5)(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5)(typescript@5.9.3))(eslint@9.39.5))(eslint@9.39.5))(eslint@9.39.5)
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5)(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.5)
       eslint-plugin-jsx-a11y: 6.10.2(eslint@9.39.5)
       eslint-plugin-react: 7.37.5(eslint@9.39.5)
       eslint-plugin-react-hooks: 7.1.1(eslint@9.39.5)
@@ -6264,7 +6264,7 @@ snapshots:
       tinyglobby: 0.2.17
       unrs-resolver: 1.12.2
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5)(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5)(typescript@5.9.3))(eslint@9.39.5))(eslint@9.39.5))(eslint@9.39.5)
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5)(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.5)
     transitivePeerDependencies:
       - supports-color
 
@@ -6279,7 +6279,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5)(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5)(typescript@5.9.3))(eslint@9.39.5))(eslint@9.39.5))(eslint@9.39.5):
+  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.72.0(eslint@9.39.5)(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.5):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.2.0
@@ -7445,7 +7445,7 @@ snapshots:
     dependencies:
       content-type: 2.1.0
 
-  next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
+  next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
     dependencies:
       '@next/env': 16.4.3
       '@swc/helpers': 0.5.23
@@ -7465,7 +7465,7 @@ snapshots:
       '@next/swc-win32-arm64-msvc': 16.4.3
       '@next/swc-win32-x64-msvc': 16.4.3
       '@opentelemetry/api': 1.9.1
-      sharp: 0.35.5(@types/node@22.20.4)
+      sharp: 0.35.5(@types/node@26.6.6)
     transitivePeerDependencies:
       - '@babel/core'
       - '@types/node'
@@ -7965,7 +7965,7 @@ snapshots:
 
   setprototypeof@1.2.0: {}
 
-  sharp@0.35.5(@types/node@22.20.4):
+  sharp@0.35.5(@types/node@26.6.6):
     dependencies:
       '@img/colour': 1.1.0
       detect-libc: 2.1.2
@@ -7996,7 +7996,7 @@ snapshots:
       '@img/sharp-win32-arm64': 0.35.5
       '@img/sharp-win32-ia32': 0.35.5
       '@img/sharp-win32-x64': 0.35.5
-      '@types/node': 22.20.4
+      '@types/node': 26.6.6
     optional: true
 
   shebang-command@2.0.0:
@@ -8245,7 +8245,7 @@ snapshots:
       has-symbols: 1.1.0
       which-boxed-primitive: 1.1.1
 
-  undici-types@6.21.0: {}
+  undici-types@8.9.0: {}
 
   undici@8.12.3: {}
 
@@ -8333,7 +8333,7 @@ snapshots:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
 
-  vite@8.3.1(@types/node@22.20.4)(esbuild@0.28.2)(tsx@4.23.15):
+  vite@8.3.1(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -8341,15 +8341,15 @@ snapshots:
       rolldown: 1.2.12
       tinyglobby: 0.2.17
     optionalDependencies:
-      '@types/node': 22.20.4
+      '@types/node': 26.6.6
       esbuild: 0.28.2
       fsevents: 2.3.3
       tsx: 4.23.15
 
-  vitest@5.0.3(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(vite@8.3.1(@types/node@22.20.4)(esbuild@0.28.2)(tsx@4.23.15)):
+  vitest@5.0.3(@opentelemetry/api@1.9.1)(@types/node@26.6.6)(vite@8.3.1(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.3(vite@8.3.1(@types/node@22.20.4)(esbuild@0.28.2)(tsx@4.23.15))
+      '@vitest/mocker': 5.0.3(vite@8.3.1(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15))
       chai: 6.3.0
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -8360,11 +8360,11 @@ snapshots:
       tinybench: 6.2.0
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
-      vite: 8.3.1(@types/node@22.20.4)(esbuild@0.28.2)(tsx@4.23.15)
+      vite: 8.3.1(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)
       why-is-node-running: 3.2.1
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
-      '@types/node': 22.20.4
+      '@types/node': 26.6.6
     transitivePeerDependencies:
       - msw
 

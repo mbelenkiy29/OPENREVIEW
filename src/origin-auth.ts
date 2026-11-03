@@ -1,4 +1,5 @@
-import { createHash, createPublicKey, verify, type JsonWebKey } from "node:crypto";
+import { createHash, createPublicKey, verify, type webcrypto } from "node:crypto";
+type JsonWebKey = webcrypto.JsonWebKey;
 import { importPKCS8, SignJWT, jwtVerify, createLocalJWKSet } from "jose";
 import { z } from "zod";
 import { isoTimestamp } from "./iso-timestamp";
