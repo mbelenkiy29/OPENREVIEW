@@ -61,7 +61,7 @@
     "@types/picomatch": "^4.0.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
-    "convex-test": "^0.0.60",
+    "convex-test": "^0.0.66",
     "esbuild": "0.28.2",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.4.3",
