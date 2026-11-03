@@ -8,8 +8,8 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
-        # web-tree-sitter is pre-1.0, so its minor releases break the API; it gets its own PR.
-        exclude-patterns: [web-tree-sitter]
+        # Pre-1.0 packages whose minor bumps broke the build or tests get their own PRs.
+        exclude-patterns: [web-tree-sitter, convex-test]
   - package-ecosystem: docker
     directory: /
     schedule:
