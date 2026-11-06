@@ -4,6 +4,7 @@ name: Live eval
 # LLM_API_KEY repository secret, and commits the results to reports/live/ on this branch.
 on:
   workflow_dispatch:
+  # A commit message containing [probe] only checks whether the key is configured; no model calls.
   push:
     branches: [claude/live-eval]
     paths: [".github/workflows/live-eval.yml", "scripts/live-eval.ts", "evals/live/**"]
@@ -50,16 +51,16 @@ jobs:
           echo "{\"checkedAt\":\"$(date -u +%FT%TZ)\",\"otherNames\":$(jq -Rn '[inputs]' < reports-presence.txt),\"LLM_API_KEY\":$([ -n "$LLM_API_KEY" ] && echo true || echo false),\"LLM_PROVIDER\":\"$LLM_PROVIDER\",\"LLM_MODEL\":\"$LLM_MODEL\"}" > reports/live/secret-probe.json
           cat reports/live/secret-probe.json
       - uses: pnpm/action-setup@v4
-        if: steps.key.outputs.present == 'true'
+        if: steps.key.outputs.present == 'true' && !contains(github.event.head_commit.message, '[probe]')
       - uses: actions/setup-node@v4
-        if: steps.key.outputs.present == 'true'
+        if: steps.key.outputs.present == 'true' && !contains(github.event.head_commit.message, '[probe]')
         with:
           node-version: 24
           cache: pnpm
-      - if: steps.key.outputs.present == 'true'
+      - if: steps.key.outputs.present == 'true' && !contains(github.event.head_commit.message, '[probe]')
         run: pnpm install --frozen-lockfile
       - name: Review each case
-        if: steps.key.outputs.present == 'true'
+        if: steps.key.outputs.present == 'true' && !contains(github.event.head_commit.message, '[probe]')
         run: |
           set -u
           used=0
