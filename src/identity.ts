@@ -2,12 +2,12 @@ import { randomBytes } from "node:crypto";
 import { assertEgress } from "./egress";
 import { z } from "zod";
 import { sessionHash } from "./session-hash";
+export { safeNext } from "./session-token";
 
 // Sign-in providers beyond GitHub. Profiles are normalised; an email counts as verified only when
 // the provider says so (Google `email_verified`; gitlab.com confirmed accounts).
 export type Profile = { providerUserId: string; login: string; avatar: string; email?: string; emailVerified: boolean };
 export function newSession() { const sid = randomBytes(32).toString("base64url"); return { sid, hash: sessionHash(sid) }; }
-export function safeNext(value: string | null | undefined) { return value && /^\/(?!\/)[A-Za-z0-9/_?=&.%-]{0,300}$/.test(value) ? value : "/dashboard"; }
 const timeout = () => AbortSignal.timeout(30000);
 
 export function gitlabBase() {
