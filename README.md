@@ -24,10 +24,7 @@
   <a href="https://openreview.tech/feedback/roadmap">Roadmap</a>
 </p>
 
-<!--
-TODO DEMO GIF: record per the demo storyboard, save as docs/images/demo.gif (under 8 MB), then uncomment.
 <p align="center"><img src="docs/images/demo.gif" alt="OpenReview catching a cents-to-dollars bug across two files" width="860"></p>
--->
 
 > Not affiliated with [vercel-labs/openreview](https://github.com/vercel-labs/openreview) or the OpenReview.net academic peer-review platform. This project is **OpenReview.tech**.
 
