@@ -71,6 +71,6 @@ test("the public 404 offers home and docs as buttons", () => {
 
 test("legal pages wrap markdown tables in ScrollTable so they scroll instead of stretching the page", () => {
   const legal = readFileSync("app/legal.tsx", "utf8");
-  assert.match(legal, /ScrollTable label="Table"/);
+  assert.match(legal, /ScrollTable label=\{labels\[table\+\+\] \?\? "Table"\}/);
   assert.match(legal, /<pre tabIndex=\{0\}>/);
 });

@@ -6,6 +6,7 @@ import { notFound } from "next/navigation";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { docBySlug, docPages, resolveDocLink } from "../../../src/docs-manifest";
+import { markdownTableLabels } from "../../../src/markdown-tables";
 import { docHeadings, type DocsEntry } from "../../../src/docs-search";
 import { DocsSearch } from "../docs-search";
 import { ScrollTable } from "../../dashboard/scroll-table";
@@ -28,6 +29,8 @@ export default async function DocsPage({ params }: { params: Promise<{ slug?: st
   if (!page) notFound();
   const source = await fs.readFile(path.join(process.cwd(), "docs", page.file), "utf8");
   const sections = [...new Set(docPages.map((d) => d.section))];
+  const labels = markdownTableLabels(source);
+  let table = 0;
   return <div className="docs-layout">
     <SiteHeader current="docs" />
     <aside className="docs-nav" aria-label="Documentation"><DocsSearch index={await docsIndex()}>{sections.map((s) => <div key={s}><h2>{s}</h2><ul>{docPages.filter((d) => d.section === s).map((d) => <li key={d.slug}><Link href={`/docs/${d.slug}`} aria-current={d.slug === page.slug ? "page" : undefined}>{d.title}</Link></li>)}</ul></div>)}</DocsSearch></aside>
@@ -35,7 +38,7 @@ export default async function DocsPage({ params }: { params: Promise<{ slug?: st
       <Markdown remarkPlugins={[remarkGfm]} skipHtml disallowedElements={["img"]} components={{
         a: ({ href, children }) => { const link = resolveDocLink(page.file, href ?? ""); return link.kind === "external" ? <a href={link.url} target="_blank" rel="noopener noreferrer">{children}</a> : link.kind === "text" || !link.url ? <span>{children}</span> : <Link href={link.url}>{children}</Link>; },
         pre: ({ children }) => <pre tabIndex={0}>{children}</pre>,
-        table: ({ children }) => <ScrollTable label="Table" className="table-scroll"><table>{children}</table></ScrollTable>,
+        table: ({ children }) => <ScrollTable label={labels[table++] ?? "Table"} className="table-scroll"><table>{children}</table></ScrollTable>,
       }}>{source}</Markdown>
     </main>
     <SiteFooter />

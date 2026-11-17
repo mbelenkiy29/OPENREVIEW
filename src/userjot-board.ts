@@ -7,6 +7,11 @@ export function boardView(pathname: string): "roadmap" | "feedback" | null {
   return /^\/feedback(\/|$)/.test(pathname) ? "feedback" : null;
 }
 
+/** Load the UserJot SDK only on the public board and the signed-in dashboard (menu buttons). */
+export function userJotNeeded(pathname: string) {
+  return boardView(pathname) !== null || pathname === "/dashboard" || pathname.startsWith("/dashboard/");
+}
+
 /** The page title for a board path, before the layout's " · OpenReview" suffix. */
 export const boardTitle = (pathname: string) => boardView(pathname) === "roadmap" ? "Roadmap" : "Feedback";
 

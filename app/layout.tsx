@@ -37,7 +37,7 @@ export default async function RootLayout({
   const nonce=(await headers()).get("x-nonce")??undefined;
   const userJot=userJotConfig();
   return (
-    <html lang="en" suppressHydrationWarning data-userjot={userJot ? "" : undefined}>
+    <html lang="en" suppressHydrationWarning>
       <head><script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{__html:themeScript}} /></head>
       <body><a className="skip-link" href="#main">Skip to content</a><ThemeProvider>{children}<ConsentBanner /><AdsPageViews />{userJot&&<UserJot projectId={userJot.projectId} boardUrl={userJot.boardUrl} />}</ThemeProvider></body>
     </html>

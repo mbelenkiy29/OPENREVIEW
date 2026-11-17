@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { docHeadings, searchDocs, type DocsEntry } from "../src/docs-search";
 
 const index: DocsEntry[] = [
@@ -25,4 +26,8 @@ test("a title match ranks above a heading match, and the matching heading is sho
 test("empty and unmatched queries return nothing", () => {
   assert.deepEqual(searchDocs(index, "   "), []);
   assert.deepEqual(searchDocs(index, "zzz"), []);
+});
+
+test("the search box only points aria-controls at the results list while a query is open", () => {
+  assert.match(readFileSync("app/docs/docs-search.tsx", "utf8"), /aria-controls=\{searching \? `\$\{id\}-results` : undefined\}/);
 });

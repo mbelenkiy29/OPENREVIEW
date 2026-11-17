@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { turnstileChallengeCopy } from "../app/turnstile";
 import { checkTurnstile, turnstileConfig, verifyTurnstile } from "../src/turnstile";
 
 const keys = { TURNSTILE_SITE_KEY: "0x4AAA-site", TURNSTILE_SECRET_KEY: "0x4AAA-secret" };
@@ -48,6 +50,14 @@ test("Cloudflare being unreachable or erroring is 'unavailable', which callers l
 test("Cloudflare's test secrets pass dummy tokens without a hostname or action", async () => {
   assert.equal((await check("XXXX.DUMMY.TOKEN.XXXX", siteverify(ok({ success: true })).fetchImpl, "1x0000000000000000000000000000000AA")).outcome, "pass");
   assert.equal((await check("XXXX.DUMMY.TOKEN.XXXX", siteverify(ok({ success: false, "error-codes": ["timeout-or-duplicate"] })).fetchImpl, "3x0000000000000000000000000000000AA")).outcome, "fail");
+});
+
+test("a visible Turnstile challenge tells the visitor to complete it and then submits", () => {
+  const source = readFileSync("app/turnstile.tsx", "utf8");
+  assert.equal(turnstileChallengeCopy, "Complete the check below to continue");
+  assert.match(source, /before-interactive-callback/);
+  assert.match(source, /form\.requestSubmit\(\)/);
+  assert.match(source, /role="status"/);
 });
 
 test("the form check blocks only a failed token in enforce mode", async () => {

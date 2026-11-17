@@ -13,7 +13,7 @@ const fetchPolicy = [
   "style-src 'self' 'unsafe-inline' https://cdn.userjot.com https://fonts.googleapis.com",
   "img-src 'self' data: blob: https://media.userjot.com https://cdn.userjot.com https://alb.reddit.com https://avatars.githubusercontent.com https://*.googleusercontent.com https://gitlab.com https://secure.gravatar.com",
   "font-src 'self' https://fonts.gstatic.com",
-  "connect-src 'self' https://widget.userjot.com wss://widget.userjot.com https://bzrcdn.openai.com https://bzr.openai.com https://pixel-config.reddit.com https://alb.reddit.com",
+  "connect-src 'self' https://widget.userjot.com wss://widget.userjot.com https://cdn.userjot.com https://collect.jotlens.com https://fonts.googleapis.com https://bzrcdn.openai.com https://bzr.openai.com https://pixel-config.reddit.com https://alb.reddit.com",
   "frame-src https://challenges.cloudflare.com https://*.userjot.com",
   "media-src 'self'",
   "manifest-src 'self'",
@@ -65,6 +65,10 @@ test("pages get a nonce script policy from middleware; everything it skips gets 
   for (const directive of ["style-src", "img-src", "font-src", "connect-src", "frame-src", "media-src", "manifest-src", "worker-src"]) assert.match(staticPolicy, new RegExp(`(^|; )${directive} `), directive);
   assert.doesNotMatch(staticPolicy, /(\s|^)(https:|http:|\*)(\s|;|$)/);
   assert.equal(contentSecurityPolicy(), staticPolicy);
+  assert.match(staticPolicy, /connect-src [^;]*https:\/\/cdn\.userjot\.com/);
+  assert.match(staticPolicy, /connect-src [^;]*https:\/\/collect\.jotlens\.com/);
+  assert.match(staticPolicy, /connect-src [^;]*https:\/\/fonts\.googleapis\.com/);
+  assert.doesNotMatch(/connect-src [^;]*/.exec(staticPolicy)![0], /(\s|^)data:/);
 });
 
 test("forms lead only to known hosts, except on pages with sign-in (any SSO IdP) and MCP OAuth consent (any redirect URI)", async () => {
