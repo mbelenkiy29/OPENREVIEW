@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { decodeJwt, jwtVerify } from "jose";
 import { userJotConfig, userJotIdentity, userJotToken } from "../src/userjot";
-import { boardTitle, boardView, withoutEmbedTheme } from "../src/userjot-board";
+import { boardTitle, boardView, userJotNeeded, withoutEmbedTheme } from "../src/userjot-board";
 
 const secret = "userjot-project-secret-for-tests";
 const me = { user: { _id: "u123", login: "ada", avatar: "https://avatars.example/ada.png" }, email: "ada@example.com" };
@@ -38,6 +38,18 @@ test("the widget identity is signed when a secret is set and unsigned otherwise"
   assert.deepEqual(signed.user, user);
   assert.equal(decodeJwt(signed.token!).sub, "u123");
   assert.deepEqual(await userJotIdentity({ user: { _id: "u9", login: "bob", avatar: "" } }, { projectId: "proj" }), { user: { id: "u9", firstName: "bob" } }, "no email or empty avatar is left out, never sent blank");
+});
+
+test("the widget loads on the public board and the dashboard, not on every public page", () => {
+  assert.equal(userJotNeeded("/feedback"), true);
+  assert.equal(userJotNeeded("/feedback/roadmap"), true);
+  assert.equal(userJotNeeded("/dashboard"), true);
+  assert.equal(userJotNeeded("/dashboard/settings"), true);
+  assert.equal(userJotNeeded("/"), false);
+  assert.equal(userJotNeeded("/docs/quickstart"), false);
+  assert.equal(userJotNeeded("/login"), false);
+  assert.equal(userJotNeeded("/signup"), false);
+  assert.equal(userJotNeeded("/privacy"), false);
 });
 
 test("board paths map to the roadmap or the board, and nothing else does", () => {

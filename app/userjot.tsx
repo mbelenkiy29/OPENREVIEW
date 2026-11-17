@@ -3,11 +3,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, type MouseEvent, type ReactNode } from "react";
 import type { Theme } from "../src/theme";
-import { boardTitle, boardView, withoutEmbedTheme } from "../src/userjot-board";
+import { boardTitle, boardView, userJotNeeded, withoutEmbedTheme } from "../src/userjot-board";
 import { useTheme } from "./theme";
 
 // UserJot widget v3 (https://userjot.com/docs/widget-v3-reference): feature requests, bug reports,
-// the roadmap and updates. Loaded once from the root layout when src/userjot.ts is configured.
+// the roadmap and updates. Mounted from the root layout when src/userjot.ts is configured, and
+// installed only on /feedback and /dashboard so public pages do not load the SDK.
 type SdkTheme = "auto" | "light" | "dark";
 type Target = { to: "feedback"; compose?: boolean } | { to: "home" | "roadmap" | "updates" };
 type Embed = { navigate(path: string): void; destroy(): void };
@@ -50,8 +51,10 @@ function install(projectId: string, theme: Theme, boardUrl?: string) {
 
 /** Loads the widget and tells it who is signed in (by internal id; see app/api/userjot/identity). */
 export function UserJot({ projectId, boardUrl }: { projectId: string; boardUrl?: string }) {
-  const theme = useTheme(), initialTheme = useRef(theme);
+  const theme = useTheme(), initialTheme = useRef(theme), pathname = usePathname(), needed = userJotNeeded(pathname);
   useEffect(() => {
+    if (!needed) return;
+    document.documentElement.dataset.userjot = "";
     install(projectId, initialTheme.current, boardUrl);
     let controller: AbortController | undefined, identifiedAt = 0;
     const identify = () => {
@@ -69,9 +72,13 @@ export function UserJot({ projectId, boardUrl }: { projectId: string; boardUrl?:
     const refresh = () => { if (document.visibilityState === "visible" && Date.now() - identifiedAt > identityRefresh) identify(); };
     identify();
     document.addEventListener("visibilitychange", refresh);
-    return () => { controller?.abort(); document.removeEventListener("visibilitychange", refresh); };
-  }, [projectId, boardUrl]);
-  useEffect(() => { window.uj?.setTheme(sdkTheme(theme)); }, [theme]);
+    return () => {
+      controller?.abort();
+      document.removeEventListener("visibilitychange", refresh);
+      delete document.documentElement.dataset.userjot;
+    };
+  }, [needed, projectId, boardUrl]);
+  useEffect(() => { if (needed) window.uj?.setTheme(sdkTheme(theme)); }, [needed, theme]);
   return null;
 }
 

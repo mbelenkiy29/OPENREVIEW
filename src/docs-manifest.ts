@@ -48,6 +48,8 @@ export function resolveDocLink(fromFile: string, href: string): { kind: "externa
   const [target, hash] = href.split("#");
   if (!target.endsWith(".md")) return { kind: "text" };
   const file = path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), target));
-  const page = docPages.find((d) => d.file === file);
+  // Changelog and other repo-root files write `docs/<file>`; published pages are stored without that prefix.
+  const docsFile = file.replace(/^docs\//, "");
+  const page = docPages.find((d) => d.file === file || d.file === docsFile);
   return page ? { kind: "doc", url: `/docs/${page.slug}${hash ? "#" + hash : ""}` } : { kind: "text" };
 }

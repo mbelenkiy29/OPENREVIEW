@@ -52,3 +52,7 @@ test("CHANGELOG.md is dated by month, with no Unreleased heading", () => {
   assert.ok(months.length > 0 && months.every((m) => /^[A-Z][a-z]+ \d{4}$/.test(m.title)), months.map((m) => m.title).join(", "));
   assert.ok(months.every((m) => m.sections.length > 0));
 });
+
+test("the hosted changelog rewrites Markdown doc links the same way the docs pages do", () => {
+  assert.match(readFileSync("app/changelog/page.tsx", "utf8"), /resolveDocLink\("CHANGELOG\.md"/);
+});

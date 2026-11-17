@@ -4,7 +4,7 @@ Billing is for hosted deployments only. With `BILLING_ENABLED` unset (the self-h
 
 ## Plans
 
-| | Free | Starter | Pro |
+| Feature | Free | Starter | Pro |
 |---|---|---|---|
 | Price | $0, no card (existing workspaces only) | `BILLING_SEAT_PRICE_LABEL` per seat (we sell $12/month) | `BILLING_PRO_PRICE_LABEL` per seat (we sell $24/month) |
 | Included model usage per month | `BILLING_FREE_USAGE_USD` per workspace (default $3) | `BILLING_USAGE_PER_SEAT_USD` per seat (default $6), pooled | `BILLING_PRO_USAGE_PER_SEAT_USD` per seat (default $12), pooled |

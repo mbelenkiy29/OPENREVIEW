@@ -4,6 +4,7 @@ import { userJotConfig } from "../src/userjot";
 import { CookieSettings } from "./consent";
 import { ThemePicker } from "./theme";
 import { BoardNavLinks } from "./userjot";
+import { Icon } from "./ui/icons";
 import { Mark } from "./ui/logo";
 
 /** The public source repository, linked from the site header, footer and self-hosting section. */
@@ -11,24 +12,38 @@ export const sourceRepository = "https://github.com/mbelenkiy29/OPENREVIEW";
 
 // Public-site header and footer shared by the landing page, docs, changelog and feedback board. On
 // the landing page links are in-page anchors; elsewhere they point back to the landing sections.
-export function SiteHeader({ home = false, current }: { home?: boolean; current?: "docs" | "changelog" }) {
+function SiteNavLinks({ home = false, current }: { home?: boolean; current?: "docs" | "changelog" }) {
   const base = home ? "" : "/";
   // Pricing lives on the landing page, which shows it when billing is enabled at build time; other
   // pages skip the link.
   const pricing = home && billingConfig().enabled, feedback = Boolean(userJotConfig());
+  return <>
+    <Link href={`${base}#features`}>Features</Link>
+    <Link href={`${base}#how`}>How it works</Link>
+    {pricing && <Link href={`${base}#pricing`}>Pricing</Link>}
+    <Link href="/docs/quickstart" aria-current={current === "docs" ? "page" : undefined}>Docs</Link>
+    <Link href="/changelog" aria-current={current === "changelog" ? "page" : undefined}>Changelog</Link>
+    {feedback && <BoardNavLinks />}
+    <a href={sourceRepository}>GitHub</a>
+  </>;
+}
+
+export function SiteHeader({ home = false, current }: { home?: boolean; current?: "docs" | "changelog" }) {
+  const account = home
+    ? <Link className="site-account" href="/login">Sign in</Link>
+    : <Link className="site-account" href="/dashboard">Dashboard</Link>;
   return <header className="site-header">
     <Link className="brand" href="/"><Mark /> OpenReview</Link>
-    <nav className="site-nav" aria-label="Site">
-      <Link href={`${base}#features`}>Features</Link>
-      <Link href={`${base}#how`}>How it works</Link>
-      {pricing && <Link href={`${base}#pricing`}>Pricing</Link>}
-      <Link href="/docs/quickstart" aria-current={current === "docs" ? "page" : undefined}>Docs</Link>
-      <Link href="/changelog" aria-current={current === "changelog" ? "page" : undefined}>Changelog</Link>
-      {feedback && <BoardNavLinks />}
-      <a href={sourceRepository}>GitHub</a>
-    </nav>
+    <nav className="site-nav" aria-label="Site"><SiteNavLinks home={home} current={current} /></nav>
     <div className="site-actions">
-      {home ? <Link href="/login">Sign in</Link> : <Link href="/dashboard">Dashboard</Link>}
+      <details className="site-menu">
+        <summary><Icon name="list" /> <span>Menu</span></summary>
+        <nav className="site-menu-panel" aria-label="Site">
+          <SiteNavLinks home={home} current={current} />
+          {home ? <Link href="/login">Sign in</Link> : <Link href="/dashboard">Dashboard</Link>}
+        </nav>
+      </details>
+      {account}
       <Link className="button primary small" href="/signup">Get started</Link>
     </div>
     {/* How far down the landing page the visitor is; app/landing/motion.tsx draws it. */}

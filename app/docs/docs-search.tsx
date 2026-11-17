@@ -25,7 +25,7 @@ export function DocsSearch({ index, children }: { index: DocsEntry[]; children: 
     <div className="docs-search" role="search">
       <label className="sr-only" htmlFor={id}>Search the docs</label>
       <input ref={input} id={id} type="search" value={query} placeholder="Search docs" aria-keyshortcuts="/" autoComplete="off"
-        aria-controls={`${id}-results`} onChange={(e) => setQuery(e.target.value)}
+        aria-controls={searching ? `${id}-results` : undefined} onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Escape") setQuery("");
           if (e.key === "Enter" && results[0]) { e.preventDefault(); setQuery(""); router.push(`/docs/${results[0].entry.slug}`); }
