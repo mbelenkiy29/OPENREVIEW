@@ -14,8 +14,12 @@ const valid = (token: string) => /^[A-Za-z0-9_-]{40,64}$/.test(token);
 export async function GET(request: Request) {
   const url = new URL(request.url), token = url.searchParams.get("token") ?? "";
   if (!valid(token)) return NextResponse.redirect(`${origin()}/login?error=signin`);
-  const next = safeNext(url.searchParams.get("next")).replace(/&/g, "&amp;");
-  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Sign in to OpenReview</title></head><body style="font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0"><form method="post" action="/api/auth/email/verify" style="text-align:center"><h1 style="font-size:1.25rem">Sign in to OpenReview</h1><input type="hidden" name="token" value="${token}"><input type="hidden" name="next" value="${next}"><button type="submit" style="font:inherit;padding:.6rem 1.4rem;cursor:pointer">Sign in</button></form></body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+  const next = safeNext(url.searchParams.get("next"));
+  const query = new URLSearchParams({ token });
+  if (next !== "/dashboard") query.set("next", next);
+  const response = NextResponse.redirect(`${origin()}/login/verify?${query}`);
+  response.headers.set("cache-control", "no-store");
+  return response;
 }
 
 export async function POST(request: Request) {

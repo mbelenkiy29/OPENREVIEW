@@ -10,7 +10,7 @@ type Action = (state: Result, form: FormData) => Promise<Result>;
 
 function Pending({ label }: { label: string }) {
   const { pending } = useFormStatus();
-  return pending ? <p className="muted" role="status">{label}</p> : null;
+  return <p className="wizard-pending muted" role="status">{pending ? label : "\u00a0"}</p>;
 }
 /** The step's form; the bottom bar's Next button submits it through form="wizard-form". */
 export function StepForm({ action, pendingLabel = "Saving…", disabled, children, className }: { action: Action; pendingLabel?: string; disabled?: boolean; children: ReactNode; className?: string }) {

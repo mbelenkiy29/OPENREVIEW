@@ -191,9 +191,11 @@ test('opening a magic link only shows a confirm button; the same-origin POST con
  let text='';vi.spyOn(globalThis,'fetch').mockImplementation(async(_u:string|URL|Request,init?:RequestInit)=>{text=JSON.parse(String(init?.body)).text;return Response.json({id:'m1'});});
  await t.action(api.identityJobs.requestMagicLink,{secret:svc,email:'scan@example.com',next:'/settings'});
  const page=await openMagicLink(new Request(/https:\/\/\S+\/api\/auth\/email\/verify\?\S+/.exec(text)![0]));
- const html=await page.text(),token=/name="token" value="([^"]+)"/.exec(html)![1];
+ const location=page.headers.get('location')??'',token=new URL(location).searchParams.get('token')!;
  // A prefetch (mail scanner) or a planted link leaves the token unused and signs no one in.
- expect([page.status,page.headers.get('content-type')]).toEqual([200,'text/html; charset=utf-8']);
+ expect(page.status).toBe(307);
+ expect(location).toMatch(/\/login\/verify\?token=/);
+ expect(page.headers.get('cache-control')).toBe('no-store');
  expect((await t.run(ctx=>ctx.db.query('loginTokens').collect()))[0].usedAt).toBeUndefined();
  expect(holder.jar.has('openreview_session')).toBe(false);
  const confirm=(origin:string)=>confirmMagicLink(new Request('https://review.example.com/api/auth/email/verify',{method:'POST',headers:{origin},body:new URLSearchParams({token,next:'/settings'})}));
