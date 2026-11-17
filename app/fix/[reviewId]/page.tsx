@@ -32,7 +32,7 @@ export default async function Fix({params,searchParams}:{params:Promise<{reviewI
  const prompt=fixPrompt(repository?.fullName??"the repository",`PR #${detail.review.prNumber}`,eligible.map(f=>({...findingSchema.parse(f),agent:f.agent,fingerprint:f.fingerprint,commitSha:f.commitSha})),detail.review.runtimeEvidence);
  const fixable=selected?selected.canFix:detail.canFix;
  const cloud=fixPr.github&&fixable?<CloudAgentSection reviewId={detail.review._id} findingId={selected?._id} finding={selected?.fingerprint} preferred={personal.cloudAgent} prompt={prompt}/>:null;
- return <main className="onboarding"><Link className="brand" href="/dashboard">OpenReview</Link><h1>{selected?selected.title:"Fix review findings"}</h1><p>PR #{detail.review.prNumber} · revision {detail.review.headSha.slice(0,8)}</p>
+ return <main id="main" className="narrow"><Link className="brand" href="/dashboard">OpenReview</Link><h1>{selected?selected.title:"Fix review findings"}</h1><p>PR #{detail.review.prNumber} · revision {detail.review.headSha.slice(0,8)}</p>
   {handoff?.status==="posted"&&<p role="status">Posted the {cloudAgents[handoff.agent as CloudAgent]?.label??handoff.agent} request as @{handoff.postedAs}: <a href={handoff.commentUrl} target="_blank" rel="noreferrer">open the comment on GitHub</a>. The agent replies there when it starts.</p>}
   {(handoff?.status==="failed"||q.error)&&<p role="alert" className="error">The hand-off didn’t go through: {handoff?.error??q.error}</p>}
   {fixable&&personal.handoff==="cloud"&&cloud}

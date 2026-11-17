@@ -20,7 +20,7 @@ export default async function Referral({ params }: { params: Promise<{ code: str
   const session = (await cookies()).get("openreview_session")?.value;
   const signedIn = session ? await backend().query(api.identity.sessionValid, { token: session }).catch(() => false) : false;
   const discount = referralConfig().discountLabel;
-  return <main className="welcome">
+  return <main id="main" className="welcome">
     <Link className="brand" href="/"><Mark /> OpenReview</Link>
     <h1>You’re invited to OpenReview</h1>
     <p>{referralInvite(referrer.login, discount)}</p>

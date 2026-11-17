@@ -167,10 +167,12 @@ The landing page's motion lives in `app/landing/motion.tsx`, with its styles at 
 
 ## Accessibility
 
-- Text colours meet WCAG AA against the surfaces they sit on. `--text-ter` is never used for meaningful text.
+- Text colours meet WCAG AA against the surfaces they sit on. `--text-ter` is never used for meaningful text. Chart axis labels, tooltips and board captions use `--muted`.
 - Focus is always visible: a 2px ember outline, or a 3px ring on inputs.
-- Anything that scrolls on its own can take keyboard focus: tables use `ScrollTable` (`app/dashboard/scroll-table.tsx`), and other scroll areas get `tabIndex={0}` with a label.
-- Links inside running text on public pages are underlined, so they don't rely on colour alone.
+- A skip link is the first tab stop (`app/layout.tsx`). It targets `#main` on each page so keyboard users skip the site or dashboard chrome.
+- Anything that scrolls on its own can take keyboard focus: tables use `ScrollTable` (`app/dashboard/scroll-table.tsx`), including the pull request list, and other scroll areas get `tabIndex={0}` with a label.
+- Links inside running text on public pages are underlined, so they don't rely on colour alone. That includes landing copy, hero links, feature links, docs, changelog, 404, welcome and OAuth consent (`.narrow`) pages. Buttons styled as `.button` stay without an underline.
+- Standalone short pages (OAuth consent, fix hand-off) use `.narrow`, which matches `.welcome` spacing so they are readable without dashboard chrome.
 - Status is never shown by colour alone: badges always carry their text.
 - Layouts hold at 390px without horizontal page scroll in both themes. Wide tables and diffs scroll inside their own containers. `pnpm test:e2e` checks this.
 - `prefers-reduced-motion` turns off transitions (tab bars jump instead of sliding), the skeleton pulse, the tab panel and section-link fades, every guided-setup animation and all landing motion, including smooth scrolling.

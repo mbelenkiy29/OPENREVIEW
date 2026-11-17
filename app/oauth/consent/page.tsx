@@ -1,8 +1,10 @@
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { SignInOptions } from "../../sign-in";
 import { current } from "../../../src/server";
 import { loopbackRedirect } from "../../../src/oauth-server";
 import { pendingAuthorization } from "../../../src/oauth-consent";
+import { Mark } from "../../ui/logo";
 import { approveAuthorization, denyAuthorization } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -11,14 +13,15 @@ const scopeText: Record<string, string> = { read: "Read reviews, findings, rules
 // warning for loopback redirects that any local program could claim), the workspace and the scopes.
 export default async function Consent() {
   const pending = await pendingAuthorization();
-  if (!pending) return <main className="narrow"><h1>Authorization expired</h1><p>Start the connection again from your MCP client.</p></main>;
+  if (!pending) return <main id="main" className="narrow"><Link className="brand" href="/"><Mark /> OpenReview</Link><h1>Authorization expired</h1><p>Start the connection again from your MCP client.</p><p><Link href="/docs/mcp">MCP docs</Link> · <Link href="/">Home</Link></p></main>;
   const redirect = new URL(pending.redirectUri);
   const signedIn = Boolean((await cookies()).get("openreview_session")?.value);
-  if (!signedIn) return <main className="narrow"><h1>Sign in to connect {pending.clientName}</h1><SignInOptions next="/oauth/consent" /></main>;
+  if (!signedIn) return <main id="main" className="narrow"><Link className="brand" href="/"><Mark /> OpenReview</Link><h1>Sign in to connect {pending.clientName}</h1><SignInOptions next="/oauth/consent" /></main>;
   const user = await current();
   const workspaces = user.organizations.filter((o) => o._id);
   return (
-    <main className="narrow">
+    <main id="main" className="narrow">
+      <Link className="brand" href="/"><Mark /> OpenReview</Link>
       <h1>Connect {pending.clientName} to OpenReview?</h1>
       <p>After you approve, OpenReview sends you to <strong>{redirect.host}</strong> (<code>{pending.redirectUri}</code>).</p>
       {loopbackRedirect(pending.redirectUri) && <p role="alert">This client redirects to your own computer ({redirect.hostname}). Approve only if you started this connection from an app you trust.</p>}

@@ -19,9 +19,9 @@ export default async function GithubLink({ searchParams }: { searchParams: Promi
   const organization = organizations.find((o) => o._id === organizationId);
   const back = <p><Link href={returnTo}>Back</Link></p>;
   if (!organization || !["owner", "admin"].includes(organization.role))
-    return <main className="welcome"><h1>Link a GitHub installation</h1><p>Only workspace owners and admins can link GitHub installations.</p>{back}</main>;
+    return <main id="main" className="welcome"><h1>Link a GitHub installation</h1><p>Only workspace owners and admins can link GitHub installations.</p>{back}</main>;
   if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_APP_SLUG)
-    return <main className="welcome"><h1>Link a GitHub installation</h1><p>GitHub App installs are not configured on this server (GITHUB_APP_SLUG and GITHUB_CLIENT_ID).</p>{back}</main>;
+    return <main id="main" className="welcome"><h1>Link a GitHub installation</h1><p>GitHub App installs are not configured on this server (GITHUB_APP_SLUG and GITHUB_CLIENT_ID).</p>{back}</main>;
   // Listing installations needs a fresh GitHub user token; this re-authorizes without signing in again.
   const credentials = await githubCredentials();
   if (!credentials) redirect(`/api/auth/login?purpose=github-install&next=${encodeURIComponent(here)}`);
@@ -29,7 +29,7 @@ export default async function GithubLink({ searchParams }: { searchParams: Promi
   try { installations = await userInstallations(credentials.token); }
   catch { error = "GitHub didn’t return your installations. Try again in a minute."; }
   const ownership = installations.length ? await backend().query(api.repositories.installationOwnership, { token, secret: process.env.SERVICE_SECRET ?? "", organizationId: organizationId as Id<"organizations">, installationIds: installations.map((i) => i.id) }) : {};
-  return <main className="welcome">
+  return <main id="main" className="welcome">
     <Link className="brand" href="/dashboard">OpenReview</Link>
     <h1>Link a GitHub installation</h1>
     <p>These are the accounts and organizations where your GitHub user can see the OpenReview App. Link one to <strong>{organization.name}</strong> to review its repositories, or refresh one that is already linked after changing its repository access on GitHub.</p>

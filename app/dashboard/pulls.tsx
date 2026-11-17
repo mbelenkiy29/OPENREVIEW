@@ -10,6 +10,7 @@ import { Icon, type IconName } from "../ui/icons";
 import { ago, when } from "./sections/shared";
 import { priorityOf } from "../../src/priority";
 import { parsePullQuery, withToken, withoutToken } from "../../src/pull-query";
+import { ScrollTable } from "./scroll-table";
 import { BulkBar, CopyFix, PageSize, PullKeys, SelectAll } from "./pull-list-client";
 const sizes=[10,30,50];
 type BrowseArgs=Partial<{repositoryId:Id<"repositories">;page:number;pageSize:number;search:string;author:string;reviewer:string;state:string;status:string;impact:string;scoreMin:number;scoreMax:number}>;
@@ -57,7 +58,7 @@ export async function PullList({token,organizationId,repositories,filters,admin,
    <Link className="button" href="/dashboard/analytics/issues"><Icon name="listChecks"/>Issues</Link>
   </div>
   <BulkBar/>
-  <div className="table-box pulls-wrap"><table className="pulls-table"><thead><tr><th className="row-select"><SelectAll/></th><th className="num-col">PR #</th><th className="name-col">PR Name</th><th className="repo-col">Repo</th><th className="branch-col">Branch</th><th className="status-col">Status</th><th className="count-col"># Reviews</th><th className="updated-col">Last updated</th></tr></thead><tbody>{result.page.map(pr=>{
+  <ScrollTable label="Pull requests" className="table-box pulls-wrap"><table className="pulls-table"><thead><tr><th className="row-select"><SelectAll/></th><th className="num-col">PR #</th><th className="name-col">PR Name</th><th className="repo-col">Repo</th><th className="branch-col">Branch</th><th className="status-col">Status</th><th className="count-col"># Reviews</th><th className="updated-col">Last updated</th></tr></thead><tbody>{result.page.map(pr=>{
    const repo=repositories.find(r=>r._id===pr.repositoryId),latest=currentReview(pr,repo),risk=latest?.approvalAssessment?.risk,branch=pr.latest?.headBranch;
    // Last updated: the change or its newest review, so a rerun shows as fresh activity (as on Greptile).
    const updated=Math.max(pr.updatedAt,pr.latest?.updatedAt??0);
@@ -73,7 +74,7 @@ export async function PullList({token,organizationId,repositories,filters,admin,
     {/* Row actions float over the row on hover or keyboard focus (Greptile rows stay 8 columns); the pull request page has them too. */}
     <td className="updated-col"><time dateTime={new Date(updated).toISOString()} title={when(updated)}>{ago(updated)}</time>{action&&<span className="row-hover-actions">{action}</span>}</td>
    </tr>;})}</tbody></table>
-  {!result.page.length&&<div className="empty-state"><strong>{q?"No results.":state==="closed"?"No closed pull requests":"No open pull requests"}</strong><p>{parsed.repo&&!tokenRepo?`No connected repository matches “${parsed.repo}”.`:q?"Change the search or filters, or sync open pull requests below.":"Pull requests appear here when they are opened on a connected repository, or when you sync open pull requests below."}</p></div>}</div>
+  {!result.page.length&&<div className="empty-state"><strong>{q?"No results.":state==="closed"?"No closed pull requests":"No open pull requests"}</strong><p>{parsed.repo&&!tokenRepo?`No connected repository matches “${parsed.repo}”.`:q?"Change the search or filters, or sync open pull requests below.":"Pull requests appear here when they are opened on a connected repository, or when you sync open pull requests below."}</p></div>}</ScrollTable>
   {result.total>0&&<div className="pagination pull-pager">
    <span>{(page-1)*pageSize+1}–{Math.min(page*pageSize,result.total)} of {result.total}{result.capped?"+":""}</span>
    <nav aria-label="Pages">
