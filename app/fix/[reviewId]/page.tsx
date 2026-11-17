@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { current,backend } from "../../../src/server";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -18,7 +18,7 @@ export default async function Fix({params,searchParams}:{params:Promise<{reviewI
  const query=new URLSearchParams();if(q.finding)query.set("finding",q.finding);if(q.agent)query.set("agent",q.agent);
  // A signed-out developer arriving from a pull request comes back here after signing in.
  const {token}=await current(`/fix/${encodeURIComponent(reviewId)}${query.size?"?"+query.toString():""}`);
- const detail=await backend().query(api.reviews.detail,{token,reviewId:reviewId as Id<"reviews">});const selected=q.finding?detail.findings.find(f=>f.fingerprint===q.finding):undefined;
+ const detail=await backend().query(api.reviews.detail,{token,reviewId:reviewId as Id<"reviews">}).catch(()=>notFound());const selected=q.finding?detail.findings.find(f=>f.fingerprint===q.finding):undefined;
  if(detail.latestReviewId&&detail.latestReviewId!==reviewId&&(!q.finding||selected)){
   const latest=await backend().query(api.reviews.detail,{token,reviewId:detail.latestReviewId});
   const finding=q.finding?latest.findings.find(f=>f.fingerprint===q.finding):undefined;
