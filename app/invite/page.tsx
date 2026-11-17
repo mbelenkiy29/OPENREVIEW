@@ -14,7 +14,7 @@ export default async function Invite({ searchParams }: { searchParams: Promise<{
   const preview = valid ? await backend().query(api.identity.invitationPreview, { tokenHash: createHash("sha256").update(token).digest("hex") }) : null;
   const session = (await cookies()).get("openreview_session")?.value;
   const signedIn = session ? await backend().query(api.identity.sessionValid, { token: session }).catch(() => false) : false;
-  return <main className="welcome">
+  return <main id="main" className="welcome">
     <Link className="brand" href="/"><Mark /> OpenReview</Link>
     {error && <p role="alert" className="error">This invitation could not be accepted. It may have expired, been revoked or already been used.</p>}
     {!preview ? <><h1>Invitation unavailable</h1><p>This invitation link is invalid, expired, revoked or already used. Ask a workspace admin for a new one.</p></> : <>

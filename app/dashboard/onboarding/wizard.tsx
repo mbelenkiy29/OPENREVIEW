@@ -14,7 +14,7 @@ export function WizardFrame({ step, workspace, organizationId, admin, billing = 
 }) {
   const steps = stepsFor(billing), back = previousStep(step, billing), position = steps.indexOf(step) + 1;
   const backHref = back ? `/dashboard/onboarding/${back}` : undefined;
-  return <main className="wizard" data-step={step}>
+  return <main id="main" className="wizard" data-step={step}>
     <div className={`wizard-body${centered ? " centered" : ""}`}>{children}</div>
     <footer className="wizard-bar">
       <div className="wizard-exit">

@@ -28,7 +28,7 @@ export default async function OperatorPage() {
   const series = (key: "spend" | "calls") => r.series.map((label, i) => ({ label, values: r.chart[key][i] }));
   return <>
     <span className="page-top" aria-hidden="true" />
-    <main className="content page">
+    <main id="main" className="content page">
       <header className="page-header"><div><h1>Operator</h1><p>Every workspace on this deployment: metadata and counts, never code, review text or chat.</p></div></header>
       <Tiles label="Totals" items={[
         ["Users", counted(r.totals.users, r.capped.users)],

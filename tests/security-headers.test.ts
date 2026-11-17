@@ -47,7 +47,7 @@ test("pages get a nonce script policy from middleware; everything it skips gets 
   assert.ok(!runs("/dashboard", { "next-router-prefetch": "1" }));
   assert.ok(!runs("/dashboard", { purpose: "prefetch" }));
 
-  const response = middleware(new NextRequest("https://openreview.tech/login"));
+  const response = await middleware(new NextRequest("https://openreview.tech/login"));
   const policy = response.headers.get("content-security-policy")!;
   const nonce = /'nonce-([A-Za-z0-9+/=]+)'/.exec(policy)?.[1];
   assert.ok(nonce && nonce.length >= 32, policy);
@@ -55,7 +55,7 @@ test("pages get a nonce script policy from middleware; everything it skips gets 
   // Next.js reads the nonce from the forwarded request headers; app/layout.tsx from x-nonce.
   assert.equal(response.headers.get("x-middleware-request-x-nonce"), nonce);
   assert.equal(response.headers.get("x-middleware-request-content-security-policy"), policy);
-  assert.notEqual(nonce, /'nonce-([^']+)'/.exec(middleware(new NextRequest("https://openreview.tech/login")).headers.get("content-security-policy")!)?.[1]);
+  assert.notEqual(nonce, /'nonce-([^']+)'/.exec((await middleware(new NextRequest("https://openreview.tech/login"))).headers.get("content-security-policy")!)?.[1]);
 
   assert.equal(contentSecurityPolicy("abc", false, false), `default-src 'self'; script-src 'self' 'nonce-abc' 'strict-dynamic'; ${fetchPolicy}`);
   assert.equal(contentSecurityPolicy("abc", false, true), `default-src 'self'; script-src 'self' 'nonce-abc' 'strict-dynamic' 'unsafe-eval'; ${fetchPolicy}`);
@@ -67,13 +67,13 @@ test("pages get a nonce script policy from middleware; everything it skips gets 
   assert.equal(contentSecurityPolicy(), staticPolicy);
 });
 
-test("forms lead only to known hosts, except on pages with sign-in (any SSO IdP) and MCP OAuth consent (any redirect URI)", () => {
-  const formAction = (path: string) => /form-action ([^;]*)/.exec(middleware(new NextRequest(`https://openreview.tech${path}`)).headers.get("content-security-policy")!)![1];
+test("forms lead only to known hosts, except on pages with sign-in (any SSO IdP) and MCP OAuth consent (any redirect URI)", async () => {
+  const formAction = async (path: string) => /form-action ([^;]*)/.exec((await middleware(new NextRequest(`https://openreview.tech${path}`))).headers.get("content-security-policy")!)![1];
   const pages = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? pages(join(dir, e.name)) : e.name === "page.tsx" ? [dir] : []);
   const signIn = pages("app").filter((dir) => /<(SignInOptions|AuthScreen)\b/.test(readFileSync(join(dir, "page.tsx"), "utf8"))).map((dir) => dir.slice("app".length).replace(/\[[^\]]+\]/g, "ABCD2345"));
   assert.ok(signIn.includes("/login") && signIn.includes("/oauth/consent"), String(signIn));
-  for (const page of signIn) assert.equal(formAction(page), `${formTargets} https: http://localhost:* http://127.0.0.1:*`, page);
-  for (const page of ["/", "/dashboard", "/dashboard/organization/billing", "/dashboard/onboarding/plan", "/fix/abc", "/changelog", "/r", "/login/x", "/oauth/consent/x"]) assert.equal(formAction(page), formTargets, page);
+  for (const page of signIn) assert.equal(await formAction(page), `${formTargets} https: http://localhost:* http://127.0.0.1:*`, page);
+  for (const page of ["/", "/dashboard", "/dashboard/organization/billing", "/dashboard/onboarding/plan", "/fix/abc", "/changelog", "/r", "/login/x", "/oauth/consent/x"]) assert.equal(await formAction(page), formTargets, page);
 });
 
 test("profile pictures from GitHub, Google and GitLab sign-ins are allowed images", () => {

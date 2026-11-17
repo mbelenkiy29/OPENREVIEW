@@ -19,7 +19,7 @@ export default function Feedback() {
   if (!config) notFound();
   return <div className="docs-layout single">
     <SiteHeader />
-    <main className="board-page">
+    <main id="main" className="board-page">
       <header className="board-intro">
         <div>
           <h1>Feedback</h1>

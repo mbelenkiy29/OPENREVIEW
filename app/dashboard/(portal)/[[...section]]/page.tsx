@@ -90,7 +90,7 @@ export default async function Dashboard(props: {
       {/* Next scrolls a new page to the top only when its first element is off-screen. This marker sits at
           the document top, so a page opened after a short scroll starts at the top, not under the header. */}
       <span className="page-top" aria-hidden="true" />
-      <main className={view === "reviews" ? (ctx.detail || ctx.pull ? "content pull-detail-page" : "content page pulls-page") : "content page"}>
+      <main id="main" className={view === "reviews" ? (ctx.detail || ctx.pull ? "content pull-detail-page" : "content page pulls-page") : "content page"}>
         {/* An open pull request keeps its chrome-free split layout; Live still refreshes running reviews. */}
         {view === "reviews" && (ctx.detail || ctx.pull) ? <><h1 className="sr-only">Pull Requests</h1><div className="pulls-live"><Live active={active} /></div></> : view === "overview" ? null : <header className="page-header">
           <div>

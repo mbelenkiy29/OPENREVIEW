@@ -20,7 +20,7 @@ export default async function Changelog() {
   const email = emailOnWeb() && Boolean(process.env.RESEND_CHANGELOG_SEGMENT_ID), turnstile = turnstileConfig();
   return <div className="docs-layout single">
     <SiteHeader current="changelog" />
-    <main className="docs-content review-markdown">
+    <main id="main" className="docs-content review-markdown">
       <h1>Changelog</h1>
       <p>Follow along with the <a href="/changelog/feed.xml">RSS feed</a>{email && ", or get the new entries by email at most once a week"}.</p>
       {email && <ChangelogEmail turnstile={turnstile.mode === "off" ? undefined : { siteKey: turnstile.siteKey! }} />}

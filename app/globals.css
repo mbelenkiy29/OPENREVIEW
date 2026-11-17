@@ -131,10 +131,30 @@ a {
 a:hover {
   text-decoration: underline;
 }
+/* First in the tab order; visible only when focused so keyboard users can skip chrome. */
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -48px;
+  z-index: 1000;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 500;
+  text-decoration: none;
+}
+.skip-link:focus {
+  top: 12px;
+  text-decoration: none;
+}
 /* Links inside running text on public pages are underlined, so they don't rely on colour alone. */
 .docs-content :where(p, li, td) a,
 .consent p a,
-.auth p a {
+.auth p a,
+.landing :where(p, li, td, .hero-links, .feature-copy) a:not(.button),
+.welcome :where(p, li) a:not(.button),
+.narrow :where(p, li) a:not(.button) {
   text-decoration: underline;
 }
 h1,
@@ -1127,18 +1147,21 @@ tr:last-child td {
   padding: 16px 0;
   border-top: 1px solid var(--line);
 }
-.welcome {
+.welcome,
+.narrow {
   max-width: 640px;
   margin: 12vh auto;
   padding: 0 24px;
 }
-.welcome h1 {
+.welcome h1,
+.narrow h1 {
   font-size: 44px;
   line-height: 1.05;
   letter-spacing: -0.025em;
   margin: 48px 0 16px;
 }
-.welcome > p {
+.welcome > p,
+.narrow > p {
   font-size: 16px;
   color: var(--muted);
 }
@@ -3713,6 +3736,11 @@ form.catalog-review {
   width: 100%;
   margin: 0;
 }
+/* Replica chart labels reuse dashboard ChartCard styles. Those still use decorative --text-ter
+   (~3.3:1 on the replica card). Scope the AA bump here so dashboard chart token edits in other PRs stay independent. */
+.replica :is(.chart-y-title, .chart-y span, .chart-tip-date, .chart-tip-row, .chart-x, .chart-board-name small) {
+  color: var(--muted);
+}
 .source-view {
   width: 100%;
   padding: 8px 10px;
@@ -4777,10 +4805,12 @@ input.switch:checked::before {
   }
 }
 @media (max-width: 620px) {
-  .welcome {
+  .welcome,
+  .narrow {
     margin: 6vh auto;
   }
-  .welcome h1 {
+  .welcome h1,
+  .narrow h1 {
     font-size: 34px;
   }
   .form-grid {
@@ -5302,6 +5332,32 @@ input.switch:checked::before {
 }
 .portal .primary-nav > [aria-current="page"] {
   color: var(--text);
+}
+/* At 390px the eight tabs overflow. A hidden scrollbar made that clip undiscoverable; show a thin
+   track under the ink bar and grow the row so --header-h still matches the sticky sidebar. */
+@media (max-width: 720px) {
+  .portal {
+    --header-h: 85px;
+  }
+  .portal:has(.trial-banner) {
+    --header-h: 130px;
+  }
+  .portal .primary-nav {
+    height: 35px;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--text) 35%, transparent) transparent;
+  }
+  .portal .primary-nav::-webkit-scrollbar {
+    display: block;
+    height: 4px;
+  }
+  .portal .primary-nav::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .portal .primary-nav::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--text) 35%, transparent);
+    border-radius: 4px;
+  }
 }
 
 /* Page: a centred 1142px column, a display title and a subtitle. */
@@ -6554,7 +6610,7 @@ dialog.modal::backdrop {
   justify-self: center;
   max-height: 166px;
   overflow: hidden;
-  color: var(--text-ter);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.08em;
@@ -6573,7 +6629,7 @@ dialog.modal::backdrop {
   position: absolute;
   right: 0;
   transform: translateY(50%);
-  color: var(--text-ter);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1;
@@ -6690,7 +6746,7 @@ dialog.modal::backdrop {
   transform: translate(calc(-100% - 12px), -50%);
 }
 .chart-tip-date {
-  color: var(--text-ter);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.06em;
@@ -6699,7 +6755,7 @@ dialog.modal::backdrop {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-ter);
+  color: var(--muted);
   font-size: 14px;
 }
 .chart-tip-row i {
@@ -6719,7 +6775,7 @@ dialog.modal::backdrop {
   grid-row: 2;
   grid-column: 3;
   padding-top: 8px;
-  color: var(--text-ter);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 15px;
@@ -6788,7 +6844,7 @@ dialog.modal::backdrop {
 }
 .chart-board-name small {
   margin-left: 8px;
-  color: var(--text-ter);
+  color: var(--muted);
   font-size: 13px;
 }
 .chart-board-value {
@@ -11720,7 +11776,7 @@ form.chat-delete {
   --auth-card-text: #1d1d1d;
   --auth-tile: #2d2d2d;
   --auth-tile-line: rgba(255, 255, 255, 0.12);
-  --auth-idle: #6f6f6f;
+  --auth-idle: #959595;
   --auth-caption: #c4c4c4;
   --radius: 2px;
   --radius-lg: 2px;
@@ -11780,7 +11836,7 @@ form.chat-delete {
   --auth-card-text: #161616;
   --auth-tile: #232323;
   --auth-tile-line: rgba(255, 255, 255, 0.1);
-  --auth-idle: #5f5f5f;
+  --auth-idle: #959595;
   --auth-caption: #a8a8a8;
 }
 @media (prefers-color-scheme: dark) {
@@ -11828,7 +11884,7 @@ form.chat-delete {
     --auth-card-text: #161616;
     --auth-tile: #232323;
     --auth-tile-line: rgba(255, 255, 255, 0.1);
-    --auth-idle: #5f5f5f;
+    --auth-idle: #959595;
     --auth-caption: #a8a8a8;
   }
 }
@@ -12005,9 +12061,11 @@ form.chat-delete {
   line-height: 19px;
   text-align: center;
   color: var(--muted);
+  text-wrap: pretty;
 }
 .auth .sign-in-legal a {
   color: inherit;
+  white-space: nowrap;
 }
 
 /* The right panel: a pull request under review (app/auth-screen.tsx). Diff lines on a dark window; a scan
@@ -13213,7 +13271,7 @@ form.chat-delete {
     grid-template-columns: minmax(0, 1fr);
   }
   .wizard .wizard-panel {
-    padding: 32px 16px 40px;
+    padding: 32px 16px 120px;
   }
   .wizard .wizard-heading h1 {
     font-size: 24px;
@@ -13239,7 +13297,7 @@ form.chat-delete {
     left: 0;
   }
   .wizard .wizard-body.centered {
-    padding: 32px 16px;
+    padding: 32px 16px 120px;
   }
   .wizard .wizard-card {
     padding: 32px 20px;

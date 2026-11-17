@@ -52,7 +52,7 @@ export default function Home() {
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(structured) }} />
     <SiteHeader home />
     <div id="smooth-wrapper"><div id="smooth-content">
-    <main>
+    <main id="main">
       <section className="hero" aria-labelledby="hero-heading" data-speed="0.92">
         <h1 id="hero-heading"><span className="line"><span>Review the change.</span></span> <span className="line"><span>Understand the codebase.</span></span></h1>
         <p className="lede">OpenReview reviews pull requests using your whole repository, not only the diff. Every finding quotes the code it depends on, and nothing is posted until it has been verified.</p>

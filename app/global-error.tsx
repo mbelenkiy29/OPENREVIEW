@@ -11,7 +11,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
     <body>
       {/* Plain tokens from globals.css (light and dark), which this page cannot rely on. */}
       <style>{"body{margin:0;padding:48px 16px;font-family:system-ui,sans-serif;background:#f7f7f4;color:#26251e}main{max-width:480px;margin:0 auto}h1{font-size:22px}p{line-height:1.5}@media (prefers-color-scheme:dark){body{background:#14120b;color:#edecec}a{color:inherit}}"}</style>
-      <main>
+      <main id="main">
         <h1>Something went wrong</h1>
         <p role="alert">OpenReview could not load this page. Try again, or come back in a minute.</p>
         <p><button onClick={reset}>Try again</button> <Link href="/">Go to the home page</Link></p>

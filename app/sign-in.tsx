@@ -35,6 +35,6 @@ export function SignInOptions({ next, mode = "login", referral }: { next?: strin
         <button>Continue with SSO</button>
       </SsoForm>
     </details>
-    <p className="sign-in-legal">By {mode === "signup" ? "signing up" : "continuing"}, you agree to the <Link href="/terms">Terms of Service</Link> and <Link href="/privacy">Privacy Policy</Link>.</p>
+    <p className="sign-in-legal">By {mode === "signup" ? "signing up" : "continuing"}, you agree to the <Link href="/terms">Terms of Service</Link> and&nbsp;<Link href="/privacy">Privacy Policy</Link>.</p>
   </div>;
 }
