@@ -5,15 +5,100 @@
   </picture>
 </p>
 
-# OpenReview
+<h1 align="center">OpenReview</h1>
 
-OpenReview is an open-source, self-hostable, repository-aware AI pull request reviewer. It uses a GitHub App, Convex for durable application state and jobs, Next.js for the dashboard, and your model credentials. The same TypeScript review engine powers GitHub and the local CLI.
+<p align="center"><strong>Open-source AI pull request reviews that understand your whole repository.<br>Every finding quotes the code it depends on. Self-host it free, or use the cloud.</strong></p>
 
-**Status:** implemented with passing local unit/integration, production browser, web build, and self-hosted Docker checks. Live GitHub installation and model quality require credentials and separate verification. This project makes no Greptile parity claims.
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <a href="https://github.com/mbelenkiy29/OPENREVIEW/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/mbelenkiy29/OPENREVIEW/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://openreview.tech/docs/quickstart"><img alt="Docs" src="https://img.shields.io/badge/docs-openreview.tech-informational"></a>
+  <!-- TODO after v0.1.0 is released: <a href="https://github.com/mbelenkiy29/OPENREVIEW/releases"><img alt="Release" src="https://img.shields.io/github/v/release/mbelenkiy29/OPENREVIEW"></a> -->
+</p>
 
-Documentation is published at `/docs` (Markdown in `docs/public/` plus selected guides), and the changelog at `/changelog`. Internal QA and acceptance logs live in `docs/internal/`.
+<p align="center">
+  <a href="https://openreview.tech">Website &amp; live demo</a> ·
+  <a href="https://openreview.tech/docs/quickstart">Quickstart</a> ·
+  <a href="docs/deployment.md">Self-host</a> ·
+  <a href="https://openreview.tech/changelog">Changelog</a> ·
+  <a href="https://openreview.tech/feedback/roadmap">Roadmap</a>
+</p>
 
-## Features
+<!--
+TODO DEMO GIF: record per the demo storyboard, save as docs/images/demo.gif (under 8 MB), then uncomment.
+<p align="center"><img src="docs/images/demo.gif" alt="OpenReview catching a cents-to-dollars bug across two files" width="860"></p>
+-->
+
+> Not affiliated with [vercel-labs/openreview](https://github.com/vercel-labs/openreview) or the OpenReview.net academic peer-review platform. This project is **OpenReview.tech**.
+
+## Why OpenReview
+
+- **Reads the repository, not just the diff.** A tree-sitter code graph (12 languages) resolves cross-file calls and imports, so a change is reviewed alongside its callers, tests, past findings and your rules.
+- **Evidence on every finding.** A finding must quote exact lines from the reviewed revision and pass a second verification before it is posted. Findings that cannot quote the code are dropped.
+- **Open source, self-host for free.** MIT licensed. Run the Next.js app and the open-source Convex backend on your own infrastructure with Docker Compose. A Helm chart and an AWS Terraform module are included.
+- **Your model, your budget.** Anthropic, OpenAI, OpenRouter, or any OpenAI-compatible endpoint, with per-task model routing and a hard inference budget.
+- **Privacy controls.** Code goes only to the model you configure, secret-looking values are redacted first, and `OPENREVIEW_OFFLINE=true` limits outbound traffic to your model, embedding, code-host and SSO endpoints. See [data controls](docs/data-controls.md) and [SECURITY.md](SECURITY.md).
+- **Works where your code lives.** GitHub, GitHub Enterprise, GitLab, Azure DevOps, Bitbucket Cloud and Data Center, Gitea and Perforce. How far each integration has been verified live is listed in the [acceptance matrix](docs/acceptance-matrix.md).
+- **Built for agents too.** A CLI, a remote and a local MCP server (16 tools), and Claude Code and Codex plugins with a resolve loop that fixes findings and re-reviews until clean.
+
+## What a review looks like
+
+One summary comment, edited in place on every push, with a verdict, a confidence score, verified findings (P0 to P3) with quoted evidence, and committable suggestions for small fixes. Try the interactive demo with sample data at **[openreview.tech](https://openreview.tech)**.
+
+![OpenReview sign-in page](docs/images/sign-in.png)
+<!-- TODO: replace the sign-in screenshot with a screenshot of a real review summary on a public PR. -->
+
+## Local quickstart
+
+Use Node.js 24 and pnpm 11.
+
+```sh
+pnpm install
+CONVEX_AGENT_MODE=anonymous pnpm exec convex dev --once
+pnpm setup:local
+pnpm backend
+# In another terminal:
+pnpm dev
+```
+
+Open http://localhost:3000. Local setup generates independent session, service, and webhook secrets and synchronizes them to the local backend without printing their values. `.env.local` and `.env.backend` are ignored by Git. For provider/GitHub settings, edit `.env.local`, then run `pnpm setup:local` again. Backend changes must be deployed with `pnpm backend` or `convex dev --once`.
+
+To test billing and referrals locally, point the [Stripe CLI](https://docs.stripe.com/stripe-cli) at a Stripe sandbox (`stripe switch`, never live mode), and run `stripe listen --print-secret` once for the webhook signing secret. Put the sandbox values from [docs/billing.md](docs/billing.md#setup-operator) in `.env.local`: `STRIPE_SECRET_KEY` (`rk_test_…`), `STRIPE_WEBHOOK_SECRET`, `STRIPE_SEAT_PRICE_ID` and `BILLING_ENABLED=true`, plus `REFERRALS_ENABLED=true` and `STRIPE_REFERRAL_COUPON_ID` for referrals. Then run `pnpm setup:local`, which copies the billing settings that have a value to the local backend, replacing the ones it had, so a new sandbox key or webhook secret takes effect. Keep `pnpm stripe:listen` running to forward sandbox webhooks to the backend that `NEXT_PUBLIC_CONVEX_SITE_URL` in `.env.local` names. Claude Code copies `.env.local` into each new worktree (`.worktreeinclude`), so agents working there can use the same sandbox. In a worktree created earlier, copy only the `STRIPE_*`, `BILLING_*` and `REFERRAL*` lines into its `.env.local`, because the other lines name that worktree's own backend and secrets, then run `pnpm setup:local` there.
+
+## Deploy
+
+| Target | Guide | Status |
+| --- | --- | --- |
+| Docker Compose (one host) | [docs/deployment.md](docs/deployment.md) | Docker build and container checks pass per the parity report |
+| Kubernetes (Helm) | [docs/self-hosting-kit.md](docs/self-hosting-kit.md) | Chart provided. The repo's docs say it has not yet been applied to a real cluster |
+| AWS (Terraform, ECS Fargate) | [docs/self-hosting-kit.md](docs/self-hosting-kit.md) | Module provided. Same caveat |
+| Vercel + Convex | [docs/deployment.md](docs/deployment.md) | Used for the hosted cloud at openreview.tech |
+
+<!--
+TODO one-click buttons: only add a "Deploy with Vercel" or similar button once a template exists that also provisions the Convex backend and prompts for the required secrets. Today none does, so no button is shown.
+-->
+
+## Self-hosted or cloud
+
+| | Self-hosted | Cloud |
+| --- | --- | --- |
+| Where it runs | Your Next.js host and Convex backend | A hosted OpenReview deployment |
+| Model and keys | Yours, with your own budget | Provided by the operator (own key on paid plans) |
+| Review limits | None | Plan quota per seat |
+| Price | Free | Starter $12 and Pro $24 per seat per month, 14-day trial ([pricing](https://openreview.tech/#pricing)) |
+
+## How it compares
+
+- [OpenReview vs Greptile](docs/compare/greptile.md)
+- [OpenReview vs CodeRabbit](docs/compare/coderabbit.md)
+
+We make no accuracy or parity claims against other products. See [Checks and evaluation](#checks-and-evaluation) for how to measure it on your own code.
+
+## Status
+
+Implemented with passing local unit and integration, production browser, web build and self-hosted Docker checks. Live GitHub installation and model quality depend on your credentials and need your own verification. Evidence levels per feature are in the [acceptance matrix](docs/acceptance-matrix.md) and the [parity report](docs/parity/REPORT.md).
+
+## Full feature list
 
 Each feature below has automated tests. The evidence level for each one (tests with fakes, verified locally, or verified live on a provider) is listed in [the acceptance matrix](docs/acceptance-matrix.md) and [the parity report](docs/parity/REPORT.md).
 
@@ -102,25 +187,6 @@ Local Git branch → CLI → the same reviewChange engine
 ```
 
 Repository content and model output are untrusted. Findings require exact source evidence and a changed-line location before a second model verification pass. Duplicate delivery IDs and review head SHAs are persisted. Reviews record stages and retries; publishing resumes stored results after failures.
-
-![OpenReview sign-in page](docs/images/sign-in.png)
-
-## Local quickstart
-
-Use Node.js 24 and pnpm 11.
-
-```sh
-pnpm install
-CONVEX_AGENT_MODE=anonymous pnpm exec convex dev --once
-pnpm setup:local
-pnpm backend
-# In another terminal:
-pnpm dev
-```
-
-Open http://localhost:3000. Local setup generates independent session, service, and webhook secrets and synchronizes them to the local backend without printing their values. `.env.local` and `.env.backend` are ignored by Git. For provider/GitHub settings, edit `.env.local`, then run `pnpm setup:local` again. Backend changes must be deployed with `pnpm backend` or `convex dev --once`.
-
-To test billing and referrals locally, point the [Stripe CLI](https://docs.stripe.com/stripe-cli) at a Stripe sandbox (`stripe switch`, never live mode), and run `stripe listen --print-secret` once for the webhook signing secret. Put the sandbox values from [docs/billing.md](docs/billing.md#setup-operator) in `.env.local`: `STRIPE_SECRET_KEY` (`rk_test_…`), `STRIPE_WEBHOOK_SECRET`, `STRIPE_SEAT_PRICE_ID` and `BILLING_ENABLED=true`, plus `REFERRALS_ENABLED=true` and `STRIPE_REFERRAL_COUPON_ID` for referrals. Then run `pnpm setup:local`, which copies the billing settings that have a value to the local backend, replacing the ones it had, so a new sandbox key or webhook secret takes effect. Keep `pnpm stripe:listen` running to forward sandbox webhooks to the backend that `NEXT_PUBLIC_CONVEX_SITE_URL` in `.env.local` names. Claude Code copies `.env.local` into each new worktree (`.worktreeinclude`), so agents working there can use the same sandbox. In a worktree created earlier, copy only the `STRIPE_*`, `BILLING_*` and `REFERRAL*` lines into its `.env.local`, because the other lines name that worktree's own backend and secrets, then run `pnpm setup:local` there.
 
 ## GitHub App setup
 
