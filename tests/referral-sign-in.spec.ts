@@ -59,7 +59,7 @@ test("a magic-link request stores the referral code on the login token and keeps
   const form = new FormData();
   form.set("email", "new@example.com"); form.set("from", "signup"); form.set("referral", "abcd-2345");
   const response = await requestMagicLink(new Request(`${base}/api/auth/email`, { method: "POST", headers: { origin: base }, body: form }));
-  expect(response.headers.get("location")).toBe(`${base}/signup?email=sent&referral=ABCD2345`);
+  expect(response.headers.get("location")).toBe(`${base}/signup?email=sent&referral=ABCD2345&to=new%40example.com`);
   expect((await t.run((ctx) => ctx.db.query("loginTokens").collect())).map((token) => token.referralCode)).toEqual(["ABCD2345"]);
 });
 

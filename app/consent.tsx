@@ -23,7 +23,7 @@ export function ConsentBanner() {
     if (open && focusNext.current) { focusNext.current = false; first.current?.focus(); }
   }, [open]);
   // Marketing pages pad by the painted height so a fixed banner never covers primary actions.
-  // Auth screens take the banner out of `position: fixed` instead (see `.consent` in globals.css).
+  // Auth and onboarding screens take the banner out of `position: fixed` instead (see `.consent` in globals.css).
   useEffect(() => {
     const root = document.documentElement;
     if (!open) {

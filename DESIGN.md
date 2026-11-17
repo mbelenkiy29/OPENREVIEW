@@ -175,7 +175,7 @@ The landing page's motion lives in `app/landing/motion.tsx`, with its styles at 
 - Standalone short pages (OAuth consent, fix hand-off) use `.narrow`, which matches `.welcome` spacing so they are readable without dashboard chrome.
 - Status is never shown by colour alone: badges always carry their text.
 - Layouts hold at 390px without horizontal page scroll in both themes. Wide tables and diffs scroll inside their own containers. Public docs and legal markdown tables wrap cell text so comparison columns fit at 1280px; below 960px a thin scrollbar remains when a table still overflows. `pnpm test:e2e` checks this.
-- The analytics cookie banner is fixed on marketing pages, with body padding from its painted height. On `/login` and `/signup` it sits in document flow under the form so GitLab sign-in and the Terms/Privacy line stay visible.
+- The analytics cookie banner is fixed on marketing pages, with body padding from its painted height. On `/login`, `/signup` and guided setup it sits in document flow so GitLab sign-in, Terms/Privacy and the wizard Logout link stay visible.
 - `prefers-reduced-motion` turns off transitions (tab bars jump instead of sliding), the skeleton pulse, the tab panel and section-link fades, every guided-setup animation and all landing motion, including smooth scrolling.
 
 ## Adding UI

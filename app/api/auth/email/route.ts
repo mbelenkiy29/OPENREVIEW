@@ -22,9 +22,9 @@ export async function POST(request: Request) {
   // A referral code rides along on the link, and survives the redirect so a retry keeps it.
   const page = origin() + authPagePath(String(form?.get("from") ?? "")), referral = normalizeReferralCode(form?.get("referral")), referralCode = referral && referralConfig().enabled ? referral : null;
   let logged: Record<string, unknown> = {};
-  const finish = (result: "sent" | "busy" | "challenge" | "error", decision: string) => {
+  const finish = (result: "sent" | "busy" | "challenge" | "error", decision: string, to?: string) => {
     console.log(JSON.stringify({ event: "auth.magic_link", rid, decision, ...logged, ms: Date.now() - started }));
-    return NextResponse.redirect(`${page}${authQuery({ email: result, referral })}`, 303);
+    return NextResponse.redirect(`${page}${authQuery({ email: result, referral, to })}`, 303);
   };
   if (request.headers.get("origin") !== origin()) return finish("error", "origin_rejected");
   const address = emailAddress.safeParse(email);
@@ -33,16 +33,16 @@ export async function POST(request: Request) {
   logged = { email: (await limitKey(canonicalEmail(address.data))).slice(0, 10), ip: ipHash?.slice(0, 10) ?? null, domain: address.data.split("@")[1] };
   const challenge = await checkTurnstile(form, "magic_link", { hostname: new URL(origin()).hostname, ip });
   if (challenge.result) logged.turnstile = challenge.result;
-  if (!challenge.allowed) return finish("challenge", "challenge_failed");
+  if (!challenge.allowed) return finish("challenge", "challenge_failed", address.data);
   try {
     const result = await backend().action(api.identityJobs.requestMagicLink, { secret: process.env.SERVICE_SECRET ?? "", email: address.data, next, requestId: rid, ...(ipHash ? { ipHash } : {}), ...(referralCode ? { referralCode } : {}) });
     if (result.status === "sent" && result.nearCap) Sentry.captureMessage("Sign-in emails passed half of the deployment-wide cap (AUTH_EMAIL_HOURLY/AUTH_EMAIL_DAILY)", { level: "warning", fingerprint: ["auth-email-near-cap"] });
-    return finish(result.status === "limited" ? "busy" : "sent", result.status);
+    return finish(result.status === "limited" ? "busy" : "sent", result.status, address.data);
   } catch (error) {
     // The visitor sees "couldn't send"; a cause that hits everyone (Resend key or quota, Convex down)
     // must reach Sentry too, as one issue. `rid` finds the request's log lines; the auth_failure tag is what
     // the "sign-in failures" Sentry alert matches.
     Sentry.captureException(error, { level: "error", fingerprint: ["auth-email-send-failed"], tags: { auth_failure: "email-send" }, extra: { rid } });
-    return finish("error", "error");
+    return finish("error", "error", address.data);
   }
 }

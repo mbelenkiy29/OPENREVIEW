@@ -1250,8 +1250,8 @@ tr:last-child td {
 }
 
 /* Analytics cookie consent: compact bar. Marketing pages pad by the painted height (`--consent-h`
-   from app/consent.tsx). Auth screens put the banner in document flow under the form so GitLab and
-   the Terms/Privacy line are never hidden, even when Turnstile or the inbox notice adds height. */
+   from app/consent.tsx). Auth and onboarding screens put the banner in document flow so GitLab,
+   Terms/Privacy, and the wizard Logout link are never hidden. */
 body:has(.consent) {
   padding-bottom: calc(var(--consent-h, 8rem) + 12px);
 }
@@ -1272,10 +1272,10 @@ body:has(.consent) {
   background: var(--bg);
   box-shadow: var(--shadow-popover);
 }
-body:has(.auth):has(.consent) {
+body:has(.auth, .wizard):has(.consent) {
   padding-bottom: 0;
 }
-body:has(.auth) .consent {
+body:has(.auth, .wizard) .consent {
   position: static;
   left: auto;
   right: auto;
@@ -4000,6 +4000,11 @@ form.catalog-review {
 #wizard-invite {
   flex-direction: column;
   align-items: stretch;
+}
+.wizard-pending {
+  margin: 0;
+  min-height: 1.4em;
+  line-height: 1.4;
 }
 .wizard-fieldset {
   display: flex;

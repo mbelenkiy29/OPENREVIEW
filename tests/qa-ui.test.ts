@@ -11,11 +11,11 @@ test("the cookie banner reports its painted height as --consent-h", () => {
   assert.match(css, /padding-bottom: calc\(var\(--consent-h, 8rem\) \+ 12px\)/);
 });
 
-test("on auth pages the cookie banner is in document flow so it cannot cover GitLab or Terms", () => {
-  assert.match(css, /body:has\(\.auth\) \.consent \{/);
-  const auth = css.slice(css.indexOf("body:has(.auth) .consent {"));
+test("on auth and onboarding pages the cookie banner is in document flow so it cannot cover GitLab, Terms or Logout", () => {
+  assert.match(css, /body:has\(\.auth, \.wizard\) \.consent \{/);
+  const auth = css.slice(css.indexOf("body:has(.auth, .wizard) .consent {"));
   assert.match(auth.slice(0, auth.indexOf("\n}")), /position: static/);
-  assert.match(css, /body:has\(\.auth\):has\(\.consent\) \{\n\s*padding-bottom: 0;/);
+  assert.match(css, /body:has\(\.auth, \.wizard\):has\(\.consent\) \{\n\s*padding-bottom: 0;/);
   assert.doesNotMatch(css, /body:has\(\.consent\) \.auth-panel/);
 });
 
