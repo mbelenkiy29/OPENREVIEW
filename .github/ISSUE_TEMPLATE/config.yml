@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/mbelenkiy29/OPENREVIEW/blob/main/SECURITY.md
+    about: Email the contact in SECURITY.md. Do not file public issues for vulnerabilities or live credentials.
+  - name: Documentation
+    url: https://github.com/mbelenkiy29/OPENREVIEW/blob/main/docs/public/quickstart.md
+    about: Quickstart, self-hosting, and CLI install from this checkout.

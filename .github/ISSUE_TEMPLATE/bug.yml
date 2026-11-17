@@ -1,0 +1,63 @@
+name: Bug
+description: Something is broken or does not match documented behaviour.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include secrets, `.env` files, private repository source, or webhook payloads that contain tokens.
+
+        The CLI package is **not on npm yet**. `npm install -g openreview-cli` 404s. Install from this checkout (`pnpm install` then `npm link`, or `pnpm cli`). See CONTRIBUTING.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, including the exact command or page.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps. Prefer a small public fixture over a private repo dump.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Dashboard / UI
+        - CLI
+        - GitHub App / webhooks
+        - Review engine
+        - Docs / onboarding
+        - Self-hosting / Docker
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: Node.js version, pnpm version, hosted vs self-hosted, OS.
+      placeholder: Node 24.11, pnpm 11, self-hosted Docker, Ubuntu
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Redact secrets. Paste only the failing lines.
+      render: text
