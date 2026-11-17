@@ -27,6 +27,10 @@ test("webhook signature verifies exact bytes, rejects missing/malformed signatur
   assert.equal(verifyWebhook(body, null, secret), false);
   assert.equal(verifyWebhook(body, "sha256=xx", secret), false);
   assert.equal(verifyWebhook(body, signature, ""), false);
+  const sha1 = "sha1=" + createHmac("sha1", secret).update(body).digest("hex");
+  assert.ok(verifyWebhook(body, sha1, secret), "legacy GitHub Enterprise SHA-1 signatures verify");
+  assert.equal(verifyWebhook(body + " ", sha1, secret), false);
+  assert.equal(verifyWebhook(body, "sha1=not-a-digest", secret), false);
 });
 
 test("branch inventory validates provider data and reports its browsing ceiling", async () => {

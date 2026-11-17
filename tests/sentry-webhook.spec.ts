@@ -42,6 +42,13 @@ test("a delivery not signed with the client secret is rejected", async () => {
   expect(fires).toHaveLength(0);
 });
 
+test("signed but invalid JSON is 400 instead of 500", async () => {
+  const body = "{not-json";
+  const response = await POST(new Request("https://review.example.com/api/sentry/webhook", { method: "POST", body, headers: { "sentry-hook-resource": "issue", "sentry-hook-signature": createHmac("sha256", secret).update(body).digest("hex") } }));
+  expect(response.status).toBe(400);
+  expect(fires).toHaveLength(0);
+});
+
 test("other actions, resources and projects are acknowledged without a run", async () => {
   expect(await deliver({ action: "resolved", data: { issue } })).toBe(204);
   expect(await deliver({ action: "created", data: { issue } }, { resource: "event_alert" })).toBe(204);

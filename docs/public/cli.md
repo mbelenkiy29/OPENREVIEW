@@ -4,10 +4,15 @@ The `openreview` command reviews your commits before you push, from your termina
 
 ## Install and sign in
 
+The `openreview-cli` package is **not on npm yet**. From a clone of this repository (Node.js 24, pnpm 11):
+
 ```sh
-npm install -g openreview-cli
+pnpm install
+npm link
 openreview login
 ```
+
+`npm link` installs the `openreview` command from `bin/openreview.mjs`. Run it in the Git checkout you want reviewed. `pnpm cli` in this repository runs the same entrypoint without linking. Publishing the `openreview-cli` package to the npm registry is a tracked open item.
 
 `openreview login` opens your browser to sign in and choose a workspace. The CLI keeps the sign-in owner-only in `~/.config/openreview/config.json` and renews it on its own.
 
@@ -16,7 +21,7 @@ openreview login
 - **API key on a machine** (Pro plan, or a Perforce only key on any plan): `openreview login --api-key` prompts for the key without echoing it, or reads it from stdin (`printf %s "$KEY" | openreview login --api-key`). Avoid `--token <api-key>`, which leaves the key in your shell history and process list; it still works but warns.
 - `openreview status` (or `openreview whoami`) shows the server and your repositories. `openreview logout` signs out and revokes the sign-in.
 
-It needs Node.js 24 or newer. In a checkout of this repository, `pnpm cli` runs the same command, and `npm link` installs it.
+It needs Node.js 24 or newer. `pnpm build:cli` writes the packaged binary to `packages/cli/dist/openreview.mjs`.
 
 ## Review your changes
 

@@ -59,3 +59,8 @@ export async function runPullAction(github: Github, repository: string, number: 
   }
   return pullActionLabels[a.action];
 }
+
+/** Dashboard GitHub actions still succeed if the workspace audit write fails; the failure is logged. */
+export function logPullAuditFailure(action: string, error: unknown) {
+  console.error(JSON.stringify({ event: "pull.audit_failed", action, error: error instanceof Error ? error.message.slice(0, 200) : "failed" }));
+}
