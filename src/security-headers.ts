@@ -39,8 +39,10 @@ export function contentSecurityPolicy(nonce?: string, anyFormTarget = false, dev
     "font-src 'self' https://fonts.gstatic.com",
     // PostHog and Sentry go through same-origin proxies (src/telemetry.ts). UserJot's API, live updates,
     // SDK CSS, Google Fonts CSS fetch, and jotlens collector; OpenAI Ads and Reddit pixels (src/ads-pixel.ts,
-    // src/reddit-pixel.ts). `data:` is Turnstile's non-network feature-detection URL (app/turnstile.tsx).
-    "connect-src 'self' https://widget.userjot.com wss://widget.userjot.com https://cdn.userjot.com https://collect.jotlens.com https://fonts.googleapis.com https://bzrcdn.openai.com https://bzr.openai.com https://pixel-config.reddit.com https://alb.reddit.com data:",
+    // src/reddit-pixel.ts). Turnstile's widget may `fetch("data:,")` as a capability probe; that is not
+    // required for the challenge (developers.cloudflare.com/turnstile/reference/content-security-policy;
+    // app/turnstile.tsx never fetches data: URLs) and is left out of connect-src.
+    "connect-src 'self' https://widget.userjot.com wss://widget.userjot.com https://cdn.userjot.com https://collect.jotlens.com https://fonts.googleapis.com https://bzrcdn.openai.com https://bzr.openai.com https://pixel-config.reddit.com https://alb.reddit.com",
     // Cloudflare Turnstile's challenge (app/turnstile.tsx) and the embedded UserJot board on /feedback.
     "frame-src https://challenges.cloudflare.com https://*.userjot.com",
     "media-src 'self'",
