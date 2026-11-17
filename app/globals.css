@@ -1249,12 +1249,11 @@ tr:last-child td {
   box-shadow: var(--shadow-popover), inset 0 0 0 1px var(--error);
 }
 
-/* Analytics cookie consent: compact bar, with page padding so it never covers primary actions. */
+/* Analytics cookie consent: compact bar. Marketing pages pad by the painted height (`--consent-h`
+   from app/consent.tsx). Auth screens put the banner in document flow under the form so GitLab and
+   the Terms/Privacy line are never hidden, even when Turnstile or the inbox notice adds height. */
 body:has(.consent) {
-  padding-bottom: 8rem;
-}
-body:has(.consent) .auth-panel {
-  padding-bottom: 8.5rem;
+  padding-bottom: calc(var(--consent-h, 8rem) + 12px);
 }
 .consent {
   position: fixed;
@@ -1272,6 +1271,22 @@ body:has(.consent) .auth-panel {
   border-radius: var(--radius-lg);
   background: var(--bg);
   box-shadow: var(--shadow-popover);
+}
+body:has(.auth):has(.consent) {
+  padding-bottom: 0;
+}
+body:has(.auth) .consent {
+  position: static;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--line);
+  box-shadow: none;
 }
 .consent-copy {
   flex: 1 1 220px;
@@ -3095,10 +3110,45 @@ form.catalog-review {
   text-align: left;
   vertical-align: top;
 }
+/* Global `table { white-space: nowrap }` is for dashboard grids. Public markdown tables wrap so
+   comparison columns (billing Feature/Free/Starter/Pro, privacy Provider/Purpose) stay on-screen
+   at 1280px. Below 960px a thin scrollbar remains when a row still overflows. */
+.docs-content .table-scroll table,
+.docs-content .table-scroll :is(th, td) {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.docs-content .table-scroll code {
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+}
+@media (min-width: 960px) {
+  .docs-content .table-scroll table {
+    table-layout: fixed;
+    width: 100%;
+  }
+}
 .table-scroll {
   overflow-x: auto;
   max-width: 100%;
   min-width: 0;
+}
+@media (max-width: 959px) {
+  .docs-content .table-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--text) 35%, transparent) transparent;
+  }
+  .docs-content .table-scroll::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+  }
+  .docs-content .table-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .docs-content .table-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--text) 35%, transparent);
+    border-radius: 4px;
+  }
 }
 /* Feedback board (app/feedback): the UserJot embed inside the site frame. */
 .board-page {
@@ -12374,9 +12424,6 @@ form.chat-delete {
   }
   .auth-panel {
     padding: 40px 16px;
-  }
-  body:has(.consent) .auth-panel {
-    padding-bottom: 12rem;
   }
 }
 

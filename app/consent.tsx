@@ -10,7 +10,7 @@ const signals = () => navigator as Navigator & { globalPrivacyControl?: boolean 
 /** Cookie consent for analytics: shown until the visitor chooses, and again from "Cookie settings". */
 export function ConsentBanner() {
   const [open, setOpen] = useState(false);
-  const first = useRef<HTMLButtonElement>(null), focusNext = useRef(false);
+  const first = useRef<HTMLButtonElement>(null), banner = useRef<HTMLElement>(null), focusNext = useRef(false);
   useEffect(() => {
     // Decided after mount: the cookie and browser signals are only known in the browser.
     setOpen(needsChoice(Boolean(posthogToken), document.cookie, signals()));
@@ -22,6 +22,22 @@ export function ConsentBanner() {
   useEffect(() => {
     if (open && focusNext.current) { focusNext.current = false; first.current?.focus(); }
   }, [open]);
+  // Marketing pages pad by the painted height so a fixed banner never covers primary actions.
+  // Auth screens take the banner out of `position: fixed` instead (see `.consent` in globals.css).
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!open) {
+      root.style.removeProperty("--consent-h");
+      return;
+    }
+    const el = banner.current;
+    if (!el) return;
+    const sync = () => root.style.setProperty("--consent-h", `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(el);
+    return () => { observer.disconnect(); root.style.removeProperty("--consent-h"); };
+  }, [open]);
   if (!open) return null;
   const choose = (choice: Consent) => {
     document.cookie = consentCookieValue(choice, location.protocol === "https:");
@@ -30,7 +46,7 @@ export function ConsentBanner() {
     else { clearAnalyticsStorage(); withLoadedAnalytics((a) => a.stopAnalytics()); }
     setOpen(false);
   };
-  return <section className="consent" aria-labelledby="consent-heading">
+  return <section ref={banner} className="consent" aria-labelledby="consent-heading">
     <div className="consent-copy">
       <h2 id="consent-heading">Analytics cookies</h2>
       <p>May we use cookies to count visits and measure ads? No tracking on other sites. See the <Link href="/privacy">Privacy Policy</Link>.</p>
