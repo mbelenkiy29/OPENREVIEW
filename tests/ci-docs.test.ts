@@ -13,6 +13,9 @@ test("CI installs Node 24, then lints, typechecks, tests and builds", () => {
   assert.match(ci, /pnpm typecheck/);
   assert.match(ci, /pnpm test/);
   assert.match(ci, /pnpm build/);
+  // Job-level APP_URL would inject dashboard links into GitHub summary tests.
+  const jobEnv = /jobs:\n  check:[\s\S]*?\n    env:\n([\s\S]*?)\n    steps:/.exec(ci)?.[1] ?? "";
+  assert.doesNotMatch(jobEnv, /APP_URL/);
 });
 
 test("issue templates exist for bugs and features, and security reports stay off the public tracker", () => {
