@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ScrollTable } from "./dashboard/scroll-table";
 import { SiteFooter, SiteHeader } from "./site-chrome";
 
 // Privacy Policy, Terms of Service and the Security page for the hosted service, read from
@@ -10,7 +11,10 @@ export async function LegalPage({ name }: { name: "privacy" | "terms" | "securit
   const source = await fs.readFile(path.join(process.cwd(), "legal", `${name}.md`), "utf8");
   return <div className="docs-layout single">
     <SiteHeader />
-    <main className="docs-content review-markdown"><Markdown remarkPlugins={[remarkGfm]} skipHtml>{source}</Markdown></main>
+    <main id="main" className="docs-content review-markdown"><Markdown remarkPlugins={[remarkGfm]} skipHtml disallowedElements={["img"]} components={{
+      pre: ({ children }) => <pre tabIndex={0}>{children}</pre>,
+      table: ({ children }) => <ScrollTable label="Table" className="table-scroll"><table>{children}</table></ScrollTable>,
+    }}>{source}</Markdown></main>
     <SiteFooter />
   </div>;
 }

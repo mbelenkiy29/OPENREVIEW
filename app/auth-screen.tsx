@@ -51,7 +51,7 @@ export async function AuthScreen({ mode, query }: { mode: AuthMode; query: AuthQ
   const next = query.next ? safeNext(query.next) : undefined, message = authMessage(query), referral = normalizeReferralCode(query.referral);
   const carry = authQuery({ next, referral }), billing = billingConfig(), referrer = await referrerFor(referral), discount = referralConfig().discountLabel;
   return <div className="auth">
-    <main className="auth-panel">
+    <main id="main" className="auth-panel">
       <div className="auth-card">
         <Link className="auth-logo" href="/" aria-label="OpenReview home"><Mark /></Link>
         <h1>{mode === "login" ? "Log into your account" : "Create an account"}</h1>

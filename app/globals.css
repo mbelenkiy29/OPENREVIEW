@@ -131,10 +131,30 @@ a {
 a:hover {
   text-decoration: underline;
 }
+/* First in the tab order; visible only when focused so keyboard users can skip chrome. */
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -48px;
+  z-index: 1000;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 500;
+  text-decoration: none;
+}
+.skip-link:focus {
+  top: 12px;
+  text-decoration: none;
+}
 /* Links inside running text on public pages are underlined, so they don't rely on colour alone. */
 .docs-content :where(p, li, td) a,
 .consent p a,
-.auth p a {
+.auth p a,
+.landing :where(p, li, td, .hero-links, .feature-copy) a:not(.button),
+.welcome :where(p, li) a:not(.button),
+.narrow :where(p, li) a:not(.button) {
   text-decoration: underline;
 }
 h1,
@@ -1127,18 +1147,21 @@ tr:last-child td {
   padding: 16px 0;
   border-top: 1px solid var(--line);
 }
-.welcome {
+.welcome,
+.narrow {
   max-width: 640px;
   margin: 12vh auto;
   padding: 0 24px;
 }
-.welcome h1 {
+.welcome h1,
+.narrow h1 {
   font-size: 44px;
   line-height: 1.05;
   letter-spacing: -0.025em;
   margin: 48px 0 16px;
 }
-.welcome > p {
+.welcome > p,
+.narrow > p {
   font-size: 16px;
   color: var(--muted);
 }
@@ -4777,10 +4800,12 @@ input.switch:checked::before {
   }
 }
 @media (max-width: 620px) {
-  .welcome {
+  .welcome,
+  .narrow {
     margin: 6vh auto;
   }
-  .welcome h1 {
+  .welcome h1,
+  .narrow h1 {
     font-size: 34px;
   }
   .form-grid {
@@ -6554,7 +6579,7 @@ dialog.modal::backdrop {
   justify-self: center;
   max-height: 166px;
   overflow: hidden;
-  color: var(--text-ter);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.08em;
@@ -6573,7 +6598,7 @@ dialog.modal::backdrop {
   position: absolute;
   right: 0;
   transform: translateY(50%);
-  color: var(--text-ter);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1;
@@ -6690,7 +6715,7 @@ dialog.modal::backdrop {
   transform: translate(calc(-100% - 12px), -50%);
 }
 .chart-tip-date {
-  color: var(--text-ter);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.06em;
@@ -6699,7 +6724,7 @@ dialog.modal::backdrop {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-ter);
+  color: var(--muted);
   font-size: 14px;
 }
 .chart-tip-row i {
@@ -6719,7 +6744,7 @@ dialog.modal::backdrop {
   grid-row: 2;
   grid-column: 3;
   padding-top: 8px;
-  color: var(--text-ter);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 15px;
@@ -6788,7 +6813,7 @@ dialog.modal::backdrop {
 }
 .chart-board-name small {
   margin-left: 8px;
-  color: var(--text-ter);
+  color: var(--muted);
   font-size: 13px;
 }
 .chart-board-value {

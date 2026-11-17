@@ -39,7 +39,7 @@ export default async function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning data-userjot={userJot ? "" : undefined}>
       <head><script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{__html:themeScript}} /></head>
-      <body><ThemeProvider>{children}<ConsentBanner /><AdsPageViews />{userJot&&<UserJot projectId={userJot.projectId} boardUrl={userJot.boardUrl} />}</ThemeProvider></body>
+      <body><a className="skip-link" href="#main">Skip to content</a><ThemeProvider>{children}<ConsentBanner /><AdsPageViews />{userJot&&<UserJot projectId={userJot.projectId} boardUrl={userJot.boardUrl} />}</ThemeProvider></body>
     </html>
   );
 }

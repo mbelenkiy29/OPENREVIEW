@@ -31,7 +31,7 @@ export default async function DocsPage({ params }: { params: Promise<{ slug?: st
   return <div className="docs-layout">
     <SiteHeader current="docs" />
     <aside className="docs-nav" aria-label="Documentation"><DocsSearch index={await docsIndex()}>{sections.map((s) => <div key={s}><h2>{s}</h2><ul>{docPages.filter((d) => d.section === s).map((d) => <li key={d.slug}><Link href={`/docs/${d.slug}`} aria-current={d.slug === page.slug ? "page" : undefined}>{d.title}</Link></li>)}</ul></div>)}</DocsSearch></aside>
-    <main className="docs-content review-markdown">
+    <main id="main" className="docs-content review-markdown">
       <Markdown remarkPlugins={[remarkGfm]} skipHtml disallowedElements={["img"]} components={{
         a: ({ href, children }) => { const link = resolveDocLink(page.file, href ?? ""); return link.kind === "external" ? <a href={link.url} target="_blank" rel="noopener noreferrer">{children}</a> : link.kind === "text" || !link.url ? <span>{children}</span> : <Link href={link.url}>{children}</Link>; },
         pre: ({ children }) => <pre tabIndex={0}>{children}</pre>,
