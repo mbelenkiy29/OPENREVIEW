@@ -2,7 +2,15 @@
 
 17 November 2026. First-round engineering audit of this repository: architecture, local run, tests, bugs, UI, onboarding, and a comparison with Greptile and CodeRabbit. No Greptile or CodeRabbit code, copy or branding was used.
 
-**Gate on this checkout (Node.js 24.11.1, pnpm 11.1.2):** `pnpm lint` (3 pre-existing warnings, 0 errors), `pnpm typecheck`, `pnpm test` (658 Node tests + 560 Vitest tests). `pnpm build` and Playwright screenshots are follow-up work.
+**Gate on this checkout (Node.js 24.11.1, pnpm 11.1.2):** `pnpm lint` (3 pre-existing warnings, 0 errors), `pnpm typecheck`, `pnpm test` (658 Node tests + 560 Vitest tests). `pnpm build` is in #152. Playwright screenshots for public pages (1280 and 390) are attached to #151.
+
+Open pull requests (do not merge until reviewed):
+
+| Theme | PR |
+| --- | --- |
+| Critical bugs, CLI onboarding, this audit | [#149](https://github.com/mbelenkiy29/OPENREVIEW/pull/149) |
+| UI/UX polish | [#151](https://github.com/mbelenkiy29/OPENREVIEW/pull/151) |
+| CI build, issue templates, CONTRIBUTING | [#152](https://github.com/mbelenkiy29/OPENREVIEW/pull/152) |
 
 ## Architecture
 
@@ -58,16 +66,16 @@ Severity, location, status. **Fixed** in this round means the change is in the o
 | B3 | Medium | `app/api/providers/[id]/webhook/route.ts`, `convex/providerJobs.ts` | **Fixed** | Every Convex failure became 401, including invalid JSON after a valid signature. JSON parse is explicit; statuses are 401 / 400 / 503. |
 | B4 | Medium | `src/github.ts` `verifyWebhook` | **Fixed** | The provider route fell back to `X-Hub-Signature` (SHA-1) but verification only accepted `sha256=`. Legacy GitHub Enterprise deliveries that send only SHA-1 were dropped. SHA-1 HMAC of the exact body is now accepted when the header matches `sha1=` plus 40 hex chars. |
 | B5 | Low | `src/pull-actions-server.ts` | **Fixed** | Dashboard GitHub actions swallowed audit-log write failures after GitHub had already performed the action. Failures are now structured-logged (`pull.audit_failed`). |
-| C1 | Medium | `.github/workflows/ci.yml` | Open | CI runs lint, typecheck and test, not `pnpm build`. CONTRIBUTING and the README treat build as required. |
-| C2 | Medium | `Dockerfile` vs `package.json` `engines` vs CI | Open | Docker builds on **Node 26**; docs and CI use **Node 24**. Behaviour can diverge for native addons and CLI. |
-| C3 | Low | `.github/ISSUE_TEMPLATE/` | Open | No bug / feature / support issue templates. |
-| C4 | Low | `CONTRIBUTING.md` | Open | Eight lines; no PR checklist, security pointer, or CLI-from-checkout notes. |
-| U1 | Medium | `app/oauth/consent/page.tsx` | Open | Uses class `narrow` with no CSS; consent pages are full-width unstyled `<main>`. |
-| U2 | Medium | `app/dashboard/error.tsx`, `loading.tsx` | Open | Error and first-load skeleton drop portal chrome (nav/tabs). |
-| U3 | Medium | `app/globals.css` landing links | Open | DESIGN.md requires underlined links in running text on public pages; landing feature CTAs are not underlined. |
-| U4 | Low | `app/layout.tsx` | Open | No skip-to-main link. |
-| U5 | Low | `app/globals.css` charts | Open | `--text-ter` used for chart axes (DESIGN: decorative only). Dark `#6f6e69` on `#14120b` is weak for 12px labels. |
-| U6 | Low | `app/dashboard/pulls.tsx` | Open | Pulls table scrolls via `.table-box` but is not wrapped in `ScrollTable` (keyboard/ARIA region used elsewhere). |
+| C1 | Medium | `.github/workflows/ci.yml` | **Fixed** in #152 | CI now runs `pnpm build` after lint, typecheck and test. |
+| C2 | Medium | `Dockerfile` vs `package.json` `engines` vs CI | **Documented** in #152 / **open (align image)** | Docker still builds on **Node 26**; docs and CI use **Node 24**. The split is now written in the README, CONTRIBUTING, and a Dockerfile comment. Pinning the image to Node 24 remains an operator choice. |
+| C3 | Low | `.github/ISSUE_TEMPLATE/` | **Fixed** in #152 | Bug and feature templates; blank issues off; security reports go to SECURITY.md. |
+| C4 | Low | `CONTRIBUTING.md` | **Fixed** in #152 | Node 24 vs Docker 26, unpublished CLI install, check commands, security pointer. |
+| U1 | Medium | `app/oauth/consent/page.tsx` | **Fixed** in #151 | `.narrow` matches `.welcome`; expired consent has Home and MCP docs links. |
+| U2 | Medium | `app/dashboard/error.tsx`, `loading.tsx` | **Fixed** in #151 | First-load and layout errors show portal chrome; page errors keep the portal layout. |
+| U3 | Medium | `app/globals.css` landing links | **Fixed** in #151 | Landing, welcome, and consent running-text links are underlined. |
+| U4 | Low | `app/layout.tsx` | **Fixed** in #151 | Skip-to-content is the first tab stop and targets `#main`. |
+| U5 | Low | `app/globals.css` charts | **Fixed** in #151 | Chart axes, tooltips, and board captions use `--muted`. |
+| U6 | Low | `app/dashboard/pulls.tsx` | **Fixed** in #151 | Pull list (and legal markdown tables) use `ScrollTable`. |
 | S1 | Low | `app/api/bridge/[action]/route.ts` | Open | Pairing rate limit prefers `X-Forwarded-For` / `X-Real-IP`. Fine behind a stripping proxy; spoofable if the app is reached directly. |
 | S2 | Info | `convex/runtime.ts` `claim` | Open (by design) | Claim patches a queued job without an extra status CAS. Convex mutations are OCC-serializable, so concurrent workers retry; not a practical race. Left documented rather than “fixed”. |
 | S3 | Info | `convex/providerConnections.ts` `claimEvent` | Open (by design) | 15-minute recovery is after typical Convex action timeouts (~10 min), so a still-running handler should already have been killed. |
@@ -116,8 +124,8 @@ Measured as the path a new OSS user follows from clone to a review on their own 
 4. **Show HN / Product Hunt.** After Marketplace or a public demo workspace exists. Show HN wants a working playground, not a self-hosting essay.
 5. **Docs site.** `/docs` already exists (`docs/public/` + selected guides). Add a short “Install the GitHub App (hosted)” page once a hosted App exists, distinct from “Register your own App (self-host)”.
 6. **Comparison pages.** `/docs/compare` with original, factual tables: self-host, BYO model, evidence gating, price. Never use competitor trademarks in product UI chrome.
-7. **Issue templates + CONTRIBUTING.** Tracked as C3/C4. Bug, feature, and support templates; CONTRIBUTING that repeats the real CLI install and the `pnpm lint && pnpm typecheck && pnpm test && pnpm build` gate.
-8. **Good-first-issues.** Label and write three: (1) Node 24 vs Docker 26 alignment, (2) skip-to-main link, (3) `ScrollTable` on the pulls list. Point at `docs/AUDIT.md` IDs U4, U6, C2.
+7. **Issue templates + CONTRIBUTING.** Done in #152 (C3/C4).
+8. **Good-first-issues.** Remaining: (1) pin Docker to Node 24 or raise the documented engine (C2), (2) trust only the last `X-Forwarded-For` hop or require a known proxy (S1), (3) isolate `tests/bridge.test.ts` from parallel SIGSEGV (T1). U4/U6 shipped in #151.
 
 ### Needs human (publish and hosted distribution)
 
@@ -125,4 +133,4 @@ Measured as the path a new OSS user follows from clone to a review on their own 
 2. Bump `packages/cli/package.json` version if needed, run **Publish CLI** (`workflow_dispatch`).
 3. Set `cliNpmPublished` to `true` in `src/cli-install.ts` and restore `npm install -g openreview-cli` in README and `docs/public/cli.md` (the test in `tests/cli-install.test.ts` enforces this).
 4. Register a public GitHub App and a Marketplace listing (or document why the project stays “bring your own App”).
-5. Align Dockerfile Node 26 vs documented Node 24.
+5. Align Dockerfile Node 26 vs documented Node 24 (still open after #152 documents the split).
