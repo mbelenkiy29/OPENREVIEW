@@ -61,7 +61,10 @@ export const originWebhook=action({args:{secret:v.string(),body:v.string(),exter
  if(!secretMatches(process.env.SERVICE_SECRET,a.secret))throw new Error("Unauthorized service");
  if(a.body.length>4000000||!process.env.ORIGIN_APP_ID)throw new Error("Invalid Origin webhook configuration or body");
  if(!await verifyOriginWebhook(a.body,a.externalId,a.timestamp,a.signature))throw new Error("Invalid Origin signature");
- const e=originEnvelope.parse(JSON.parse(a.body));
+ let parsed: unknown;
+ try { parsed = JSON.parse(a.body); }
+ catch { throw new Error("Invalid Origin JSON body"); }
+ const e=originEnvelope.parse(parsed);
  if(e.deliveryId!==a.externalId||e.appId!==process.env.ORIGIN_APP_ID)throw new Error("Origin delivery identity mismatch");
  if(e.event.type==="ping")return;
  const installationId=e.installationId??z.object({installation:z.object({id:z.string(),appId:z.string()})}).parse(e.event.payload).installation.id;
@@ -135,7 +138,9 @@ export const webhook=action({args:{secret:v.string(),connectionId:v.id("provider
  // GitLab and Azure DevOps service hooks send the shared secret itself (a header or Basic password).
  const verified=c.kind==="gitlab"||c.kind==="azure-devops"?timingSafeEqual(createHash("sha256").update(expected).digest(),createHash("sha256").update(a.signature).digest()):verifyWebhook(a.body,c.kind==="gitea"?"sha256="+a.signature:a.signature,expected);
  if(!verified)throw new Error("Invalid webhook signature");
- const payload=JSON.parse(a.body);
+ let payload: {eventKey?: unknown};
+ try { payload = JSON.parse(a.body) as {eventKey?: unknown}; }
+ catch { throw new Error("Invalid JSON body"); }
  if(c.kind==="bitbucket-dc"&&(!a.eventType||payload.eventKey!==a.eventType))throw new Error("Bitbucket event header and signed body mismatch");
  await ctx.runMutation(internal.providerConnections.receive,{connectionId:c._id,externalId:a.externalId,body:a.body,eventType:a.eventType});
 }});

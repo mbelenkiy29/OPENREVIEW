@@ -92,7 +92,7 @@ TODO one-click buttons: only add a "Deploy with Vercel" or similar button once a
 - [OpenReview vs Greptile](docs/compare/greptile.md)
 - [OpenReview vs CodeRabbit](docs/compare/coderabbit.md)
 
-We make no accuracy or parity claims against other products. See [Checks and evaluation](#checks-and-evaluation) for how to measure it on your own code.
+We make no accuracy or parity claims against other products. See [Checks and evaluation](#checks-and-evaluation) for how to measure it on your own code. An engineering audit of this repository (bugs, CLI install, feature gaps) is in [docs/AUDIT.md](docs/AUDIT.md).
 
 ## Status
 
@@ -313,13 +313,18 @@ Avoid printing secrets in logs, terminal transcripts, or CI output. Rotate sessi
 
 ## CLI
 
+The `openreview-cli` package is **not on npm yet**. Until it is published, install from this checkout (Node.js 24, pnpm 11):
+
 ```sh
-npm install -g openreview-cli
+pnpm install
+npm link
 openreview login
 openreview review --agent
 ```
 
-Signed in, `openreview review` runs on your workspace with its model, rules and plan, and the usage shows in the dashboard; `--local` (or signing out) reviews on your machine with your own model key. See [CLI](docs/public/cli.md). From this checkout:
+`npm link` puts the `openreview` command on your PATH using `bin/openreview.mjs`. Run it from the repository you want reviewed (the CLI uses that directory's Git checkout, not OpenReview's). Signed in, `openreview review` runs on your workspace with its model, rules and plan, and the usage shows in the dashboard; `--local` (or signing out) reviews on your machine with your own model key. See [CLI](docs/public/cli.md).
+
+From this checkout without linking:
 
 ```sh
 pnpm cli --help
@@ -333,7 +338,7 @@ pnpm cli onboard --repositories all
 pnpm cli resolve --pr 42 --fix-agent claude
 ```
 
-To install the `openreview` command from this checkout, run `npm link` (Node.js 24); `pnpm build:cli` builds the `openreview-cli` npm package in `packages/cli`. Review compares committed HEAD with the merge base; commit your working changes first. Configure model credentials through the environment or `.env.local` in that repository. Local indexing respects ignored paths and limits eligible source to 5,000 files / 20 MB; it does not execute repository code.
+`pnpm build:cli` bundles the same command into `packages/cli` (the unpublished `openreview-cli` npm package); `npm --prefix packages/cli link` installs that binary. Publishing to npm is a tracked open item (`.github/workflows/publish-cli.yml`, needs an `NPM_TOKEN` secret). Review compares committed HEAD with the merge base; commit your working changes first. Configure model credentials through the environment or `.env.local` in that repository. Local indexing respects ignored paths and limits eligible source to 5,000 files / 20 MB; it does not execute repository code.
 
 Optional `.openreview.json`:
 

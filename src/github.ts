@@ -17,13 +17,24 @@ export function verifyWebhook(
   signature: string | null,
   secret: string,
 ): boolean {
-  if (!secret || !signature || !/^sha256=[a-f0-9]{64}$/.test(signature))
-    return false;
-  const expected = Buffer.from(
-    createHmac("sha256", secret).update(body).digest("hex"),
-    "hex",
-  );
-  return timingSafeEqual(expected, Buffer.from(signature.slice(7), "hex"));
+  if (!secret || !signature) return false;
+  // GitHub Apps send X-Hub-Signature-256. Older GitHub Enterprise deliveries may send only the
+  // legacy SHA-1 X-Hub-Signature header; both are HMAC of the exact body with the webhook secret.
+  if (/^sha256=[a-f0-9]{64}$/.test(signature)) {
+    const expected = Buffer.from(
+      createHmac("sha256", secret).update(body).digest("hex"),
+      "hex",
+    );
+    return timingSafeEqual(expected, Buffer.from(signature.slice(7), "hex"));
+  }
+  if (/^sha1=[a-f0-9]{40}$/.test(signature)) {
+    const expected = Buffer.from(
+      createHmac("sha1", secret).update(body).digest("hex"),
+      "hex",
+    );
+    return timingSafeEqual(expected, Buffer.from(signature.slice(5), "hex"));
+  }
+  return false;
 }
 const repoSchema = z.object({
   id: z.number().int(),

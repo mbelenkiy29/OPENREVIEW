@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { Github } from "../src/github";
-import { pullActionSchema, runPullAction } from "../src/pull-actions";
+import { logPullAuditFailure, pullActionSchema, runPullAction } from "../src/pull-actions";
 
 const head = "a".repeat(40);
 function fake(t: test.TestContext, responses: Record<string, unknown> = {}) {
@@ -46,4 +46,11 @@ test("a refused merge surfaces GitHub's reason; malformed actions never reach Gi
   assert.equal(pullActionSchema.safeParse({ action: "request_changes", body: "  " }).success, false);
   assert.equal(pullActionSchema.safeParse({ action: "delete_branch" }).success, false);
   assert.equal(pullActionSchema.safeParse({ action: "resolve", threadId: "x}){evil" }).success, false);
+});
+
+test("a failed audit write is logged without throwing", (t) => {
+  const lines: string[] = [];
+  t.mock.method(console, "error", (line: string) => { lines.push(line); });
+  logPullAuditFailure("merge", new Error("Workspace unavailable"));
+  assert.deepEqual(JSON.parse(lines[0]!), { event: "pull.audit_failed", action: "merge", error: "Workspace unavailable" });
 });

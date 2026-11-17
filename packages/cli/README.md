@@ -2,11 +2,16 @@
 
 AI code review of your commits before you push, from your terminal or from a coding agent such as Claude Code or Codex.
 
+This package is **not on npm yet**. From a clone of [OpenReview](https://github.com/mbelenkiy29/OPENREVIEW) (Node.js 24, pnpm 11):
+
 ```sh
-npm install -g openreview-cli
+pnpm install
+npm link
 openreview login           # signs in through your browser
 openreview review          # reviews the commits since the merge base with main
 ```
+
+`npm link` from the repository root puts `openreview` on your PATH. `pnpm build:cli` then `npm --prefix packages/cli link` installs this packaged binary instead. Publishing `openreview-cli` to the npm registry is a tracked open item.
 
 Signed in, the review runs on your [OpenReview](https://openreview.tech) workspace with its model, rules and repository index, and counts toward the workspace's plan. `openreview review --local` reviews on your machine instead, with your own model key (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`).
 

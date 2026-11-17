@@ -11,7 +11,13 @@ export async function POST(request: Request) {
   const body = await request.text();
   // Sentry signs with the same HMAC-SHA256 hex digest as GitHub, just without the "sha256=" prefix.
   if (!verifyWebhook(body, `sha256=${request.headers.get("sentry-hook-signature")}`, secret)) return new Response("Invalid signature", { status: 401 });
-  const { action, data } = JSON.parse(body) as { action?: string; data?: { issue?: SentryIssue } };
+  let parsed: { action?: string; data?: { issue?: SentryIssue } };
+  try {
+    parsed = JSON.parse(body) as { action?: string; data?: { issue?: SentryIssue } };
+  } catch {
+    return new Response("Invalid payload", { status: 400 });
+  }
+  const { action, data } = parsed;
   const issue = data?.issue, project = process.env.SENTRY_PROJECT;
   if (request.headers.get("sentry-hook-resource") !== "issue" || action !== "created" || !issue || (project && issue.project?.slug !== project))
     return new Response(null, { status: 204 });
