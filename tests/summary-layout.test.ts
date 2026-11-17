@@ -23,7 +23,7 @@ test("GitHub layout follows Greptile: score heading and verdict, folded summary,
  assert.deepEqual([...order].sort((a,b)=>a-b),order);
  assert.equal((layout.match(/<details/g)??[]).length,(layout.match(/<\/details>/g)??[]).length);
  // Without a recorded score the heading is the product name and the verdict stays.
- assert.match(disclosureLayout("**Review incomplete**\n\n### Overview\nx"),/^<h2>OpenReview<\/h2>\n\n\*\*Review incomplete\.\*\*/);
+ assert.match(disclosureLayout("**Review incomplete**\n\n### Overview\nx"),/^<h2>Confidence Score: n\/a \(review incomplete\)<\/h2>\n\n\*\*Review incomplete\.\*\*/);
 });
 
 test("model text cannot close a disclosure early, but code fences are left alone",()=>{

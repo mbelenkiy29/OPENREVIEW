@@ -103,7 +103,8 @@ test("check runs report what was reviewed and fail below a required confidence s
  const severe=checkOutcome({findings,score:5,files:1,posted:1,failureSeverity:"high",minimumScore:3});
  assert.equal(severe.conclusion,"failure");
  assert.equal(severe.title,"1 verified finding at or above high severity");
- assert.equal(checkOutcome({findings:[],score:5,files:2,posted:0,verdict:"incomplete"}).summary.split("\n")[0],"**Review incomplete** · Confidence score **5/5**");
+ assert.equal(checkOutcome({findings:[],score:5,files:2,posted:0,verdict:"incomplete"}).summary.split("\n")[0],"**Review incomplete**");
+ assert.equal(checkOutcome({findings:[],score:5,files:2,posted:0,verdict:"incomplete",minimumScore:4}).conclusion,"neutral","an incomplete 5/5 does not pass a score gate");
  assert.ok(supersededCheck("Review cancelled")&&supersededCheck("Review is obsolete; pull request head changed or closed")&&!supersededCheck("Model timed out"));
 });
 

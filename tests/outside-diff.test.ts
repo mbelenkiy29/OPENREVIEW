@@ -59,6 +59,7 @@ test("verdict mapping covers every severity, score boundary and incomplete cover
   assert.deepEqual(Object.values(verdictLabels), ["Ready to merge", "Merge after fixes", "Needs changes", "Review incomplete"]);
   assert.equal(verdictLine("fixes", { value: 3 }), "**Merge after fixes** · Confidence score **3/5**");
   assert.equal(verdictLine("incomplete"), "**Review incomplete**");
+  assert.equal(verdictLine("incomplete", { value: 5 }), "**Review incomplete**", "a leaked 5/5 is unpublished on an incomplete verdict");
 });
 
 test("outside-diff grounding needs an exact quote of a changed line; changed-line anchors stay inline", () => {
@@ -140,8 +141,12 @@ test("summary: the outside section follows Issues, shows even when Issues is off
   const many = reviewSummary({ ...data, findings: Array.from({ length: 23 }, (_, i) => make({ ...outside, title: "Outside finding " + i }, { outsideDiff: true, fingerprint: "f" + i })) }, []);
   assert.equal((many.match(/^- 🔴 \*\*P0\*\* · critical/gm) ?? []).length, 20);
   assert.match(many, /- 3 more on the review page\./);
-  // Incomplete coverage turns a clean review into "Review incomplete".
-  assert.match(reviewSummary({ ...data, findings: [], score: { value: 5, reason: "No defects were found in the reviewed files." }, incomplete: true }), /^\*\*Review incomplete\*\* · Confidence score \*\*5\/5\*\*/);
+  // Incomplete coverage turns a clean review into "Review incomplete" and drops the numeric score.
+  const incomplete = reviewSummary({ ...data, findings: [], score: { value: 5, reason: "No defects were found in the reviewed files." }, incomplete: true, coverageLimits: ["Some changed source files were unavailable or excluded"] });
+  assert.match(incomplete, /^\*\*Review incomplete\*\*/);
+  assert.doesNotMatch(incomplete, /5\/5/);
+  assert.match(incomplete, /n\/a \(review incomplete\)/);
+  assert.match(incomplete, /Some changed source files were unavailable or excluded/);
   assert.match(reviewSummary({ ...data, findings: [], score: { value: 5, reason: "No defects were found in the reviewed files." } }), /^\*\*Ready to merge\*\* · Confidence score \*\*5\/5\*\*/);
 });
 

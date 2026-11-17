@@ -2,7 +2,7 @@ import {summarySections,summaryLabels,validSummarySections} from "./review-setti
 import type {Finding,ReviewInput,ReviewResult,SourceFile} from "./engine/types";
 import {suggestionBlock,type SuggestionSyntax} from "./suggestions";
 import {changedLines} from "./engine/patch-lines";
-import {reviewVerdict,verdictLine} from "./verdict";
+import {incompleteScoreLabel,publishedReviewScore,reviewVerdict,verdictLine} from "./verdict";
 import {priorityBadge,tagBadges} from "./priority";
 import {tipLine,type TicketKind,type TipKey} from "./feature-tips";
 import {generatedTestSection} from "./generated-tests";
@@ -73,18 +73,24 @@ function cause(f:Finding,files:Summary["files"]){
  }
  return "";
 }
+function incompleteScoreBody(limits:string[]){
+ const why=limits.length?limits.map(l=>firstSentence(l)).join(" "):"Changed code went unreviewed.";
+ return incompleteScoreLabel+" — "+why;
+}
 export function reviewSummary(data:Summary,selected:readonly string[]=summarySections){
  if(!validSummarySections(selected))throw new Error("Invalid summary sections");
  const describe=new Map((data.fileSummaries??[]).map(f=>[f.path,f.summary]));
  const location=(f:Finding)=>{const text=code(f.filePath+":"+f.startLine+(f.endLine>f.startLine?"–"+f.endLine:""));const url=data.sourceLink?.(f.filePath,f.startLine,f.endLine);return url&&/^https:\/\//.test(url)?"["+text+"](<"+url.replaceAll(">","%3E")+">)":text;};
  const files=data.files.slice(0,60);
  const inline=inlineFindings(data.findings),outside=data.findings.filter(f=>f.outsideDiff).sort((a,b)=>severityOrder[a.severity]-severityOrder[b.severity]);
+ const verdict=reviewVerdict({score:data.score?.value,findings:data.findings,incomplete:data.incomplete});
+ const publishedScore=publishedReviewScore(verdict,data.score);
  const sections:Record<(typeof summarySections)[number],string>={
   overview:data.overview,
   diagram:data.diagram?"```mermaid\n"+data.diagram+"\n```":"",
   affectedAreas:files.length?"| File | Change |\n| --- | --- |\n"+files.map(f=>"| "+code(f.path)+" | "+cell(describe.get(f.path)??(f.status+" · "+lineStats(f.patch)))+" |").join("\n")+(data.files.length>files.length?"\n\n…and "+(data.files.length-files.length)+" more changed files.":""):"No remaining changed files.",
   findings:inline.length?"| Priority | Location | Issue |\n| --- | --- | --- |\n"+[...inline].sort((a,b)=>severityOrder[a.severity]-severityOrder[b.severity]).map(f=>"| "+badge(f)+" | "+location(f)+" | "+cell(f.title)+tags(f)+threadToken(f.fingerprint)+" |").join("\n"):outside.length?"No verified findings on the changed lines; see Outside the changed code.":"No verified findings. This does not establish that the change is risk-free.",
-  score:data.score?"**"+data.score.value+"/5** — "+firstSentence(data.score.reason):"Not recorded for this review.",
+  score:verdict==="incomplete"?incompleteScoreBody(data.coverageLimits):publishedScore?"**"+publishedScore.value+"/5** — "+firstSentence(publishedScore.reason):"Not recorded for this review.",
   risk:data.assessment?data.assessment.risk+" risk\n\n"+data.assessment.reason:"Unknown: no structured risk assessment was recorded.",
   resolved:data.resolved.map(f=>"- "+f.title+" · "+code(f.filePath)).join("\n")||"No previously reported findings were confirmed resolved in this review.",
   skipped:data.skippedFiles?.length?skippedList(data.skippedFiles).replace(/^\n\nSkipped files:\n/,""):"No changed files were skipped.",
@@ -94,7 +100,6 @@ export function reviewSummary(data:Summary,selected:readonly string[]=summarySec
   testSource:data.files.filter(f=>/(?:^|\/)(?:tests?|__tests__)(?:\/|\.)|\.(?:test|spec)\.[^/]+$/.test(f.path)).map(f=>"- "+code(f.path)).join("\n")||"No changed test source identified by filename. This does not measure test coverage.",
  };
  const runtime=data.runtimeEvidence;
- const verdict=reviewVerdict({score:data.score?.value,findings:data.findings,incomplete:data.incomplete});
  // Tips are a footer line added at publication (see reviewFooter), not a summary section.
  const shown=selected.filter(s=>s!=="tips"&&(s!=="diagram"||data.diagram)&&(s!=="requirements"||data.requirements)&&(s!=="agentPrompt"||data.findings.length));
  const blocks=shown.map(s=>"### "+summaryLabels[s as keyof typeof summaryLabels]+"\n"+sections[s as keyof typeof sections]);
@@ -104,7 +109,7 @@ export function reviewSummary(data:Summary,selected:readonly string[]=summarySec
   const at=shown.reduce((last,s,i)=>summarySections.indexOf(s as (typeof summarySections)[number])<=pivot?i+1:last,0);
   blocks.splice(at,0,"### Outside the changed code\nVerified findings on lines this change did not modify, caused by lines it did. They are not posted as inline comments.\n\n"+outside.slice(0,20).map(f=>{const by=cause(f,data.files);return "- "+badge(f)+" · "+location(f)+" · "+cell(f.title)+tags(f)+"\n  "+(by?"Caused by "+by+". ":"")+firstSentence(f.description)+" **Fix:** "+firstSentence(f.suggestedFix);}).join("\n")+(outside.length>20?"\n- "+(outside.length-20)+" more on the review page.":""));
  }
- return [verdictLine(verdict,selected.includes("score")?data.score:undefined),...blocks,
+ return [verdictLine(verdict,selected.includes("score")?publishedScore:undefined),...blocks,
   "### Test execution\n"+(runtime?"Recorded command: "+code(runtime.command)+" · "+runtimeStatus(runtime)+" at "+runtime.headSha+".":"Not executed by OpenReview. Test files and CI metadata are context, not proof of a successful test run."),
   `### Coverage\n${plural(data.files.length,"changed file")}; ${plural(data.contextCount,"retrieved context file")}. ${plural(data.candidates,"candidate")}; ${plural(data.findings.length,"verified finding")}; ${data.suppressed} suppressed.`+(data.coverageLimits.length?"\n\n"+data.coverageLimits.map(l=>"- "+l).join("\n"):"")+(selected.includes("skipped")?"":skippedList(data.skippedFiles))+(data.knowledgeUsed?.length?"\n\nKnowledge base entries supplied as background (not evidence): "+data.knowledgeUsed.slice(0,10).map(k=>code(k.slice(0,100))).join(", ")+(data.knowledgeUsed.length>10?" and "+(data.knowledgeUsed.length-10)+" more":"")+".":"")+(data.guidanceUsed?.length?"\n\nAPI guidance packs applied (guidance only): "+data.guidanceUsed.slice(0,4).map(g=>code(g.slice(0,80))).join(", ")+".":"")+fetchedContextLinks(data.requirementsContext)].join("\n\n");
 }

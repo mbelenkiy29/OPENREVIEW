@@ -1,5 +1,5 @@
 import { findingSchema } from "../../../src/engine/types";
-import { verdictLabels } from "../../../src/verdict";
+import { incompleteScoreLabel, verdictLabels } from "../../../src/verdict";
 import Link from "next/link";
 import { ReviewMarkdown } from "../markdown";
 import { ScrollTable } from "../scroll-table";
@@ -101,7 +101,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 <div className="facts">
                   <StatusChip pr={{ latest: detail.review }} latest={{ status: detail.review.status }} />
                   {pull?.isDraft && <span>PR is in draft mode</span>}
-                  {detail.review.reviewScore && <span title={detail.review.reviewScore.reason}>{detail.review.reviewScore.value}/5</span>}
+                  {detail.review.verdict === "incomplete" ? <span>{incompleteScoreLabel}</span> : detail.review.reviewScore && <span title={detail.review.reviewScore.reason}>{detail.review.reviewScore.value}/5</span>}
                   {ci}
                   {detail.review.approvalAssessment && detail.review.approvalAssessment.risk !== "unknown" && <span className={"impact " + detail.review.approvalAssessment.risk}>{detail.review.approvalAssessment.risk[0].toUpperCase() + detail.review.approvalAssessment.risk.slice(1)} impact</span>}
                 </div>
@@ -121,7 +121,7 @@ export function ReviewsSection({ ctx }: { ctx: DashboardContext }) {
                 <div className="pr-info-box">
                   <h3>Review summary</h3>
                   <div className="pr-info-scroll">
-                    {detail.review.reviewScore && <p><strong>Confidence Score: {detail.review.reviewScore.value}/5</strong> · {detail.review.reviewScore.reason}</p>}
+                    {detail.review.verdict === "incomplete" ? <p><strong>Confidence Score: {incompleteScoreLabel}</strong></p> : detail.review.reviewScore && <p><strong>Confidence Score: {detail.review.reviewScore.value}/5</strong> · {detail.review.reviewScore.reason}</p>}
                     {detail.review.verdict && <p className="muted">{verdictLabels[detail.review.verdict]} · computed from the score, unresolved findings and review coverage</p>}
                     <ReviewMarkdown>
                       {detail.review.summary ??

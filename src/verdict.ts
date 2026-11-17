@@ -11,6 +11,13 @@ export function reviewVerdict({score,findings,incomplete}:{score?:number;finding
  // Only low-severity findings (or none) and a score of 4–5: ready unless coverage was cut short.
  return incomplete||score===undefined?"incomplete":"ready";
 }
+// A numeric merge-confidence score is unpublished when coverage was incomplete: a model-returned
+// 5/5 must not sit next to "Review incomplete". Complete reviews keep the recorded number.
+export const incompleteScoreLabel="n/a (review incomplete)";
+export function publishedReviewScore<T extends{value:number}>(verdict:Verdict,score?:T){
+ return verdict==="incomplete"?undefined:score;
+}
 export function verdictLine(verdict:Verdict,score?:{value:number}){
- return "**"+verdictLabels[verdict]+"**"+(score?" · Confidence score **"+score.value+"/5**":"");
+ const shown=publishedReviewScore(verdict,score);
+ return "**"+verdictLabels[verdict]+"**"+(shown?" · Confidence score **"+shown.value+"/5**":"");
 }
