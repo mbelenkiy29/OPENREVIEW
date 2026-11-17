@@ -4,13 +4,13 @@
 
 **Gate on this checkout (Node.js 24.11.1, pnpm 11.1.2):** `pnpm lint` (3 pre-existing warnings, 0 errors), `pnpm typecheck`, `pnpm test` (658 Node tests + 560 Vitest tests). `pnpm build` is in #152. Playwright screenshots for public pages (1280 and 390) are attached to #151.
 
-Open pull requests (do not merge until reviewed):
+Pull requests from this audit:
 
-| Theme | PR |
-| --- | --- |
-| Critical bugs, CLI onboarding, this audit | [#149](https://github.com/mbelenkiy29/OPENREVIEW/pull/149) |
-| UI/UX polish | [#151](https://github.com/mbelenkiy29/OPENREVIEW/pull/151) |
-| CI build, issue templates, CONTRIBUTING | [#152](https://github.com/mbelenkiy29/OPENREVIEW/pull/152) |
+| Theme | PR | Status |
+| --- | --- | --- |
+| Critical bugs, CLI onboarding, this audit | [#149](https://github.com/mbelenkiy29/OPENREVIEW/pull/149) | Open — rebased onto `main` after #151 |
+| UI/UX polish | [#151](https://github.com/mbelenkiy29/OPENREVIEW/pull/151) | **Merged** 17 Nov 2026 (`1041633`) |
+| CI build, issue templates, CONTRIBUTING | [#152](https://github.com/mbelenkiy29/OPENREVIEW/pull/152) | Open — rebased onto `main` after #151 |
 
 ## Architecture
 
@@ -70,12 +70,12 @@ Severity, location, status. **Fixed** in this round means the change is in the o
 | C2 | Medium | `Dockerfile` vs `package.json` `engines` vs CI | **Documented** in #152 / **open (align image)** | Docker still builds on **Node 26**; docs and CI use **Node 24**. The split is now written in the README, CONTRIBUTING, and a Dockerfile comment. Pinning the image to Node 24 remains an operator choice. |
 | C3 | Low | `.github/ISSUE_TEMPLATE/` | **Fixed** in #152 | Bug and feature templates; blank issues off; security reports go to SECURITY.md. |
 | C4 | Low | `CONTRIBUTING.md` | **Fixed** in #152 | Node 24 vs Docker 26, unpublished CLI install, check commands, security pointer. |
-| U1 | Medium | `app/oauth/consent/page.tsx` | **Fixed** in #151 | `.narrow` matches `.welcome`; expired consent has Home and MCP docs links. |
-| U2 | Medium | `app/dashboard/error.tsx`, `loading.tsx` | **Fixed** in #151 | First-load and layout errors show portal chrome; page errors keep the portal layout. |
-| U3 | Medium | `app/globals.css` landing links | **Fixed** in #151 | Landing, welcome, and consent running-text links are underlined. |
-| U4 | Low | `app/layout.tsx` | **Fixed** in #151 | Skip-to-content is the first tab stop and targets `#main`. |
-| U5 | Low | `app/globals.css` charts | **Fixed** in #151 | Chart axes, tooltips, and board captions use `--muted`. |
-| U6 | Low | `app/dashboard/pulls.tsx` | **Fixed** in #151 | Pull list (and legal markdown tables) use `ScrollTable`. |
+| U1 | Medium | `app/oauth/consent/page.tsx` | **Merged** in #151 | `.narrow` matches `.welcome`; expired consent has Home and MCP docs links. |
+| U2 | Medium | `app/dashboard/error.tsx`, `loading.tsx` | **Merged** in #151 | First-load and layout errors show portal chrome; page errors keep the portal layout. |
+| U3 | Medium | `app/globals.css` landing links | **Merged** in #151 | Landing, welcome, and consent running-text links are underlined. |
+| U4 | Low | `app/layout.tsx` | **Merged** in #151 | Skip-to-content is the first tab stop and targets `#main`. |
+| U5 | Low | `app/globals.css` charts | **Merged** in #151 | Chart axes, tooltips, and board captions use `--muted`. |
+| U6 | Low | `app/dashboard/pulls.tsx` | **Merged** in #151 | Pull list (and legal markdown tables) use `ScrollTable`. |
 | S1 | Low | `app/api/bridge/[action]/route.ts` | Open | Pairing rate limit prefers `X-Forwarded-For` / `X-Real-IP`. Fine behind a stripping proxy; spoofable if the app is reached directly. |
 | S2 | Info | `convex/runtime.ts` `claim` | Open (by design) | Claim patches a queued job without an extra status CAS. Convex mutations are OCC-serializable, so concurrent workers retry; not a practical race. Left documented rather than “fixed”. |
 | S3 | Info | `convex/providerConnections.ts` `claimEvent` | Open (by design) | 15-minute recovery is after typical Convex action timeouts (~10 min), so a still-running handler should already have been killed. |
