@@ -1,0 +1,115 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { z } from "zod";
+import { capReviewScore, reviewChange } from "../src/engine/review";
+import { compactLayout, disclosureLayout } from "../src/summary-layout";
+import { reviewSummary } from "../src/review-summary";
+import { incompleteScoreLabel, verdictLine } from "../src/verdict";
+import type { Finding, ModelProvider, ModelRequest, ReviewInput } from "../src/engine/types";
+
+const low: Finding = {
+  symbol: "note", title: "Comment restates the helper name", description: "The new comment only repeats the function name.",
+  severity: "low", confidence: 0.8, category: "correctness", filePath: "src/total.ts", startLine: 1, endLine: 1,
+  evidence: [{ filePath: "src/total.ts", startLine: 1, quote: "export function total() {" }],
+  impact: "Readers get no new information.", suggestedFix: "Describe the units the helper returns.",
+  fingerprint: "low1", agent: "correctness", commitSha: "a".repeat(40),
+};
+const base = {
+  overview: "The patch update from Next.js 16.4.3 to 16.4.6 synchronizes the lockfile.",
+  files: [{ path: "package.json", status: "modified" as const, patch: "@@ -1 +1 @@\n-a\n+b" }, { path: "pnpm-lock.yaml", status: "modified" as const, patch: "@@ -1 +1 @@\n-a\n+b" }],
+  resolved: [] as Finding[],
+  score: { value: 5, reason: "No defects were found in the reviewed files." },
+  assessment: { risk: "low" as const, confidence: 0.4, reason: "Manifest and lockfile versions stay aligned." },
+  runtimeEvidence: undefined, contextCount: 0, candidates: 0, suppressed: 0,
+};
+const unavailable = "Some changed source files were unavailable or excluded";
+const queued = "CI checks were still queued at review time";
+
+test("(a) a complete review keeps its numeric confidence score", () => {
+  const summary = reviewSummary({ ...base, findings: [], coverageLimits: [] });
+  assert.match(summary, /^\*\*Ready to merge\*\* · Confidence score \*\*5\/5\*\*/);
+  assert.match(summary, /### Confidence score\n\*\*5\/5\*\* — No defects were found in the reviewed files\./);
+  const layout = disclosureLayout(summary);
+  assert.match(layout, /^<h2>Confidence Score: 5\/5<\/h2>\n\n\*\*Ready to merge\.\*\*/);
+  assert.equal(verdictLine("ready", { value: 5 }), "**Ready to merge** · Confidence score **5/5**");
+  assert.deepEqual(capReviewScore(base.score, []), base.score);
+});
+
+test("(b) incomplete review with zero findings, matching #155, shows no 5/5 and names the reason", () => {
+  const summary = reviewSummary({
+    ...base, findings: [], incomplete: true,
+    coverageLimits: [unavailable, queued],
+  });
+  assert.match(summary, /^\*\*Review incomplete\*\*\n/);
+  assert.doesNotMatch(summary, /5\/5/);
+  assert.match(summary, new RegExp("### Confidence score\\n" + incompleteScoreLabel.replace(/[()]/g, "\\$&") + " — " + unavailable));
+  assert.match(summary, new RegExp(queued));
+  assert.match(summary, /### Coverage\n[\s\S]*- Some changed source files were unavailable or excluded/);
+  assert.match(summary, /Not executed by OpenReview/);
+  const layout = disclosureLayout(summary);
+  assert.match(layout, new RegExp("^<h2>Confidence Score: " + incompleteScoreLabel.replace(/[()]/g, "\\$&") + "</h2>"));
+  assert.match(layout, /\*\*Review incomplete\.\*\* Some changed source files were unavailable or excluded/);
+  assert.doesNotMatch(layout, /5\/5/);
+  // Renderer guard: a stored summary that still carries the leaked 5/5 is unpublished.
+  const leaked = "**Review incomplete** · Confidence score **5/5**\n\n### Overview\nLockfile bump.\n\n### Confidence score\n**5/5** — No defects were found in the reviewed files.\n\n### Coverage\n2 changed files.\n\n- " + unavailable;
+  const guarded = disclosureLayout(leaked);
+  assert.match(guarded, new RegExp("^<h2>Confidence Score: " + incompleteScoreLabel.replace(/[()]/g, "\\$&") + "</h2>"));
+  assert.doesNotMatch(guarded, /5\/5/);
+  assert.match(guarded, /unavailable or excluded/);
+  const compact = compactLayout(leaked, "`abc`");
+  assert.match(compact, new RegExp("### Confidence Score: " + incompleteScoreLabel.replace(/[()]/g, "\\$&")));
+  assert.doesNotMatch(compact, /5\/5/);
+  assert.equal(capReviewScore(base.score, [], true), undefined);
+});
+
+test("(c) an incomplete review with findings still lists them and shows no full score", () => {
+  const summary = reviewSummary({
+    ...base, findings: [low], incomplete: true,
+    coverageLimits: [unavailable],
+  });
+  assert.match(summary, /^\*\*Review incomplete\*\*\n/);
+  assert.doesNotMatch(summary, /5\/5|4\/5/);
+  assert.match(summary, /n\/a \(review incomplete\) — Some changed source files were unavailable or excluded/);
+  assert.match(summary, /Comment restates the helper name/);
+  const layout = disclosureLayout(summary);
+  assert.match(layout, /Confidence Score: n\/a \(review incomplete\)/);
+  assert.match(layout, /Comment restates the helper name/);
+  assert.doesNotMatch(layout, /[45]\/5/);
+  assert.equal(capReviewScore(base.score, [{ severity: "low" }], true), undefined);
+  // Medium+ findings keep a finding-capped score because they force a non-incomplete verdict.
+  assert.equal(capReviewScore(base.score, [{ severity: "high" }], true)?.value, 2);
+});
+
+class CleanModel implements ModelProvider {
+  async generate<T>(request: ModelRequest, schema: z.ZodType<T>) {
+    const value = request.task.startsWith("review:") ? { findings: [] }
+      : request.task === "verify" ? { decisions: [] }
+      : request.task === "diagram" ? { diagram: null }
+      : { summary: "The patch updates Next.js and its lockfile from 16.4.3 to 16.4.6.", reviewScore: { value: 5, reason: "No defects were found in the reviewed files." } };
+    return { value: schema.parse(value), usage: { task: request.task, provider: "fixture", model: "deterministic", inputTokens: 1, outputTokens: 1, latencyMs: 1, estimatedCost: 0, cached: false } };
+  }
+}
+
+test("the engine drops a model-returned 5/5 when changed sources were unavailable", async () => {
+  const input: ReviewInput = {
+    repository: "acme/app", baseSha: "base", headSha: "head", title: "Bump next", description: "",
+    files: [],
+    diff: [
+      { path: "package.json", status: "modified", patch: "@@ -1 +1 @@\n-\"next\": \"16.4.3\"\n+\"next\": \"16.4.6\"" },
+      { path: "pnpm-lock.yaml", status: "modified", patch: "@@ -1 +1 @@\n-16.4.3\n+16.4.6" },
+    ],
+    rules: [], mode: "standard", settings: { categories: ["correctness"] },
+  };
+  const result = await reviewChange(input, new CleanModel());
+  assert.equal(result.metadata.coverageIncomplete, true);
+  assert.equal(result.metadata.reviewScore, undefined);
+  assert.equal(result.metadata.verdict, "incomplete");
+  assert.ok(result.metadata.coverageLimits?.includes("Some changed source files were unavailable or excluded"));
+  assert.doesNotMatch(result.summary, /5\/5/);
+  assert.match(result.summary, /^\*\*Review incomplete\*\*/);
+  assert.match(result.summary, /n\/a \(review incomplete\)/);
+  assert.match(result.summary, /unavailable or excluded/);
+  const layout = disclosureLayout(result.summary);
+  assert.match(layout, /Confidence Score: n\/a \(review incomplete\)/);
+  assert.doesNotMatch(layout, /5\/5/);
+});

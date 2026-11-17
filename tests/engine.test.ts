@@ -579,6 +579,9 @@ test("an over-cap confidence score is clamped instead of failing the review, and
  assert.equal(capReviewScore({value:5,reason:"x".repeat(2000)},[{severity:"critical"}])?.reason.length,2000);
  assert.deepEqual(capReviewScore({value:3,reason:"Within the cap for a medium finding."},[{severity:"medium"}]),{value:3,reason:"Within the cap for a medium finding."});
  assert.equal(reviewScoreCeiling([]),5);assert.equal(reviewScoreCeiling([{severity:"low"}]),4);
+ assert.equal(capReviewScore({value:5,reason:"No defects were found in the reviewed files."},[],true),undefined);
+ assert.equal(capReviewScore({value:5,reason:"No defects were found in the reviewed files."},[{severity:"low"}],true),undefined);
+ assert.equal(capReviewScore({value:5,reason:"Only minor polish remains in the authentication change."},[{severity:"high"}],true)?.value,2);
 });
 
 test("the model adapter accepts an over-cap summary score in one request instead of exhausting repairs",async(t)=>{

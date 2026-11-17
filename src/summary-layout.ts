@@ -1,4 +1,5 @@
 import {summaryLabels} from "./review-settings";
+import {incompleteScoreLabel,verdictLabels} from "./verdict";
 
 // GitHub publication layout, in the shape of Greptile's PR summary: a "Confidence Score: N/5" heading with the
 // verdict and its reason, a folded Summary, the issues, the open diagram, everything else folded into one
@@ -36,7 +37,9 @@ export function disclosureLayout(summary: string, footerItems: readonly string[]
   const tail = summary.match(footer);
   const [verdictText, ...chunks] = summary.slice(0, tail?.index ?? summary.length).split(/\n\n(?=### )/);
   const verdict = verdictText.match(/^\*\*([^*\n]+)\*\*(?: · Confidence score \*\*(\d)\/5\*\*)?$/);
-  let score = verdict?.[2], reason = "", overview = "", diagram = "";
+  const incomplete = verdict?.[1] === verdictLabels.incomplete;
+  // Guard: even a stored 5/5 next to "Review incomplete" is unpublished.
+  let score = incomplete ? undefined : verdict?.[2], reason = "", overview = "", diagram = "";
   const main: string[] = [], more: string[] = [];
   for (const chunk of chunks) {
     const newline = chunk.indexOf("\n");
@@ -45,14 +48,17 @@ export function disclosureLayout(summary: string, footerItems: readonly string[]
     // A section's sectionLayout setting (plain/open/collapsed) overrides where it would go by default.
     const state = layoutOf(label);
     const scored = label === summaryLabels.score ? body.match(/^\*\*(\d)\/5\*\* — ([\s\S]*)$/) : null;
-    if (scored) { score ??= scored[1]; reason = scored[2]; }
+    const unavailable = label === summaryLabels.score ? body.match(/^n\/a \(review incomplete\)(?: — ([\s\S]*))?$/) : null;
+    if (unavailable) { reason = unavailable[1] ?? ""; }
+    else if (scored) { if (!incomplete) score ??= scored[1]; reason = scored[2]; }
     else if (label === summaryLabels.overview) overview = body;
     else if (label === summaryLabels.diagram) diagram = body.replace(/^```mermaid\n/, "```mermaid\n%%{init: {'theme': 'neutral'}}%%\n");
     else if (state === "open") main.push(fold(label, body, true));
     else if (state === "plain" || (!state && shown.has(label))) main.push(chunk);
     else more.push(chunk);
   }
-  const head = (score ? `<h2>Confidence Score: ${score}/5</h2>` : "<h2>OpenReview</h2>") + "\n\n" + (verdict ? `**${verdict[1]}.**${reason ? " " + escapeDisclosure(reason) : ""}` : verdictText);
+  const heading = incomplete ? `<h2>Confidence Score: ${incompleteScoreLabel}</h2>` : score ? `<h2>Confidence Score: ${score}/5</h2>` : "<h2>OpenReview</h2>";
+  const head = heading + "\n\n" + (verdict ? `**${verdict[1]}.**${reason ? " " + escapeDisclosure(reason) : ""}` : verdictText);
   const line = [tail?.[1] ? `Reviews (${tail[1]})` : "", ...footerItems, tail ? tail[2].replace(/ it$/, "") : "", "Reviewed by OpenReview"].filter(Boolean).join(" · ");
   return [head, overview && placed(summaryLabels.overview, "Summary", overview, false), ...main, diagram && placed(summaryLabels.diagram, "Diagram", diagram, true), more.length ? fold("More details", more.join("\n\n")) : "", `<sub>${line}</sub>`].filter(Boolean).join("\n\n") + (tail?.[3] ?? "");
 }
@@ -68,10 +74,15 @@ export function compactLayout(summary: string, commit: string, links = "") {
   const body = (label: string) => sections.find((s) => s.label === label)?.body;
   const front = new Set([summaryLabels.overview, summaryLabels.score, summaryLabels.affectedAreas, summaryLabels.diagram, summaryLabels.agentPrompt, outsideLabel]);
   const overview = body(summaryLabels.overview), files = body(summaryLabels.affectedAreas), diagram = body(summaryLabels.diagram), outside = body(outsideLabel), prompt = body(summaryLabels.agentPrompt);
-  const score = body(summaryLabels.score)?.match(/^\*\*(\d)\/5\*\* — ([\s\S]*)$/);
+  const numeric = body(summaryLabels.score)?.match(/^\*\*(\d)\/5\*\* — ([\s\S]*)$/);
+  const unavailable = body(summaryLabels.score)?.match(/^n\/a \(review incomplete\)(?: — ([\s\S]*))?$/);
+  const incomplete = /^\*\*Review incomplete\*\*/.test(head);
+  const scoreBlock = incomplete || unavailable
+    ? `### Confidence Score: ${incompleteScoreLabel}\n\n**${verdictLabels.incomplete}**\n\n${unavailable?.[1] ?? numeric?.[2] ?? ""}`.trimEnd()
+    : numeric ? `### Confidence Score: ${numeric[1]}/5\n\n${head.match(/^\*\*[^*]+\*\*/)?.[0] ?? head}\n\n${numeric[2]}` : head;
   const blocks = [
     overview !== undefined ? "### OpenReview Summary\n\n" + overview : "",
-    score ? `### Confidence Score: ${score[1]}/5\n\n${head.match(/^\*\*[^*]+\*\*/)?.[0] ?? head}\n\n${score[2]}` : head,
+    scoreBlock,
     files !== undefined ? "### Important Files Changed\n\n" + files.replace(/^\| File \| Change \|/, "| Filename | Overview |") : "",
     diagram !== undefined ? "### Sequence Diagram\n\n" + diagram : "",
     outside !== undefined ? details("Comments Outside Diff", outside, true) : "",

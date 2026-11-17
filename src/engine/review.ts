@@ -524,7 +524,7 @@ export async function reviewChange(
     reviewSummarySchema(runtimeEvidence,context.flatMap(c=>c.provenance?[c.provenance.sourceUrl]:[]),[...findings,...carriedForward],previous.length>0&&resolvedFingerprints.length===0,diff.map((d)=>d.path)),
   );
   usage.push(summary.usage);
-  const reviewScore = capReviewScore(summary.value.reviewScore, [...findings, ...carriedForward]);
+  const reviewScore = capReviewScore(summary.value.reviewScore, [...findings, ...carriedForward], coverageIncomplete);
   return {
     summary: reviewSummary({overview:summary.value.summary,files:input.fullDiff?input.fullDiff.filter((f)=>!ignored(f.path)):diff,findings:[...findings,...carriedForward],resolved:previous.filter(f=>resolvedFingerprints.includes(f.fingerprint)),score:reviewScore,assessment:summary.value.approvalAssessment,runtimeEvidence,coverageLimits,contextCount:context.length,candidates:candidates.length+deterministic.findings.length,suppressed:suppressions.length,requirementsContext:context,skippedFiles,fileSummaries:summary.value.files,sourceLink:input.sourceLink,diagram,incomplete:coverageIncomplete,knowledgeUsed:input.knowledge?.map(k=>k.subsystem),guidanceUsed:input.guidance?.map(g=>g.id+"@"+g.version),requirements},input.settings?.summarySections),
     findings,
@@ -590,9 +590,15 @@ export function reviewScoreCeiling(findings:Pick<Finding,"severity">[]){
 }
 // Unresolved verified findings cap the score. Clamp instead of rejecting so an over-confident
 // summary cannot fail the whole review and drop findings that were already verified.
-export function capReviewScore(score:z.infer<typeof reviewScoreSchema>|undefined,findings:Pick<Finding,"severity">[]){
+export function capReviewScore(score:z.infer<typeof reviewScoreSchema>|undefined,findings:Pick<Finding,"severity">[],incomplete=false){
+  if(!score)return score;
+  // Incomplete coverage cannot support a merge-confidence number. Drop it when the verdict
+  // would be "incomplete" (no medium+ findings) so a model-returned 5/5 cannot leak through.
+  // Verified medium/high/critical findings still keep their finding cap: they force a
+  // non-incomplete verdict.
+  if(incomplete&&!findings.some(f=>f.severity==="critical"||f.severity==="high"||f.severity==="medium"))return undefined;
   const maximum=reviewScoreCeiling(findings);
-  if(!score||score.value<=maximum)return score;
+  if(score.value<=maximum)return score;
   // Lead with the cap: the PR summary renders only the reason's first sentence.
   const note=`Unresolved verified findings cap this score at ${maximum}/5 (the summary proposed ${score.value}/5). `;
   return {value:maximum,reason:(note+score.reason.trim()).slice(0,2000)};
