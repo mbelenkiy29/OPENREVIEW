@@ -6,4 +6,5 @@ node_modules
 output
 .playwright-cli
 reports
+graphify-out
 *.tsbuildinfo
