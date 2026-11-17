@@ -50,7 +50,7 @@ One summary comment, edited in place on every push, with a verdict, a confidence
 
 ## Local quickstart
 
-Use Node.js 24 and pnpm 11.
+Use Node.js 24 and pnpm 11. GitHub Actions uses Node 24. The production Docker image is Node 26, which satisfies `engines.node >= 24`.
 
 ```sh
 pnpm install
@@ -450,7 +450,7 @@ pnpm test:e2e # requires running local web and Convex services
 pnpm eval
 ```
 
-`pnpm test` runs unit and Convex integration tests. Browser checks authenticate a dedicated local fixture identity, visit onboarding/all dashboard sections, and save real rules/settings. They do not simulate successful GitHub OAuth or live inference. `pnpm eval` requires a real model and writes `reports/evaluation.json`; without credentials it exits with a blocked report, without inventing scores. `pnpm eval --validate` checks fixture identities, source/diff presence and expected finding locations without making model calls. The suite includes ten seeded defects and two behavior-preserving changes; clean fixtures contribute true negatives or false positives rather than missed bugs. Use `--fixture=<id>` for a targeted run, and `--engine=agentic` to evaluate the tool-using engine. Agentic results record the engine that actually ran (a fallback to the pipeline is reported as a failure), a one-line `trace` of tool calls, and the agent's `transcript`, with each tool result cut to 2,000 characters. Reports therefore contain fixture source and model output. Evaluation scores use location/keyword matching and require human adjudication before quality claims. Provider/schema failures are unscored, return a nonzero exit code, and are reported separately from missed bugs.
+CI on each pull request runs lint, typecheck, test, and build. `pnpm test` runs unit and Convex integration tests. Browser checks authenticate a dedicated local fixture identity, visit onboarding/all dashboard sections, and save real rules/settings. They do not simulate successful GitHub OAuth or live inference. `pnpm eval` requires a real model and writes `reports/evaluation.json`; without credentials it exits with a blocked report, without inventing scores. `pnpm eval --validate` checks fixture identities, source/diff presence and expected finding locations without making model calls. The suite includes ten seeded defects and two behavior-preserving changes; clean fixtures contribute true negatives or false positives rather than missed bugs. Use `--fixture=<id>` for a targeted run, and `--engine=agentic` to evaluate the tool-using engine. Agentic results record the engine that actually ran (a fallback to the pipeline is reported as a failure), a one-line `trace` of tool calls, and the agent's `transcript`, with each tool result cut to 2,000 characters. Reports therefore contain fixture source and model output. Evaluation scores use location/keyword matching and require human adjudication before quality claims. Provider/schema failures are unscored, return a nonzero exit code, and are reported separately from missed bugs.
 
 ## Troubleshooting
 

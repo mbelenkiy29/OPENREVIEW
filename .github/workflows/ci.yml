@@ -14,9 +14,11 @@ concurrency:
 
 jobs:
   check:
-    name: Lint, typecheck and test
+    name: Lint, typecheck, test and build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v5
@@ -28,3 +30,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      # APP_URL is not set for tests: GitHub summaries omit dashboard links unless it is present.
+      - run: pnpm build
+        env:
+          APP_URL: http://localhost:3000
