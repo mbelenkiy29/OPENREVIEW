@@ -19,8 +19,8 @@ async function device(ctx: MutationCtx, hash: string) {
   await ctx.db.patch(d._id,{lastSeen:Date.now()});
   return d;
 }
-// Pairing needs no sign-in, so it has two limits: per caller (the web route passes the client address) so one caller
-// cannot use up everyone's pairings, plus a looser shared cap because without a proxy the caller sets its own address.
+// Pairing needs no sign-in. The web route supplies a trusted client address or "unknown", so
+// deployments without a trusted proxy share the stricter bucket as well as the deployment-wide cap.
 export const startPair = mutation({args:{secret:v.string(),hash:v.string(),code:v.string(),name:v.string(),client:v.optional(v.string())},handler:async(ctx,a)=>{
   service(a.secret); if(!/^[a-f0-9]{64}$/.test(a.hash)|| !/^[a-f0-9]{12}$/.test(a.code)||a.name.length>100||(a.client?.length??0)>100) throw new Error("Invalid pairing");
   await rateLimit(ctx,"bridge:pair",300);

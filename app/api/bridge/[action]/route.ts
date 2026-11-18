@@ -1,11 +1,20 @@
 import { createHash } from "node:crypto";
+import { isIP, SocketAddress } from "node:net";
 import { z } from "zod";
 import { api } from "../../../../convex/_generated/api";
 import { backend } from "../../../../src/server";
 import type { Id } from "../../../../convex/_generated/dataModel";
 const hash=(s:string)=>createHash("sha256").update(s).digest("hex");
-// shortcut: trusts the proxy's x-real-ip / x-forwarded-for (set by Vercel and common proxies); without a proxy the caller sets it, so startPair's shared 300/minute cap is the bound.
-const clientAddress=(request:Request)=>(request.headers.get("x-real-ip")??request.headers.get("x-forwarded-for")?.split(",")[0]??"unknown").trim().slice(0,100);
+// Request exposes no socket peer address. Trust requires an overwriting proxy and an isolated origin.
+function clientAddress(request:Request) {
+ const header=process.env.BRIDGE_TRUSTED_IP_HEADER;
+ if(header!=="x-real-ip"&&header!=="x-forwarded-for")return "unknown";
+ const ip=request.headers.get(header)?.trim();
+ if(!ip||ip.length>45||ip.includes("%"))return "unknown";
+ const family=isIP(ip);if(!family)return "unknown";
+ const canonical=SocketAddress.parse(family===6?`[${ip}]`:ip)?.address;
+ return canonical?.replace(/^::ffff:/,"")??"unknown";
+}
 export async function POST(request:Request,{params}:{params:Promise<{action:string}>}) {
  const {action}=await params;const secret=process.env.SERVICE_SECRET??"";
  try {

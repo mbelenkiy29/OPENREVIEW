@@ -62,9 +62,26 @@ Turn this on before the emailed sign-in link gets traffic. Details and defaults 
    - nginx: `header:x-real-ip` with `proxy_set_header X-Real-IP $remote_addr`.
    - AWS ALB: `xff-rightmost`.
 
-   The bridge pairing route (`app/api/bridge/[action]/route.ts`) still reads `x-real-ip` or the first `x-forwarded-for` itself, bounded by its global cap.
+   Bridge pairing uses a separate, explicit trust policy described below.
 
 See [Convex's Vercel deployment guide](https://docs.convex.dev/production/hosting/vercel), [Convex limits](https://docs.convex.dev/production/state/limits), and [Vercel Hobby eligibility](https://vercel.com/docs/plans/hobby).
+
+### Bridge pairing client identity
+
+By default, `POST /api/bridge/pair` ignores all forwarding headers. All callers share the `unknown` bucket of 30 accepted pairings per minute. The backend also retains its deployment-wide 300-per-minute cap. This default applies on Vercel too; `VERCEL` and `CLIENT_IP_SOURCE` do not opt bridge pairing into header trust. Next.js `Request` does not expose the TCP peer address.
+
+To separate legitimate clients, set **one** of these exact values on the web app:
+
+- `BRIDGE_TRUSTED_IP_HEADER=x-real-ip`
+- `BRIDGE_TRUSTED_IP_HEADER=x-forwarded-for`
+
+Enable this only when the trusted ingress strips caller-supplied copies of the selected header and replaces them with exactly one verified client IP on every request. Block direct access to the application origin and all alternate ingress paths that bypass this rule. The other header is always ignored, even if the selected header is missing or invalid. Header validation cannot make an untrusted ingress safe.
+
+For a single nginx ingress that directly receives client connections, `proxy_set_header X-Real-IP $remote_addr;` replaces the selected header; restrict the web listener to that ingress. Behind additional proxies, first configure and verify how the ingress obtains the real client address. Do not enable this policy for a proxy that only appends `X-Forwarded-For`; neither the first nor the last entry is trusted automatically. Verify hosted-provider header replacement and origin protection before opting in; the platform name alone is not a trust guarantee.
+
+The selected header must contain a single IPv4 or bare IPv6 address. Surrounding whitespace is removed. IPv6 spelling is canonicalized, and IPv4-mapped IPv6 shares the IPv4 bucket. Missing, empty, malformed, overlong, port-qualified, bracketed, zone-qualified, duplicate, or comma-separated values use `unknown`; no chain entry or alternate header is selected. An unset or unsupported configuration also uses `unknown`.
+
+This change can reduce pairing throughput on existing deployments until a verified ingress policy is configured. Clients behind the same address share a limit. The HTTP error contract and signed-in workspace-write approval remain unchanged; rate limiting does not authenticate a device.
 
 ## Docker deployment
 
