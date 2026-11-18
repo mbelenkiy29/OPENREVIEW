@@ -2,15 +2,23 @@
 
 17 November 2026. First-round engineering audit of this repository: architecture, local run, tests, bugs, UI, onboarding, and a comparison with Greptile and CodeRabbit. No Greptile or CodeRabbit code, copy or branding was used.
 
-**Gate on this checkout (Node.js 24.11.1, pnpm 11.1.2):** `pnpm lint` (3 pre-existing warnings, 0 errors), `pnpm typecheck`, `pnpm test` (658 Node tests + 560 Vitest tests). `pnpm build` is in #152. Playwright screenshots for public pages (1280 and 390) are attached to #151.
+**Status refreshed 18 November 2026** against `main` at `d952840946a18f6368e86f4bce392c578f037819`. PR merge states and repository content were checked. Application gates, live providers, backend connectivity, sign-in, model reviews, hosting, and public npm installation were not rerun for this documentation refresh.
 
-Pull requests from this audit:
+**Historical gate reported on 17 November (Node.js 24.11.1, pnpm 11.1.2; execution revision not recorded):** `pnpm lint` (3 pre-existing warnings, 0 errors), `pnpm typecheck`, `pnpm test` (658 Node tests + 560 Vitest tests). Build coverage was deferred to #152 at that time. Public-page screenshots (1280 and 390) were attached to #151.
+
+**Later gate reported in [#165](https://github.com/mbelenkiy29/OPENREVIEW/pull/165), 18 November:** Node.js 24.22.3 / pnpm 11.1.2, 699 Node tests + 571 Vitest tests (1,270 total), lint (3 existing warnings), typecheck, and production build passed. This is prior-run evidence for that PR's head `e689a8882e0e5c06c57bcda867d24e23d936b2d4`, not a fresh run on this documentation checkout.
+
+Pull requests from this audit and its follow-ups:
 
 | Theme | PR | Status |
 | --- | --- | --- |
-| Critical bugs, CLI onboarding, this audit | [#149](https://github.com/mbelenkiy29/OPENREVIEW/pull/149) | Open — rebased onto `main` after #151 |
+| Critical bugs, CLI onboarding, this audit | [#149](https://github.com/mbelenkiy29/OPENREVIEW/pull/149) | **Merged** 17 Nov 2026 |
 | UI/UX polish | [#151](https://github.com/mbelenkiy29/OPENREVIEW/pull/151) | **Merged** 17 Nov 2026 (`1041633`) |
-| CI build, issue templates, CONTRIBUTING | [#152](https://github.com/mbelenkiy29/OPENREVIEW/pull/152) | Open — rebased onto `main` after #151 |
+| CI build, issue templates, CONTRIBUTING | [#152](https://github.com/mbelenkiy29/OPENREVIEW/pull/152) | **Merged** 17 Nov 2026 |
+| README sample-data demo GIF | [#153](https://github.com/mbelenkiy29/OPENREVIEW/pull/153) | **Merged** 17 Nov 2026 |
+| Clean-checkout Docker build and runtime assets | [#163](https://github.com/mbelenkiy29/OPENREVIEW/pull/163) | **Merged** 18 Nov 2026 |
+| Explicit proxy trust for bridge pairing | [#164](https://github.com/mbelenkiy29/OPENREVIEW/pull/164) | **Merged** 18 Nov 2026 |
+| Deterministic confirmation-token tamper test | [#165](https://github.com/mbelenkiy29/OPENREVIEW/pull/165) | **Merged** 18 Nov 2026 |
 
 ## Architecture
 
@@ -56,43 +64,45 @@ Open http://localhost:3000. `pnpm setup:local` generates session, service and we
 
 ## Issues
 
-Severity, location, status. **Fixed** in this round means the change is in the open pull requests from this audit, not merged.
+Severity, location, and status as of 18 November. **Merged** means the change is in `main`; it does not establish live deployment or provider acceptance. Original findings remain below as history.
 
 | ID | Severity | Location | Status | Issue |
 | --- | --- | --- | --- | --- |
-| O1 | **High** | `README.md`, `docs/public/cli.md`, `packages/cli/README.md`, dashboard Fix settings, agent skill | **Fixed (docs)** / **open (publish)** | README and docs told users to `npm install -g openreview-cli`. That package **404s on the npm registry**. The real package name is `openreview-cli` (`packages/cli/package.json`); it is built by `pnpm build:cli` (`scripts/build-cli.ts` → `packages/cli/dist/openreview.mjs`). Docs now install from this checkout (`pnpm install` + `npm link`, or `pnpm cli`). Publishing remains an open operator step: `.github/workflows/publish-cli.yml` (`workflow_dispatch`) needs an `NPM_TOKEN` secret and a version bump. Flip `cliNpmPublished` in `src/cli-install.ts` after the first successful publish. |
-| B1 | Medium | `app/api/sentry/webhook/route.ts` | **Fixed** | Signed but invalid JSON threw and returned 500. Now 400 `Invalid payload`. |
-| B2 | Medium | `app/api/origin/webhook/route.ts` | **Fixed** | Auth failures (bad signature, identity mismatch) returned 503, so Origin would retry as if the backend were down. Now 401 for auth, 400 for bad JSON, 503 for unavailability. |
-| B3 | Medium | `app/api/providers/[id]/webhook/route.ts`, `convex/providerJobs.ts` | **Fixed** | Every Convex failure became 401, including invalid JSON after a valid signature. JSON parse is explicit; statuses are 401 / 400 / 503. |
-| B4 | Medium | `src/github.ts` `verifyWebhook` | **Fixed** | The provider route fell back to `X-Hub-Signature` (SHA-1) but verification only accepted `sha256=`. Legacy GitHub Enterprise deliveries that send only SHA-1 were dropped. SHA-1 HMAC of the exact body is now accepted when the header matches `sha1=` plus 40 hex chars. |
-| B5 | Low | `src/pull-actions-server.ts` | **Fixed** | Dashboard GitHub actions swallowed audit-log write failures after GitHub had already performed the action. Failures are now structured-logged (`pull.audit_failed`). |
-| C1 | Medium | `.github/workflows/ci.yml` | **Fixed** in #152 | CI now runs `pnpm build` after lint, typecheck and test. |
-| C2 | Medium | `Dockerfile` vs `package.json` `engines` vs CI | **Documented** in #152 / **open (align image)** | Docker still builds on **Node 26**; docs and CI use **Node 24**. The split is now written in the README, CONTRIBUTING, and a Dockerfile comment. Pinning the image to Node 24 remains an operator choice. |
-| C3 | Low | `.github/ISSUE_TEMPLATE/` | **Fixed** in #152 | Bug and feature templates; blank issues off; security reports go to SECURITY.md. |
-| C4 | Low | `CONTRIBUTING.md` | **Fixed** in #152 | Node 24 vs Docker 26, unpublished CLI install, check commands, security pointer. |
+| O1 | **High** | `README.md`, `docs/public/cli.md`, `packages/cli/README.md`, dashboard Fix settings, agent skill | **Merged (docs)** in #149 / **open (publish readiness and release)** | The 17 November registry check returned 404 for `openreview-cli`. Docs now install from this checkout (`pnpm install` + `npm link`, or `pnpm cli`). The package remains version `0.1.0` and `cliNpmPublished=false` in this revision; no registry install was tested in this refresh. The manual publish workflow exists, but that alone does not establish release readiness. Review package contents, ownership, credentials and version, and validate the artifact before a human release. Change the flag only after successful publication and a real registry-install check. |
+| B1 | Medium | `app/api/sentry/webhook/route.ts` | **Merged** in #149 | Signed but invalid JSON threw and returned 500. Now 400 `Invalid payload`. |
+| B2 | Medium | `app/api/origin/webhook/route.ts` | **Merged** in #149 | Auth failures (bad signature, identity mismatch) returned 503, so Origin would retry as if the backend were down. Now 401 for auth, 400 for bad JSON, 503 for unavailability. |
+| B3 | Medium | `app/api/providers/[id]/webhook/route.ts`, `convex/providerJobs.ts` | **Merged** in #149 | Every Convex failure became 401, including invalid JSON after a valid signature. JSON parse is explicit; statuses are 401 / 400 / 503. |
+| B4 | Medium | `src/github.ts` `verifyWebhook` | **Merged** in #149 | The provider route fell back to `X-Hub-Signature` (SHA-1) but verification only accepted `sha256=`. Legacy GitHub Enterprise deliveries that send only SHA-1 were dropped. SHA-1 HMAC of the exact body is now accepted when the header matches `sha1=` plus 40 hex chars. |
+| B5 | Low | `src/pull-actions-server.ts` | **Merged** in #149 | Dashboard GitHub actions swallowed audit-log write failures after GitHub had already performed the action. Failures are now structured-logged (`pull.audit_failed`). |
+| C1 | Medium | `.github/workflows/ci.yml` | **Merged** in #152 | CI runs `pnpm build` after lint, typecheck and test. Docker image smoke checks are not wired into this workflow. |
+| C2 | Medium | `Dockerfile` vs `package.json` `engines` vs CI | **Documented** in merged #152 | Docker uses **Node 26**; development and CI use **Node 24**. Both satisfy `engines.node >=24`. Alignment is an optional operator choice, not a required fix for the build failures addressed in #163. |
+| C3 | Low | `.github/ISSUE_TEMPLATE/` | **Merged** in #152 | Bug and feature templates; blank issues off; security reports go to SECURITY.md. |
+| C4 | Low | `CONTRIBUTING.md` | **Merged** in #152 | Node 24 vs Docker 26, unpublished CLI install, check commands, security pointer. |
+| C5 | Medium | `Dockerfile`, `scripts/docker-smoke.sh` | **Merged** in #163 | Removed the missing `patches` input, installed pinned pnpm without absent Corepack, and packaged `public/` assets. That PR reports a successful production image build and offline non-root health/static-asset smoke; later rebuilds hit sandbox OOM. The smoke command exists, but Docker CI wiring and live backend/sign-in/model acceptance remain unverified here. |
 | U1 | Medium | `app/oauth/consent/page.tsx` | **Merged** in #151 | `.narrow` matches `.welcome`; expired consent has Home and MCP docs links. |
 | U2 | Medium | `app/dashboard/error.tsx`, `loading.tsx` | **Merged** in #151 | First-load and layout errors show portal chrome; page errors keep the portal layout. |
 | U3 | Medium | `app/globals.css` landing links | **Merged** in #151 | Landing, welcome, and consent running-text links are underlined. |
 | U4 | Low | `app/layout.tsx` | **Merged** in #151 | Skip-to-content is the first tab stop and targets `#main`. |
 | U5 | Low | `app/globals.css` charts | **Merged** in #151 | Chart axes, tooltips, and board captions use `--muted`. |
 | U6 | Low | `app/dashboard/pulls.tsx` | **Merged** in #151 | Pull list (and legal markdown tables) use `ScrollTable`. |
-| S1 | Low | `app/api/bridge/[action]/route.ts` | Open | Pairing rate limit prefers `X-Forwarded-For` / `X-Real-IP`. Fine behind a stripping proxy; spoofable if the app is reached directly. |
+| S1 | Low | `app/api/bridge/[action]/route.ts` | **Merged** in #164 | Pairing previously trusted caller-controlled forwarding headers. It now ignores them by default and shares the 30-per-minute `unknown` bucket. `BRIDGE_TRUSTED_IP_HEADER` can select one header with one canonical IP only behind an overwriting proxy and isolated origin; it does not select a first or last chain entry. The 300-per-minute deployment cap remains. See [bridge pairing client identity](deployment.md#bridge-pairing-client-identity). |
 | S2 | Info | `convex/runtime.ts` `claim` | Open (by design) | Claim patches a queued job without an extra status CAS. Convex mutations are OCC-serializable, so concurrent workers retry; not a practical race. Left documented rather than “fixed”. |
 | S3 | Info | `convex/providerConnections.ts` `claimEvent` | Open (by design) | 15-minute recovery is after typical Convex action timeouts (~10 min), so a still-running handler should already have been killed. |
-| T1 | Low | `tests/bridge.test.ts` | Open | Documented flake: Node child SIGSEGV/SIGBUS under parallel load on some Node versions. |
+| T1 | Low | `tests/bridge.test.ts` | Historical observation; not re-reproduced in this refresh | Node child SIGSEGV/SIGBUS under parallel load was documented on some Node versions. The later passing gate does not prove this intermittent failure is eliminated. |
+| T2 | Low | `tests/changelog-email.spec.ts` | **Merged** in #165 | Text-only edits could preserve decoded authentication-tag bytes and make the rejection test fail randomly. The test now flips one decoded tag bit and checks that rejection makes no email-provider requests. This test-only fix is separate from T1. |
 
 **Already solid (do not re-fix):** GitHub webhook HMAC in `convex/http.ts` (size limits, exact-byte SHA-256, delivery dedup); Stripe and Slack signature checks; hashed API keys; `scripts/bootstrap.ts` never prints secrets; CSP / HSTS / `X-Frame-Options: DENY`; docs link checker (`tests/docs-links.test.ts`).
 
 ## Feature gap analysis vs Greptile and CodeRabbit
 
-Built from public product descriptions only. Ranked by **user impact** (whether a team evaluating those products would miss it) and **effort**. OpenReview already has a large parity surface (see `docs/parity/REPORT.md`); this table is what still matters for winning users.
+The original ranking uses public product descriptions, **user impact** (whether a team evaluating those products would miss it), and **effort**. OpenReview already has a large parity surface (see `docs/parity/REPORT.md`). Status notes were refreshed on 18 November; rows marked **Shipped** are no longer absent features. Competitor facts and live availability were not rechecked.
 
 | Rank | Gap | Impact | Effort | Notes |
 | --- | --- | --- | --- | --- |
 | 1 | One-click hosted install / GitHub Marketplace listing | High | Medium (human) | Greptile and CodeRabbit install from the Marketplace in a minute. OpenReview requires registering your own GitHub App, converting a PKCS#1 key, and wiring Convex. Time-to-first-review is the conversion killer. |
 | 2 | Published CLI (`openreview-cli` on npm) | High | Low once npm org exists | CodeRabbit and Greptile ship a global CLI. **O1** unblocks docs; publish is still open. |
-| 3 | Demo GIF / interactive hosted demo with a public sample PR | High | Medium | Greptile’s marketing shows a real review. OpenReview has an interactive landing replica (`app/landing/`) but no recorded GIF in the README and no public demo workspace. |
-| 4 | Comparison pages (`/compare/greptile`, `/compare/coderabbit`) | High | Low | Buyers search “[tool] alternative”. No comparison page exists. Keep original wording; do not copy competitor UI. |
+| 3 | Demo / public sample PR | High | Medium | **Shipped (sample-data recording):** README embeds [the demo GIF](images/demo.gif), added in #153. The interactive landing replica remains sample data, not live review-quality evidence. A real public-review/workspace acceptance check was not performed in this refresh. |
+| 4 | Comparison content and discoverability | High | Low | **Shipped (repository docs):** [Greptile](compare/greptile.md) and [CodeRabbit](compare/coderabbit.md) comparisons exist and README links to both. Their competitor facts are dated 16 November; recheck them before making new marketing claims. This does not establish hosted `/compare/*` route availability. |
 | 5 | GitHub check-run as a required status out of the box | Medium | Low–medium | CodeRabbit is often a required check. OpenReview supports check runs only with Checks write and an explicit failure threshold (default remaining `neutral`). |
 | 6 | IDE inline comments (VS Code / JetBrains) | Medium | High | CodeRabbit has editor extensions. OpenReview has MCP + CLI + dashboard. |
 | 7 | Automatic issue filing (Linear/Jira) from findings | Medium | Medium | CodeRabbit/Greptile-style “create ticket from finding” is a common workflow. OpenReview reads tickets as requirements; it does not open them. |
@@ -104,7 +114,7 @@ Built from public product descriptions only. Ranked by **user impact** (whether 
 
 ## Onboarding / DX friction (time-to-first-review)
 
-Measured as the path a new OSS user follows from clone to a review on their own PR.
+Historical estimates from the 17 November audit for the path from clone to a review on the user's own PR; timings were not remeasured in this refresh.
 
 1. **Node version.** `engines.node` is `>=24`. A Node 22 environment fails the engine check (`pnpm install` warns). The README does not mention `nvm` / `fnm`. **~10 minutes** if the user is on 22.
 2. **pnpm 11.** Corepack can install it; not everyone has Corepack enabled.
@@ -114,23 +124,23 @@ Measured as the path a new OSS user follows from clone to a review on their own 
 6. **Model key.** Reviews do nothing useful without `LLM_API_KEY` on Convex, not only in Next.js. Easy to set the key only in `.env.local`.
 7. **CLI (O1).** Until this fix, `npm install -g openreview-cli` failed immediately. Working path is now clone → `pnpm install` → `npm link`. Still worse than a one-line global install.
 
-**Honest time-to-first-review today:** an hour or more for GitHub-hosted reviews; about 15 minutes for a local `pnpm cli review --local` once Node 24, pnpm, and a model key exist. Greptile/CodeRabbit: minutes, because the App is pre-registered.
+**17 November time-to-first-review estimate:** an hour or more for GitHub-hosted reviews; about 15 minutes for a local `pnpm cli review --local` once Node 24, pnpm, and a model key exist. The original comparison estimated minutes for Greptile/CodeRabbit because their Apps are pre-registered; no fresh timing comparison was run.
 
 ## Growth plan (OSS dev tool)
 
-1. **README / landing.** Lead with a 20-second demo GIF of a PR summary + inline finding. Keep the architecture diagram. Put “not on npm yet / install from checkout” next to the CLI until publish. Add a one-click **Deploy to Render** / **Deploy on Railway** button only if the Compose/Helm path is actually one-click (it is not today; Convex + GitHub App still need human steps).
-2. **Demo GIF.** Record `pnpm test:e2e`’s landing + a fixture review; commit under `docs/images/` (or a short MP4 like `public/whats-new/`).
+1. **README / landing.** Keep the existing sample-data demo GIF and architecture diagram. Keep “not on npm yet / install from checkout” next to the CLI until publish. Add a one-click **Deploy to Render** / **Deploy on Railway** button only when a tested template provisions the backend and prompts for required secrets; the documented setup still needs human Convex + GitHub App steps.
+2. **Demo GIF — shipped in #153.** Maintain the recording under `docs/images/` with its sample-data label. Re-recording instructions are in [scripts/demo/README.md](../scripts/demo/README.md). Treat a real public review as separate evidence, not as something this recording proves.
 3. **GitHub Marketplace listing.** Needs a public GitHub App, a listing description, screenshots, and support URL. Human-only (cannot be done from this agent). Highest-leverage distribution.
 4. **Show HN / Product Hunt.** After Marketplace or a public demo workspace exists. Show HN wants a working playground, not a self-hosting essay.
 5. **Docs site.** `/docs` already exists (`docs/public/` + selected guides). Add a short “Install the GitHub App (hosted)” page once a hosted App exists, distinct from “Register your own App (self-host)”.
-6. **Comparison pages.** `/docs/compare` with original, factual tables: self-host, BYO model, evidence gating, price. Never use competitor trademarks in product UI chrome.
+6. **Comparison content — shipped.** Maintain [Greptile](compare/greptile.md) and [CodeRabbit](compare/coderabbit.md) tables with dated sources and factual claims. Verify site navigation and hosted routes separately before advertising them.
 7. **Issue templates + CONTRIBUTING.** Done in #152 (C3/C4).
-8. **Good-first-issues.** Remaining: (1) pin Docker to Node 24 or raise the documented engine (C2), (2) trust only the last `X-Forwarded-For` hop or require a known proxy (S1), (3) isolate `tests/bridge.test.ts` from parallel SIGSEGV (T1). U4/U6 shipped in #151.
+8. **Remaining engineering work.** Add Docker smoke coverage to CI, complete CLI publish readiness, and investigate T1 only with a reproducible failure and recorded runtime. S1 shipped in #164; follow its explicit proxy/header policy instead of trusting a chain position. Node-version alignment is optional (C2). U4/U6 shipped in #151.
 
 ### Needs human (publish and hosted distribution)
 
-1. Create an npmjs org, add repository secret `NPM_TOKEN` with publish rights for `openreview-cli`.
-2. Bump `packages/cli/package.json` version if needed, run **Publish CLI** (`workflow_dispatch`).
-3. Set `cliNpmPublished` to `true` in `src/cli-install.ts` and restore `npm install -g openreview-cli` in README and `docs/public/cli.md` (the test in `tests/cli-install.test.ts` enforces this).
+1. Complete and review CLI build, package-content, and install validation before release. The package remains `0.1.0`; publication is not established by a successful local build or by a prepared but unmerged change.
+2. Confirm npm package ownership, approved publish credentials (`NPM_TOKEN` for the existing manual workflow), package contents, and the release version before a human runs **Publish CLI** (`workflow_dispatch`). No release was dispatched by this refresh.
+3. Only after publication and a successful registry install, set `cliNpmPublished` to `true` in `src/cli-install.ts` and restore `npm install -g openreview-cli` in README and `docs/public/cli.md` (the test in `tests/cli-install.test.ts` enforces this).
 4. Register a public GitHub App and a Marketplace listing (or document why the project stays “bring your own App”).
-5. Align Dockerfile Node 26 vs documented Node 24 (still open after #152 documents the split).
+5. Add Docker build/smoke coverage through a reviewed CI workflow change and verify it on a runner with sufficient memory. The smoke script is merged; CI wiring is not. This is separate from optional Node-version alignment.
