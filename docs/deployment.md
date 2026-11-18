@@ -108,6 +108,9 @@ Dependency checks: run `pnpm audit --prod`, review findings, and use patched ver
 
 Docker build/Compose execution require a functioning Docker daemon. Real deployment and GitHub/model acceptance cannot be verified with unit fixtures alone. See `docs/implementation-status.md` for current evidence and limits.
 
+From a fresh checkout, run `bash scripts/docker-smoke.sh` to build the web image and check its non-root runtime, health endpoint, public assets, and generated JavaScript with container networking disabled. This needs Bash and Docker, but no backend or credentials. It does not verify sign-in, backend connectivity, or model reviews.
+To check an existing image without rebuilding it, run `bash scripts/docker-smoke.sh openreview:local`.
+
 ### GitHub Enterprise API and author identity
 
 Enterprise Server connections accept the instance root or its `/api/v3` API root. API requests use `/api/v3`; source and clone links use the actual server hostname, including servers whose hostname starts with `api.`. Dedicated GHE.com connections use `api.SUBDOMAIN.ghe.com` for API calls and `SUBDOMAIN.ghe.com` for source/clone links. Add the input instance host to `SCM_ALLOWED_HOSTS`; when entering its web host, also explicitly authorize the derived API host. Credentials are never forwarded through redirects.
