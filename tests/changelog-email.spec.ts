@@ -58,7 +58,11 @@ test('changelog sign-up is double opt-in, stores no address, and lands in the Re
  expect(await t.action(api.changelogJobs.confirm,{secret:svc,token})).toBe(true);
  expect(r.contacts.get('reader@example.com')).toEqual({unsubscribed:false,segments:new Set(['seg_1'])});
  // Tampered or expired links do nothing, and each address gets 3 links an hour.
- expect(await t.action(api.changelogJobs.confirm,{secret:svc,token:token.slice(0,-2)+'xx'})).toBe(false);
+ const parts=token.split('.'),tag=Buffer.from(parts[4],'base64url'),callsBeforeTamper=r.calls.length;
+ tag[0]^=1;
+ parts[4]=tag.toString('base64url');
+ expect(await t.action(api.changelogJobs.confirm,{secret:svc,token:parts.join('.')})).toBe(false);
+ expect(r.calls).toHaveLength(callsBeforeTamper);
  await t.action(api.changelogJobs.subscribe,{secret:svc,email:'reader@example.com'});
  await t.action(api.changelogJobs.subscribe,{secret:svc,email:'reader@example.com'});
  await expect(t.action(api.changelogJobs.subscribe,{secret:svc,email:'reader@example.com'})).rejects.toThrow('Rate limit');
