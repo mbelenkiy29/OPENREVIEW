@@ -90,6 +90,38 @@ Setup can't be skipped. Until a workspace finishes it, opening the dashboard tak
 
 When a review is blocked, it is recorded as failed with a `Billing:` reason, visible on the pull request's review page. Blocked reviews are also counted on **Organization Settings → Billing & Usage**.
 
+## Enterprise contracts
+
+Enterprise is sold by contract, not through Checkout. It bills **active contributors**: the distinct authors of pull requests that got a completed review in a UTC month. Bots and the logins a contract lists as non-billable never count. A customer commits to a number of contributors for a year and is invoiced.
+
+**What the customer receives:**
+- **Day one:** one invoice for the year's commitment (committed contributors × monthly price × 12), due after the contract's net days.
+- **Each month after:** an invoice for contributors above the commitment and, on Managed, model usage past the included amount. It can be $0.
+- **End of term:** the subscription cancels. A contract never renews by itself.
+
+**Two modes:**
+- **Managed:** reviews run on the operator's model. Each billed contributor adds included usage to a shared monthly pool; usage past it is billed at cost times the contract's multiplier, up to the admin's spending cap.
+- **Own key:** reviews run on the customer's saved model key and nothing is metered. A call that would fall back to the operator's model is refused.
+
+**Stripe objects** (one Product per tier, prices per contract):
+- **Product** "OpenReview Enterprise": `STRIPE_ENTERPRISE_PRODUCT_ID`.
+- **Meter** for contributors above the commitment, aggregation **Sum**: its event name is `STRIPE_CONTRIBUTOR_METER_EVENT` (default `openreview_contributors_over`) and its ID is `STRIPE_CONTRIBUTOR_METER_ID`. One event is sent per contract per month, at 00:10 UTC on the 1st, for the month that just closed.
+- **Shared overage price** on the existing usage meter with the Enterprise markup: `STRIPE_ENTERPRISE_USAGE_PRICE_ID`. A contract with another multiplier gets its own price on the same meter, entered on the form.
+- **Per contract**, created by the app and never by hand: a yearly licensed price (the commitment) and a monthly metered price on the contributors meter (the true-up).
+- **Subscription schedule:** one phase of one year with those items, `collection_method: send_invoice`, `days_until_due` from the contract, `billing_mode: flexible` (mixed yearly and monthly items need it) and `end_behavior: cancel`. Its metadata carries `organizationId` and `contractId`.
+
+**Creating a contract:** an operator opens **Operator → Enterprise contracts**, enters the terms, checks **Preview** and chooses **Create contract**. The preview is computed by the app before tax; it does not call Stripe. The workspace moves to Enterprise when the `customer.subscription.created` webhook arrives on the contract's first day, and a live Pro subscription is replaced then. Every step is recorded in the operator log and the workspace audit log (`billing.contract_draft`, `billing.contract_created`).
+
+**Moving from Starter or Pro:** choose the workspace and **Preview**: the form shows its current subscription and its billable contributors for the last three months, so the commitment comes from data rather than seats. Creating a contract that starts next month sets the old subscription's `cancel_at` to the contract's first day with no proration, so it bills normally until then. A contract that starts on the 1st of the current month ends the old subscription at once and credits its unused time. The audit log records `billing.migrated_from_pro`. Features never drop in between: Enterprise holds every Pro feature, and if the old subscription ends a moment before the new one starts, the contract takes over at once (`billing.contract_takeover` in the logs).
+
+**Renewal and end of term:** 60 and 30 days before a contract ends, the workspace's owners and the operators get one email each, unless a renewal is signed. To renew, use the same form for that workspace: it creates the next year's contract, which must start the day the term ends, with its own prices. Without a renewal the subscription cancels at the end of the term and the workspace is left as after a cancelled Pro subscription. The term's last month of contributors is reported at 23:30 UTC on its last day, before the subscription ends.
+
+**Stripe setup (once):**
+1. Create the product, the contributors meter and the shared overage price, and set the four settings above on Convex.
+2. In Billing settings, leave a past-due invoiced subscription **past due**. The contract's grace days decide when reviews pause.
+3. In Invoice settings, give subscription-cycle invoices with a metered price at least 24 hours before they finalize (Stripe allows up to 72), so the monthly contributor report always lands first.
+4. Turn on invoice reminder emails.
+
 ## Stripe customers
 
 Every workspace becomes a Stripe customer when it is created, so the Stripe Dashboard lists all of them. The customer is named after the workspace and carries its first owner's verified email (if there is one) and `metadata.organizationId`. The workspace keeps the ID in `organizations.stripeCustomerId`. Checkout reuses it, and linking it there (`billingAccounts.customerId`) is still what starts the trial and shows the billing portal. Operators' workspaces get no customer.

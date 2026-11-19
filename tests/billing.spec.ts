@@ -650,3 +650,23 @@ test('hosted agent fixes: none on Free, 5 per Starter seat pooled until refused,
  for(let i=0;i<50;i++)expect(await fix()).toEqual({allowed:true});
  expect(await t.run(async ctx=>(await ctx.db.query('billingUsage').collect()).map(u=>u.fixes))).toEqual([10,1]);
 });
+
+test('the cost report lists each paying workspace\'s monthly model cost per review; an account without a contract bills as before; nothing with billing off',async()=>{
+ const {t,org}=await setup();
+ await t.run(async ctx=>{
+  await ctx.db.insert('billingAccounts',{organizationId:org,status:'active',seats:2,trialEndsAt:0,subscriptionId:'sub_1',plan:'pro',updatedAt:Date.now()});
+  await ctx.db.insert('billingUsage',{organizationId:org,period:'2026-10',reviews:4,blocked:0,usedMicros:260_000,overageMicros:20_000});
+  await ctx.db.insert('billingUsage',{organizationId:org,period:'2026-09',reviews:0,blocked:1,usedMicros:5_000});
+  await ctx.db.insert('billingUsage',{organizationId:org,period:'2026-01',reviews:9,blocked:0,usedMicros:900_000});
+ });
+ const report=await t.query(internal.billing.costReport,{months:3});
+ expect(report.rows.map(r=>[r.period,r.plan,r.seats,r.reviews,r.usedMicros,r.overageMicros,r.costPerReviewMicros])).toEqual([['2026-10','pro',2,4,260_000,20_000,65_000],['2026-09','pro',2,0,5_000,0,null]]);
+ expect([report.p50CostPerReviewMicros,report.p90CostPerReviewMicros]).toEqual([65_000,65_000]);
+ // The row has no contract, so it still bills as Pro.
+ expect((await t.query(internal.billing.entitlement,{organizationId:org,key:'auth.sso'}))).toBe(true);
+ // A workspace without a live subscription is left out.
+ await t.run(async ctx=>{const a=await ctx.db.query('billingAccounts').first();await ctx.db.patch(a!._id,{status:'canceled'});});
+ expect((await t.query(internal.billing.costReport,{})).rows).toEqual([]);
+ delete process.env.BILLING_ENABLED;
+ expect(await t.query(internal.billing.costReport,{})).toEqual({rows:[],p50CostPerReviewMicros:null,p90CostPerReviewMicros:null});
+});

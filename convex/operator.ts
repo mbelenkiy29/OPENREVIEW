@@ -5,6 +5,8 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { authenticatedSession } from "./auth";
 import { billingConfig, billingDecision, keepsFree, paidPlanReason, periodKey, seatCount } from "../src/billing";
+import { contributorCount } from "./contributors";
+import { verifiedEmail } from "./referralLedger";
 
 // Operators (super admins) of this deployment: OPERATOR_GITHUB_IDS on Convex, comma-separated numeric GitHub
 // user ids (a login can be renamed and then reused). Only this setting grants it, never a client flag or a stored field.
@@ -17,6 +19,8 @@ async function operatorUsers(ctx: QueryCtx): Promise<Id<"users">[]> {
   ]));
   return found.filter((id): id is Id<"users"> => id !== undefined);
 }
+/** Verified addresses of the deployment's operators, for mail only they should get (contract renewals). */
+export const operatorEmails = async (ctx: QueryCtx) => Promise.all((await operatorUsers(ctx)).map((id) => verifiedEmail(ctx, id)));
 export const isOperator = async (ctx: QueryCtx, userId: Id<"users">) => (await operatorUsers(ctx)).includes(userId);
 /** A workspace an operator owns; billing treats it as self-hosted (configFor in convex/billing.ts). */
 export async function operatorOwned(ctx: QueryCtx, organizationId: Id<"organizations">) {
@@ -75,12 +79,15 @@ async function operatorReport(ctx: QueryCtx) {
     const exempt = config.enabled && members.some((m) => m.role === "owner" && operators.has(m.userId));
     // Only workspaces that keep Free (keepsFree) have its allowance, as on their Billing page.
     // shortcut: leaves out the one-Free-workspace-per-owner rule, so an owner's second Free workspace shows the Free allowance; check its Billing page.
-    const decision = config.enabled && !exempt ? billingDecision(account ?? { status: "trial", seats: 0, trialEndsAt: 0 }, month?.usedMicros ?? 0, now, config, 0, keepsFree(o) ? undefined : paidPlanReason) : null;
+    const contract = account?.contract, contributors = contract ? await contributorCount(ctx, o._id, period) : null;
+    const decision = config.enabled && !exempt ? billingDecision(account ?? { status: "trial", seats: 0, trialEndsAt: 0 }, month?.usedMicros ?? 0, now, config, 0, keepsFree(o) ? undefined : paidPlanReason, contributors ?? 0) : null;
     return {
       id: o._id, name: o.name, createdAt: o.createdAt, exempt, plan: decision?.plan ?? null, status: account?.subscriptionId ? account.status : null,
       choosingPlan: config.enabled && !exempt && Boolean(o.planRequired && !o.planSelectedAt), seats: seatCount(members), members: members.length,
       billedSeats: account?.subscriptionId ? account.seats : null, spend: spent.get(o._id) ?? 0, usedMicros: month?.usedMicros ?? 0, limitMicros: decision?.limit ?? null,
       reviews: month?.reviews ?? 0, blocked: month?.blocked ?? 0, fixes: month?.fixes ?? 0, lastActivity: last?.createdAt ?? null,
+      // Enterprise contract terms and this month's billable contributors (null without a contract).
+      contract: contract ? { mode: contract.mode, committed: contract.committedContributors, priceCents: contract.contributorPriceCents, startsAt: contract.startsAt, endsAt: contract.endsAt, inStripe: Boolean(contract.stripe?.scheduleId) } : null, contributors,
     };
   }));
   workspaces.sort((x, y) => y.spend - x.spend || y.createdAt - x.createdAt);
@@ -132,10 +139,10 @@ async function operatorReport(ctx: QueryCtx) {
   ]);
   const wanted = Object.entries(paywalls.reduce<Record<string, number>>((n, e) => ({ ...n, [e.method ?? "unknown"]: (n[e.method ?? "unknown"] ?? 0) + 1 }), {})).map(([feature, count]) => ({ feature, count })).sort((x, y) => y.count - x.count);
   return {
-    billing: config.enabled, days, series, chart, workspaces, users: people, activity, funnel: { steps, wanted },
+    billing: config.enabled, contractDefaults: { minContributors: config.enterpriseMinContributors, includedUsageUsd: config.enterpriseUsagePerContributorMicros / 1e6, netDays: config.enterpriseNetDays, graceDays: config.enterpriseGraceDays }, days, series, chart, workspaces, users: people, activity, funnel: { steps, wanted },
     access: await Promise.all(access.map(async (e) => ({ id: e._id, at: e.createdAt, action: e.action, user: await login(e.userId) }))),
     capped: { workspaces: organizations.length === cap, users: users.length === cap, usage: usage.length === usageCap },
-    totals: { users: users.length, workspaces: workspaces.length, operators: operators.size, spend: total("spend"), reviews: total("reviews"), blocked: total("blocked"), fixes: total("fixes"), plans: Object.fromEntries(["free", "starter", "pro"].map((p) => [p, workspaces.filter((w) => w.plan === p).length])) },
+    totals: { users: users.length, workspaces: workspaces.length, operators: operators.size, spend: total("spend"), reviews: total("reviews"), blocked: total("blocked"), fixes: total("fixes"), plans: Object.fromEntries(["free", "starter", "pro", "enterprise"].map((p) => [p, workspaces.filter((w) => w.plan === p).length])) },
     budget: budget ? { limitMicros: budget.limitMicros, usedMicros: budget.committedMicros + budget.reservedMicros } : null,
   };
 }

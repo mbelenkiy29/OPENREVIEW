@@ -22,4 +22,7 @@ crons.interval("Expire inference reservations that were never settled",{minutes:
 crons.interval("Retry referral credits and payouts stuck in processing",{minutes:15},internal.referralJobs.reconcileRedemptions,{});
 crons.interval("Remind owners of workspaces still in setup after two days",{hours:24},internal.lifecycleEmails.remindUnfinishedSetup,{});
 crons.weekly("Email the week's changelog entries to subscribers",{dayOfWeek:"tuesday",hourUTC:16,minuteUTC:0},internal.changelogJobs.digest,{});
+crons.monthly("Queue Enterprise contributor reports for the month that just closed",{day:1,hourUTC:0,minuteUTC:10},internal.billing.queueContributorReports,{});
+crons.cron("Report the last month of Enterprise contracts that end tonight","30 23 28-31 * *",internal.billing.queueContributorReports,{final:true});
+crons.daily("Remind owners and operators of Enterprise contracts ending in 60 and 30 days",{hourUTC:15,minuteUTC:0},internal.enterprise.remindRenewals,{});
 export default crons;

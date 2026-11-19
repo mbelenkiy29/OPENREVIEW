@@ -1,13 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, fixRunLimit, formEncode, reviewsLeft, nextPeriodStart, openSubscription, periodKey, seatCount, stripe, stripeGet, stripeKey, stripeV2, trialEndsFrom, verifyStripeSignature } from "../src/billing";
+import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, contractEnd, contractPreview, contractTermsError, contributorMeterEvent, fixRunLimit, formEncode, reviewsLeft, nextPeriodStart, openSubscription, ownKeyOnlyReason, periodKey, seatCount, stripe, stripeGet, stripeKey, stripeV2, trialEndsFrom, verifyStripeSignature } from "../src/billing";
 
 const config = billingConfig({ BILLING_ENABLED: "true", BILLING_FREE_USAGE_USD: "3", BILLING_USAGE_PER_SEAT_USD: "10", BILLING_GRACE_DAYS: "7" });
 const now = Date.UTC(2026, 9, 14), day = 86400000, usd = 1e6;
 
 test("billing configuration defaults to disabled and validates numbers", () => {
-  assert.deepEqual(billingConfig({}), { enabled: false, trialDays: 14, freeUsageMicros: 3 * usd, usagePerSeatMicros: 6 * usd, proUsagePerSeatMicros: 12 * usd, graceDays: 7, starterFixesPerSeat: 5, proFixesPerSeat: 20 });
+  assert.deepEqual(billingConfig({}), { enabled: false, trialDays: 14, freeUsageMicros: 3 * usd, usagePerSeatMicros: 6 * usd, proUsagePerSeatMicros: 12 * usd, graceDays: 7, starterFixesPerSeat: 5, proFixesPerSeat: 20, enterpriseMinContributors: 25, enterpriseUsagePerContributorMicros: 12 * usd, enterpriseNetDays: 30, enterpriseGraceDays: 30 });
+  assert.deepEqual([billingConfig({ BILLING_ENTERPRISE_MIN_CONTRIBUTORS: "40", BILLING_ENTERPRISE_USAGE_PER_CONTRIBUTOR_USD: "x", BILLING_ENTERPRISE_NET_DAYS: "45", BILLING_ENTERPRISE_GRACE_DAYS: "-3" })].map((c) => [c.enterpriseMinContributors, c.enterpriseUsagePerContributorMicros, c.enterpriseNetDays, c.enterpriseGraceDays]), [[40, 12 * usd, 45, 30]], "enterprise defaults are overridable and bad values fall back");
   assert.deepEqual([billingConfig({ BILLING_STARTER_FIXES_PER_SEAT: "8", BILLING_PRO_FIXES_PER_SEAT: "x" })].map((c) => [c.starterFixesPerSeat, c.proFixesPerSeat]), [[8, 20]]);
   assert.equal(billingConfig({ BILLING_ENABLED: "yes" }).enabled, false);
   assert.equal(billingConfig({ BILLING_TRIAL_DAYS: "-1", BILLING_USAGE_PER_SEAT_USD: "abc" }).trialDays, 14);
@@ -180,4 +181,40 @@ test("reviews left: the workspace's own average after five reviews, else a typic
   assert.equal(reviewsLeft(3_000_000, 1_000_000, calls), 20);
   assert.equal(reviewsLeft(3_000_000, 1_000_000, calls.filter((c) => c.reviewId !== "r4")), 30, "four reviews are too few to trust");
   assert.equal(reviewsLeft(3_000_000, 4_000_000, calls), 0, "never negative past the limit");
+});
+
+const contract = { id: "c1", mode: "managed" as const, startsAt: 0, endsAt: now + 365 * day, committedContributors: 25, minimumContributors: 25, contributorPriceCents: 2200, includedUsagePerContributorUsd: 12, overageMultiplier: 1.15, netDays: 30, graceDays: 30, nonBillableAuthors: [] };
+const enterprise = { status: "active", seats: 3, trialEndsAt: 0, subscriptionId: "sub_e", plan: "enterprise", contract };
+test("an Enterprise contract's included usage follows the higher of committed and active contributors", () => {
+  const decide = (active: number, used = 0, request = 0, account: typeof enterprise & { spendCapUsd?: number } = enterprise) => billingDecision(account, used, now, config, request, undefined, active);
+  assert.deepEqual([decide(0), decide(10), decide(40)].map((d) => [d.plan, d.limit, d.units]), [["enterprise", 300 * usd, 25], ["enterprise", 300 * usd, 25], ["enterprise", 480 * usd, 40]]);
+  assert.equal(decide(0, 300 * usd).allowed, false, "past the included usage with no cap");
+  assert.deepEqual([decide(0, 300 * usd, usd, { ...enterprise, spendCapUsd: 50 })].map((d) => [d.allowed, d.overage]), [[true, true]], "the cap and overage work as on seat plans");
+  assert.equal(fixRunLimit(decide(40), 3, config), 40 * config.proFixesPerSeat, "fix runs follow billed contributors, not seats");
+  assert.equal(billingDecision({ ...enterprise, contract: undefined }, 0, now, config).plan, "starter", "no contract never means unlimited");
+  assert.equal(billingDecision(enterprise, 0, now, billingConfig({}), 5, undefined, 0).allowed, true, "billing off allows everything");
+});
+test("an own-key contract meters nothing and Enterprise past due uses the contract's grace days", () => {
+  const ownKey = { ...enterprise, spendCapUsd: 100, contract: { ...contract, mode: "ownKey" as const } };
+  assert.deepEqual([billingDecision(ownKey, 0, now, config)].map((d) => [d.allowed, d.limit, d.capMicros]), [[true, 0, 0]], "reviews may start");
+  assert.deepEqual([billingDecision(ownKey, 0, now, config, 10_000)].map((d) => [d.allowed, d.reason]), [[false, ownKeyOnlyReason]], "a call on the operator's model is refused");
+  const pastDue = (days: number) => billingDecision({ ...enterprise, status: "past_due", pastDueSince: now - days * day }, 0, now, config).allowed;
+  assert.deepEqual([pastDue(8), pastDue(29), pastDue(30)], [true, true, false], "30 contract days, not the 7 of seat plans");
+});
+test("the contributor meter event bills only above the commitment, with one identifier per month inside that month", () => {
+  const event = contributorMeterEvent("org1", "2026-10", 31, 25);
+  assert.deepEqual(event, { identifier: "contributors:org1:2026-10", timestamp: Date.UTC(2026, 10, 1) / 1000 - 1, value: 6 });
+  assert.equal(periodKey(event.timestamp * 1000), "2026-10");
+  assert.equal(contributorMeterEvent("org1", "2026-10", 20, 25).value, 0);
+  assert.equal(contributorMeterEvent("org1", "2026-12", 1, 0).timestamp, Date.UTC(2027, 0, 1) / 1000 - 1);
+});
+
+test("contract terms are checked before anything is saved, and the preview is the year's commitment up front", () => {
+  const terms = { mode: "managed" as const, startsAt: Date.UTC(2026, 10, 1), committedContributors: 30, contributorPriceCents: 2200, includedUsagePerContributorUsd: 12, overageMultiplier: 1.15, netDays: 30, graceDays: 30, nonBillableAuthors: ["release-bot"] };
+  assert.equal(contractTermsError(terms, config), null);
+  const refused = (change: Partial<typeof terms> & { usagePriceId?: string }) => contractTermsError({ ...terms, ...change }, config) !== null;
+  assert.deepEqual([{ startsAt: Date.UTC(2026, 10, 2) }, { startsAt: Date.UTC(2026, 10, 1, 5) }, { committedContributors: 24 }, { committedContributors: 30.5 }, { contributorPriceCents: 0 }, { overageMultiplier: 0.9 }, { netDays: 400 }, { usagePriceId: "prod_1" }, { nonBillableAuthors: [""] }].map(refused), Array(9).fill(true));
+  assert.equal(contractEnd(Date.UTC(2026, 10, 1)), Date.UTC(2027, 10, 1));
+  assert.deepEqual(contractPreview(terms), { firstInvoiceCents: 30 * 2200 * 12, perExtraContributorCents: 2200, includedUsageUsd: 360 });
+  assert.equal(contractPreview({ ...terms, mode: "ownKey" }).includedUsageUsd, 0);
 });

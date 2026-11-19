@@ -1,6 +1,7 @@
 // Cloud plans. Usage allowances live in billingConfig (env); this is which plan unlocks which feature.
 // With billing disabled (self-hosted) the plan is "disabled" and everything is unlocked.
-export const plans = ["free", "starter", "pro"] as const;
+// Enterprise is a per-contract plan (docs/roadmap/enterprise-plan.md): operators create it, there is no Checkout price.
+export const plans = ["free", "starter", "pro", "enterprise"] as const;
 export type Plan = (typeof plans)[number];
 // Pro features: the ones that cost us to run, plus the team and admin features. Security checks never are.
 // Starter also gets hosted fix pull requests, with a smaller monthly run limit (fixRunLimit in src/billing.ts), and the
@@ -11,6 +12,7 @@ export const planCatalog: Record<Plan, { name: string; entitlements: readonly En
   free: { name: "Free", entitlements: [] },
   starter: { name: "Starter", entitlements: ["fix.pullRequests", "model.ownKey"] },
   pro: { name: "Pro", entitlements },
+  enterprise: { name: "Enterprise", entitlements },
 };
 // legacy: a Starter subscription from before Pro existed keeps every feature it had (grandfathered).
 export const planEntitlements = (plan: Plan | "disabled", legacy = false): readonly Entitlement[] => plan === "disabled" || (legacy && plan === "starter") ? entitlements : planCatalog[plan].entitlements;

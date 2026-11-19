@@ -2,6 +2,16 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import {repositoryContextValidator} from "./repositoryContextTypes";
 
+const contractValidator = v.object({
+  id: v.string(), mode: v.union(v.literal("managed"), v.literal("ownKey")), startsAt: v.number(), endsAt: v.number(),
+  committedContributors: v.number(), minimumContributors: v.number(),
+  contributorPriceCents: v.number(), includedUsagePerContributorUsd: v.number(), overageMultiplier: v.number(),
+  netDays: v.number(), graceDays: v.number(), nonBillableAuthors: v.array(v.string()),
+  stripe: v.optional(v.object({ productId: v.optional(v.string()), commitPriceId: v.optional(v.string()), contributorPriceId: v.optional(v.string()), usagePriceId: v.optional(v.string()), scheduleId: v.optional(v.string()) })),
+  notes: v.optional(v.string()),
+  // Days-before-end renewal reminders already emailed (60, 30).
+  remindersSent: v.optional(v.array(v.number())),
+});
 const org = v.id("organizations"),
   repo = v.id("repositories"),
   review = v.id("reviews");
@@ -120,7 +130,7 @@ export default defineSchema({
   providerReceipts: defineTable({jti:v.string(),expiresAt:v.number()}).index("by_jti",["jti"]),
   providerInstallRequests:defineTable({organizationId:org,userId:v.id("users"),tokenHash:v.string(),expiresAt:v.number(),consumed:v.boolean(),createdAt:v.number()}).index("by_hash",["tokenHash"]),
   providerIdentityGrants:defineTable({repositoryId:repo,connectionId:v.id("providerConnections"),userId:v.id("users"),digest:v.string(),tokenHash:v.string(),expiresAt:v.number(),consumed:v.boolean()}).index("by_hash",["tokenHash"]),
-  providerIdentities:defineTable({organizationId:org,connectionId:v.id("providerConnections"),userId:v.id("users"),externalId:v.string(),username:v.string(),credentials:v.optional(v.string()),connectionDigest:v.string(),active:v.boolean(),generation:v.number(),expiresAt:v.number(),createdAt:v.number(),updatedAt:v.number()}).index("by_connection_user",["connectionId","userId"]).index("by_connection_external",["connectionId","externalId"]),
+  providerIdentities:defineTable({organizationId:org,connectionId:v.id("providerConnections"),userId:v.id("users"),externalId:v.string(),username:v.string(),credentials:v.optional(v.string()),connectionDigest:v.string(),active:v.boolean(),generation:v.number(),expiresAt:v.number(),createdAt:v.number(),updatedAt:v.number()}).index("by_connection_user",["connectionId","userId"]).index("by_connection_external",["connectionId","externalId"]).index("by_connection_username",["connectionId","username"]),
   p4Identities:defineTable({organizationId:org,repositoryId:repo,connectionId:v.id("providerConnections"),userId:v.id("users"),username:v.string(),credentials:v.optional(v.string()),connectionDigest:v.string(),active:v.boolean(),generation:v.number(),expiresAt:v.number(),createdAt:v.number(),updatedAt:v.number()}).index("by_repo_user",["repositoryId","userId"]).index("by_repo_username",["repositoryId","username"]).index("by_user",["userId"]),
   p4Polls:defineTable({organizationId:org,repositoryId:repo,requestedBy:v.id("users"),connectionId:v.id("providerConnections"),credentialDigest:v.string(),baselineJobId:v.id("indexJobs"),enabled:v.boolean(),generation:v.number(),status:v.string(),cursor:v.optional(v.number()),pending:v.array(v.number()),position:v.number(),pages:v.number(),scanned:v.number(),skipped:v.number(),diagnostics:v.array(v.object({nativeNumber:v.number(),reason:v.string()})),attempts:v.number(),error:v.optional(v.string()),scheduledId:v.optional(v.id("_scheduled_functions")),nextAt:v.optional(v.number()),lease:v.optional(v.object({id:v.string(),expiresAt:v.number()})),lastCompleteAt:v.optional(v.number()),updatedAt:v.number(),createdAt:v.number()}).index("by_repo",["repositoryId"]).index("by_org",["organizationId"]).index("by_enabled",["enabled"]),
   // The row outlives its body: it dedupes redeliveries and lists the delivery; the body is cleared after 14 days.
@@ -223,7 +233,7 @@ export default defineSchema({
     // "What's new" announcements this user closed (convex/announcements.ts), so each opens once.
     dismissedAnnouncements: v.optional(v.array(v.string())),
     createdAt: v.number(),
-  }).index("by_github", ["githubId"]),
+  }).index("by_github", ["githubId"]).index("by_login", ["login"]),
   // Sign-in identities: one row per provider account. Accounts link only through a verified
   // email on both sides, so an unverified address can never take over an existing user.
   identities: defineTable({
@@ -235,7 +245,7 @@ export default defineSchema({
     emailVerified: v.boolean(),
     createdAt: v.number(),
     lastLoginAt: v.number(),
-  }).index("by_provider_user", ["provider", "providerUserId"]).index("by_user", ["userId"]).index("by_email", ["email"]),
+  }).index("by_provider_user", ["provider", "providerUserId"]).index("by_user", ["userId"]).index("by_email", ["email"]).index("by_provider_login", ["provider", "login"]),
   // Server-side browser sessions; the session cookie carries a random ID whose SHA-256 is stored.
   sessions: defineTable({
     userId: v.id("users"),
@@ -682,8 +692,12 @@ export default defineSchema({
     customerId: v.optional(v.string()),
     subscriptionId: v.optional(v.string()),
     subscriptionItemId: v.optional(v.string()),
-    // The subscription's paid plan (starter | pro) from its seat price; unset on a subscription means starter.
+    // The subscription's paid plan (starter | pro from its seat price, enterprise from a contract); unset on a subscription means starter.
     plan: v.optional(v.string()),
+    // An Enterprise contract's negotiated terms (BillingContract in src/billing.ts), written by an operator. Absent on every other account.
+    contract: v.optional(contractValidator),
+    // A signed renewal: the contract for the year after `contract` ends. The webhook makes it `contract` when its subscription starts.
+    nextContract: v.optional(contractValidator),
     // A subscription from before plans existed: while it stays on Starter it keeps every entitlement.
     legacy: v.optional(v.boolean()),
     status: v.string(), // trial | active | trialing | past_due | unpaid | canceled | incomplete | incomplete_expired | paused
@@ -788,7 +802,13 @@ export default defineSchema({
     // Hosted agent fix runs started this period (fixAllowance), counted against fixRunLimit.
     fixes: v.optional(v.number()) }).index("by_org_period", ["organizationId", "period"]),
   // Extra usage waiting to be reported to Stripe as meter events (identifier = this row id).
-  billingMeterEvents: defineTable({ organizationId: org, period: v.string(), micros: v.number(), status: v.string() /* pending | reported | skipped | failed */, attempts: v.number(), error: v.optional(v.string()), createdAt: v.number(), reportedAt: v.optional(v.number()) }).index("by_org_status", ["organizationId", "status"]),
+  billingMeterEvents: defineTable({ organizationId: org, period: v.string(), micros: v.number(),
+    // Absent kind is extra model usage (micros). "contributors" is an Enterprise month's contributors above the commitment (quantity).
+    kind: v.optional(v.union(v.literal("usage"), v.literal("contributors"))), quantity: v.optional(v.number()),
+    status: v.string() /* pending | reported | skipped | failed */, attempts: v.number(), error: v.optional(v.string()), createdAt: v.number(), reportedAt: v.optional(v.number()) }).index("by_org_status", ["organizationId", "status"]),
+  // Enterprise billing: one row per pull request author with a completed review in a UTC month (convex/contributors.ts).
+  // Bots are kept with bot: true so the admin list can show them as not billed.
+  activeContributors: defineTable({ organizationId: org, period: v.string(), key: v.string(), login: v.string(), provider: v.string(), userId: v.optional(v.id("users")), firstReviewId: v.id("reviews"), firstAt: v.number(), bot: v.boolean() }).index("by_org_period_key", ["organizationId", "period", "key"]),
   stripeEvents: defineTable({ eventId: v.string(), type: v.string(), outcome: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Slack app installs (one per Slack workspace); the bot token is encrypted with scope `<org>:slack`.
   slackInstallations: defineTable({

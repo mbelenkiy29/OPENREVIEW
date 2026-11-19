@@ -1,7 +1,7 @@
 import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { StripeError, checkoutTrialEnd, liveSubscription, stripe, stripeKey } from "../src/billing";
+import { StripeError, checkoutTrialEnd, contributorMeterEvent, liveSubscription, stripe, stripeKey } from "../src/billing";
 
 // Extra usage is metered in micro-dollars of inference cost; the markup lives in the Stripe price.
 const usagePrice = () => { const id = process.env.STRIPE_USAGE_PRICE_ID; return id && /^price_[A-Za-z0-9]+$/.test(id) ? id : undefined; };
@@ -13,8 +13,10 @@ const appOrigin = () => new URL(process.env.APP_URL ?? "http://localhost:3000").
 const returnPaths = { settings: "/dashboard/organization/billing", onboarding: "/dashboard/onboarding/plan" } as const;
 // Tags these sessions in the Stripe Dashboard so this flow can be compared with others.
 const integrationIdentifier = "openreview-starter-seats-qkvmhzrt";
+const contractOnly = "Contract changes go through your OpenReview account manager.";
 export const checkout = action({ args: { token: v.string(), organizationId: v.id("organizations"), returnTo: v.optional(v.union(v.literal("settings"), v.literal("onboarding"))), plan: v.optional(v.union(v.literal("starter"), v.literal("pro"))) }, handler: async (ctx, a): Promise<string> => {
   const context = await ctx.runQuery(internal.billing.checkoutContext, { token: a.token, organizationId: a.organizationId });
+  if (context.contract) throw new Error(contractOnly);
   if (liveSubscription(context)) throw new Error("This workspace already has a subscription; manage it in the billing portal");
   const key = stripeKey(), price = priceFor(a.plan ?? "starter");
   let customer = context.customerId;
@@ -67,6 +69,7 @@ export const portal = action({ args: { token: v.string(), organizationId: v.id("
 // legacy is left alone, so a grandfathered Starter that comes back from Pro keeps its features.
 export const changePlan = action({ args: { token: v.string(), organizationId: v.id("organizations"), plan: v.union(v.literal("starter"), v.literal("pro")) }, handler: async (ctx, a): Promise<string> => {
   const context = await ctx.runQuery(internal.billing.checkoutContext, { token: a.token, organizationId: a.organizationId });
+  if (context.contract) throw new Error(contractOnly);
   if (!context.subscriptionId || !context.subscriptionItemId || !["active", "trialing", "past_due"].includes(context.status)) throw new Error("Start a subscription first");
   if (context.plan === a.plan) throw new Error(`This workspace is already on ${a.plan === "pro" ? "Pro" : "Starter"}`);
   await stripe(`/v1/subscriptions/${context.subscriptionId}`, { items: [{ id: context.subscriptionItemId, price: priceFor(a.plan) }], proration_behavior: "create_prorations" }, stripeKey(), fetch, `plan:${a.organizationId}:${a.plan}:${Math.floor(Date.now() / 60000)}`);
@@ -87,7 +90,11 @@ export const reportUsage = internalAction({ args: { id: v.id("billingMeterEvents
   if (!event) return "done";
   if (!event.customerId) { await ctx.runMutation(internal.billing.meterResult, { id: a.id, status: "skipped", error: "No Stripe customer" }); return "skipped"; }
   try {
-    await stripe("/v1/billing/meter_events", { event_name: process.env.STRIPE_METER_EVENT || "openreview_usage_micros", identifier: a.id, timestamp: Math.floor(event.createdAt / 1000), payload: { stripe_customer_id: event.customerId, value: event.micros } }, stripeKey(), fetch, `meter:${a.id}`);
+    // An Enterprise month's contributors above the commitment go to their own meter; everything else is extra usage in micro-dollars.
+    const contributors = event.kind === "contributors" ? contributorMeterEvent(event.organizationId, event.period, event.quantity ?? 0, 0) : null;
+    await stripe("/v1/billing/meter_events", contributors
+      ? { event_name: process.env.STRIPE_CONTRIBUTOR_METER_EVENT || "openreview_contributors_over", identifier: contributors.identifier, timestamp: contributors.timestamp, payload: { stripe_customer_id: event.customerId, value: contributors.value } }
+      : { event_name: process.env.STRIPE_METER_EVENT || "openreview_usage_micros", identifier: a.id, timestamp: Math.floor(event.createdAt / 1000), payload: { stripe_customer_id: event.customerId, value: event.micros } }, stripeKey(), fetch, `meter:${contributors?.identifier ?? a.id}`);
     await ctx.runMutation(internal.billing.meterResult, { id: a.id, status: "reported" });
     return "reported";
   } catch (error) {

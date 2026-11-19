@@ -971,3 +971,19 @@ export async function generateTour(form: FormData) {
  try { await backend().action(api.tourJobs.generate, { token, reviewId }); } catch (e) { error = e instanceof Error ? e.message.replace(/^.*Uncaught Error: /s, "").split("\n")[0].slice(0, 300) : "Tour failed"; }
  redirect(`/dashboard/pulls/${reviewId}?tab=code&view=tour${error ? "&tourError=" + encodeURIComponent(error) : ""}`);
 }
+
+// Operator → Enterprise contracts. "Preview" only reloads the page with the entered terms; "Create contract" saves
+// them and makes the Stripe prices and schedule (convex/enterpriseJobs.ts), which checks the operator again.
+export async function createEnterpriseContract(form: FormData) {
+  const { token } = await current();
+  const names = ["organizationId", "mode", "start", "committed", "price", "included", "multiplier", "usagePriceId", "netDays", "graceDays", "nonBillable", "notes"];
+  const params = new URLSearchParams(names.flatMap((n) => { const value = text(form, n).trim().slice(0, 2000); return value ? [[n, value]] : []; }));
+  const back = (extra: string) => `/dashboard/operator?${params}${extra}#operator-contracts`;
+  if (text(form, "intent") !== "create") redirect(back("&preview=1"));
+  const field = (n: string) => params.get(n) ?? "", usagePriceId = field("usagePriceId");
+  let error = "";
+  try {
+    await backend().action(api.enterpriseJobs.createContract, { token, organizationId: field("organizationId") as Id<"organizations">, mode: field("mode") === "ownKey" ? "ownKey" : "managed", startsAt: Date.parse(`${field("start")}-01T00:00:00Z`), committedContributors: Number(field("committed")), contributorPriceCents: Math.round(Number(field("price")) * 100), includedUsagePerContributorUsd: Number(field("included")), overageMultiplier: Number(field("multiplier")), ...(usagePriceId ? { usagePriceId } : {}), netDays: Number(field("netDays")), graceDays: Number(field("graceDays")), nonBillableAuthors: field("nonBillable").split(/[\s,]+/).filter(Boolean), ...(field("notes") ? { notes: field("notes") } : {}) });
+  } catch (e) { error = actionError(e); }
+  redirect(error ? back(`&contractError=${encodeURIComponent(error)}`) : "/dashboard/operator?contract=created#operator-contracts");
+}

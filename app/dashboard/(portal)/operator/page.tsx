@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { backend } from "../../../../src/server";
-import { usdText } from "../../../../src/billing";
+import { contractPreview, usdText } from "../../../../src/billing";
+import { createEnterpriseContract } from "../../actions";
 import { planCatalog, type Plan } from "../../../../src/plans";
 import { ChartCard } from "../../analytics-chart";
 import { ScrollTable } from "../../scroll-table";
@@ -20,11 +22,19 @@ const Heading = ({ id, title, children }: { id: string; title: string; children?
 
 // Operator analytics across every workspace: metadata and counts only (convex/operator.ts). Anyone who is not an
 // operator gets a 404; the backend checks OPERATOR_GITHUB_IDS again and records each visit.
-export default async function OperatorPage() {
-  const user = await viewer();
+export default async function OperatorPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+  const user = await viewer(), q = await searchParams;
   if (!user.operator) notFound();
   const r = await backend().action(api.operator.overview, { token: user.token });
   const plan = (w: (typeof r.workspaces)[number]) => !r.billing ? "Billing off" : w.exempt ? "Operator" : w.choosingPlan ? "Choosing a plan" : planCatalog[w.plan as Plan].name;
+  // Enterprise contract form: the entered terms come back in the URL after Preview or a refused Create.
+  const d = r.contractDefaults, nextMonth = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1)).toISOString().slice(0, 7);
+  const f = { organizationId: q.organizationId ?? "", mode: q.mode === "ownKey" ? "ownKey" as const : "managed" as const, start: q.start ?? nextMonth, committed: q.committed ?? String(d.minContributors), price: q.price ?? "", included: q.included ?? String(d.includedUsageUsd), multiplier: q.multiplier ?? "1.15", usagePriceId: q.usagePriceId ?? "", netDays: q.netDays ?? String(d.netDays), graceDays: q.graceDays ?? String(d.graceDays), nonBillable: q.nonBillable ?? "", notes: q.notes ?? "" };
+  const committed = Number(f.committed), priceCents = Math.round(Number(f.price) * 100), included = Number(f.included);
+  const preview = q.preview && committed > 0 && priceCents > 0 && included >= 0 ? contractPreview({ mode: f.mode, committedContributors: committed, contributorPriceCents: priceCents, includedUsagePerContributorUsd: included }) : null;
+  // The chosen workspace's current subscription and its billable contributors, so the commitment is set from data, not seats.
+  const history = q.preview && q.organizationId ? await backend().action(api.enterpriseJobs.contributorHistory, { token: user.token, organizationId: q.organizationId as Id<"organizations"> }).catch(() => null) : null;
+  const contracts = r.workspaces.filter((w) => w.contract), month = (at: number) => new Date(at).toISOString().slice(0, 7);
   const series = (key: "spend" | "calls") => r.series.map((label, i) => ({ label, values: r.chart[key][i] }));
   return <>
     <span className="page-top" aria-hidden="true" />
@@ -40,7 +50,7 @@ export default async function OperatorPage() {
         ["Reviews this month", r.totals.reviews],
         ["Blocked this month", r.totals.blocked],
         ["Agent fixes this month", r.totals.fixes],
-        ["Free · Starter · Pro", `${r.totals.plans.free} · ${r.totals.plans.starter} · ${r.totals.plans.pro}`],
+        ["Free · Starter · Pro · Enterprise", `${r.totals.plans.free} · ${r.totals.plans.starter} · ${r.totals.plans.pro} · ${r.totals.plans.enterprise}`],
       ]} />
       <ChartCard wide icon="chartBar" title="Model usage, last 30 days" labels={r.days} info="Estimated model cost per UTC day, for the three workspaces that spent most and everyone else."
         views={[{ label: "Spend", kind: "bar", unit: "$", yTitle: "USD", series: series("spend") }, { label: "Model calls", kind: "bar", yTitle: "Calls", series: series("calls") }]} />
@@ -75,6 +85,42 @@ export default async function OperatorPage() {
           </tbody>
         </table>
       </ScrollTable>
+
+      {r.billing && <>
+        <Heading id="operator-contracts" title="Enterprise contracts">Billed per active contributor: authors of pull requests reviewed in a month. Creating a contract makes its Stripe prices and a one-year invoiced subscription; the workspace moves to Enterprise when Stripe confirms it. For a workspace with a contract in force, the form creates its renewal, which starts the day the term ends.</Heading>
+        {q.contract === "created" && <p className="notice-banner" role="status">Contract created. The workspace moves to Enterprise on the contract&apos;s first day.</p>}
+        {q.contractError && <p className="error" role="alert">{q.contractError}</p>}
+        <ScrollTable label="Enterprise contracts table" className="table-box">
+          <table aria-labelledby="operator-contracts">
+            <thead><tr><th>Workspace</th><th>Mode</th><th>Committed</th><th>Active this month</th><th>Per contributor</th><th>Term (UTC)</th><th>Stripe</th></tr></thead>
+            <tbody>
+              {contracts.map((w) => <tr key={w.id}>
+                <td>{w.name}</td><td>{w.contract!.mode === "ownKey" ? "Own key" : "Managed"}</td><td>{w.contract!.committed}</td><td>{w.contributors}</td>
+                <td>{dollars(w.contract!.priceCents / 100)} / month</td><td>{month(w.contract!.startsAt)} to {month(w.contract!.endsAt)}</td>
+                <td>{w.contract!.inStripe ? w.plan === "enterprise" ? "Active" : "Scheduled" : <span className="badge">draft</span>}</td>
+              </tr>)}
+              {!contracts.length && <tr><td colSpan={7} className="table-empty">No contracts yet</td></tr>}
+            </tbody>
+          </table>
+        </ScrollTable>
+        {preview && <p className="notice-banner" role="status">First invoice: <strong>{dollars(preview.firstInvoiceCents / 100)}</strong> before tax ({committed} contributors × {dollars(priceCents / 100)} × 12 months), due {f.netDays} days after it is sent. Each month after: {dollars(preview.perExtraContributorCents / 100)} for every active contributor above {committed}{f.mode === "managed" ? <>, and model usage past {dollars(preview.includedUsageUsd)} a month at cost × {f.multiplier}</> : <>; model usage runs on the customer&apos;s own key and is not billed</>}. Nothing has been created.</p>}
+        {history && <p className="muted table-note">{history.plan ? `Now on ${planCatalog[history.plan as Plan]?.name ?? history.plan} with ${history.seats} billed ${history.plan === "enterprise" ? "contributors" : "seats"}. ` : "No subscription now. "}Billable contributors: {history.months.map((m) => `${m.period}: ${m.contributors}`).join(", ")}.{history.plan && history.plan !== "enterprise" && " Creating the contract ends that subscription when the contract starts."}</p>}
+        <form action={createEnterpriseContract} className="form-grid">
+          <label>Workspace<select name="organizationId" required defaultValue={f.organizationId}><option value="">Choose a workspace</option>{r.workspaces.filter((w) => !w.exempt).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
+          <label>Mode<select name="mode" defaultValue={f.mode}><option value="managed">Managed (our model, metered)</option><option value="ownKey">Own key (nothing metered)</option></select></label>
+          <label>Start month (UTC)<input name="start" type="month" required defaultValue={f.start} /></label>
+          <label>Committed contributors<input name="committed" type="number" required min={d.minContributors} step={1} defaultValue={f.committed} /></label>
+          <label>Price per contributor per month (USD)<input name="price" type="number" required min={0.01} step={0.01} defaultValue={f.price} /></label>
+          <label>Included usage per contributor (USD)<input name="included" type="number" required min={0} step={0.01} defaultValue={f.included} /></label>
+          <label>Overage multiplier<input name="multiplier" type="number" required min={1} max={5} step={0.01} defaultValue={f.multiplier} /></label>
+          <label>Custom overage price (optional)<input name="usagePriceId" placeholder="price_… (blank uses the shared one)" defaultValue={f.usagePriceId} /></label>
+          <label>Net days<input name="netDays" type="number" required min={0} max={365} step={1} defaultValue={f.netDays} /></label>
+          <label>Grace days after due<input name="graceDays" type="number" required min={0} max={365} step={1} defaultValue={f.graceDays} /></label>
+          <label className="wide">Non-billable authors (logins, separated by commas or spaces)<input name="nonBillable" defaultValue={f.nonBillable} /></label>
+          <label className="wide">Notes<textarea name="notes" rows={2} maxLength={2000} defaultValue={f.notes} /></label>
+          <div className="wide setting-actions"><button name="intent" value="preview">Preview</button><button name="intent" value="create" className="primary">Create contract</button></div>
+        </form>
+      </>}
 
       <Heading id="operator-users" title="Users">{r.capped.users ? "The newest 500 accounts." : undefined}</Heading>
       <ScrollTable label="Users table" className="table-box">

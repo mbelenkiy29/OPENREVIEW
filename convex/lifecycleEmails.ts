@@ -18,12 +18,15 @@ const emails = {
   repository_connected: { subject: "Your first repository is connected", paragraphs: ["Your first repository is connected to OpenReview. Its next pull request gets an automatic review."], action: { label: "Manage repositories", path: "/dashboard/repositories" } },
   first_review_completed: { subject: "Your first review is done", paragraphs: ["OpenReview finished its first review in your workspace. The findings are on the pull request and in your dashboard."], action: { label: "See the review", path: "/dashboard/pulls" } },
   subscribed: { subject: "Thanks for subscribing to OpenReview", paragraphs: ["Thanks for subscribing. Your workspace's plan is active."], action: { label: "Billing and usage", path: "/dashboard/organization/billing" } },
+  // Sent by convex/enterprise.ts (remindRenewals) to a workspace's owners and the operators, once per contract.
+  contract_ends_60: { subject: "Your OpenReview Enterprise contract ends in 60 days", paragraphs: ["Your OpenReview Enterprise contract ends in about 60 days. It does not renew by itself: without a renewal, reviews stop when the term ends.", "Reply to this email to renew or change the terms."], action: { label: "Billing and usage", path: "/dashboard/organization/billing" } },
+  contract_ends_30: { subject: "Your OpenReview Enterprise contract ends in 30 days", paragraphs: ["Your OpenReview Enterprise contract ends in about 30 days. It does not renew by itself: without a renewal, reviews stop when the term ends.", "Reply to this email to renew or change the terms."], action: { label: "Billing and usage", path: "/dashboard/organization/billing" } },
   onboarding_reminder: { subject: "Finish setting up your OpenReview workspace", paragraphs: ["You started setting up your OpenReview workspace but haven't finished yet. Setup picks up where you left off, and OpenReview starts reviewing pull requests once it's done."], action: { label: "Finish setup", path: "/dashboard/onboarding" } },
 };
 type Kind = keyof typeof emails;
 const kind = v.union(...(Object.keys(emails) as Kind[]).map((k) => v.literal(k)));
 
-export async function lifecycleEmail(ctx: MutationCtx, k: Kind, to: { userId: Id<"users"> } | { organizationId: Id<"organizations"> }) {
+export async function lifecycleEmail(ctx: MutationCtx, k: Exclude<Kind, "contract_ends_60" | "contract_ends_30">, to: { userId: Id<"users"> } | { organizationId: Id<"organizations"> }) {
   let userIds: Id<"users">[];
   if ("userId" in to) {
     const user = await ctx.db.get(to.userId);
