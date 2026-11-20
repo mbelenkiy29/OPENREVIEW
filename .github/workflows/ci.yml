@@ -27,6 +27,14 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Regenerates convex/_generated against a throwaway local backend (no Convex account or secrets).
+      # CONVEX_AGENT_MODE=anonymous is required: `convex codegen` alone refuses without CONVEX_DEPLOYMENT.
+      - name: Check Convex generated files
+        env:
+          CONVEX_AGENT_MODE: anonymous
+        run: |
+          pnpm exec convex dev --once --typecheck disable
+          git diff --exit-code convex/_generated
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
