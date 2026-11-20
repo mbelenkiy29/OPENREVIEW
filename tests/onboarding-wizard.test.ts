@@ -181,7 +181,7 @@ test("the trial calendar is labelled as trial days, not setup steps", async () =
   const art = renderToStaticMarkup(createElement(TrialArt, { days: 14, elapsed: 0, subscribed: false }));
   assert.match(art, /14-DAY FREE TRIAL/);
   assert.doesNotMatch(art, /Step \d+ of/);
-  const stage = renderToStaticMarkup(createElement(Stage, { title: "14-day free trial", caption: "Day 1 of 14", children: null }));
+  const stage = renderToStaticMarkup(createElement(Stage, { title: "14-day free trial", caption: "Day 1 of 14" }));
   assert.match(stage, /wizard-stage-title/);
   assert.match(stage, /14-day free trial/);
   assert.match(stage, /Day 1 of 14/);
