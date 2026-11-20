@@ -9,7 +9,7 @@ import {fixAllowance} from '../convex/billing';
 import {entitlements} from '../src/plans';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='operator-session-secret-at-least-32-characters',svc='operator-service',operatorId=206921626;
-const extra=['OPERATOR_GITHUB_IDS','BILLING_ENABLED','BILLING_FREE_USAGE_USD'];
+const extra=['OPERATOR_GITHUB_IDS','BILLING_ENABLED','BILLING_FREE_USAGE_USD','STRIPE_SECRET_KEY'];
 beforeEach(()=>{vi.useFakeTimers({toFake:['setTimeout','clearTimeout','Date']});vi.setSystemTime(Date.UTC(2026,9,26,12));Object.assign(process.env,{SESSION_SECRET:secret,SERVICE_SECRET:svc,OPERATOR_GITHUB_IDS:` ${operatorId}, not-an-id`});});
 afterEach(()=>{vi.useRealTimers();for(const k of extra)delete process.env[k];});
 
@@ -61,7 +61,7 @@ test('only an operator named in OPERATOR_GITHUB_IDS, in a browser session, opens
 });
 
 test('a workspace an operator owns has unlimited usage, fixes and features, still capped by the inference budget; other workspaces keep their limits',async()=>{
- Object.assign(process.env,{BILLING_ENABLED:'true',BILLING_FREE_USAGE_USD:'0.02'});
+ Object.assign(process.env,{BILLING_ENABLED:'true',BILLING_FREE_USAGE_USD:'0.02',STRIPE_SECRET_KEY:'sk_test_fixture'});
  const t=convexTest(schema,modules);
  const operator=await signIn(t,operatorId,'mbelenkiy29'),alice=await signIn(t,31,'alice');
  const mine=await t.mutation(api.users.createOrganization,{token:operator.token,name:'Mine'});

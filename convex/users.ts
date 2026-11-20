@@ -1,7 +1,7 @@
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { planMissing, scheduleSeatSync } from "./billing";
-import { billingConfig } from "../src/billing";
+import { billsWorkspaces } from "../src/billing";
 import { githubAccounts, linkIdentity } from "./identity";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
@@ -72,8 +72,8 @@ export const createOrganization = mutation({
       onboarding: { startedAt: Date.now() },
       // Opts the workspace into one-time emails (convex/lifecycleEmails.ts); older workspaces have none.
       lifecycleEmails: [],
-      // On billing deployments a new workspace needs Starter or Pro before anything else runs; only older ones keep Free.
-      ...(billingConfig().enabled ? { planRequired: true } : {}),
+      // On billing deployments a new workspace needs a trial or paid plan before anything else runs; only older ones keep Free.
+      ...(billsWorkspaces() ? { planRequired: true } : {}),
       createdAt: Date.now(),
     });
     await ctx.db.insert("organizationMembers", {
@@ -82,7 +82,7 @@ export const createOrganization = mutation({
       role: "owner",
     });
     // Every workspace is a Stripe customer from the start; scheduled so a Stripe outage cannot fail the signup.
-    if (billingConfig().enabled) await ctx.scheduler.runAfter(0, internal.billingJobs.createCustomer, { organizationId });
+    if (billsWorkspaces()) await ctx.scheduler.runAfter(0, internal.billingJobs.createCustomer, { organizationId });
     await bindReferralOnWorkspace(ctx, user._id, organizationId);
     return organizationId;
   },
