@@ -1,5 +1,5 @@
 // Search metadata for the public site: the shared description, and schema.org structured data
-// (JSON-LD) for the home page that gives search engines the site's name and describes the app,
+// (JSON-LD) for the home page that gives search engines the site's name, says who publishes it and describes the app,
 // its licence, its source and, when billing is on, its prices.
 import type { BillingConfig } from "./billing";
 
@@ -20,6 +20,7 @@ export function homeStructuredData({ url, repository, billing, priceLabel, proPr
     "@context": "https://schema.org",
     "@graph": [
       { "@type": "WebSite", name: "OpenReview", url },
+      { "@type": "Organization", name: "OpenReview", url, logo: new URL("/icon.svg", url).href, sameAs: [repository] },
       { "@type": "SoftwareApplication", name: "OpenReview", applicationCategory: "DeveloperApplication", operatingSystem: "Web", url, description: siteDescription, license: "https://opensource.org/licenses/MIT", sameAs: [repository], ...(offers.length ? { offers } : {}) },
     ],
   };

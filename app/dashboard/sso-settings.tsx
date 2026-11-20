@@ -4,7 +4,8 @@ import { backend } from "../../src/server";
 import { proGatesAt, type Entitlement } from "../../src/plans";
 import { Icon } from "../ui/icons";
 import { Locked } from "./locked";
-import { addSsoDomain, removeSsoDomain, saveSsoConnection, setSsoEnforcement, verifySsoDomain } from "./actions";
+import { addSsoDomain, removeSsoDomain, revokeScimToken, saveSsoConnection, setScimGroupRole, setSsoEnforcement, verifySsoDomain } from "./actions";
+import { CreateScimToken } from "./scim-token";
 
 // Organization Settings → Organization → Enterprise SSO (admins only): Greptile's one-line card, with our
 // SAML / OIDC connection behind "Set up SSO", then the verified domains and the requirement switch.
@@ -56,5 +57,33 @@ export async function SsoSettings({ token, organizationId, locked }: { token: st
         {(c.enforce || (verified > 0 && c.active)) && <button>{c.enforce ? "Stop requiring SSO" : "Require SSO"}</button>}
       </form>
     </>}
+    <ScimSettings token={token} organizationId={organizationId} locked={locked} base={base} />
   </section>;
+}
+
+// SCIM provisioning (Enterprise): the endpoint and tokens for the identity provider, and which workspace role each
+// provisioned group gets. Tokens can always be revoked, even after the plan no longer includes SCIM.
+async function ScimSettings({ token, organizationId, locked, base }: { token: string; organizationId: Id<"organizations">; locked: readonly Entitlement[]; base: string }) {
+  const s = await backend().query(api.scim.settings, { token, organizationId }), off = locked.includes("auth.scim");
+  const day = (ms: number | null) => ms === null ? "Never" : new Date(ms).toLocaleDateString("en-US", { timeZone: "UTC", dateStyle: "medium" });
+  return <>
+    <h3 className="card-subheading" id="scim-heading">SCIM provisioning</h3>
+    <p className="muted">Your identity provider creates, deactivates and groups people, and this workspace&apos;s members follow. Deactivating someone removes them and signs them out. People are matched by email. SCIM never makes anyone an owner.{base && <> Endpoint: <code>{`${base}/api/scim/v2`}</code></>}</p>
+    {off && !s.tokens.length ? <Locked feature="auth.scim" locked={locked} /> : <>
+      {off && <Locked feature="auth.scim" locked={locked} />}
+      <div className="table-box"><table aria-labelledby="scim-heading">
+        <thead><tr><th>Token</th><th>Last used</th><th>Actions</th></tr></thead>
+        <tbody>
+          {s.tokens.map((t) => <tr key={t._id}><td>Created {day(t.createdAt)}</td><td>{day(t.lastUsedAt)}</td><td><form action={revokeScimToken}><input type="hidden" name="tokenId" value={t._id} /><button className="small">Revoke</button></form></td></tr>)}
+          {!s.tokens.length && <tr><td colSpan={3} className="table-empty">No SCIM tokens yet.</td></tr>}
+        </tbody>
+      </table></div>
+      {!off && <CreateScimToken organizationId={organizationId} />}
+      {!off && s.groups.length > 0 && <div className="table-box"><table aria-label="Provisioned groups">
+        <thead><tr><th>Group</th><th>People</th><th>Workspace role</th></tr></thead>
+        <tbody>{s.groups.map((g) => <tr key={g._id}><td>{g.displayName}</td><td>{g.members}</td><td><form action={setScimGroupRole} className="cell-actions"><input type="hidden" name="groupId" value={g._id} /><select name="role" defaultValue={g.role ?? "none"} aria-label={`Role for ${g.displayName}`}><option value="none">No role (leave as is)</option><option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option></select><button className="small">Save</button></form></td></tr>)}</tbody>
+      </table></div>}
+      <p className="muted">{s.users} provisioned {s.users === 1 ? "person" : "people"}, {s.active} active. Someone in several mapped groups gets the role with the most access.</p>
+    </>}
+  </>;
 }

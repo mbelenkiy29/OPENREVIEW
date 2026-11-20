@@ -3266,9 +3266,13 @@ form.catalog-review {
 }
 .hero .hero-note {
   margin: 0;
-  font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 15px;
   color: var(--muted);
+}
+/* One filled button in the hero: Sign in is outlined so the primary action leads. */
+.hero-actions .button:not(.primary) {
+  --button-bg: transparent;
+  --button-line: var(--line);
 }
 .hero-links {
   display: flex;

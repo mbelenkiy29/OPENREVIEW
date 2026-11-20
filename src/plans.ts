@@ -1,19 +1,24 @@
 // Cloud plans. Usage allowances live in billingConfig (env); this is which plan unlocks which feature.
 // With billing disabled (self-hosted) the plan is "disabled" and everything is unlocked.
-export const plans = ["free", "starter", "pro"] as const;
+// Enterprise is a per-contract plan (docs/roadmap/enterprise-plan.md): operators create it, there is no Checkout price.
+export const plans = ["free", "starter", "pro", "enterprise"] as const;
 export type Plan = (typeof plans)[number];
 // Pro features: the ones that cost us to run, plus the team and admin features. Security checks never are.
 // Starter also gets hosted fix pull requests, with a smaller monthly run limit (fixRunLimit in src/billing.ts), and the
 // workspace's own model key, whose calls are not metered (so Free stays bounded by its included usage).
-export const entitlements = ["review.deep", "review.reproTests", "fix.pullRequests", "context.requirements", "memory.conventions", "api.access", "analytics.history", "auth.sso", "audit.log", "model.ownKey"] as const;
+export const entitlements = ["review.deep", "review.reproTests", "fix.pullRequests", "context.requirements", "memory.conventions", "api.access", "analytics.history", "auth.sso", "audit.log", "model.ownKey", "auth.scim", "audit.export"] as const;
 export type Entitlement = (typeof entitlements)[number];
+// Enterprise adds provisioning from the identity provider and audit log export; Pro has everything else.
+const enterpriseOnly: readonly Entitlement[] = ["auth.scim", "audit.export"];
+export const proEntitlements = entitlements.filter((e) => !enterpriseOnly.includes(e));
 export const planCatalog: Record<Plan, { name: string; entitlements: readonly Entitlement[] }> = {
   free: { name: "Free", entitlements: [] },
   starter: { name: "Starter", entitlements: ["fix.pullRequests", "model.ownKey"] },
-  pro: { name: "Pro", entitlements },
+  pro: { name: "Pro", entitlements: proEntitlements },
+  enterprise: { name: "Enterprise", entitlements },
 };
 // legacy: a Starter subscription from before Pro existed keeps every feature it had (grandfathered).
-export const planEntitlements = (plan: Plan | "disabled", legacy = false): readonly Entitlement[] => plan === "disabled" || (legacy && plan === "starter") ? entitlements : planCatalog[plan].entitlements;
+export const planEntitlements = (plan: Plan | "disabled", legacy = false): readonly Entitlement[] => plan === "disabled" ? entitlements : legacy && plan === "starter" ? proEntitlements : planCatalog[plan].entitlements;
 export const entitled = (plan: Plan | "disabled", key: Entitlement, legacy = false) => planEntitlements(plan, legacy).includes(key);
 export const upgradeNote: Record<Entitlement, string> = {
   "review.deep": "Deep reviews are on the Pro plan, so this review ran at the standard tier.",
@@ -25,6 +30,8 @@ export const upgradeNote: Record<Entitlement, string> = {
   "analytics.history": "Analytics older than 30 days are on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage.",
   "auth.sso": "Single sign-on is on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage.",
   "audit.log": "The audit log is on the Pro plan; a workspace admin can upgrade in Organization Settings → Billing & Usage. Changes are still recorded.",
+  "auth.scim": "SCIM provisioning is on the Enterprise plan.",
+  "audit.export": "Audit log export is on the Enterprise plan. The log itself is on Pro and Enterprise.",
   "model.ownKey": "Your own model key is on the Starter and Pro plans; a workspace admin can upgrade in Organization Settings → Billing & Usage. A saved key is kept and works again after upgrading.",
 };
 // When the Pro gates shipped: SSO connections created before then stay fully editable on any plan.
@@ -43,4 +50,12 @@ export function priceFor(plan: "starter" | "pro", env: Record<string, string | u
   const name = plan === "pro" ? "STRIPE_PRO_PRICE_ID" : "STRIPE_SEAT_PRICE_ID", id = env[name];
   if (!id || !/^price_[A-Za-z0-9]+$/.test(id)) throw new Error(`Configure ${name}`);
   return id;
+}
+
+/** The Enterprise pricing card: shown only on a billing deployment with somewhere to send the buyer (a mailto: or
+ *  https: link in BILLING_ENTERPRISE_CONTACT_URL). The price text is display only; real prices are per contract. */
+export function enterpriseOffer(billingEnabled: boolean, env: Record<string, string | undefined> = process.env) {
+  const contactUrl = env.BILLING_ENTERPRISE_CONTACT_URL?.trim();
+  if (!billingEnabled || !contactUrl || !/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/.test(contactUrl)) return null;
+  return { contactUrl, priceLabel: env.BILLING_ENTERPRISE_PRICE_LABEL?.trim() || "Per active contributor, billed annually" };
 }

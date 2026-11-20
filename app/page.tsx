@@ -7,6 +7,7 @@ import { LandingMotion } from "./landing/motion-loader";
 import { Copy } from "./dashboard/live";
 import { ScrollTable } from "./dashboard/scroll-table";
 import { billingConfig, usdText } from "../src/billing";
+import { enterpriseOffer } from "../src/plans";
 import { homeStructuredData, jsonLd } from "../src/structured-data";
 
 export const metadata: Metadata = { alternates: { canonical: "/" } };
@@ -38,6 +39,13 @@ const faq = [
   ["Will it flood our PRs with comments?", "Findings must pass confidence, severity and evidence thresholds. You choose the maximum comment count, strictness and categories, and learned preferences reduce repeat noise."],
   ["Which models are supported?", "Claude and OpenAI models, or any OpenAI-compatible endpoint, with per-task model routing."],
 ] as const;
+// What a reviewer that sees only the diff can do, by definition, next to what this page says OpenReview does.
+const versus = [
+  ["What it reads", "The changed lines", "The diff with its callers, tests, past findings and your rules"],
+  ["Callers of a changed function", "Not read", "Followed through a cross-file call and import graph"],
+  ["Evidence", "Can point only at the diff", "Each issue cites the exact lines it depends on, pinned to the commit"],
+  ["Unsupported claims", "Cannot be checked against the rest of the code", "Dropped before posting"],
+] as const;
 const commands = ["pnpm install", "CONVEX_AGENT_MODE=anonymous pnpm exec convex dev --once", "pnpm setup:local", "pnpm backend", "pnpm dev"];
 
 // Prerendered at build time, so billing values come from the build environment. Old sign-in result
@@ -47,6 +55,7 @@ const commands = ["pnpm install", "CONVEX_AGENT_MODE=anonymous pnpm exec convex 
 // items rise in, data-stagger lists bring their children in turn, and data-speed sets parallax.
 export default function Home() {
   const billing = billingConfig();
+  const enterprise = enterpriseOffer(billing.enabled);
   const structured = homeStructuredData({ url: process.env.APP_URL ?? "http://localhost:3000", repository: sourceRepository, billing, priceLabel: process.env.BILLING_SEAT_PRICE_LABEL, proPriceLabel: process.env.BILLING_PRO_PRICE_LABEL });
   return <div className="landing">
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(structured) }} />
@@ -54,16 +63,24 @@ export default function Home() {
     <div id="smooth-wrapper"><div id="smooth-content">
     <main id="main">
       <section className="hero" aria-labelledby="hero-heading" data-speed="0.92">
-        <h1 id="hero-heading"><span className="line"><span>Review the change.</span></span> <span className="line"><span>Understand the codebase.</span></span></h1>
+        <h1 id="hero-heading"><span className="line"><span>Catch bugs that depend on</span></span> <span className="line"><span>code outside the diff.</span></span></h1>
         <p className="lede">OpenReview reviews pull requests using your whole repository, not only the diff. Every finding quotes the code it depends on, and nothing is posted until it has been verified.</p>
         <div className="hero-actions">
-          <Link className="button primary large" href="/signup">Get started</Link>
+          <Link className="button primary large" href="/signup">Connect a repository</Link>
           <Link className="button large" href="/login">Sign in</Link>
         </div>
-        {billing.enabled && <p className="hero-note">Every plan starts with a {billing.trialDays}-day free trial.</p>}
-        <p className="hero-links"><Link href="/docs/quickstart">Read the quickstart →</Link><Link href="/docs/self-hosting">Self-host it →</Link></p>
+        {billing.enabled && <p className="hero-note">{billing.trialDays}-day free trial. Cancel anytime. <Link href="#pricing">See pricing</Link></p>}
+        <p className="hero-links"><Link href="/docs/quickstart">Read the quickstart →</Link></p>
       </section>
       <div className="stage hero-stage"><ReviewReplica /><p className="stage-hint">Live demo with sample data. Click around.</p></div>
+
+      <section className="compare-band" aria-labelledby="versus-heading">
+        <h2 id="versus-heading" data-split>Diff-only review vs OpenReview</h2>
+        <ScrollTable label="Diff-only review compared with OpenReview" className="table-scroll"><table className="compare"><thead><tr><th><span className="sr-only">Aspect</span></th><th>Diff-only review</th><th>OpenReview</th></tr></thead><tbody data-stagger>
+          {versus.map(([aspect, diff, ours]) => <tr key={aspect}><th scope="row">{aspect}</th><td>{diff}</td><td>{ours}</td></tr>)}
+        </tbody></table></ScrollTable>
+        <p data-reveal><Link className="button primary" href="/signup">Connect a repository</Link></p>
+      </section>
 
       <section className="hosts" aria-labelledby="hosts-heading">
         <h2 id="hosts-heading" data-reveal>Reviews pull requests on</h2>
@@ -123,8 +140,9 @@ export default function Home() {
         <div className="feature-grid" data-stagger>
           <article className="feature-card"><h3>Starter</h3><p className="price">{process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.usagePerSeatMicros)} of model usage per seat each month, pooled across the workspace, then optional pay-as-you-go extra usage up to a cap you set. {billing.starterFixesPerSeat} OpenReview agent fixes per seat each month, each opened as a pull request, and your own model key. Owners, admins and members are seats; viewers are free.</p><p className="pricing-action"><Link className="button" href={`/signup?next=${encodeURIComponent("/dashboard/onboarding/plan?intent=starter")}`}>Choose Starter</Link></p></article>
           <article className="feature-card"><h3>Pro</h3><p className="price">{process.env.BILLING_PRO_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.proUsagePerSeatMicros)} of model usage and {billing.proFixesPerSeat} OpenReview agent fixes per seat each month, plus deep reviews with the agentic engines, generated reproduction tests, requirements checks, SSO, the audit log and API keys. {billing.trialDays} days free.</p><p className="pricing-action"><Link className="button primary" href={`/signup?next=${encodeURIComponent("/dashboard/onboarding/plan?intent=pro")}`}>Start Pro trial</Link></p></article>
+          {enterprise && <article className="feature-card"><h3>Enterprise</h3><p className="price">{enterprise.priceLabel}</p><p>Pay for active contributors, not seats: only people whose pull requests were reviewed that month count, and bots never do. From {billing.enterpriseMinContributors} contributors, on an annual contract paid by invoice. Run reviews on our model with usage included, or on your own model key with nothing metered. Everything in Pro, plus SCIM provisioning, audit log export, one contract across several workspaces, custom retention terms and a named support tier.</p><p className="pricing-action"><a className="button" href={enterprise.contactUrl}>Talk to us</a></p></article>}
         </div>
-        <p className="muted" data-reveal>Self-hosting is free and unlimited: <Link href="/docs/self-hosting">self-hosting guide</Link>.</p>
+        <p className="muted" data-reveal>Self-hosting is free and unlimited: <Link href="/docs/self-hosting">self-hosting guide</Link>. Companies that self-host can buy a support and updates contract; it unlocks nothing, because nothing is locked.</p>
       </section>}
 
       <section className="faq-band" aria-labelledby="faq-heading">

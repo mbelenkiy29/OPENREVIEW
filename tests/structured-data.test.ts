@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { homeStructuredData, jsonLd, priceFromLabel } from "../src/structured-data";
 
 const base = { url: "https://openreview.tech", repository: "https://github.com/acme/openreview" };
-const offersOf = (data: ReturnType<typeof homeStructuredData>) => (data["@graph"][1] as { offers?: { name: string; price: string }[] }).offers;
+const offersOf = (data: ReturnType<typeof homeStructuredData>) => (data["@graph"][2] as { offers?: { name: string; price: string }[] }).offers;
 
 test("the seat price is read from its display label, or left out", () => {
   assert.equal(priceFromLabel("$12 per seat / month"), "12");
@@ -14,7 +14,7 @@ test("the seat price is read from its display label, or left out", () => {
 
 test("structured data names the site and app, and lists prices only when billing is on", () => {
   const off = homeStructuredData({ ...base, billing: { enabled: false } });
-  assert.deepEqual(off["@graph"].map((n) => n["@type"]), ["WebSite", "SoftwareApplication"]);
+  assert.deepEqual(off["@graph"].map((n) => n["@type"]), ["WebSite", "Organization", "SoftwareApplication"]);
   assert.equal(offersOf(off), undefined, "self-hosted deployments show no prices");
   const on = homeStructuredData({ ...base, billing: { enabled: true }, priceLabel: "$12 per seat / month", proPriceLabel: "$24 per seat / month" });
   assert.deepEqual(offersOf(on)?.map((o) => [o.name, o.price]), [["Starter", "12"], ["Pro", "24"]]);

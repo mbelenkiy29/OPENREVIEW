@@ -38,12 +38,12 @@ export async function OrganizationSettings({ token, organizationId, admin, locke
           <input type="checkbox" role="switch" name="dataSharing" value="aggregate" defaultChecked={s.dataSharing === "aggregate"} aria-labelledby="share-label" aria-describedby="share-help" /><input type="hidden" name="dataSharing" value="private" />
         </div>
         <div className="setting-row">
-          <div><strong id="review-retention">Keep reviews and findings</strong><p>Days to keep them. Blank keeps them until the workspace is deleted.</p></div>
-          <span className="days-field"><input type="number" name="reviewRetentionDays" min={7} max={3650} defaultValue={s.reviewRetentionDays ?? ""} placeholder="Forever" aria-labelledby="review-retention" />days</span>
+          <div><strong id="review-retention">Keep reviews and findings</strong><p>Days to keep them. {s.retentionBounds.unlimited ? "Blank keeps them until the workspace is deleted." : `Your contract allows ${s.retentionBounds.min} to ${s.retentionBounds.max} days.`}</p></div>
+          <span className="days-field"><input type="number" name="reviewRetentionDays" min={s.retentionBounds.min} max={s.retentionBounds.max} required={!s.retentionBounds.unlimited} defaultValue={s.reviewRetentionDays ?? ""} placeholder={s.retentionBounds.unlimited ? "Forever" : ""} aria-labelledby="review-retention" />days</span>
         </div>
         <div className="setting-row">
-          <div><strong id="transcript-retention">Keep transcripts</strong><p>Agent runs, chat and pull request Q&amp;A. Blank keeps them until the workspace is deleted.</p></div>
-          <span className="days-field"><input type="number" name="transcriptRetentionDays" min={7} max={3650} defaultValue={s.transcriptRetentionDays ?? ""} placeholder="Forever" aria-labelledby="transcript-retention" />days</span>
+          <div><strong id="transcript-retention">Keep transcripts</strong><p>Agent runs, chat and pull request Q&amp;A. {s.retentionBounds.unlimited ? "Blank keeps them until the workspace is deleted." : `Your contract allows ${s.retentionBounds.min} to ${s.retentionBounds.max} days.`}</p></div>
+          <span className="days-field"><input type="number" name="transcriptRetentionDays" min={s.retentionBounds.min} max={s.retentionBounds.max} required={!s.retentionBounds.unlimited} defaultValue={s.transcriptRetentionDays ?? ""} placeholder={s.retentionBounds.unlimited ? "Forever" : ""} aria-labelledby="transcript-retention" />days</span>
         </div>
         <div className="setting-actions">{!canEdit && <p className="muted">Only workspace owners and admins can change these settings.</p>}<button>Save data settings</button></div>
       </fieldset></form>

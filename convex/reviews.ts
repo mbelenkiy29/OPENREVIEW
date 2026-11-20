@@ -4,6 +4,7 @@ import { autofixWanted } from "./autofix";
 import { notificationsEnabled } from "./notifications";
 import { lifecycleEmail } from "./lifecycleEmails";
 import { reviewAllowance } from "./billing";
+import { recordContributor } from "./contributors";
 import {
   internalMutation,
   internalQuery,
@@ -526,6 +527,7 @@ export const finished = internalMutation({
       retryAt,
       retryScheduledId,
     });
+    if (!args.error) await recordContributor(ctx, review, Date.now());
     if (args.githubReviewId)
       await ctx.db.insert("reviewComments", {
         organizationId: review.organizationId,

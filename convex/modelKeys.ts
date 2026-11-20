@@ -15,7 +15,7 @@ export const status = query({ args: { token: v.string(), organizationId: v.id("o
   const key = await keyOf(ctx, a.organizationId);
   return key ? { provider: key.provider, model: key.model ?? null, updatedAt: key.updatedAt } : null;
 } });
-export const save = internalMutation({ args: { token: v.string(), organizationId: v.id("organizations"), provider: v.union(v.literal("anthropic"), v.literal("openai"), v.literal("openrouter")), credentials: v.string(), model: v.optional(v.string()) }, handler: async (ctx, a) => {
+export const save = internalMutation({ args: { token: v.string(), organizationId: v.id("organizations"), provider: v.union(v.literal("anthropic"), v.literal("openai"), v.literal("openrouter"), v.literal("bedrock"), v.literal("azure"), v.literal("vertex")), credentials: v.string(), model: v.optional(v.string()) }, handler: async (ctx, a) => {
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
   const existing = await keyOf(ctx, a.organizationId);
   const row = { organizationId: a.organizationId, provider: a.provider, credentials: a.credentials, ...(a.model ? { model: a.model } : {}), updatedBy: user._id, updatedAt: Date.now() };

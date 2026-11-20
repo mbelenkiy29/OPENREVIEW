@@ -4,7 +4,7 @@ import { api } from "../../../../convex/_generated/api";
 import { backend } from "../../../../src/server";
 import { emailOnWeb } from "../../../../src/email";
 import { checkoutTrialEnd, usdText } from "../../../../src/billing";
-import { entitlements } from "../../../../src/plans";
+import { enterpriseOffer, entitlements } from "../../../../src/plans";
 import { referralConfig, referralDisclosure, referralFact } from "../../../../src/referrals";
 import { installHref, linkHref } from "../../../../src/github-install";
 import { providerDisplay, providerShort } from "../../../../src/provider-display";
@@ -119,7 +119,8 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
     // A new workspace must choose Starter or Pro through Stripe Checkout with a card (any remaining trial carries
     // over), and setup continues once Stripe confirms it. A workspace that keeps Free can just continue.
     const required = billing.planRequired && !billing.planSelected;
-    const now = Date.now(), paid = billing.plan === "starter" || billing.plan === "pro", free = billing.freePlan && !paid, confirming = query.checkout === "success" && !paid;
+    const enterprise = enterpriseOffer(true);
+    const now = Date.now(), paid = billing.plan === "starter" || billing.plan === "pro" || billing.plan === "enterprise", free = billing.freePlan && !paid, confirming = query.checkout === "success" && !paid;
     const carries = Boolean(checkoutTrialEnd(billing.trialEndsAt, now)), trialLeft = Math.ceil((billing.trialEndsAt - now) / 86400000);
     const elapsed = billing.trialStarted ? Math.max(0, Math.min(billing.trialDays, Math.floor((now - billing.trialEndsAt) / 86400000) + billing.trialDays)) : 0;
     const percent = Math.min(100, Math.round((billing.used / Math.max(1, billing.limit ?? 1)) * 100));
@@ -147,6 +148,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
             {admin && !paid && !confirming && <form id={card.plan === primary ? "wizard-form" : undefined} action={checkoutFromSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value={card.plan} />{card.plan !== primary && <button>Choose {card.name}</button>}</form>}
           </article>)}
         </div>
+        {enterprise && <p className="muted">50+ developers? <a href={enterprise.contactUrl}>Talk to us about Enterprise</a>: billed per active contributor, by invoice.</p>}
         <dl className="facts">
           <dt>Seats</dt><dd>{billing.activeSeats} active</dd>
           {billing.referral?.discount && <><dt>Referral</dt><dd>{referralFact(billing.referral, referralConfig().discountLabel)}</dd></>}

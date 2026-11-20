@@ -82,7 +82,7 @@ TODO one-click buttons: only add a "Deploy with Vercel" or similar button once a
 | Where it runs | Your Next.js host and Convex backend | A hosted OpenReview deployment |
 | Model and keys | Yours, with your own budget | Provided by the operator (own key on paid plans) |
 | Review limits | None | Plan quota per seat |
-| Price | Free | Starter $12 and Pro $24 per seat per month, 14-day trial ([pricing](https://openreview.tech/#pricing)) |
+| Price | Free. An optional yearly [support and updates contract](docs/deployment.md#support-and-updates-contract) unlocks nothing | Starter $12 and Pro $24 per seat per month, 14-day trial. Enterprise is billed per active contributor on an annual invoiced contract ([pricing](https://openreview.tech/#pricing), [how it works](docs/billing.md#enterprise-contracts)) |
 
 ## How it compares
 

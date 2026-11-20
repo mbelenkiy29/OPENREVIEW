@@ -16,6 +16,18 @@
         "dev"
       ],
       "port": 3000
+    },
+    {
+      "name": "web-billing-preview",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "BILLING_ENABLED=true",
+        "BILLING_ENTERPRISE_CONTACT_URL=mailto:sales@example.com",
+        "BILLING_ENTERPRISE_PRICE_LABEL=From $22 per active contributor",
+        "pnpm",
+        "dev"
+      ],
+      "port": 3000
     }
   ]
 }

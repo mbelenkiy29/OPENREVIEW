@@ -6,6 +6,7 @@ import { ConvexError } from "convex/values";
 import { anthropicDefaults, HttpModel, modelFromEnvironment, type ModelCache } from "../src/engine/model";
 import { decryptCredential } from "../src/credentials";
 import { egressAllowed } from "../src/egress";
+import { cloudModelAccess, isCloudProvider, type CloudSecret } from "../src/cloud-models";
 import { InferenceBudgetError, modelAllowed, type InferenceBilling } from "../src/inference-billing";
 // With a workspace, calls also use that workspace's monthly usage (billing on); its refusal reason is shown as is.
 export function inferenceBilling(ctx: ActionCtx, organizationId?: Id<"organizations">): InferenceBilling {
@@ -31,6 +32,8 @@ export async function budgetModel(ctx: ActionCtx, organizationId: Id<"organizati
     const chosen = model ?? await ctx.runQuery(internal.scopes.workspaceModel, { organizationId });
     return modelFromEnvironment(chosen && modelAllowed(chosen) ? chosen : undefined, cache, inferenceBilling(ctx, organizationId));
   }
+  // The workspace's own cloud account (Bedrock, Azure OpenAI, Vertex): the same client, at that account's address.
+  if (isCloudProvider(key.provider)) return new HttpModel({ provider: "compatible", model: key.model!, ...await cloudModelAccess(key.provider, JSON.parse(decryptCredential(key.credentials, `${organizationId}:model`)) as CloudSecret), workspaceKey: true }, cache);
   const anthropic = key.provider === "anthropic";
   return new HttpModel({
     provider: key.provider,

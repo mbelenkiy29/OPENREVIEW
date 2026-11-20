@@ -131,3 +131,15 @@ export const activityPage=query({args:{token:v.string(),organizationId:v.id("org
  const page=await Promise.all(result.page.map(async entry=>({...entry,actor:entry.userId?(await ctx.db.get(entry.userId))?.login??"Unavailable user":"OpenReview"})));
  return {...result,page};
 }});
+
+// Audit log export (audit.export, Enterprise): one page of a UTC date range, oldest first. The web route
+// (app/api/audit/export) follows the cursor and streams CSV or JSON. Audit events are never pruned unless the
+// workspace's contract sets a retention period, so an export does not expire.
+export const activityExport=query({args:{token:v.string(),organizationId:v.id("organizations"),from:v.number(),to:v.number(),cursor:v.optional(v.string())},handler:async(ctx,a)=>{
+ await authorize(ctx,a.token,a.organizationId,true);
+ if(!await hasEntitlement(ctx,a.organizationId,"audit.export"))throw new Error(upgradeNote["audit.export"]);
+ if(!(a.from<a.to))throw new Error("The export range must start before it ends");
+ const result=await ctx.db.query("auditEvents").withIndex("by_org",q=>q.eq("organizationId",a.organizationId).gte("_creationTime",a.from).lt("_creationTime",a.to)).paginate({numItems:500,cursor:a.cursor??null});
+ const page=await Promise.all(result.page.map(async e=>({id:e._id,at:e.createdAt,action:e.action,actor:e.userId?(await ctx.db.get(e.userId))?.login??"Unavailable user":"OpenReview",target:e.target})));
+ return {page,isDone:result.isDone,continueCursor:result.continueCursor};
+}});

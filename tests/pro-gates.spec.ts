@@ -52,9 +52,10 @@ test('billing.locked lists the Pro features a plan lacks, and none with billing 
  const {t,token,org,billing,pro}=await setup();
  expect(await t.query(api.billing.locked,{token,organizationId:org})).toEqual([]);
  billing(true);
- expect(await t.query(api.billing.locked,{token,organizationId:org})).toEqual(['review.deep','review.reproTests','fix.pullRequests','context.requirements','memory.conventions','api.access','analytics.history','auth.sso','audit.log','model.ownKey']);
+ expect(await t.query(api.billing.locked,{token,organizationId:org})).toEqual(['review.deep','review.reproTests','fix.pullRequests','context.requirements','memory.conventions','api.access','analytics.history','auth.sso','audit.log','model.ownKey','auth.scim','audit.export']);
  await pro();
- expect(await t.query(api.billing.locked,{token,organizationId:org})).toEqual([]);
+ // SCIM and audit log export are Enterprise only.
+ expect(await t.query(api.billing.locked,{token,organizationId:org})).toEqual(['auth.scim','audit.export']);
 });
 
 test('auth.sso: a new SSO connection needs Pro, and one from before the Pro gates keeps working and stays editable',async()=>{

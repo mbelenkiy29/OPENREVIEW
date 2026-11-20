@@ -17,8 +17,8 @@ export default function OpengraphImage() {
         OpenReview
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 76, fontWeight: 400, lineHeight: 1.05, letterSpacing: -2 }}>Review the change.</div>
-        <div style={{ fontSize: 76, fontWeight: 400, lineHeight: 1.05, letterSpacing: -2 }}>Understand the codebase.</div>
+        <div style={{ fontSize: 76, fontWeight: 400, lineHeight: 1.05, letterSpacing: -2 }}>Catch bugs that depend on</div>
+        <div style={{ fontSize: 76, fontWeight: 400, lineHeight: 1.05, letterSpacing: -2 }}>code outside the diff.</div>
       </div>
       <div style={{ display: "flex", fontSize: 28, color: "#64635c" }}>Evidence-backed pull request reviews · self-hosted or cloud</div>
     </div>,

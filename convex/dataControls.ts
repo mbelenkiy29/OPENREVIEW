@@ -5,7 +5,7 @@ import { v } from "convex/values";
 import type { Doc, Id, TableNames } from "./_generated/dataModel";
 import schema from "./schema";
 import { audit, authorize, service } from "./auth";
-import { openSubscription } from "../src/billing";
+import { openSubscription, retentionBounds } from "../src/billing";
 import { disableRepository } from "./repositories";
 
 // Data controls (M3): data sharing (private by default), retention for reviews and transcripts, and
@@ -40,7 +40,7 @@ export const purgePlan: Step[] = [
   ...(["providerInstallRequests", "notificationDeliveries", "oauthCodes", "bridgeDevices"] as const).map((table) => ({ table, via: "scan" as const, match: "organizationId" as const })),
   { table: "providerIdentityGrants", via: "scan", match: "repositoryOrConnection" },
   // Workspace-indexed tables; repositories and members near the end, the audit log last.
-  ...([["conversionEvents", "by_org"], ["fileReviews", "by_org"], ["integrationConnections", "by_org"], ["modelKeys", "by_org"], ["cliReviews", "by_org"], ["approvalPolicies", "by_org"], ["approvalJobs", "by_org_status"], ["runtimePolicies", "by_org"], ["runtimeWorkers", "by_org"], ["runtimeJobs", "by_org_status"], ["p4Polls", "by_org"], ["providerConnections", "by_org"], ["scopeSettings", "by_org"], ["repositoryClusters", "by_org"], ["clusterSuggestions", "by_org_status"], ["modelCache", "by_key"], ["ssoConnections", "by_org"], ["emailInvitations", "by_org"], ["joinRequests", "by_org"], ["memberLinks", "by_org"], ["analyticsDaily", "by_org_day"], ["invitations", "by_org"], ["pullRequests", "by_org"], ["findings", "by_org"], ["issueEvents", "by_org"], ["issues", "by_org_last"], ["reviews", "by_org"], ["billingAccounts", "by_org"], ["billingUsage", "by_org_period"], ["billingMeterEvents", "by_org_status"], ["notificationChannels", "by_org"], ["slackInstallations", "by_org"], ["notificationPreferences", "by_org"], ["chatThreads", "by_org_user"], ["learnedRules", "by_org"], ["commentReactions", "by_org_time"], ["findingFeedback", "by_org"], ["findingSignals", "by_org_time"], ["learnedPreferences", "by_org_scope"], ["customRules", "by_org"], ["ruleSuggestions", "by_org_status"], ["ruleAssistantRuns", "by_org_time"], ["usageEvents", "by_org"], ["oauthGrants", "by_org"], ["apiKeys", "by_org"], ["teams", "by_org"], ["githubInstallations", "by_org"], ["repositories", "by_org"], ["organizationMembers", "by_org"], ["auditEvents", "by_org"]] as const).map(([table, index]) => ({ table, via: "org" as const, index })),
+  ...([["conversionEvents", "by_org"], ["activeContributors", "by_org_period_key"], ["scimTokens", "by_org"], ["scimUsers", "by_org_username"], ["scimGroups", "by_org"], ["fileReviews", "by_org"], ["integrationConnections", "by_org"], ["modelKeys", "by_org"], ["cliReviews", "by_org"], ["approvalPolicies", "by_org"], ["approvalJobs", "by_org_status"], ["runtimePolicies", "by_org"], ["runtimeWorkers", "by_org"], ["runtimeJobs", "by_org_status"], ["p4Polls", "by_org"], ["providerConnections", "by_org"], ["scopeSettings", "by_org"], ["repositoryClusters", "by_org"], ["clusterSuggestions", "by_org_status"], ["modelCache", "by_key"], ["ssoConnections", "by_org"], ["emailInvitations", "by_org"], ["joinRequests", "by_org"], ["memberLinks", "by_org"], ["analyticsDaily", "by_org_day"], ["invitations", "by_org"], ["pullRequests", "by_org"], ["findings", "by_org"], ["issueEvents", "by_org"], ["issues", "by_org_last"], ["reviews", "by_org"], ["billingAccounts", "by_org"], ["billingUsage", "by_org_period"], ["billingMeterEvents", "by_org_status"], ["notificationChannels", "by_org"], ["slackInstallations", "by_org"], ["notificationPreferences", "by_org"], ["chatThreads", "by_org_user"], ["learnedRules", "by_org"], ["commentReactions", "by_org_time"], ["findingFeedback", "by_org"], ["findingSignals", "by_org_time"], ["learnedPreferences", "by_org_scope"], ["customRules", "by_org"], ["ruleSuggestions", "by_org_status"], ["ruleAssistantRuns", "by_org_time"], ["usageEvents", "by_org"], ["oauthGrants", "by_org"], ["apiKeys", "by_org"], ["teams", "by_org"], ["githubInstallations", "by_org"], ["repositories", "by_org"], ["organizationMembers", "by_org"], ["auditEvents", "by_org"]] as const).map(([table, index]) => ({ table, via: "org" as const, index })),
   { table: "organizations", via: "self" },
 ];
 // Not owned by a workspace: kept on deletion, with the reason.
@@ -193,12 +193,18 @@ export const settings = query({ args: { token: v.string(), organizationId: v.id(
   const { member } = await authorize(ctx, a.token, a.organizationId);
   const org = await ctx.db.get(a.organizationId);
   const deletion = await ctx.db.query("workspaceDeletions").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId)).order("desc").first();
-  return { role: member.role, name: org?.name ?? "", dataSharing: org?.dataSharing ?? "private", reviewRetentionDays: org?.reviewRetentionDays ?? null, transcriptRetentionDays: org?.transcriptRetentionDays ?? null, graceDays: graceDays(), deletion: deletion && ["scheduled", "purging"].includes(deletion.status) ? { status: deletion.status, scheduledFor: deletion.scheduledFor } : null };
+  return { role: member.role, name: org?.name ?? "", dataSharing: org?.dataSharing ?? "private", reviewRetentionDays: org?.reviewRetentionDays ?? null, transcriptRetentionDays: org?.transcriptRetentionDays ?? null, retentionBounds: retentionBounds(await contractOf(ctx, a.organizationId)), graceDays: graceDays(), deletion: deletion && ["scheduled", "purging"].includes(deletion.status) ? { status: deletion.status, scheduledFor: deletion.scheduledFor } : null };
 } });
 const days = v.union(v.number(), v.null());
+// The workspace's Enterprise contract, when it is on Enterprise (its retention terms apply only then).
+async function contractOf(ctx: QueryCtx, organizationId: Id<"organizations">) {
+  const account = await ctx.db.query("billingAccounts").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).unique();
+  return account?.plan === "enterprise" ? account.contract ?? null : null;
+}
 export const saveSettings = mutation({ args: { token: v.string(), organizationId: v.id("organizations"), dataSharing: v.union(v.literal("private"), v.literal("aggregate")), reviewRetentionDays: days, transcriptRetentionDays: days }, handler: async (ctx, a) => {
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
-  for (const n of [a.reviewRetentionDays, a.transcriptRetentionDays]) if (n !== null && (!Number.isInteger(n) || n < 7 || n > 3650)) throw new Error("Retention is between 7 and 3,650 days, or unlimited");
+  const bounds = retentionBounds(await contractOf(ctx, a.organizationId));
+  for (const n of [a.reviewRetentionDays, a.transcriptRetentionDays]) if (n === null ? !bounds.unlimited : !Number.isInteger(n) || n < bounds.min || n > bounds.max) throw new Error(`Retention is between ${bounds.min.toLocaleString("en-US")} and ${bounds.max.toLocaleString("en-US")} days${bounds.unlimited ? ", or unlimited" : " under this workspace's contract"}`);
   await ctx.db.patch(a.organizationId, { dataSharing: a.dataSharing, reviewRetentionDays: a.reviewRetentionDays ?? undefined, transcriptRetentionDays: a.transcriptRetentionDays ?? undefined });
   await audit(ctx, a.organizationId, user._id, "workspace.data_settings", `${a.dataSharing};reviews=${a.reviewRetentionDays ?? "unlimited"};transcripts=${a.transcriptRetentionDays ?? "unlimited"}`);
 } });
@@ -230,7 +236,7 @@ async function removeReview(ctx: MutationCtx, review: Doc<"reviews">): Promise<b
 export const retentionSweep = internalMutation({ args: { cursor: v.optional(v.string()) }, handler: async (ctx, a) => {
   const page = await ctx.db.query("organizations").paginate({ numItems: 25, cursor: a.cursor ?? null });
   let n = 0;
-  for (const org of page.page) if (org.reviewRetentionDays || org.transcriptRetentionDays) { await ctx.scheduler.runAfter(n++ * 1000, internal.dataControls.retention, { organizationId: org._id }); }
+  for (const org of page.page) if (org.reviewRetentionDays || org.transcriptRetentionDays || (await contractOf(ctx, org._id))?.retention) { await ctx.scheduler.runAfter(n++ * 1000, internal.dataControls.retention, { organizationId: org._id }); }
   if (!page.isDone) await ctx.scheduler.runAfter(n * 1000, internal.dataControls.retentionSweep, { cursor: page.continueCursor });
   return n;
 } });
@@ -238,14 +244,24 @@ export const retention = internalMutation({ args: { organizationId: v.id("organi
   const org = await ctx.db.get(a.organizationId);
   if (!org) return { reviews: 0, transcripts: 0, more: false };
   let reviewsDeleted = 0, transcripts = 0, more = false;
-  if (org.reviewRetentionDays) {
-    const cutoff = Date.now() - org.reviewRetentionDays * 86_400_000;
+  // An Enterprise contract's terms win over a setting saved before it: periods are clamped to its bounds, and with a
+  // contract maximum "unlimited" means that maximum. It can also set how long audit events are kept.
+  const contract = await contractOf(ctx, org._id), bounds = retentionBounds(contract);
+  const within = (days: number | undefined) => days ? Math.min(bounds.max, Math.max(bounds.min, days)) : bounds.unlimited ? undefined : bounds.max;
+  const reviewDays = within(org.reviewRetentionDays), transcriptDays = within(org.transcriptRetentionDays);
+  if (contract?.retention?.auditDays) {
+    const old = await ctx.db.query("auditEvents").withIndex("by_org", (q) => q.eq("organizationId", org._id).lt("_creationTime", Date.now() - contract.retention!.auditDays! * 86_400_000)).take(200);
+    for (const e of old) await ctx.db.delete(e._id);
+    if (old.length === 200) more = true;
+  }
+  if (reviewDays) {
+    const cutoff = Date.now() - reviewDays * 86_400_000;
     const old = await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", org._id).lt("createdAt", cutoff)).take(20);
     for (const r of old) { if (!await removeReview(ctx, r)) { more = true; break; } reviewsDeleted++; }
     if (old.length === 20) more = true;
   }
-  if (org.transcriptRetentionDays) {
-    const cutoff = Date.now() - org.transcriptRetentionDays * 86_400_000;
+  if (transcriptDays) {
+    const cutoff = Date.now() - transcriptDays * 86_400_000;
     // Agent transcripts: reviews keep their row, so a time cursor on the workspace marks how far the clearing got.
     const reviews = await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", org._id).gte("createdAt", org.transcriptsClearedBefore ?? 0).lt("createdAt", cutoff)).take(100);
     for (const r of reviews) if (r.agentStateStorageId) { await ctx.storage.delete(r.agentStateStorageId).catch(() => undefined); await ctx.db.patch(r._id, { agentStateStorageId: undefined }); transcripts++; }
