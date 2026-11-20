@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const notifications = readFileSync("app/dashboard/notifications.tsx", "utf8");
+const notificationsDoc = readFileSync("docs/notifications.md", "utf8");
+const selfHostDoc = readFileSync("docs/public/self-hosting.md", "utf8");
 const billing = readFileSync("app/dashboard/billing.tsx", "utf8");
 const portal = readFileSync("app/dashboard/portal.tsx", "utf8");
 const integrations = readFileSync("app/dashboard/integrations.tsx", "utf8");
@@ -12,9 +14,18 @@ const chart = readFileSync("app/dashboard/analytics-chart.tsx", "utf8");
 const plan = readFileSync("app/dashboard/onboarding/[step]/page.tsx", "utf8");
 
 test("notifications do not name Slack operator env vars in the customer UI", () => {
-  assert.match(notifications, /Slack notifications aren&apos;t available yet on this workspace/);
+  assert.match(notifications, /Slack isn&apos;t configured on this deployment/);
   assert.match(notifications, /href="\/docs\/notifications"/);
   assert.doesNotMatch(notifications, /SLACK_CLIENT_ID|SLACK_CLIENT_SECRET|SLACK_SIGNING_SECRET|slack-app-manifest/);
+});
+
+test("self-host docs list Slack env var names only", () => {
+  for (const name of ["SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "SLACK_SIGNING_SECRET"]) {
+    assert.match(notificationsDoc, new RegExp("`" + name + "`"));
+    assert.match(selfHostDoc, new RegExp("`" + name + "`"));
+    assert.doesNotMatch(notificationsDoc, new RegExp(name + "\\s*="));
+    assert.doesNotMatch(selfHostDoc, new RegExp(name + "\\s*="));
+  }
 });
 
 test("an active trial asks for a card as optional, with a secondary control", () => {

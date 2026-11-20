@@ -25,7 +25,7 @@ export async function NotificationsPanel({ token, organizationId, repositories, 
         {s.slack && !s.offline && s.slackConfigured && <Confirm trigger="Disconnect Slack" triggerClassName="danger" title="Disconnect Slack" action={disconnectSlack} fields={{ organizationId }} confirm="Disconnect Slack">OpenReview stops posting to <strong>{s.slack.teamName}</strong> and unlinks every channel.</Confirm>}</div>
       <section aria-labelledby="slack-heading">
         {s.offline ? <p className="card-line">Offline mode is on, so Slack is turned off for this deployment.</p>
-          : !s.slackConfigured ? <p className="card-line">Slack notifications aren&apos;t available yet on this workspace. Self-hosters can enable them in the <Link href="/docs/notifications">Slack and email</Link> guide.</p>
+          : !s.slackConfigured ? <p className="card-line">Slack isn&apos;t configured on this deployment. <Link href="/docs/notifications">Slack and email</Link></p>
           : !s.slack ? <div className="setting-row"><div><strong>Not connected</strong><p>Connect a Slack workspace to link channels.</p></div><a className="button primary" href={`/api/slack/install?organization=${organizationId}`}>Add to Slack</a></div>
           : <>
             <p className="card-line">Connected to <strong>{s.slack.teamName}</strong>. In linked channels, members can mention @OpenReview with a question about the linked repositories, and run <code>/openreview status</code>.</p>
