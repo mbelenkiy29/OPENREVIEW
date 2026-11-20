@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { billsWorkspaces } from "../../../src/billing";
 import { backend, current } from "../../../src/server";
 import type { SetupState } from "../../../src/onboarding-steps";
 import { activeWorkspace } from "../load";
@@ -8,7 +9,7 @@ import { activeWorkspace } from "../load";
 /** The signed-in user, active workspace, setup and billing status, and the state the step guards use. */
 export async function loadSetup() {
   const user = await current(), organization = activeWorkspace(user, await cookies());
-  if (!organization?._id) return { user, organization: null, status: null, billing: null, state: { hasWorkspace: false, connected: false, selected: 0, indexingStarted: false, completed: false, billing: false } satisfies SetupState };
+  if (!organization?._id) return { user, organization: null, status: null, billing: null, state: { hasWorkspace: false, connected: false, selected: 0, indexingStarted: false, completed: false, billing: billsWorkspaces() } satisfies SetupState };
   const organizationId = organization._id as Id<"organizations">;
   const [status, billing] = await Promise.all([
     backend().query(api.onboarding.status, { token: user.token, organizationId }),
@@ -23,8 +24,8 @@ export async function loadSetup() {
     cursor: status.onboarding?.step,
     // Workspaces from before guided setup have no record: treat them as set up (setup reopened).
     completed: !status.onboarding || Boolean(status.onboarding.completedAt),
-    billing: billing.enabled,
-    planMissing: billing.enabled && billing.planMissing,
+    billing: billing.enabled && billing.planStep !== false,
+    planMissing: billing.enabled && billing.planStep !== false && billing.planMissing,
   };
   return { user, organization: { ...organization, _id: organizationId }, status, billing, state };
 }

@@ -372,7 +372,9 @@ export async function changePlan(form: FormData) {
 }
 export async function applyReferralCode(form: FormData) {
   const { token } = await current();
-  try { const result = await backend().mutation(api.referrals.applyCode, { token, organizationId: text(form, "organizationId") as Id<"organizations">, code: text(form, "code") }); await notify(result.ok ? "Referral code applied." : result.error, result.ok ? "success" : "error"); }
+  const code = String(form.get("code") ?? "").trim();
+  if (!code) return;
+  try { const result = await backend().mutation(api.referrals.applyCode, { token, organizationId: text(form, "organizationId") as Id<"organizations">, code }); await notify(result.ok ? "Referral code applied." : result.error, result.ok ? "success" : "error"); }
   catch (e) { await notify(backendMessage(e, "Could not apply the referral code."), "error"); }
   revalidatePath("/dashboard", "layout");
 }

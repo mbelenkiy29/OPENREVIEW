@@ -4,8 +4,9 @@ import type { Plan } from "./plans";
 // Plans (src/plans.ts): Free has a small monthly usage allowance per workspace and never expires, but only
 // workspaces from before paid-only signups keep it (keepsFree); Starter and Pro are per-seat subscriptions that
 // include model usage each month, metered in micro-dollars of inference cost (pricier models use it faster).
-// Past it, an admin-set monthly cap allows extra usage, reported to Stripe as meter events. Paid plans start with
-// a trial at Checkout (trialDays).
+// Past it, an admin-set monthly cap allows extra usage, reported to Stripe as meter events. New workspaces start a
+// 14-day Starter trial with no card (trialStartedAt); Checkout collects a card to keep reviews after it ends.
+
 export type BillingConfig = { enabled: boolean; trialDays: number; freeUsageMicros: number; usagePerSeatMicros: number; proUsagePerSeatMicros: number; graceDays: number; starterFixesPerSeat: number; proFixesPerSeat: number; enterpriseMinContributors: number; enterpriseUsagePerContributorMicros: number; enterpriseNetDays: number; enterpriseGraceDays: number };
 export const int = (value: string | undefined, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isInteger(n) && n >= min && n <= max ? n : fallback; };
 const usd = (value: string | undefined, fallback: number) => { const n = Number(value); return Math.round((value?.trim() && Number.isFinite(n) && n >= 0 && n <= 100_000 ? n : fallback) * 1e6); };
@@ -14,6 +15,8 @@ export function billingConfig(env: Record<string, string | undefined> = process.
     // Enterprise contract defaults; each contract row can override them (billingAccounts.contract).
     enterpriseMinContributors: int(env.BILLING_ENTERPRISE_MIN_CONTRIBUTORS, 25, 1, 100_000), enterpriseUsagePerContributorMicros: usd(env.BILLING_ENTERPRISE_USAGE_PER_CONTRIBUTOR_USD, 12), enterpriseNetDays: int(env.BILLING_ENTERPRISE_NET_DAYS, 30, 0, 365), enterpriseGraceDays: int(env.BILLING_ENTERPRISE_GRACE_DAYS, 30, 0, 365) };
 }
+/** The plan step and dashboard gate: BILLING_ENABLED (PR #167) plus a Stripe secret. Self-hosted installs omit both. */
+export const billsWorkspaces = (env: Record<string, string | undefined> = process.env) => billingConfig(env).enabled && Boolean(env.STRIPE_SECRET_KEY);
 // Billed seats: owners, admins and members; viewers are free.
 export const seatCount = (members: { role: string }[]) => members.filter((m) => m.role !== "viewer").length;
 export const periodKey = (now: number) => new Date(now).toISOString().slice(0, 7);
@@ -62,7 +65,7 @@ export const contractEnd = (startsAt: number) => { const d = new Date(startsAt);
 export const contractPreview = (t: Pick<ContractTerms, "mode" | "committedContributors" | "contributorPriceCents" | "includedUsagePerContributorUsd">) => ({
   firstInvoiceCents: t.committedContributors * t.contributorPriceCents * 12, perExtraContributorCents: t.contributorPriceCents,
   includedUsageUsd: t.mode === "ownKey" ? 0 : t.committedContributors * t.includedUsagePerContributorUsd });
-export type BillingAccount = { status: string; seats: number; trialEndsAt: number; pastDueSince?: number; subscriptionId?: string; spendCapUsd?: number; plan?: string; contract?: BillingContract; contractGroupId?: string };
+export type BillingAccount = { status: string; seats: number; trialEndsAt: number; trialStartedAt?: number; pastDueSince?: number; subscriptionId?: string; spendCapUsd?: number; plan?: string; contract?: BillingContract; contractGroupId?: string };
 // limit, used and capMicros are micro-dollars; overage is true when this request runs past the included usage.
 // units is the billed contributors of an Enterprise contract (the higher of committed and active); absent on seat plans.
 export type BillingDecision = { allowed: boolean; plan: "disabled" | Plan; limit: number | null; used: number; capMicros: number; overage: boolean; reason?: string; units?: number };
@@ -71,6 +74,8 @@ const paying = new Set(["active", "trialing", "past_due"]);
 /** Free is only for workspaces created before plans were required or that started on Free; every newer one pays per seat. */
 export const keepsFree = (organization: { planRequired?: boolean; plan?: string } | null | undefined) => !organization?.planRequired || organization.plan === "free";
 export const paidPlanReason = "This workspace has no paid plan. A workspace admin can choose Starter or Pro in Organization Settings → Billing & Usage.";
+export const trialEndedReason = "This workspace's trial ended. Add a payment method in Organization Settings → Billing & Usage to resume reviews.";
+export const trialUsedReason = "This workspace already used its trial. Add a payment method in Organization Settings → Billing & Usage.";
 export const freeTakenReason = (workspace: string) => `Free is one workspace per owner, and an owner of this workspace already has "${workspace}" on Free. A workspace admin can choose Starter or Pro in Organization Settings → Billing & Usage, or use "${workspace}" for free reviews.`;
 /** used includes in-flight reservations; request is the next call's reservation (0 for the pre-check at enqueue).
  * blocked is why this workspace gets no Free allowance (convex/billing.ts): it does not keep Free, or its owner's Free workspace is another one.
@@ -98,6 +103,18 @@ export function billingDecision(account: BillingAccount, used: number, now: numb
       ? `This workspace reached its extra usage cap of ${usdText(capMicros)} this month. Usage resets on ${resetText(now)}; a workspace admin can raise the cap in Organization Settings → Billing & Usage.`
       : trialing ? `This workspace used its included usage for this month. Usage resets on ${resetText(now)}; extra usage can start once the trial ends.`
       : `This workspace used its included usage for this month. Usage resets on ${resetText(now)}; a workspace admin can turn on extra usage in Organization Settings → Billing & Usage.` };
+  }
+  // No-card Starter trial: trialStartedAt is set once on the server (startTrial). Reviews run as Starter until
+  // trialEndsAt; after that they pause until a live subscription exists. Paid and Enterprise rows never reach here.
+  if (account.trialStartedAt) {
+    const plan = account.plan === "pro" ? "pro" as const : "starter" as const;
+    const limit = Math.max(1, account.seats) * (plan === "pro" ? config.proUsagePerSeatMicros : config.usagePerSeatMicros);
+    const base = { plan, limit, used, capMicros: 0, overage: false as const };
+    if (now < account.trialEndsAt) {
+      if (!over(limit)) return { ...base, allowed: true };
+      return { ...base, allowed: false, reason: `This workspace used its included usage for this month. Usage resets on ${resetText(now)}; extra usage can start once the trial ends.` };
+    }
+    return { ...base, allowed: false, reason: trialEndedReason };
   }
   // Free: no subscription (or a lapsed one). The allowance resets each month and has no extra usage.
   const base = { plan: "free" as const, limit: config.freeUsageMicros, used, capMicros: 0, overage: false };

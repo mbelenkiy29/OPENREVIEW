@@ -4,7 +4,7 @@ import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { audit, authorize } from "./auth";
-import { billingConfig, billingDecision, fixRunLimit, reviewsLeft, freeTakenReason, keepsFree, liveSubscription, paidPlanReason, nextPeriodStart, openSubscription, periodKey, resetText, seatCount, trialEndsFrom } from "../src/billing";
+import { billingConfig, billingDecision, billsWorkspaces, fixRunLimit, reviewsLeft, freeTakenReason, keepsFree, liveSubscription, paidPlanReason, nextPeriodStart, openSubscription, periodKey, resetText, seatCount, trialEndsFrom, trialUsedReason } from "../src/billing";
 import { entitled, entitlements, planCatalog, planEntitlements, planForPrice, upgradeNote, type Entitlement, type Plan } from "../src/plans";
 import { referralConfig } from "../src/referrals";
 import { contributorCount, contributorRows, groupContributorRows } from "./contributors";
@@ -14,9 +14,9 @@ import { recordConversion } from "./conversions";
 import { operatorOwned } from "./operator";
 
 // Billing state, the review gate and the workspace usage ledger. With BILLING_ENABLED unset every check allows.
-// The account row starts with the first review or checkout. Without a subscription a workspace from before
-// paid-only workspaces is on the Free plan (keepsFree) and a newer one has no allowance; the paid-plan trial
-// (trialEndsAt) starts when the workspace first opens Checkout.
+// The account row starts with the first review, no-card trial or checkout. Without a subscription a workspace from
+// before paid-only workspaces is on the Free plan (keepsFree) and a newer one has no allowance until it starts a
+// trial; the Starter trial (trialStartedAt) starts once per workspace, with no card.
 async function members(ctx: QueryCtx, organizationId: Id<"organizations">) {
   return ctx.db.query("organizationMembers").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).collect();
 }
@@ -33,8 +33,8 @@ async function usageOf(ctx: QueryCtx, organizationId: Id<"organizations">, perio
   return ctx.db.query("billingUsage").withIndex("by_org_period", (q) => q.eq("organizationId", organizationId).eq("period", period)).unique();
 }
 // Usage counted against the allowance: settled cost plus what in-flight calls have reserved.
-// Until the first Checkout links a customer, the trial is a full one starting now.
-const paidTrialEndsAt = (account: { customerId?: string; trialEndsAt: number } | null, now: number) => account?.customerId ? account.trialEndsAt : trialEndsFrom(now, billingConfig());
+// Until the trial starts (no-card startTrial or first Checkout), the remaining time is a full one starting now.
+const paidTrialEndsAt = (account: { customerId?: string; trialStartedAt?: number; trialEndsAt: number } | null, now: number) => account?.customerId || account?.trialStartedAt ? account.trialEndsAt : trialEndsFrom(now, billingConfig());
 const spent = (usage: Doc<"billingUsage"> | null) => (usage?.usedMicros ?? 0) + (usage?.reservedMicros ?? 0);
 // A workspace an operator owns (convex/operator.ts) bills like a self-hosted install: unlimited usage and fixes, every
 // feature, nothing reported to Stripe. Its usage is still counted, and the deployment's inference budget still caps it.
@@ -43,9 +43,10 @@ async function configFor(ctx: QueryCtx, organizationId: Id<"organizations">) {
   return config.enabled && await operatorOwned(ctx, organizationId) ? { ...config, enabled: false } : config;
 }
 export const choosePlanMessage = "Choose a plan for this workspace first: a workspace admin picks Starter or Pro under Setup → Choose your plan";
-/** A workspace that must choose a plan (new, on a billing deployment) and has no Stripe-confirmed choice yet. */
+/** A workspace that must choose a plan (new, on a billing deployment) and has no trial or Stripe-confirmed choice yet.
+ *  Self-hosted installs (BILLING_ENABLED unset or no Stripe secret) are never gated. */
 export async function planMissing(ctx: QueryCtx, organizationId: Id<"organizations">) {
-  if (!(await configFor(ctx, organizationId)).enabled) return false;
+  if (!billsWorkspaces() || !(await configFor(ctx, organizationId)).enabled) return false;
   const organization = await ctx.db.get(organizationId);
   return Boolean(organization?.planRequired && !organization.planSelectedAt);
 }
@@ -124,6 +125,26 @@ export const chooseFreePlan = mutation({ args: { token: v.string(), organization
   if (!keepsFree(await ctx.db.get(a.organizationId))) throw new ConvexError("Billing: " + paidPlanReason);
   const taken = await startOnFree(ctx, a.organizationId, user._id);
   if (taken) throw new ConvexError("Billing: " + freeTakenReason(taken));
+} });
+// 14-day Starter trial with no card. Dates are taken from the server clock; the client cannot set them.
+// Idempotent while that trial is still running; refused after it has been used, including once a paid
+// or Enterprise subscription exists (those workspaces are left alone).
+export const startTrial = mutation({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
+  const { user } = await authorize(ctx, a.token, a.organizationId, true);
+  if (!billsWorkspaces() || !(await configFor(ctx, a.organizationId)).enabled) throw new Error("Billing is disabled on this deployment");
+  const organization = await ctx.db.get(a.organizationId);
+  if (!organization) throw new Error("Workspace not found");
+  const account = await ensureAccount(ctx, a.organizationId);
+  if (liveSubscription(account) || account.plan === "enterprise") return { started: false as const, reason: "subscribed" as const };
+  if (account.trialStartedAt) {
+    if (Date.now() < account.trialEndsAt) return { started: false as const, reason: "trialing" as const };
+    throw new ConvexError("Billing: " + trialUsedReason);
+  }
+  const now = Date.now();
+  await ctx.db.patch(account._id, { trialStartedAt: now, trialEndsAt: trialEndsFrom(now, billingConfig()), status: "trial", plan: "starter", updatedAt: now });
+  await recordPlanSelected(ctx, a.organizationId, "trialing", "starter");
+  await audit(ctx, a.organizationId, user._id, "billing.trial_started", "starter");
+  return { started: true as const };
 } });
 // Whether the workspace's plan includes a feature; with billing off every feature is unlocked.
 export async function hasEntitlement(ctx: QueryCtx, organizationId: Id<"organizations">, key: Entitlement) {
@@ -272,7 +293,7 @@ export const status = query({ args: { token: v.string(), organizationId: v.id("o
   const stored = await accountOf(ctx, a.organizationId);
   const account = stored ?? { status: "trial", seats: 0, trialEndsAt: 0 } as Pick<Doc<"billingAccounts">, "status" | "seats" | "trialEndsAt"> & Partial<Doc<"billingAccounts">>;
   const now = Date.now(), usage = await usageOf(ctx, a.organizationId, periodKey(now));
-  const facts = { status: account.status, seats: account.seats, trialEndsAt: account.trialEndsAt, pastDueSince: account.pastDueSince, subscriptionId: account.subscriptionId, spendCapUsd: account.spendCapUsd, plan: account.plan, contract: account.contract, contractGroupId: account.contractGroupId };
+  const facts = { status: account.status, seats: account.seats, trialEndsAt: account.trialEndsAt, trialStartedAt: account.trialStartedAt, pastDueSince: account.pastDueSince, subscriptionId: account.subscriptionId, spendCapUsd: account.spendCapUsd, plan: account.plan, contract: account.contract, contractGroupId: account.contractGroupId };
   const decision = await decide(ctx, a.organizationId, facts, spent(usage), now);
   const organization = await ctx.db.get(a.organizationId);
   const admin = ["owner", "admin"].includes(member.role), referrals = admin && referralConfig().enabled;
@@ -283,7 +304,7 @@ export const status = query({ args: { token: v.string(), organizationId: v.id("o
   const contract = decision.plan === "enterprise" ? (group?.account ?? account).contract : undefined, rows = !contract ? [] : group ? await groupContributorRows(ctx, group.organizationIds, periodKey(now)) : await contributorRows(ctx, a.organizationId, periodKey(now));
   const enterprise = contract ? { mode: contract.mode, startsAt: contract.startsAt, endsAt: contract.endsAt, committed: contract.committedContributors, minimum: contract.minimumContributors, includedUsagePerContributorUsd: contract.includedUsagePerContributorUsd, netDays: contract.netDays, graceDays: contract.graceDays, renewed: Boolean((group?.account ?? account).nextContract?.stripe?.scheduleId), workspaces: group?.organizationIds.length ?? 1, billedHere: !group || group.billedId === a.organizationId, supportTier: contract.supportTier ?? null, active: rows.filter((r) => !r.bot).length,
     priceCents: admin ? contract.contributorPriceCents : null, contributors: admin ? rows.map((r) => ({ key: r.key, login: r.login, provider: r.provider, firstAt: r.firstAt, billed: !r.bot })).sort((x, y) => Number(y.billed) - Number(x.billed) || x.login.localeCompare(y.login)) : null } : null;
-  return { enabled: true as const, enterprise, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, planName: decision.plan === "disabled" ? null : planCatalog[decision.plan].name, legacy: Boolean(account.legacy && decision.plan === "starter"), entitlements: planEntitlements(decision.plan, account.legacy), allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: (usage?.usedMicros ?? 0) + pooled, reserved: usage?.reservedMicros ?? 0, overage: usage?.overageMicros ?? 0, capUsd: account.spendCapUsd ?? 0, resetsAt: nextPeriodStart(now), reviews: usage?.reviews ?? 0, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: paidTrialEndsAt(account, now), trialStarted: Boolean(account.customerId), trialDays: config.trialDays, freeUsageMicros: config.freeUsageMicros, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, usagePerSeatMicros: config.usagePerSeatMicros, proUsagePerSeatMicros: config.proUsagePerSeatMicros, hasCustomer: Boolean(account.customerId), hasPaymentMethod, freePlan: keepsFree(organization), fixes: { used: usage?.fixes ?? 0, limit: fixRunLimit(decision, account.seats, config) }, starterFixesPerSeat: config.starterFixesPerSeat, proFixesPerSeat: config.proFixesPerSeat, reviewsLeft: reviewsLeft(decision.limit, (usage?.usedMicros ?? 0) + (usage?.reservedMicros ?? 0), (await ctx.db.query("usageEvents").withIndex("by_org_time", (q) => q.eq("organizationId", a.organizationId).gt("createdAt", now - 30 * 86400000)).order("desc").take(2000)).filter((e) => e.kind === "review")) };
+  return { enabled: true as const, planStep: billsWorkspaces(), enterprise, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, planName: decision.plan === "disabled" ? null : planCatalog[decision.plan].name, legacy: Boolean(account.legacy && decision.plan === "starter"), entitlements: planEntitlements(decision.plan, account.legacy), allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: (usage?.usedMicros ?? 0) + pooled, reserved: usage?.reservedMicros ?? 0, overage: usage?.overageMicros ?? 0, capUsd: account.spendCapUsd ?? 0, resetsAt: nextPeriodStart(now), reviews: usage?.reviews ?? 0, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: paidTrialEndsAt(account, now), trialStarted: Boolean(account.trialStartedAt || account.customerId), cardlessTrial: Boolean(account.trialStartedAt && !liveSubscription(account)), trialDays: config.trialDays, freeUsageMicros: config.freeUsageMicros, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, usagePerSeatMicros: config.usagePerSeatMicros, proUsagePerSeatMicros: config.proUsagePerSeatMicros, hasCustomer: Boolean(account.customerId), hasPaymentMethod, freePlan: keepsFree(organization), fixes: { used: usage?.fixes ?? 0, limit: fixRunLimit(decision, account.seats, config) }, starterFixesPerSeat: config.starterFixesPerSeat, proFixesPerSeat: config.proFixesPerSeat, reviewsLeft: reviewsLeft(decision.limit, (usage?.usedMicros ?? 0) + (usage?.reservedMicros ?? 0), (await ctx.db.query("usageEvents").withIndex("by_org_time", (q) => q.eq("organizationId", a.organizationId).gt("createdAt", now - 30 * 86400000)).order("desc").take(2000)).filter((e) => e.kind === "review")) };
 } });
 
 export const checkoutContext = internalQuery({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
@@ -299,8 +320,10 @@ export const linkCustomer = internalMutation({ args: { organizationId: v.id("org
   if (account.customerId && account.customerId !== a.customerId) throw new Error("Workspace already has a billing customer");
   const other = await ctx.db.query("billingAccounts").withIndex("by_customer", (q) => q.eq("customerId", a.customerId)).unique();
   if (other && other._id !== account._id) throw new Error("Billing customer belongs to another workspace");
-  // The paid-plan trial starts with the first Checkout, however long the workspace was on Free.
-  await ctx.db.patch(account._id, { customerId: a.customerId, ...(account.customerId ? {} : { trialEndsAt: trialEndsFrom(Date.now(), billingConfig()) }), updatedAt: Date.now() });
+  // The paid-plan trial clock starts with the first Checkout unless a no-card trial already set it.
+  // trialStartedAt is only written by startTrial: opening Checkout must not entitle a cardless trial.
+  const started = Boolean(account.customerId || account.trialStartedAt), now = Date.now();
+  await ctx.db.patch(account._id, { customerId: a.customerId, ...(started ? {} : { trialEndsAt: trialEndsFrom(now, billingConfig()) }), updatedAt: now });
 } });
 // A workspace without a Stripe customer yet, on a billing deployment and not an operator's (those bill like self-hosted).
 async function needsCustomer(ctx: QueryCtx, organization: Doc<"organizations">) {
@@ -423,7 +446,7 @@ export const applyStripeEvent = internalMutation({ args: { eventId: v.string(), 
 // with `npx convex run billing:forgetStripeLinks '{"confirm":"switch-stripe-mode"}' --prod`.
 export const forgetStripeLinks = internalMutation({ args: { confirm: v.literal("switch-stripe-mode") }, handler: async (ctx): Promise<number> => {
   const accounts = await ctx.db.query("billingAccounts").collect();
-  for (const account of accounts) await ctx.db.patch(account._id, { customerId: undefined, subscriptionId: undefined, plan: undefined, legacy: undefined, subscriptionItemId: undefined, currentPeriodEnd: undefined, pastDueSince: undefined, lastEventCreated: undefined, subscriptionPaymentMethod: undefined, customerPaymentMethod: undefined, customerEventCreated: undefined, status: "trial", seats: seatCount(await members(ctx, account.organizationId)), updatedAt: Date.now() });
+  for (const account of accounts) await ctx.db.patch(account._id, { customerId: undefined, subscriptionId: undefined, plan: undefined, legacy: undefined, subscriptionItemId: undefined, currentPeriodEnd: undefined, pastDueSince: undefined, lastEventCreated: undefined, subscriptionPaymentMethod: undefined, customerPaymentMethod: undefined, customerEventCreated: undefined, trialStartedAt: undefined, status: "trial", seats: seatCount(await members(ctx, account.organizationId)), updatedAt: Date.now() });
   for (const organization of await ctx.db.query("organizations").collect()) if (organization.stripeCustomerId) await ctx.db.patch(organization._id, { stripeCustomerId: undefined });
   return accounts.length;
 } });

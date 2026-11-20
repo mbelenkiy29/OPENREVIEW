@@ -34,6 +34,11 @@ export const isWizardStep = (value: string | undefined): value is WizardStep => 
 export const isConfigureStep = (value: string): value is ConfigureStep => (configureSteps as readonly string[]).includes(value);
 /** The steps a deployment shows: the plan step only when it bills workspaces. */
 export const stepsFor = (billing: boolean): readonly WizardStep[] => billing ? wizardSteps : wizardSteps.filter((s) => s !== "plan");
+/** One shared total for every setup step; `billing` is whether this deployment shows the plan step. */
+export function wizardProgress(step: WizardStep, billing: boolean) {
+  const steps = stepsFor(billing), index = steps.indexOf(step);
+  return { position: index < 0 ? 1 : index + 1, total: steps.length };
+}
 export function nextStep(step: WizardStep, billing: boolean): WizardStep | undefined {
   const at = wizardSteps.indexOf(step);
   return stepsFor(billing).find((s) => wizardSteps.indexOf(s) > at);
@@ -50,7 +55,7 @@ export function needsSetup(organization: { onboarding?: Onboarding | null } | nu
   return Boolean(organization?.onboarding?.startedAt && !organization.onboarding.completedAt);
 }
 
-// planMissing: a new workspace on a billing deployment without a Stripe-confirmed plan.
+// planMissing: a new workspace on a billing deployment without a trial or Stripe-confirmed plan.
 export type SetupState = { hasWorkspace: boolean; connected: boolean; selected: number; indexingStarted: boolean; cursor?: string; completed: boolean; billing: boolean; planMissing?: boolean };
 /** The step to show for a request: guards send users back to the first step they still need. */
 export function resolveStep(requested: string | undefined, state: SetupState): WizardStep {

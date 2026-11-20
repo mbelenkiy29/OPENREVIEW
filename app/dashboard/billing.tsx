@@ -17,10 +17,10 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
   if (!s.enabled) return <><div className="section-heading"><h2 id="plan-heading">{"exempt" in s ? "Operator workspace" : "Billing is off"}</h2></div><section aria-labelledby="plan-heading"><p className="card-line">{"exempt" in s
     ? "An OpenReview operator owns this workspace, so it has no plan quota: usage and agent fixes are unlimited and every feature is on. The deployment's inference budget still applies."
     : <>This deployment does not bill workspaces (<code>BILLING_ENABLED</code> is not set), so reviews have no plan quota. Self-hosted installs are unlimited.</>}</p></section></>;
-  // subscribed is any paid plan; perSeat is Starter or Pro, which have Checkout, plan switching and seats.
-  const e = s.enterprise, ownKey = e?.mode === "ownKey", perSeat = s.plan === "starter" || s.plan === "pro", subscribed = perSeat || Boolean(e), percent = s.limit ? Math.min(100, Math.round((s.used / s.limit) * 100)) : 0;
+  // subscribed is a Stripe-backed paid plan; perSeat is Starter or Pro with a live subscription.
+  const e = s.enterprise, ownKey = e?.mode === "ownKey", cardless = Boolean(s.cardlessTrial), perSeat = !cardless && (s.plan === "starter" || s.plan === "pro"), subscribed = perSeat || Boolean(e), percent = s.limit ? Math.min(100, Math.round((s.used / s.limit) * 100)) : 0;
   // A workspace without a paid plan that does not keep Free (new, or a lapsed new subscription) has no plan at all.
-  const unpaid = !subscribed && !s.freePlan, badge = unpaid ? "Inactive" : s.plan === "free" ? "Active" : e && s.status === "active" ? "Invoiced" : statusLabel(s.status);
+  const unpaid = !subscribed && !s.freePlan && !cardless, badge = unpaid ? "Inactive" : cardless ? "Trial" : s.plan === "free" ? "Active" : e && s.status === "active" ? "Invoiced" : statusLabel(s.status);
   const trial = checkoutTrialEnd(s.trialEndsAt, Date.now());
   const portal = (label: ReactNode, name?: string, className?: string) => <form action={openBillingPortal}><input type="hidden" name="organizationId" value={organizationId} /><button className={className} aria-label={name}>{label}</button></form>;
   return <>
@@ -50,8 +50,9 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
           {s.referralCredit ? <><dt>Referral credit</dt><dd>{formatMoney(s.referralCredit)} applied from referral earnings · Stripe takes it off the next invoices</dd></> : null}
         </dl>
         {s.admin ? <div className="page-actions">
-          {!subscribed && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="pro" /><button className="primary">{trial ? "Start Pro trial" : "Upgrade to Pro"}</button></form>}
-          {!subscribed && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="starter" /><button>{trial ? "Start Starter trial" : "Choose Starter"}</button></form>}
+          {cardless && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="starter" /><button className="primary">Add a card to keep reviewing</button></form>}
+          {!subscribed && !cardless && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="pro" /><button className="primary">{trial ? "Start Pro trial" : "Upgrade to Pro"}</button></form>}
+          {!subscribed && !cardless && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="starter" /><button>{trial ? "Start Starter trial" : "Choose Starter"}</button></form>}
           {perSeat && <form action={changePlan}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value={s.plan === "pro" ? "starter" : "pro"} /><button className={s.plan === "pro" ? undefined : "primary"}>{s.plan === "pro" ? "Switch to Starter" : "Switch to Pro"}</button></form>}
         </div> : <p className="muted">Only workspace owners and admins can change billing.</p>}
         {s.admin && perSeat && <p className="muted">Switching plans takes effect now and is prorated: the price difference for the rest of this period is on the next invoice.</p>}
@@ -68,7 +69,7 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
       <tbody>{e.contributors.map((c) => <tr key={c.key}><td>{c.login}</td><td>{c.provider}</td><td>{day(c.firstAt)}</td><td>{c.billed ? "Billed" : <span className="muted">Not billed</span>}</td></tr>)}
         {!e.contributors.length && <tr><td colSpan={4} className="table-empty">No reviewed pull requests yet this month</td></tr>}</tbody>
     </table></div></>}
-    <div className="section-heading minor"><h2 id="payment-heading">Payment Details</h2>{s.admin && (s.hasCustomer ? portal(<><Icon name="plus" />Add Payment Method</>) : !subscribed && <a className="button" href="#plan-heading"><Icon name="plus" />Add Payment Method</a>)}</div>
+    <div className="section-heading minor"><h2 id="payment-heading">Payment Details</h2>{s.admin && (s.hasCustomer ? portal(<><Icon name="plus" />Add Payment Method</>) : (!subscribed || cardless) && <a className="button" href="#plan-heading"><Icon name="plus" />Add Payment Method</a>)}</div>
     <div className="table-box"><table aria-labelledby="payment-heading">
       <thead><tr><th>Name</th><th><span className="sr-only">Actions</span></th></tr></thead>
       <tbody>{s.hasCustomer ? <tr><td>Kept by Stripe <span className="muted">· cards and bank details never reach OpenReview</span></td><td>{s.admin && portal("Manage", "Manage payment methods", "small")}</td></tr>
@@ -82,12 +83,12 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
     <div className="section-heading"><h2 id="portal-heading">Billing Portal</h2></div>
     <section aria-labelledby="portal-heading" className="setting-row portal-card">
       <div><strong>Manage Billing <span className="role-badge">{badge}</span></strong>
-        <p>{s.status === "trialing" && s.trialEndsAt ? `You’re on a free trial until ${day(s.trialEndsAt)}. ` : ""}{s.hasCustomer ? "Visit the portal to update your payment method, download invoices or manage your plan." : "The Stripe billing portal opens once this workspace has a plan with a payment method."}</p></div>
+        <p>{(s.status === "trialing" || s.cardlessTrial) && s.trialEndsAt ? `You’re on a free trial until ${day(s.trialEndsAt)}. ${s.cardlessTrial ? "Add a card before then or reviews pause; nothing is deleted." : ""}` : ""}{s.hasCustomer ? "Visit the portal to update your payment method, download invoices or manage your plan." : s.cardlessTrial ? "Choose Add a card above; Checkout collects a payment method and reviews keep running." : "The Stripe billing portal opens once this workspace has a plan with a payment method."}</p></div>
       {s.admin && s.hasCustomer && portal("Manage", "Manage billing")}
     </section>
     {s.referral?.canApply && <><div className="section-heading"><div><h2 id="referral-code-heading">Referral code</h2><p>Were you referred by someone already on OpenReview? Add their code before you subscribe{referralConfig().discountLabel ? ` to get ${referralConfig().discountLabel}` : ""}.</p></div></div>
     <section aria-labelledby="referral-code-heading">
-      <form action={applyReferralCode} className="toolbar-row"><input type="hidden" name="organizationId" value={organizationId} /><label className="grow"><span className="sr-only">Code</span><input name="code" aria-label="Code" placeholder="Referral code" defaultValue={filters.referral ?? ""} required maxLength={64} autoComplete="off" spellCheck={false} /></label><button>Apply code</button></form>
+      <form action={applyReferralCode} className="toolbar-row"><input type="hidden" name="organizationId" value={organizationId} /><label className="grow"><span className="sr-only">Referral code (optional)</span><input name="code" aria-label="Referral code (optional)" placeholder="Referral code (optional)" defaultValue={filters.referral ?? ""} maxLength={64} autoComplete="off" spellCheck={false} /></label><button>Apply code</button></form>
       <p className="muted">{referralDisclosure(null)}</p>
     </section></>}
   </>;

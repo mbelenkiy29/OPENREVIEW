@@ -106,10 +106,12 @@ test("setup can't be skipped: finishing needs an indexing repository and release
   // The plan step comes right after the workspace where the deployment bills workspaces.
   expect(await t.mutation(api.onboarding.advance, { token: alice, organizationId, step: "team" })).toBe("done");
   process.env.BILLING_ENABLED = "true";
+  process.env.STRIPE_SECRET_KEY = "sk_test_fixture";
   try {
+    expect(await t.mutation(api.onboarding.advance, { token: alice, organizationId, step: "workspace" })).toBe("plan");
     expect(await t.mutation(api.onboarding.advance, { token: alice, organizationId, step: "team" })).toBe("done");
     expect(await t.mutation(api.onboarding.advance, { token: alice, organizationId, step: "plan" })).toBe("connect");
-  } finally { delete process.env.BILLING_ENABLED; }
+  } finally { delete process.env.BILLING_ENABLED; delete process.env.STRIPE_SECRET_KEY; }
   expect((await organization())?.onboarding?.step).toBe("plan");
   await expect(t.mutation(api.onboarding.complete, { token: bob, organizationId })).rejects.toThrow("Forbidden");
   // The last step opens once indexing starts, so the triggers step may never have saved: finishing releases the hold.

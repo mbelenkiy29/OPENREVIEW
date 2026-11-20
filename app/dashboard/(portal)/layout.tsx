@@ -20,8 +20,9 @@ export default async function PortalLayout({ children }: { children: React.React
     scopesFor(user.token, organization._id),
     billingConfig().enabled ? backend().query(api.billing.status, { token: user.token, organizationId: organization._id }).catch(() => null) : null,
   ]);
-  // Greptile's trial banner: the days left of a running trial that has no payment method on file.
-  const trialLeft = billing?.enabled && billing.status === "trialing" ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / 86400000)) : undefined;
+  // Trial banner: Stripe trialing subscriptions, and the no-card Starter trial, while time remains.
+  const onTrial = Boolean(billing?.enabled && (billing.status === "trialing" || billing.cardlessTrial) && billing.trialEndsAt > Date.now());
+  const trialLeft = billing?.enabled && onTrial ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / 86400000)) : undefined;
   // Without a card the banner runs the whole trial; with one it reminds in the last 3 days that the card will be charged.
   const trialDaysLeft = trialLeft !== undefined && (!billing?.hasPaymentMethod || trialLeft <= 3) ? trialLeft : undefined;
   const trialCharge = trialDaysLeft !== undefined && billing?.enabled && billing.hasPaymentMethod ? { plan: billing.planName ?? "paid", date: new Date(billing.trialEndsAt).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }) } : undefined;

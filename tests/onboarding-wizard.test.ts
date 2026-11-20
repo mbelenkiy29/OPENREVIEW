@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { configureSteps, needsSetup, nextStep, previousStep, resolveStep, stepKeys, stepSettingsFromForm, stepsFor, wizardSteps } from "../src/onboarding-steps";
+import { configureSteps, needsSetup, nextStep, previousStep, resolveStep, stepKeys, stepSettingsFromForm, stepsFor, wizardProgress, wizardSteps } from "../src/onboarding-steps";
 import { previewComments, pullRequestOutcome, pullRequestSteps, sampleFindings, triggerTimeline } from "../src/onboarding-preview";
 import { graphLayout, litCount } from "../src/onboarding-graph";
 import { installHref, installReturnPath } from "../src/github-install";
@@ -61,6 +61,19 @@ test("a new workspace on a billing deployment cannot get past the plan step unti
   assert.equal(resolveStep(undefined, { ...fresh, planMissing: false }), "connect");
   assert.equal(resolveStep("tools", { ...ready, billing: false, planMissing: true }), "tools", "without billing nothing is required");
   assert.equal(resolveStep(undefined, { ...fresh, hasWorkspace: false }), "workspace");
+});
+
+test("every setup step uses the same total, with or without the plan step", () => {
+  assert.equal(wizardProgress("workspace", true).total, 10);
+  assert.equal(wizardProgress("plan", true).total, 10);
+  assert.equal(wizardProgress("connect", true).total, 10);
+  assert.deepEqual(wizardProgress("workspace", true), { position: 1, total: 10 });
+  assert.deepEqual(wizardProgress("plan", true), { position: 2, total: 10 });
+  assert.deepEqual(wizardProgress("connect", true), { position: 3, total: 10 });
+  assert.equal(wizardProgress("workspace", false).total, 9);
+  assert.equal(wizardProgress("connect", false).total, 9);
+  assert.deepEqual(wizardProgress("workspace", false), { position: 1, total: 9 });
+  assert.deepEqual(wizardProgress("connect", false), { position: 2, total: 9 });
 });
 
 test("each configuration step owns distinct, real workspace settings and parses only its form", () => {

@@ -1,10 +1,10 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Icon } from "../../ui/icons";
-import { logout } from "../actions";
+import { applyReferralCode, logout } from "../actions";
 import { SignOutForm } from "../../telemetry-identity";
 import { ShortcutHint, WizardShortcuts } from "./wizard-client";
-import { configureLabels, configureSteps, previousStep, stepsFor, stepTitles, type ConfigureStep, type WizardStep } from "../../../src/onboarding-steps";
+import { configureLabels, configureSteps, previousStep, stepTitles, wizardProgress, type ConfigureStep, type WizardStep } from "../../../src/onboarding-steps";
 
 /** Full-screen setup frame on Greptile's dotted canvas: the step body, then a bar with Logout and
  *  Back to dashboard on the left, Back (⌘+⇧+↵) and Next (⌘+↵) centred, and where you are on the right. */
@@ -12,7 +12,7 @@ export function WizardFrame({ step, workspace, organizationId, admin, billing = 
   step: WizardStep; workspace?: string; organizationId?: string; admin: boolean; billing?: boolean; planMissing?: boolean;
   nextLabel: string; nextHref?: string; centered?: boolean; children: ReactNode;
 }) {
-  const steps = stepsFor(billing), back = previousStep(step, billing), position = steps.indexOf(step) + 1;
+  const { position, total } = wizardProgress(step, billing), back = previousStep(step, billing);
   const backHref = back ? `/dashboard/onboarding/${back}` : undefined;
   return <main id="main" className="wizard" data-step={step}>
     <div className={`wizard-body${centered ? " centered" : ""}`}>{children}</div>
@@ -29,7 +29,7 @@ export function WizardFrame({ step, workspace, organizationId, admin, billing = 
           ? <button className="primary" type="submit" form="wizard-form" aria-keyshortcuts="Meta+Enter Control+Enter">{nextLabel} <ShortcutHint /><Icon name="arrowRight" /></button>
           : nextHref && <Link className="button primary" href={nextHref}>Next <ShortcutHint /><Icon name="arrowRight" /></Link>}
       </nav>
-      <p className="wizard-position">{workspace && <span className="wizard-workspace">{workspace}</span>}Step {position} of {steps.length}</p>
+      <p className="wizard-position">{workspace && <span className="wizard-workspace">{workspace}</span>}Step {position} of {total}</p>
     </footer>
     <WizardShortcuts nextHref={admin ? undefined : nextHref} backHref={backHref} />
   </main>;
@@ -47,4 +47,8 @@ export function ConfigureProgress({ step }: { step: ConfigureStep }) {
 }
 export function ReadOnlyNote({ admin }: { admin: boolean }) {
   return admin ? null : <p className="muted" role="note">A workspace admin manages setup. You can look through each step.</p>;
+}
+/** Optional on the plan step: HTML required would draw the red asterisk. Empty submit is a no-op. */
+export function ReferralCodeField({ organizationId, defaultCode, disclosure }: { organizationId: string; defaultCode?: string; disclosure: string }) {
+  return <><form action={applyReferralCode} className="form-grid"><input type="hidden" name="organizationId" value={organizationId} /><label>Referral code <span className="muted">(optional)</span><input name="code" defaultValue={defaultCode ?? ""} maxLength={64} autoComplete="off" spellCheck={false} /></label><button>Apply code</button></form><p className="muted">{disclosure}</p></>;
 }

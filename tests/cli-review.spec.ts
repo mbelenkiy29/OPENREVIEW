@@ -23,8 +23,8 @@ import {POST as startRoute} from '../app/api/reviews/local/route';
 import {GET as progressRoute} from '../app/api/reviews/local/[id]/route';
 
 const modules=import.meta.glob('../convex/**/*.ts');
-beforeEach(()=>{vi.useFakeTimers();process.env.SESSION_SECRET=secret;process.env.SERVICE_SECRET='integration-service-secret';process.env.LLM_API_KEY='fixture';delete process.env.EMBEDDING_MODEL;delete process.env.BILLING_ENABLED;});
-afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();delete process.env.BILLING_ENABLED;});
+beforeEach(()=>{vi.useFakeTimers();process.env.SESSION_SECRET=secret;process.env.SERVICE_SECRET='integration-service-secret';process.env.LLM_API_KEY='fixture';delete process.env.EMBEDDING_MODEL;delete process.env.BILLING_ENABLED;delete process.env.STRIPE_SECRET_KEY;});
+afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();delete process.env.BILLING_ENABLED;delete process.env.STRIPE_SECRET_KEY;});
 
 async function setup(){
  const t=convexTest(schema,modules);holder.t=t;
@@ -90,6 +90,7 @@ test('repositories outside the workspace, disabled or unindexed ones, and an exh
  await t.run(ctx=>ctx.db.patch(fresh._id,{enabled:true}));
  expect((await json(await startRoute(request('/api/reviews/local',keys.write,upload(fresh._id)))))[0]).toBe(409);
  process.env.BILLING_ENABLED='true';
+ process.env.STRIPE_SECRET_KEY='sk_test_fixture';
  // API keys need Pro (api.access); this Pro subscription is not yet confirmed as the workspace's chosen plan.
  await t.run(async ctx=>{await ctx.db.patch(org,{planRequired:true});await ctx.db.insert('billingAccounts',{organizationId:org,subscriptionId:'sub_1',plan:'pro',status:'active',seats:1,trialEndsAt:Date.now(),updatedAt:Date.now()});});
  const [status,body]=await json(await startRoute(request('/api/reviews/local',keys.write,upload(shop._id))));

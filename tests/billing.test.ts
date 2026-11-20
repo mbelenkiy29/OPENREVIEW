@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, checkoutTrialEnd, contractEnd, contractPreview, contractTermsError, contributorMeterEvent, fixRunLimit, formEncode, reviewsLeft, nextPeriodStart, openSubscription, ownKeyOnlyReason, periodKey, seatCount, stripe, stripeGet, stripeKey, stripeV2, trialEndsFrom, verifyStripeSignature } from "../src/billing";
+import { STRIPE_API_VERSION, StripeError, billingConfig, billingDecision, billsWorkspaces, checkoutTrialEnd, contractEnd, contractPreview, contractTermsError, contributorMeterEvent, fixRunLimit, formEncode, reviewsLeft, nextPeriodStart, openSubscription, ownKeyOnlyReason, periodKey, seatCount, stripe, stripeGet, stripeKey, stripeV2, trialEndedReason, trialEndsFrom, verifyStripeSignature } from "../src/billing";
 
 const config = billingConfig({ BILLING_ENABLED: "true", BILLING_FREE_USAGE_USD: "3", BILLING_USAGE_PER_SEAT_USD: "10", BILLING_GRACE_DAYS: "7" });
 const now = Date.UTC(2026, 9, 14), day = 86400000, usd = 1e6;
@@ -52,6 +52,23 @@ test("usage decisions: Free, included Starter and Pro usage, extra usage cap, pa
   const trialing = { ...capped, status: "trialing" };
   assert.deepEqual(billingDecision(trialing, 39 * usd, now, config, usd), { allowed: true, plan: "starter", limit: 40 * usd, used: 39 * usd, capMicros: 0, overage: false });
   assert.match(billingDecision(trialing, 40 * usd, now, config, usd).reason!, /extra usage can start once the trial ends/);
+});
+
+test("a no-card Starter trial is entitled until it ends, then pauses; paid and Enterprise rows are unchanged", () => {
+  assert.equal(billsWorkspaces({}), false);
+  assert.equal(billsWorkspaces({ BILLING_ENABLED: "true" }), false, "no Stripe secret means the plan step is skipped");
+  assert.equal(billsWorkspaces({ BILLING_ENABLED: "true", STRIPE_SECRET_KEY: "" }), false);
+  assert.equal(billsWorkspaces({ BILLING_ENABLED: "true", STRIPE_SECRET_KEY: "sk_test_x" }), true);
+  const cardless = { status: "trial", seats: 2, trialEndsAt: now + 5 * day, trialStartedAt: now - 9 * day, plan: "starter" };
+  assert.deepEqual(billingDecision(cardless, 0, now, config), { allowed: true, plan: "starter", limit: 20 * usd, used: 0, capMicros: 0, overage: false });
+  assert.equal(billingDecision({ ...cardless, trialEndsAt: now - 1 }, 0, now, config).allowed, false);
+  assert.equal(billingDecision({ ...cardless, trialEndsAt: now - 1 }, 0, now, config).reason, trialEndedReason);
+  assert.equal(billingDecision({ ...cardless, trialEndsAt: now - 1 }, 0, now, config).plan, "starter", "expired trial does not delete the plan");
+  const paying = { status: "active", seats: 2, trialEndsAt: now - 20 * day, trialStartedAt: now - 30 * day, subscriptionId: "sub_1", plan: "starter" };
+  assert.deepEqual(billingDecision(paying, 0, now, config), { allowed: true, plan: "starter", limit: 20 * usd, used: 0, capMicros: 0, overage: false });
+  const stripeTrial = { status: "trialing", seats: 2, trialEndsAt: now + 5 * day, trialStartedAt: now, subscriptionId: "sub_1", plan: "starter" };
+  assert.equal(billingDecision(stripeTrial, 0, now, config).allowed, true);
+  assert.equal(billingDecision(stripeTrial, 0, now, config).plan, "starter");
 });
 
 test("fix run limits follow the usage decision's plan and the billed seats", () => {
@@ -193,6 +210,8 @@ test("an Enterprise contract's included usage follows the higher of committed an
   assert.equal(fixRunLimit(decide(40), 3, config), 40 * config.proFixesPerSeat, "fix runs follow billed contributors, not seats");
   assert.equal(billingDecision({ ...enterprise, contract: undefined }, 0, now, config).plan, "starter", "no contract never means unlimited");
   assert.equal(billingDecision(enterprise, 0, now, billingConfig({}), 5, undefined, 0).allowed, true, "billing off allows everything");
+  assert.equal(billingDecision({ ...enterprise, trialStartedAt: now - 20 * day, trialEndsAt: now - day }, 0, now, config, 0, undefined, 25).plan, "enterprise", "a leftover no-card trial does not override Enterprise");
+  assert.equal(billingDecision({ ...enterprise, trialStartedAt: now - 20 * day, trialEndsAt: now - day }, 0, now, config, 0, undefined, 25).allowed, true);
 });
 test("an own-key contract meters nothing and Enterprise past due uses the contract's grace days", () => {
   const ownKey = { ...enterprise, spendCapUsd: 100, contract: { ...contract, mode: "ownKey" as const } };

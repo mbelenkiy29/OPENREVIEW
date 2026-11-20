@@ -8,7 +8,7 @@ import type {Id} from '../convex/_generated/dataModel';
 import {STALE_RESERVATION_MS} from '../convex/inferenceBudget';
 import {choosePlanMessage,fixAllowance,releaseFix} from '../convex/billing';
 import {proEntitlements,upgradeNote} from '../src/plans';
-import {paidPlanReason} from '../src/billing';
+import {paidPlanReason,trialEndedReason,trialUsedReason} from '../src/billing';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='billing-session-secret-at-least-32-characters',whsec='whsec_billing_fixture';
 const env={SESSION_SECRET:secret,SERVICE_SECRET:'billing-service',BILLING_ENABLED:'true',BILLING_FREE_USAGE_USD:'0.02',BILLING_USAGE_PER_SEAT_USD:'0.01',BILLING_PRO_USAGE_PER_SEAT_USD:'0.02',BILLING_GRACE_DAYS:'7',STRIPE_WEBHOOK_SECRET:whsec,STRIPE_SECRET_KEY:'sk_test_fixture',STRIPE_SEAT_PRICE_ID:'price_seat',STRIPE_PRO_PRICE_ID:'price_pro',APP_URL:'https://review.example.com'};
@@ -669,4 +669,77 @@ test('the cost report lists each paying workspace\'s monthly model cost per revi
  expect((await t.query(internal.billing.costReport,{})).rows).toEqual([]);
  delete process.env.BILLING_ENABLED;
  expect(await t.query(internal.billing.costReport,{})).toEqual({rows:[],p50CostPerReviewMicros:null,p90CostPerReviewMicros:null});
+});
+
+test('a new workspace starts a 14-day Starter trial with no card; a second start is refused after it ends',async()=>{
+ const {t,alice,bob}=await setup();
+ const fresh=await t.mutation(api.users.createOrganization,{token:alice.token,name:'Trialing'});
+ await t.mutation(api.repositories.connect,{token:alice.token,secret:'billing-service',organizationId:fresh,installationId:88,account:'trialco',accountId:8,repositories:[{id:8801,fullName:'trialco/app',defaultBranch:'main'}]});
+ const repo=(await t.run(ctx=>ctx.db.query('repositories').withIndex('by_github',q=>q.eq('githubId',8801)).unique()))!;
+ await t.run(async ctx=>{await ctx.db.patch(repo._id,{enabled:true});await ctx.db.insert('organizationMembers',{organizationId:fresh,userId:bob.id,role:'member'});});
+ await expect(t.mutation(api.billing.startTrial,{token:bob.token,organizationId:fresh})).rejects.toThrow(/Forbidden/);
+ expect(await t.mutation(api.billing.startTrial,{token:alice.token,organizationId:fresh})).toEqual({started:true});
+ const started=await t.query(api.billing.status,{token:alice.token,organizationId:fresh});
+ expect(started).toMatchObject({plan:'starter',planName:'Starter',planMissing:false,planSelected:true,allowed:true,cardlessTrial:true,trialStarted:true,status:'trial',trialEndsAt:Date.now()+14*86400000});
+ if(!started.enabled)throw new Error('expected billing');
+ expect(await t.query(internal.billing.entitlement,{organizationId:fresh,key:'fix.pullRequests'})).toBe(true);
+ expect(await t.query(internal.billing.entitlement,{organizationId:fresh,key:'review.deep'})).toBe(false);
+ expect((await reviewOf(t,await enqueue(t,repo._id,1)))?.status).toBe('queued');
+ // Idempotent while the trial is running: same end date, no second clock.
+ expect(await t.mutation(api.billing.startTrial,{token:alice.token,organizationId:fresh})).toEqual({started:false,reason:'trialing'});
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:fresh})).trialEndsAt).toBe(started.trialEndsAt);
+ // After it ends, reviews pause with a recorded reason and the trial cannot be restarted.
+ vi.setSystemTime(started.trialEndsAt);
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:fresh})).toMatchObject({allowed:false,reason:trialEndedReason,plan:'starter',cardlessTrial:true});
+ const paused=await reviewOf(t,await enqueue(t,repo._id,2));
+ expect([paused?.status,paused?.error]).toEqual(['failed','Billing: '+trialEndedReason]);
+ await expect(t.mutation(api.billing.startTrial,{token:alice.token,organizationId:fresh})).rejects.toThrow(trialUsedReason);
+ // Checkout with a card resumes reviews; the no-card trial is not restarted.
+ const created=Math.floor(Date.now()/1000);
+ await t.mutation(internal.billing.linkCustomer,{organizationId:fresh,customerId:'cus_resume'});
+ await deliver(t,{id:'evt_resume_checkout',type:'checkout.session.completed',created,data:{object:{mode:'subscription',client_reference_id:fresh,customer:'cus_resume',subscription:'sub_resume'}}});
+ await deliver(t,{id:'evt_resume_sub',type:'customer.subscription.created',created:created+1,data:{object:{id:'sub_resume',customer:'cus_resume',status:'active',metadata:{organizationId:fresh},items:{data:[{id:'si_resume',quantity:1,current_period_end:created+30*86400,price:{id:'price_seat'}}]}}}});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:fresh})).toMatchObject({plan:'starter',allowed:true,cardlessTrial:false,status:'active'});
+ expect((await reviewOf(t,await enqueue(t,repo._id,3)))?.status).toBe('queued');
+ expect(await t.mutation(api.billing.startTrial,{token:alice.token,organizationId:fresh})).toEqual({started:false,reason:'subscribed'});
+});
+
+test('startTrial leaves paid and Enterprise workspaces alone',async()=>{
+ const {t,alice}=await setup();
+ const paid=await t.mutation(api.users.createOrganization,{token:alice.token,name:'Paid'});
+ const enterprise=await t.mutation(api.users.createOrganization,{token:alice.token,name:'Enterprise'});
+ await t.run(async ctx=>{
+  await ctx.db.patch(paid,{planSelectedAt:Date.now(),plan:'pro'});
+  await ctx.db.insert('billingAccounts',{organizationId:paid,customerId:'cus_paid',subscriptionId:'sub_paid',plan:'pro',status:'active',seats:1,trialEndsAt:Date.now(),updatedAt:Date.now()});
+  await ctx.db.patch(enterprise,{planSelectedAt:Date.now(),plan:'enterprise'});
+  await ctx.db.insert('billingAccounts',{organizationId:enterprise,customerId:'cus_ent',subscriptionId:'sub_ent',plan:'enterprise',status:'active',seats:1,trialEndsAt:0,updatedAt:Date.now(),contract:{id:'c1',mode:'managed',startsAt:Date.UTC(2026,9,1),endsAt:Date.UTC(2027,9,1),committedContributors:25,minimumContributors:25,contributorPriceCents:2200,includedUsagePerContributorUsd:12,overageMultiplier:1.15,netDays:30,graceDays:30,nonBillableAuthors:[]}});
+ });
+ const beforePaid=await t.query(api.billing.status,{token:alice.token,organizationId:paid});
+ expect(await t.mutation(api.billing.startTrial,{token:alice.token,organizationId:paid})).toEqual({started:false,reason:'subscribed'});
+ expect(await t.mutation(api.billing.startTrial,{token:alice.token,organizationId:enterprise})).toEqual({started:false,reason:'subscribed'});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:paid})).toMatchObject({plan:'pro',status:'active',allowed:true,cardlessTrial:false,trialEndsAt:beforePaid.trialEndsAt});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:enterprise})).toMatchObject({plan:'enterprise',status:'active',allowed:true,cardlessTrial:false});
+ expect((await t.run(ctx=>ctx.db.query('billingAccounts').withIndex('by_org',q=>q.eq('organizationId',paid)).unique()))?.trialStartedAt).toBeUndefined();
+ expect((await t.run(ctx=>ctx.db.query('billingAccounts').withIndex('by_org',q=>q.eq('organizationId',enterprise)).unique()))?.trialStartedAt).toBeUndefined();
+});
+
+test('self-hosted and billing-without-Stripe skip the plan step and never gate reviews',async()=>{
+ const {t,alice}=await setup();
+ delete process.env.BILLING_ENABLED;
+ const selfHosted=await t.mutation(api.users.createOrganization,{token:alice.token,name:'Self hosted'});
+ expect((await t.run(ctx=>ctx.db.get(selfHosted)))?.planRequired).toBeUndefined();
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:selfHosted})).toEqual({enabled:false});
+ expect(await t.mutation(api.onboarding.advance,{token:alice.token,organizationId:selfHosted,step:'workspace'})).toBe('connect');
+ await expect(t.mutation(api.billing.startTrial,{token:alice.token,organizationId:selfHosted})).rejects.toThrow(/Billing is disabled/);
+ await t.mutation(api.repositories.connect,{token:alice.token,secret:'billing-service',organizationId:selfHosted,installationId:91,account:'self',accountId:9,repositories:[{id:9101,fullName:'self/app',defaultBranch:'main'}]});
+ const selfRepo=(await t.run(ctx=>ctx.db.query('repositories').withIndex('by_github',q=>q.eq('githubId',9101)).unique()))!;
+ await t.run(ctx=>ctx.db.patch(selfRepo._id,{enabled:true}));
+ expect((await reviewOf(t,await enqueue(t,selfRepo._id,1)))?.status).toBe('queued');
+ process.env.BILLING_ENABLED='true';
+ delete process.env.STRIPE_SECRET_KEY;
+ const noKeys=await t.mutation(api.users.createOrganization,{token:alice.token,name:'No Stripe'});
+ expect((await t.run(ctx=>ctx.db.get(noKeys)))?.planRequired).toBeUndefined();
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:noKeys})).toMatchObject({enabled:true,planStep:false,planMissing:false,planRequired:false});
+ expect(await t.mutation(api.onboarding.advance,{token:alice.token,organizationId:noKeys,step:'workspace'})).toBe('connect');
+ await expect(t.mutation(api.billing.startTrial,{token:alice.token,organizationId:noKeys})).rejects.toThrow(/Billing is disabled/);
 });

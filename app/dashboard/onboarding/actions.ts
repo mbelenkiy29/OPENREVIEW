@@ -74,6 +74,17 @@ export async function checkoutFromSetup(form: FormData) {
   redirect(url);
 }
 
+// 14-day Starter trial with no card; setup continues at connect once Convex records it.
+export async function startTrialFromSetup(form: FormData) {
+  const { token } = await current(), organizationId = organizationOf(form);
+  try {
+    await backend().mutation(api.billing.startTrial, { token, organizationId });
+    await backend().mutation(api.onboarding.advance, { token, organizationId, step: "plan" });
+  } catch { redirect("/dashboard/onboarding/plan?billing=error"); }
+  revalidatePath("/dashboard", "layout");
+  redirect("/dashboard/onboarding/connect");
+}
+
 export async function inviteFromSetup(_state: Result, form: FormData): Promise<Result> {
   const login = text(form, "login").trim().replace(/^@/, "");
   if (!login) return { error: "Enter a GitHub username." };
