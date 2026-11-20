@@ -39,6 +39,13 @@ const faq = [
   ["Will it flood our PRs with comments?", "Findings must pass confidence, severity and evidence thresholds. You choose the maximum comment count, strictness and categories, and learned preferences reduce repeat noise."],
   ["Which models are supported?", "Claude and OpenAI models, or any OpenAI-compatible endpoint, with per-task model routing."],
 ] as const;
+// What a reviewer that sees only the diff can do, by definition, next to what this page says OpenReview does.
+const versus = [
+  ["What it reads", "The changed lines", "The diff with its callers, tests, past findings and your rules"],
+  ["Callers of a changed function", "Not read", "Followed through a cross-file call and import graph"],
+  ["Evidence", "Can point only at the diff", "Each issue cites the exact lines it depends on, pinned to the commit"],
+  ["Unsupported claims", "Cannot be checked against the rest of the code", "Dropped before posting"],
+] as const;
 const commands = ["pnpm install", "CONVEX_AGENT_MODE=anonymous pnpm exec convex dev --once", "pnpm setup:local", "pnpm backend", "pnpm dev"];
 
 // Prerendered at build time, so billing values come from the build environment. Old sign-in result
@@ -56,16 +63,24 @@ export default function Home() {
     <div id="smooth-wrapper"><div id="smooth-content">
     <main id="main">
       <section className="hero" aria-labelledby="hero-heading" data-speed="0.92">
-        <h1 id="hero-heading"><span className="line"><span>Review the change.</span></span> <span className="line"><span>Understand the codebase.</span></span></h1>
+        <h1 id="hero-heading"><span className="line"><span>Catch bugs that depend on</span></span> <span className="line"><span>code outside the diff.</span></span></h1>
         <p className="lede">OpenReview reviews pull requests using your whole repository, not only the diff. Every finding quotes the code it depends on, and nothing is posted until it has been verified.</p>
         <div className="hero-actions">
-          <Link className="button primary large" href="/signup">Get started</Link>
+          <Link className="button primary large" href="/signup">Connect a repository</Link>
           <Link className="button large" href="/login">Sign in</Link>
         </div>
-        {billing.enabled && <p className="hero-note">Every plan starts with a {billing.trialDays}-day free trial.</p>}
-        <p className="hero-links"><Link href="/docs/quickstart">Read the quickstart →</Link><Link href="/docs/self-hosting">Self-host it →</Link></p>
+        {billing.enabled && <p className="hero-note">{billing.trialDays}-day free trial. Cancel anytime. <Link href="#pricing">See pricing</Link></p>}
+        <p className="hero-links"><Link href="/docs/quickstart">Read the quickstart →</Link></p>
       </section>
       <div className="stage hero-stage"><ReviewReplica /><p className="stage-hint">Live demo with sample data. Click around.</p></div>
+
+      <section className="compare-band" aria-labelledby="versus-heading">
+        <h2 id="versus-heading" data-split>Diff-only review vs OpenReview</h2>
+        <ScrollTable label="Diff-only review compared with OpenReview" className="table-scroll"><table className="compare"><thead><tr><th><span className="sr-only">Aspect</span></th><th>Diff-only review</th><th>OpenReview</th></tr></thead><tbody data-stagger>
+          {versus.map(([aspect, diff, ours]) => <tr key={aspect}><th scope="row">{aspect}</th><td>{diff}</td><td>{ours}</td></tr>)}
+        </tbody></table></ScrollTable>
+        <p data-reveal><Link className="button primary" href="/signup">Connect a repository</Link></p>
+      </section>
 
       <section className="hosts" aria-labelledby="hosts-heading">
         <h2 id="hosts-heading" data-reveal>Reviews pull requests on</h2>
