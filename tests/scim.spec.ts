@@ -88,6 +88,7 @@ test('provisioning adds members, deactivating removes them and ends their sessio
  const owner=await call(t,tok,'Users','POST',{body:{userName:'alice@acme.com'}});
  expect((await call(t,tok,'Users','PATCH',{id:owner.body.id,body:{Operations:[{op:'replace',value:{active:false}}]}})).status).toBe(409);
  expect(await role(t,acme,alice.id)).toBe('owner');
+ expect((await call(t,tok,'Users','GET',{id:owner.body.id})).body.active).toBe(true);
 });
 
 test('a mapped group sets roles, leaving it demotes to member, and SCIM never changes an owner',async()=>{

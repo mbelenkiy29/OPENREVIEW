@@ -66,6 +66,26 @@ test('each author of a completed review is one ledger row a month; bots are list
  await expect(t.mutation(internal.contributors.backfill,{organizationId:org,period:'2026-13'})).rejects.toThrow(/YYYY-MM/);
 });
 
+test('one contract across two workspaces counts a person once from completed reviews',async()=>{
+ const {t,token,org,repo}=await setup();
+ const labs=await t.mutation(api.users.createOrganization,{token,name:'Labs'});
+ await t.mutation(api.repositories.connect,{token,secret:'contributors-service',organizationId:labs,installationId:42,account:'labs',accountId:2,repositories:[{id:4201,fullName:'acme/labs',defaultBranch:'main'}]});
+ const [labRepo]=await t.query(api.repositories.list,{token,organizationId:labs});
+ await enterprise(t,org,'managed',25);
+ await t.run(async ctx=>{
+  const account={organizationId:labs,status:'active' as const,seats:1,trialEndsAt:0,updatedAt:Date.now(),plan:'enterprise' as const,contractGroupId:org};
+  const existing=await ctx.db.query('billingAccounts').withIndex('by_org',q=>q.eq('organizationId',labs)).unique();
+  if(existing)await ctx.db.patch(existing._id,account);else await ctx.db.insert('billingAccounts',account);
+ });
+ await review(t,org,repo,'bob');await review(t,org,repo,'bob');
+ await review(t,labs,labRepo._id as Id<'repositories'>,'Bob');
+ await review(t,labs,labRepo._id as Id<'repositories'>,'carol');
+ await review(t,org,repo,'dependabot[bot]');
+ const [billed,other]=await Promise.all([org,labs].map(id=>t.query(api.billing.status,{token,organizationId:id})));
+ for(const s of [billed,other])expect(s).toMatchObject({plan:'enterprise',enterprise:{active:2,committed:25,workspaces:2}});
+ expect(billed.enabled&&billed.enterprise?.contributors?.map(c=>[c.login,c.billed])).toEqual([['bob',true],['carol',true],['dependabot[bot]',false]]);
+});
+
 test('with billing disabled no contributor rows are written',async()=>{
  const {t,org,repo}=await setup();
  delete process.env.BILLING_ENABLED;
