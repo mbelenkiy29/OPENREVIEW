@@ -1,6 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalMutation, internalQuery } from "./_generated/server";
+import { internalMutation, internalQuery, mutation } from "./_generated/server";
 import { audit } from "./auth";
 import { ensureAccount } from "./billing";
 import { requireOperator } from "./operator";
@@ -13,14 +13,14 @@ import { emailConfigured } from "../src/email";
 // Enterprise contracts (docs/roadmap/enterprise-plan.md, E2.2). An operator enters the negotiated terms; the Stripe
 // objects are made by convex/enterpriseJobs.ts. Every step needs an operator's browser session and is audited twice:
 // in operatorAudit and on the workspace. The webhook, not these functions, moves the workspace to Enterprise.
-export const termsArgs = { mode: v.union(v.literal("managed"), v.literal("ownKey")), startsAt: v.number(), committedContributors: v.number(), contributorPriceCents: v.number(), includedUsagePerContributorUsd: v.number(), overageMultiplier: v.number(), usagePriceId: v.optional(v.string()), netDays: v.number(), graceDays: v.number(), nonBillableAuthors: v.array(v.string()), notes: v.optional(v.string()) };
+export const termsArgs = { mode: v.union(v.literal("managed"), v.literal("ownKey")), startsAt: v.number(), committedContributors: v.number(), contributorPriceCents: v.number(), includedUsagePerContributorUsd: v.number(), overageMultiplier: v.number(), usagePriceId: v.optional(v.string()), netDays: v.number(), graceDays: v.number(), nonBillableAuthors: v.array(v.string()), notes: v.optional(v.string()), supportTier: v.optional(v.string()), retention: v.optional(v.object({ minDays: v.optional(v.number()), maxDays: v.optional(v.number()), auditDays: v.optional(v.number()) })) };
 
 export const saveDraft = internalMutation({ args: { token: v.string(), organizationId: v.id("organizations"), ...termsArgs }, handler: async (ctx, { token, organizationId, ...input }) => {
   const user = await requireOperator(ctx, token), config = billingConfig();
   if (!config.enabled) throw new ConvexError("Billing is disabled on this deployment");
   const organization = await ctx.db.get(organizationId);
   if (!organization) throw new ConvexError("Workspace not found");
-  const terms: ContractTerms = { ...input, nonBillableAuthors: [...new Set(input.nonBillableAuthors.map((a) => a.trim()).filter(Boolean))], notes: input.notes?.trim() || undefined };
+  const terms: ContractTerms = { ...input, nonBillableAuthors: [...new Set(input.nonBillableAuthors.map((a) => a.trim()).filter(Boolean))], notes: input.notes?.trim() || undefined, supportTier: input.supportTier?.trim() || undefined };
   const error = contractTermsError(terms, config);
   if (error) throw new ConvexError(error);
   const account = await ensureAccount(ctx, organizationId), current = account.contract;
@@ -32,7 +32,7 @@ export const saveDraft = internalMutation({ args: { token: v.string(), organizat
   const { usagePriceId, ...saved } = terms;
   const contract = { ...saved, endsAt: contractEnd(terms.startsAt), minimumContributors: config.enterpriseMinContributors, ...(usagePriceId ? { stripe: { usagePriceId } } : {}) };
   // A retry with the same terms keeps its id, so each Stripe call reuses its idempotency key; changed terms get a new one.
-  const fingerprint = (c: Omit<typeof contract, "stripe"> & { stripe?: { usagePriceId?: string } }) => JSON.stringify([c.mode, c.startsAt, c.committedContributors, c.contributorPriceCents, c.includedUsagePerContributorUsd, c.overageMultiplier, c.netDays, c.graceDays, c.nonBillableAuthors, c.notes ?? "", c.stripe?.usagePriceId ?? ""]);
+  const fingerprint = (c: Omit<typeof contract, "stripe"> & { stripe?: { usagePriceId?: string } }) => JSON.stringify([c.mode, c.startsAt, c.committedContributors, c.contributorPriceCents, c.includedUsagePerContributorUsd, c.overageMultiplier, c.netDays, c.graceDays, c.nonBillableAuthors, c.notes ?? "", c.stripe?.usagePriceId ?? "", c.supportTier ?? "", c.retention?.minDays ?? 0, c.retention?.maxDays ?? 0, c.retention?.auditDays ?? 0]);
   const same = old && fingerprint(old) === fingerprint(contract);
   const id = same ? old.id : crypto.randomUUID();
   await ctx.db.patch(account._id, { [slot]: { ...contract, id, ...(same && old.stripe ? { stripe: old.stripe } : {}) }, updatedAt: Date.now() });
@@ -83,4 +83,27 @@ export const remindRenewals = internalMutation({ args: {}, handler: async (ctx) 
     sent++;
   }
   return sent;
+} });
+
+// One contract across several workspaces (E4.4): puts a workspace under another workspace's contract, or with
+// billedOrganizationId null takes it out again, which returns it to its own plan. The workspace joining must have no
+// subscription or contract of its own, so nothing is billed twice.
+export const setContractGroup = mutation({ args: { token: v.string(), organizationId: v.id("organizations"), billedOrganizationId: v.union(v.id("organizations"), v.null()) }, handler: async (ctx, a) => {
+  const user = await requireOperator(ctx, a.token);
+  if (!billingConfig().enabled) throw new ConvexError("Billing is disabled on this deployment");
+  if (!await ctx.db.get(a.organizationId)) throw new ConvexError("Workspace not found");
+  const account = await ensureAccount(ctx, a.organizationId);
+  if (a.billedOrganizationId) {
+    const billed = await ctx.db.query("billingAccounts").withIndex("by_org", (q) => q.eq("organizationId", a.billedOrganizationId!)).unique();
+    if (a.billedOrganizationId === a.organizationId || !billed?.contract?.stripe?.scheduleId || billed.contractGroupId) throw new ConvexError("Choose a workspace that holds a contract of its own");
+    if (account.contract || liveSubscription(account)) throw new ConvexError("This workspace has its own subscription or contract; end that first");
+    if (await ctx.db.query("billingAccounts").withIndex("by_contract_group", (q) => q.eq("contractGroupId", a.organizationId)).first()) throw new ConvexError("Other workspaces are billed under this one; move them first");
+    // Being under a contract is this workspace's plan choice.
+    const organization = (await ctx.db.get(a.organizationId))!;
+    if (!organization.planSelectedAt) await ctx.db.patch(a.organizationId, { planSelectedAt: Date.now() });
+  }
+  await ctx.db.patch(account._id, { contractGroupId: a.billedOrganizationId ?? undefined, updatedAt: Date.now() });
+  await ctx.db.insert("operatorAudit", { userId: user._id, action: a.billedOrganizationId ? "enterprise.contract_group_joined" : "enterprise.contract_group_left", createdAt: Date.now() });
+  await audit(ctx, a.organizationId, user._id, a.billedOrganizationId ? "billing.contract_group_joined" : "billing.contract_group_left", a.billedOrganizationId ?? account.contractGroupId ?? "");
+  if (a.billedOrganizationId) await audit(ctx, a.billedOrganizationId, user._id, "billing.contract_group_added", a.organizationId);
 } });

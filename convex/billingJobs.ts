@@ -63,7 +63,9 @@ export const createCustomer = internalAction({ args: { organizationId: v.id("org
 export const portal = action({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a): Promise<string> => {
   const context = await ctx.runQuery(internal.billing.checkoutContext, a);
   if (!context.customerId) throw new Error("Start a subscription first");
-  return (await stripe<{ url: string }>("/v1/billing_portal/sessions", { customer: context.customerId, return_url: `${appOrigin()}/dashboard/organization/billing` }, stripeKey())).url;
+  return (await stripe<{ url: string }>("/v1/billing_portal/sessions", { customer: context.customerId, return_url: `${appOrigin()}/dashboard/organization/billing`,
+    // An Enterprise workspace gets its own portal: invoices and payment details, no cancelling or switching plans.
+    ...(context.enterprise && /^bpc_[A-Za-z0-9]+$/.test(process.env.STRIPE_ENTERPRISE_PORTAL_CONFIGURATION_ID ?? "") ? { configuration: process.env.STRIPE_ENTERPRISE_PORTAL_CONFIGURATION_ID } : {}) }, stripeKey())).url;
 } });
 // Switches the seat price in place (the Customer Portal cannot update subscriptions with a metered item).
 // legacy is left alone, so a grandfathered Starter that comes back from Pro keeps its features.

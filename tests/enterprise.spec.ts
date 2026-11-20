@@ -192,3 +192,77 @@ test('a contract that ends without a renewal leaves the workspace as a cancelled
  expect(await t.query(internal.billing.entitlement,{organizationId:org,key:'auth.sso'})).toBe(false);
  expect((await t.query(api.billing.status,{token:(await signIn(t,31,'alice')).token,organizationId:org})).plan).toBe('free');
 });
+
+test('contract terms: support tier is shown, retention settings stay inside the contract bounds, audit events are pruned and exported only on Enterprise',async()=>{
+ const {t,operator,alice,org}=await setup();fakeStripe();
+ // On Pro: default bounds, no export.
+ await t.mutation(api.dataControls.saveSettings,{token:alice.token,organizationId:org,dataSharing:'private',reviewRetentionDays:null,transcriptRetentionDays:7});
+ const range={from:Date.UTC(2026,9,1),to:Date.UTC(2026,11,1)};
+ await expect(t.query(api.scopes.activityExport,{token:alice.token,organizationId:org,...range})).rejects.toThrow(/Enterprise plan/);
+ await t.action(api.enterpriseJobs.createContract,{token:operator.token,...terms(org),supportTier:' Priority ',retention:{minDays:30,maxDays:365,auditDays:10}});
+ await expect(t.action(api.enterpriseJobs.createContract,{token:operator.token,...terms(alice.id as never),retention:{minDays:400,maxDays:365}})).rejects.toThrow();
+ const contractId=(await account(t,org)).contract!.id,start=Math.floor(Date.UTC(2026,10,1)/1000);
+ // Until the contract is in force its terms change nothing.
+ expect((await t.query(api.dataControls.settings,{token:alice.token,organizationId:org})).retentionBounds).toEqual({min:7,max:3650,unlimited:true});
+ await deliver(t,sub('evt_ent','customer.subscription.created',start,'sub_ent',[item('si_commit','price_1','licensed','prod_ent',30)],{organizationId:org,contractId}));
+ const status=await t.query(api.billing.status,{token:alice.token,organizationId:org});
+ expect(status.enabled&&status.enterprise).toMatchObject({supportTier:'Priority'});
+ expect((await t.query(api.dataControls.settings,{token:alice.token,organizationId:org})).retentionBounds).toEqual({min:30,max:365,unlimited:false});
+ for(const bad of [{reviewRetentionDays:null,transcriptRetentionDays:60},{reviewRetentionDays:29,transcriptRetentionDays:60},{reviewRetentionDays:60,transcriptRetentionDays:366}])await expect(t.mutation(api.dataControls.saveSettings,{token:alice.token,organizationId:org,dataSharing:'private',...bad})).rejects.toThrow(/between 30 and 365 days under this workspace's contract/);
+ await t.mutation(api.dataControls.saveSettings,{token:alice.token,organizationId:org,dataSharing:'private',reviewRetentionDays:30,transcriptRetentionDays:365});
+ // Export: only this workspace's rows, only inside the range, admins only.
+ const other=await t.mutation(api.users.createOrganization,{token:alice.token,name:'Other'});
+ await t.run(async ctx=>{await ctx.db.insert('auditEvents',{organizationId:other,action:'other.secret',target:'x',createdAt:Date.now()});});
+ const exported=await t.query(api.scopes.activityExport,{token:alice.token,organizationId:org,...range});
+ expect(exported.isDone).toBe(true);
+ expect(exported.page.map(e=>e.action)).toEqual(expect.arrayContaining(['billing.contract_created','workspace.data_settings']));
+ expect(exported.page.map(e=>e.action)).not.toContain('other.secret');
+ expect((await t.query(api.scopes.activityExport,{token:alice.token,organizationId:org,from:Date.UTC(2025,0,1),to:Date.UTC(2025,1,1)})).page).toEqual([]);
+ const mia=await signIn(t,77,'mia');
+ await t.run(ctx=>ctx.db.insert('organizationMembers',{organizationId:org,userId:mia.id as Id<'users'>,role:'member'}));
+ await expect(t.query(api.scopes.activityExport,{token:mia.token,organizationId:org,...range})).rejects.toThrow();
+ // The contract keeps audit events for 10 days: the sweep removes older ones and leaves the other workspace alone.
+ const before=(await t.run(ctx=>ctx.db.query('auditEvents').collect())).filter(e=>e.organizationId===org).length;
+ expect(before).toBeGreaterThan(0);
+ vi.setSystemTime(Date.now()+11*86400000);
+ await t.mutation(internal.dataControls.retention,{organizationId:org});
+ const after=await t.run(ctx=>ctx.db.query('auditEvents').collect());
+ expect(after.filter(e=>e.organizationId===org)).toEqual([]);
+ expect(after.filter(e=>e.organizationId===other)).toHaveLength(1);
+});
+
+test('one contract across two workspaces: a person counts once, usage is one pool, and leaving the group returns the workspace to its own plan',async()=>{
+ const {t,operator,alice,org}=await setup();fakeStripe();
+ const second=await t.mutation(api.users.createOrganization,{token:alice.token,name:'Acme Labs'});
+ // Only a workspace with a contract in Stripe can take others, and only operators decide.
+ await expect(t.mutation(api.enterprise.setContractGroup,{token:operator.token,organizationId:second,billedOrganizationId:org})).rejects.toThrow(/holds a contract/);
+ await t.action(api.enterpriseJobs.createContract,{token:operator.token,...terms(org),committedContributors:25,includedUsagePerContributorUsd:0.001});
+ const contractId=(await account(t,org)).contract!.id,start=Math.floor(Date.UTC(2026,10,1)/1000);
+ await deliver(t,sub('evt_ent','customer.subscription.created',start,'sub_ent',[item('si_commit','price_1','licensed','prod_ent',25)],{organizationId:org,contractId}));
+ await expect(t.mutation(api.enterprise.setContractGroup,{token:alice.token,organizationId:second,billedOrganizationId:org})).rejects.toThrow(/Forbidden/);
+ await expect(t.mutation(api.enterprise.setContractGroup,{token:operator.token,organizationId:org,billedOrganizationId:org})).rejects.toThrow(/holds a contract/);
+ expect(await t.query(internal.billing.entitlement,{organizationId:second,key:'auth.sso'})).toBe(false);
+ await t.mutation(api.enterprise.setContractGroup,{token:operator.token,organizationId:second,billedOrganizationId:org});
+ expect(await t.query(internal.billing.entitlement,{organizationId:second,key:'audit.export'})).toBe(true);
+ // bob wrote pull requests in both workspaces, carol in one, dave in the other: three people.
+ const period='2026-10',row=(organizationId:Id<'organizations'>,login:string,firstAt:number)=>({organizationId,period,key:`github:github:${login}`,login,provider:'github',firstReviewId:reviewId,firstAt,bot:false});
+ await t.mutation(api.repositories.connect,{token:alice.token,secret:svc,organizationId:org,installationId:31,account:'acme',accountId:1,repositories:[{id:3101,fullName:'acme/shop',defaultBranch:'main'}]});
+ const [repo]=await t.query(api.repositories.list,{token:alice.token,organizationId:org});
+ const reviewId=await t.run(ctx=>ctx.db.insert('reviews',{organizationId:org,repositoryId:repo._id,prNumber:1,headSha:'a'.repeat(40),status:'completed',mode:'standard',attempts:0,createdAt:Date.now(),updatedAt:Date.now()}));
+ await t.run(async ctx=>{for(const r of [row(org,'bob',2),row(org,'carol',3),row(second,'bob',1),row(second,'dave',4)])await ctx.db.insert('activeContributors',r);});
+ const [first,other]=await Promise.all([org,second].map(id=>t.query(api.billing.status,{token:alice.token,organizationId:id})));
+ for(const s of [first,other])expect(s).toMatchObject({plan:'enterprise',limit:25_000,enterprise:{active:3,committed:25,workspaces:2}});
+ expect(first.enabled&&first.enterprise?.billedHere).toBe(true);
+ expect(other.enabled&&other.enterprise?.billedHere).toBe(false);
+ expect(other.enabled&&other.enterprise?.contributors?.map(c=>c.login).sort()).toEqual(['bob','carol','dave']);
+ // Usage in either workspace draws on the one pool ($0.025): two $0.01 calls fit, the third is refused in both.
+ const quote={provider:'openai',model:'gpt-4.1',baseUrl:'https://api.openai.com/v1',inputTokenCeiling:1000,outputTokenCeiling:1000};
+ for(const id of [org,second]){const reservation=await t.mutation(internal.inferenceBudget.reserve,{...quote,organizationId:id});await t.mutation(internal.inferenceBudget.settle,{id:reservation!,inputTokens:1000,outputTokens:1000});}
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:second}))).toMatchObject({used:20_000,allowed:true});
+ for(const id of [org,second])await expect(t.mutation(internal.inferenceBudget.reserve,{...quote,organizationId:id})).rejects.toThrow(/included usage/);
+ // Taken out of the group, the second workspace is on its own plan again (it has none).
+ await t.mutation(api.enterprise.setContractGroup,{token:operator.token,organizationId:second,billedOrganizationId:null});
+ expect(await t.query(internal.billing.entitlement,{organizationId:second,key:'auth.sso'})).toBe(false);
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:second})).toMatchObject({plan:'free',enterprise:null});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({used:10_000,enterprise:{active:2,workspaces:1}});
+});

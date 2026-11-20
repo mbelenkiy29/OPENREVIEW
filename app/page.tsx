@@ -7,6 +7,7 @@ import { LandingMotion } from "./landing/motion-loader";
 import { Copy } from "./dashboard/live";
 import { ScrollTable } from "./dashboard/scroll-table";
 import { billingConfig, usdText } from "../src/billing";
+import { enterpriseOffer } from "../src/plans";
 import { homeStructuredData, jsonLd } from "../src/structured-data";
 
 export const metadata: Metadata = { alternates: { canonical: "/" } };
@@ -47,6 +48,7 @@ const commands = ["pnpm install", "CONVEX_AGENT_MODE=anonymous pnpm exec convex 
 // items rise in, data-stagger lists bring their children in turn, and data-speed sets parallax.
 export default function Home() {
   const billing = billingConfig();
+  const enterprise = enterpriseOffer(billing.enabled);
   const structured = homeStructuredData({ url: process.env.APP_URL ?? "http://localhost:3000", repository: sourceRepository, billing, priceLabel: process.env.BILLING_SEAT_PRICE_LABEL, proPriceLabel: process.env.BILLING_PRO_PRICE_LABEL });
   return <div className="landing">
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(structured) }} />
@@ -123,8 +125,9 @@ export default function Home() {
         <div className="feature-grid" data-stagger>
           <article className="feature-card"><h3>Starter</h3><p className="price">{process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.usagePerSeatMicros)} of model usage per seat each month, pooled across the workspace, then optional pay-as-you-go extra usage up to a cap you set. {billing.starterFixesPerSeat} OpenReview agent fixes per seat each month, each opened as a pull request, and your own model key. Owners, admins and members are seats; viewers are free.</p><p className="pricing-action"><Link className="button" href={`/signup?next=${encodeURIComponent("/dashboard/onboarding/plan?intent=starter")}`}>Choose Starter</Link></p></article>
           <article className="feature-card"><h3>Pro</h3><p className="price">{process.env.BILLING_PRO_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.proUsagePerSeatMicros)} of model usage and {billing.proFixesPerSeat} OpenReview agent fixes per seat each month, plus deep reviews with the agentic engines, generated reproduction tests, requirements checks, SSO, the audit log and API keys. {billing.trialDays} days free.</p><p className="pricing-action"><Link className="button primary" href={`/signup?next=${encodeURIComponent("/dashboard/onboarding/plan?intent=pro")}`}>Start Pro trial</Link></p></article>
+          {enterprise && <article className="feature-card"><h3>Enterprise</h3><p className="price">{enterprise.priceLabel}</p><p>Pay for active contributors, not seats: only people whose pull requests were reviewed that month count, and bots never do. From {billing.enterpriseMinContributors} contributors, on an annual contract paid by invoice. Run reviews on our model with usage included, or on your own model key with nothing metered. Everything in Pro.</p><p className="pricing-action"><a className="button" href={enterprise.contactUrl}>Talk to us</a></p></article>}
         </div>
-        <p className="muted" data-reveal>Self-hosting is free and unlimited: <Link href="/docs/self-hosting">self-hosting guide</Link>.</p>
+        <p className="muted" data-reveal>Self-hosting is free and unlimited: <Link href="/docs/self-hosting">self-hosting guide</Link>. Companies that self-host can buy a support and updates contract; it unlocks nothing, because nothing is locked.</p>
       </section>}
 
       <section className="faq-band" aria-labelledby="faq-heading">

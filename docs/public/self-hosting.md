@@ -28,3 +28,19 @@ docker build -t openreview:local .
 ```
 
 The [deployment guide](../deployment.md) covers Docker Compose with a self-hosted Convex backend, backups and upgrades.
+
+## Support and updates contract
+
+Self-hosting is free, and every feature is on. Companies that want a vendor to call can buy a yearly support and updates contract.
+
+**It covers:**
+- Named support contacts on your side and ours.
+- Response targets for incidents and questions, written into the contract.
+- Help with upgrades and migrations.
+- Security advisories before they are public.
+
+**It does not cover:**
+- Access to features. Nothing in the code is locked, so there is nothing to unlock.
+- A license key. There is none, and the code stays MIT.
+
+OpenReview adds no telemetry, phone-home or license check for this. Your install talks to the same endpoints with or without a contract. The contract is invoiced yearly; ask through the contact link on the pricing page.

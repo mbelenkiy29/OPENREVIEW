@@ -79,8 +79,14 @@ test('an Enterprise contract sets the included usage, never syncs seats, and ref
  await enterprise(t,org,'managed',2);
  expect(await t.query(api.billing.status,{token,organizationId:org})).toMatchObject({plan:'enterprise',planName:'Enterprise',limit:20_000,allowed:true});
  for(const author of ['bob','carol','dave'])await review(t,org,repo,author);
- // Three active contributors pass the commitment of two.
- expect(await t.query(api.billing.status,{token,organizationId:org})).toMatchObject({plan:'enterprise',limit:30_000});
+ // Three active contributors pass the commitment of two. Admins see the price and who counted; members only the counts.
+ const admin=await t.query(api.billing.status,{token,organizationId:org});
+ expect(admin).toMatchObject({plan:'enterprise',limit:30_000,enterprise:{mode:'managed',committed:2,active:3,priceCents:2200,renewed:false}});
+ expect(admin.enabled&&admin.enterprise?.contributors?.map(c=>[c.login,c.billed])).toEqual([['bob',true],['carol',true],['dave',true]]);
+ const memberId=await t.mutation(api.users.login,{secret:'contributors-service',githubId:42,login:'mia',avatar:''}) as Id<'users'>;
+ await t.run(ctx=>ctx.db.insert('organizationMembers',{organizationId:org,userId:memberId,role:'member'}));
+ const memberToken=await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setIssuer('openreview').setAudience('openreview').setSubject(memberId).setExpirationTime('120d').sign(new TextEncoder().encode(secret));
+ expect(await t.query(api.billing.status,{token:memberToken,organizationId:org})).toMatchObject({enterprise:{active:3,committed:2,priceCents:null,contributors:null}});
  expect(await t.query(internal.billing.entitlement,{organizationId:org,key:'auth.sso'})).toBe(true);
  await t.run(ctx=>scheduleSeatSync(ctx,org));
  expect((await t.run(ctx=>ctx.db.system.query('_scheduled_functions').collect())).filter(j=>j.name.includes('syncSeats'))).toEqual([]);

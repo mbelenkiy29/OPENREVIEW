@@ -562,7 +562,7 @@ export async function saveModelKey(form: FormData) {
   const { token } = await current();
   const model = text(form, "model");
   try {
-    await backend().action(api.modelKeyJobs.save, { token, organizationId: text(form, "organizationId") as Id<"organizations">, provider: z.enum(["anthropic", "openai", "openrouter"]).parse(form.get("provider")), key: text(form, "key"), ...(model ? { model } : {}) });
+    await backend().action(api.modelKeyJobs.save, { token, organizationId: text(form, "organizationId") as Id<"organizations">, provider: z.enum(["anthropic", "openai", "openrouter", "bedrock", "azure", "vertex"]).parse(form.get("provider")), key: text(form, "key"), ...(model ? { model } : {}), ...Object.fromEntries(["region", "resource", "project", "location"].flatMap((n) => text(form, n).trim() ? [[n, text(form, n).trim()]] : [])) });
     await notify("Model key saved. This workspace now runs on it.");
   } catch (e) { await notify(backendMessage(e, "Could not save the model key."), "error"); }
   revalidatePath("/dashboard/organization/api-keys");
@@ -976,14 +976,45 @@ export async function generateTour(form: FormData) {
 // them and makes the Stripe prices and schedule (convex/enterpriseJobs.ts), which checks the operator again.
 export async function createEnterpriseContract(form: FormData) {
   const { token } = await current();
-  const names = ["organizationId", "mode", "start", "committed", "price", "included", "multiplier", "usagePriceId", "netDays", "graceDays", "nonBillable", "notes"];
+  const names = ["organizationId", "mode", "start", "committed", "price", "included", "multiplier", "usagePriceId", "netDays", "graceDays", "nonBillable", "notes", "supportTier", "retentionMin", "retentionMax", "auditDays"];
   const params = new URLSearchParams(names.flatMap((n) => { const value = text(form, n).trim().slice(0, 2000); return value ? [[n, value]] : []; }));
   const back = (extra: string) => `/dashboard/operator?${params}${extra}#operator-contracts`;
   if (text(form, "intent") !== "create") redirect(back("&preview=1"));
   const field = (n: string) => params.get(n) ?? "", usagePriceId = field("usagePriceId");
+  const retention = Object.fromEntries([["minDays", "retentionMin"], ["maxDays", "retentionMax"], ["auditDays", "auditDays"]].flatMap(([key, name]) => field(name) ? [[key, Number(field(name))]] : []));
   let error = "";
   try {
-    await backend().action(api.enterpriseJobs.createContract, { token, organizationId: field("organizationId") as Id<"organizations">, mode: field("mode") === "ownKey" ? "ownKey" : "managed", startsAt: Date.parse(`${field("start")}-01T00:00:00Z`), committedContributors: Number(field("committed")), contributorPriceCents: Math.round(Number(field("price")) * 100), includedUsagePerContributorUsd: Number(field("included")), overageMultiplier: Number(field("multiplier")), ...(usagePriceId ? { usagePriceId } : {}), netDays: Number(field("netDays")), graceDays: Number(field("graceDays")), nonBillableAuthors: field("nonBillable").split(/[\s,]+/).filter(Boolean), ...(field("notes") ? { notes: field("notes") } : {}) });
+    await backend().action(api.enterpriseJobs.createContract, { token, organizationId: field("organizationId") as Id<"organizations">, mode: field("mode") === "ownKey" ? "ownKey" : "managed", startsAt: Date.parse(`${field("start")}-01T00:00:00Z`), committedContributors: Number(field("committed")), contributorPriceCents: Math.round(Number(field("price")) * 100), includedUsagePerContributorUsd: Number(field("included")), overageMultiplier: Number(field("multiplier")), ...(usagePriceId ? { usagePriceId } : {}), netDays: Number(field("netDays")), graceDays: Number(field("graceDays")), nonBillableAuthors: field("nonBillable").split(/[\s,]+/).filter(Boolean), ...(field("notes") ? { notes: field("notes") } : {}), ...(field("supportTier") ? { supportTier: field("supportTier") } : {}), ...(Object.keys(retention).length ? { retention } : {}) });
   } catch (e) { error = actionError(e); }
   redirect(error ? back(`&contractError=${encodeURIComponent(error)}`) : "/dashboard/operator?contract=created#operator-contracts");
+}
+
+// Organization Settings → SCIM provisioning. The token is made here and shown once; only its hash is stored.
+export async function createScimToken(_previous: string, form: FormData): Promise<string> {
+  const { token } = await current(), value = "scim_" + randomBytes(32).toString("hex");
+  try { await backend().mutation(api.scim.createToken, { token, organizationId: text(form, "organizationId") as Id<"organizations">, tokenHash: createHash("sha256").update(value).digest("hex") }); }
+  catch (error) { await notify(actionError(error), "error"); return ""; }
+  revalidatePath("/dashboard/organization");
+  return value;
+}
+export async function revokeScimToken(form: FormData) {
+  const { token } = await current();
+  await backend().mutation(api.scim.revokeToken, { token, tokenId: text(form, "tokenId") as Id<"scimTokens"> });
+  await notify("SCIM token revoked.");
+  revalidatePath("/dashboard/organization");
+}
+export async function setScimGroupRole(form: FormData) {
+  const { token } = await current(), role = z.enum(["admin", "member", "viewer", "none"]).parse(text(form, "role"));
+  try { await backend().mutation(api.scim.setGroupRole, { token, groupId: text(form, "groupId") as Id<"scimGroups">, role: role === "none" ? null : role }); await notify("Group role saved."); }
+  catch (error) { await notify(actionError(error), "error"); }
+  revalidatePath("/dashboard/organization");
+}
+
+// Operator → Enterprise contracts: bills a workspace under another workspace's contract, or takes it out again.
+export async function setEnterpriseContractGroup(form: FormData) {
+  const { token } = await current(), billed = text(form, "billedOrganizationId");
+  let error = "";
+  try { await backend().mutation(api.enterprise.setContractGroup, { token, organizationId: text(form, "organizationId") as Id<"organizations">, billedOrganizationId: billed ? billed as Id<"organizations"> : null }); }
+  catch (e) { error = actionError(e); }
+  redirect(error ? `/dashboard/operator?contractError=${encodeURIComponent(error)}#operator-contracts` : "/dashboard/operator#operator-contracts");
 }

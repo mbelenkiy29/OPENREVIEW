@@ -1,3 +1,4 @@
+import { scimJoin } from "./scim";
 import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
@@ -176,6 +177,8 @@ export const signIn = mutation({
     const emailVerified = ssoEmailVerified(a.email, await verifiedDomains(ctx, c._id), a.emailVerifiedByIdp);
     const userId = await linkIdentity(ctx, { provider: "sso", providerUserId: `${c._id}:${a.subject}`, login: (a.name || a.email?.split("@")[0] || "sso-user").slice(0, 100), avatar: "", email: a.email, emailVerified });
     let member = Boolean(await ctx.db.query("organizationMembers").withIndex("by_org_user", (q) => q.eq("organizationId", c.organizationId).eq("userId", userId)).unique());
+    // Provisioned by the identity provider over SCIM before they had an account: they join now, with their group's role.
+    if (!member && emailVerified && a.email) member = await scimJoin(ctx, c.organizationId, userId, a.email);
     // Just-in-time membership: only for people whose email is on a verified domain.
     if (!member && c.jitRole && emailVerified) {
       await ctx.db.insert("organizationMembers", { organizationId: c.organizationId, userId, role: c.jitRole as "member" | "viewer" });

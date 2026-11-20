@@ -5,7 +5,8 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { authenticatedSession } from "./auth";
 import { billingConfig, billingDecision, keepsFree, paidPlanReason, periodKey, seatCount } from "../src/billing";
-import { contributorCount } from "./contributors";
+import { groupContributorRows } from "./contributors";
+import { contractGroup } from "./billing";
 import { verifiedEmail } from "./referralLedger";
 
 // Operators (super admins) of this deployment: OPERATOR_GITHUB_IDS on Convex, comma-separated numeric GitHub
@@ -79,7 +80,9 @@ async function operatorReport(ctx: QueryCtx) {
     const exempt = config.enabled && members.some((m) => m.role === "owner" && operators.has(m.userId));
     // Only workspaces that keep Free (keepsFree) have its allowance, as on their Billing page.
     // shortcut: leaves out the one-Free-workspace-per-owner rule, so an owner's second Free workspace shows the Free allowance; check its Billing page.
-    const contract = account?.contract, contributors = contract ? await contributorCount(ctx, o._id, period) : null;
+    // A contract's contributors are counted once across every workspace billed under it.
+    const group = config.enabled ? await contractGroup(ctx, o._id, account) : null, contract = account?.contract;
+    const contributors = contract ? (await groupContributorRows(ctx, group?.organizationIds ?? [o._id], period)).filter((r) => !r.bot).length : null;
     const decision = config.enabled && !exempt ? billingDecision(account ?? { status: "trial", seats: 0, trialEndsAt: 0 }, month?.usedMicros ?? 0, now, config, 0, keepsFree(o) ? undefined : paidPlanReason, contributors ?? 0) : null;
     return {
       id: o._id, name: o.name, createdAt: o.createdAt, exempt, plan: decision?.plan ?? null, status: account?.subscriptionId ? account.status : null,
@@ -87,7 +90,7 @@ async function operatorReport(ctx: QueryCtx) {
       billedSeats: account?.subscriptionId ? account.seats : null, spend: spent.get(o._id) ?? 0, usedMicros: month?.usedMicros ?? 0, limitMicros: decision?.limit ?? null,
       reviews: month?.reviews ?? 0, blocked: month?.blocked ?? 0, fixes: month?.fixes ?? 0, lastActivity: last?.createdAt ?? null,
       // Enterprise contract terms and this month's billable contributors (null without a contract).
-      contract: contract ? { mode: contract.mode, committed: contract.committedContributors, priceCents: contract.contributorPriceCents, startsAt: contract.startsAt, endsAt: contract.endsAt, inStripe: Boolean(contract.stripe?.scheduleId) } : null, contributors,
+      billedUnder: account?.contractGroupId ?? null, contract: contract ? { mode: contract.mode, committed: contract.committedContributors, priceCents: contract.contributorPriceCents, startsAt: contract.startsAt, endsAt: contract.endsAt, supportTier: contract.supportTier ?? null, workspaces: group?.organizationIds.length ?? 1, inStripe: Boolean(contract.stripe?.scheduleId) } : null, contributors,
     };
   }));
   workspaces.sort((x, y) => y.spend - x.spend || y.createdAt - x.createdAt);

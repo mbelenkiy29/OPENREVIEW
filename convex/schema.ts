@@ -9,6 +9,10 @@ const contractValidator = v.object({
   netDays: v.number(), graceDays: v.number(), nonBillableAuthors: v.array(v.string()),
   stripe: v.optional(v.object({ productId: v.optional(v.string()), commitPriceId: v.optional(v.string()), contributorPriceId: v.optional(v.string()), usagePriceId: v.optional(v.string()), scheduleId: v.optional(v.string()) })),
   notes: v.optional(v.string()),
+  // Display only: the support terms the customer bought (docs/sla.md).
+  supportTier: v.optional(v.string()),
+  // Negotiated data retention: bounds for the workspace's own retention settings, and how long audit events are kept.
+  retention: v.optional(v.object({ minDays: v.optional(v.number()), maxDays: v.optional(v.number()), auditDays: v.optional(v.number()) })),
   // Days-before-end renewal reminders already emailed (60, 30).
   remindersSent: v.optional(v.array(v.number())),
 });
@@ -149,7 +153,7 @@ export default defineSchema({
   personalCredentials: defineTable({ userId: v.id("users"), kind: v.string(), ciphertext: v.string(), updatedAt: v.number() }).index("by_user_kind", ["userId", "kind"]),
   // A workspace's own model provider key (bring your own key), encrypted with CREDENTIAL_ENCRYPTION_KEY
   // under the scope `<organizationId>:model`. When present, every model call for the workspace uses it.
-  modelKeys: defineTable({ organizationId: org, provider: v.union(v.literal("anthropic"), v.literal("openai"), v.literal("openrouter")), credentials: v.string(), model: v.optional(v.string()), updatedBy: v.id("users"), updatedAt: v.number() }).index("by_org", ["organizationId"]),
+  modelKeys: defineTable({ organizationId: org, provider: v.union(v.literal("anthropic"), v.literal("openai"), v.literal("openrouter"), v.literal("bedrock"), v.literal("azure"), v.literal("vertex")), credentials: v.string(), model: v.optional(v.string()), updatedBy: v.id("users"), updatedAt: v.number() }).index("by_org", ["organizationId"]),
   personalSettings: defineTable({ userId: v.id("users"), agent: v.optional(v.union(v.literal("codex"), v.literal("claude"), v.literal("cursor"))), handoff: v.optional(handoffValidator), cloudAgent: v.optional(cloudAgentValidator), updatedAt: v.number() }).index("by_user", ["userId"]),
   bridgeDevices: defineTable({ tokenHash: v.string(), code: v.string(), userId: v.optional(v.id("users")), organizationId: v.optional(org), name: v.string(), expiresAt: v.number(), revoked: v.boolean(), createdAt: v.number(), lastSeen: v.optional(v.number()) }).index("by_hash", ["tokenHash"]).index("by_code", ["code"]).index("by_user", ["userId"]),
   fixRequests: defineTable({ userId: v.id("users"), organizationId: org, repositoryId: repo, reviewId: review, headSha: v.string(), findingIds: v.optional(v.array(v.id("findings"))), agent: v.string(), prompt: v.string(), status: v.string(), error: v.optional(v.string()), deviceId: v.optional(v.id("bridgeDevices")), expiresAt: v.number(), createdAt: v.number(), updatedAt: v.number(), /* cloud agent handoffs (kind "cloud"): intent → posting → posted | failed; OpenReview fix pull requests (kind "hosted"): queued → running → opened | failed */ kind: v.optional(v.string()), commentUrl: v.optional(v.string()), postedAs: v.optional(v.string()), pullRequestUrl: v.optional(v.string()) }).index("by_user", ["userId"]).index("by_review", ["reviewId"]),
@@ -698,6 +702,9 @@ export default defineSchema({
     contract: v.optional(contractValidator),
     // A signed renewal: the contract for the year after `contract` ends. The webhook makes it `contract` when its subscription starts.
     nextContract: v.optional(contractValidator),
+    // One contract across several workspaces: set on each extra workspace, naming the workspace that holds the contract
+    // and is billed. Contributors are counted once across the group and included usage is pooled.
+    contractGroupId: v.optional(org),
     // A subscription from before plans existed: while it stays on Starter it keeps every entitlement.
     legacy: v.optional(v.boolean()),
     status: v.string(), // trial | active | trialing | past_due | unpaid | canceled | incomplete | incomplete_expired | paused
@@ -714,7 +721,7 @@ export default defineSchema({
     // Monthly extra-usage cap in dollars, set by an admin; 0 or unset means no usage past the included amount.
     spendCapUsd: v.optional(v.number()),
     updatedAt: v.number(),
-  }).index("by_org", ["organizationId"]).index("by_customer", ["customerId"]),
+  }).index("by_org", ["organizationId"]).index("by_customer", ["customerId"]).index("by_contract_group", ["contractGroupId"]),
   // Referral program (REFERRALS_ENABLED and BILLING_ENABLED only). One personal code per user. A
   // referral attributes a newly created user to the code's owner, then binds their first workspace.
   // The workspace is stored as referredOrganizationId: the referrer's records outlive its deletion.
@@ -809,6 +816,11 @@ export default defineSchema({
   // Enterprise billing: one row per pull request author with a completed review in a UTC month (convex/contributors.ts).
   // Bots are kept with bot: true so the admin list can show them as not billed.
   activeContributors: defineTable({ organizationId: org, period: v.string(), key: v.string(), login: v.string(), provider: v.string(), userId: v.optional(v.id("users")), firstReviewId: v.id("reviews"), firstAt: v.number(), bot: v.boolean() }).index("by_org_period_key", ["organizationId", "period", "key"]),
+  // SCIM provisioning (convex/scim.ts, Enterprise). Tokens are stored as SHA-256 hashes; userName is the lowercased email.
+  scimTokens: defineTable({ organizationId: org, tokenHash: v.string(), createdBy: v.id("users"), createdAt: v.number(), lastUsedAt: v.optional(v.number()), revokedAt: v.optional(v.number()) }).index("by_hash", ["tokenHash"]).index("by_org", ["organizationId"]),
+  scimUsers: defineTable({ organizationId: org, userName: v.string(), externalId: v.optional(v.string()), displayName: v.optional(v.string()), active: v.boolean(), userId: v.optional(v.id("users")), createdAt: v.number(), updatedAt: v.number() }).index("by_org_username", ["organizationId", "userName"]),
+  // role: the workspace role an admin mapped this identity-provider group to (never owner).
+  scimGroups: defineTable({ organizationId: org, displayName: v.string(), externalId: v.optional(v.string()), role: v.optional(v.union(v.literal("admin"), v.literal("member"), v.literal("viewer"))), members: v.array(v.id("scimUsers")), createdAt: v.number(), updatedAt: v.number() }).index("by_org", ["organizationId"]),
   stripeEvents: defineTable({ eventId: v.string(), type: v.string(), outcome: v.string(), createdAt: v.number() }).index("by_event", ["eventId"]),
   // Slack app installs (one per Slack workspace); the bot token is encrypted with scope `<org>:slack`.
   slackInstallations: defineTable({

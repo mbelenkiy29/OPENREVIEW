@@ -17,9 +17,10 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
   if (!s.enabled) return <><div className="section-heading"><h2 id="plan-heading">{"exempt" in s ? "Operator workspace" : "Billing is off"}</h2></div><section aria-labelledby="plan-heading"><p className="card-line">{"exempt" in s
     ? "An OpenReview operator owns this workspace, so it has no plan quota: usage and agent fixes are unlimited and every feature is on. The deployment's inference budget still applies."
     : <>This deployment does not bill workspaces (<code>BILLING_ENABLED</code> is not set), so reviews have no plan quota. Self-hosted installs are unlimited.</>}</p></section></>;
-  const subscribed = s.plan === "starter" || s.plan === "pro", percent = s.limit ? Math.min(100, Math.round((s.used / s.limit) * 100)) : 0;
+  // subscribed is any paid plan; perSeat is Starter or Pro, which have Checkout, plan switching and seats.
+  const e = s.enterprise, ownKey = e?.mode === "ownKey", perSeat = s.plan === "starter" || s.plan === "pro", subscribed = perSeat || Boolean(e), percent = s.limit ? Math.min(100, Math.round((s.used / s.limit) * 100)) : 0;
   // A workspace without a paid plan that does not keep Free (new, or a lapsed new subscription) has no plan at all.
-  const unpaid = !subscribed && !s.freePlan, badge = unpaid ? "Inactive" : s.plan === "free" ? "Active" : statusLabel(s.status);
+  const unpaid = !subscribed && !s.freePlan, badge = unpaid ? "Inactive" : s.plan === "free" ? "Active" : e && s.status === "active" ? "Invoiced" : statusLabel(s.status);
   const trial = checkoutTrialEnd(s.trialEndsAt, Date.now());
   const portal = (label: ReactNode, name?: string, className?: string) => <form action={openBillingPortal}><input type="hidden" name="organizationId" value={organizationId} /><button className={className} aria-label={name}>{label}</button></form>;
   return <>
@@ -32,30 +33,41 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
     <section aria-labelledby="plan-heading" className="strip-card">
       <header className="card-strip"><Icon name="creditCard" /><h3 id="plan-heading">{unpaid ? "No plan" : `${s.planName} plan`}</h3><span className="role-badge">{badge}</span></header>
       <div className="strip-body">
-        {!unpaid && <div className="usage-meter"><div><strong>{percent}%</strong><span> of included usage{s.admin ? ` (${usdText(s.used)} of ${usdText(s.limit ?? 0)})` : ""}</span></div><meter min={0} max={100} value={percent} aria-label="Included usage used" /><span className="muted">Resets {day(s.resetsAt)}{s.reviewsLeft !== null ? ` · about ${s.reviewsLeft} reviews left` : ""}</span></div>}
+        {!unpaid && !ownKey && <div className="usage-meter"><div><strong>{percent}%</strong><span> of included usage{s.admin ? ` (${usdText(s.used)} of ${usdText(s.limit ?? 0)})` : ""}</span></div><meter min={0} max={100} value={percent} aria-label="Included usage used" /><span className="muted">Resets {day(s.resetsAt)}{s.reviewsLeft !== null ? ` · about ${s.reviewsLeft} reviews left` : ""}</span></div>}
         <dl className="facts">
-          {s.currentPeriodEnd && <><dt>Current period ends</dt><dd>{day(s.currentPeriodEnd)}</dd></>}
-          {s.pastDueSince && <><dt>Past due since</dt><dd>{day(s.pastDueSince)} · reviews pause after {s.graceDays} days</dd></>}
-          {subscribed && <><dt>Extra usage</dt><dd>{s.capUsd > 0 ? (s.admin ? `${usdText(s.overage)} of a ${usdText(s.capUsd * 1e6)} monthly cap` : "On") : "Off: reviews pause when the included usage runs out"}</dd></>}
+          {e && <><dt>Contract term</dt><dd>{day(e.startsAt)} to {day(e.endsAt)}{e.renewed ? " · renewed for another year" : " · ends then unless renewed"}{e.priceCents !== null ? ` · $${(e.priceCents / 100).toFixed(2)} per contributor per month, invoiced net ${e.netDays} days` : ""}</dd>
+            <dt>Active contributors</dt><dd>{e.active} this month of {e.committed} committed{e.active > e.committed ? ` · ${e.active - e.committed} above commitment, billed on the next monthly invoice` : ""}<span className="muted"> · authors of pull requests reviewed this month{e.workspaces > 1 ? `, counted once across the ${e.workspaces} workspaces on this contract` : ""}; bots are not billed</span></dd>
+            <dt>Model usage</dt><dd>{ownKey ? "Your own model key, nothing metered" : `$${e.includedUsagePerContributorUsd.toFixed(2)} included per billed contributor each month, pooled`}</dd>
+            {e.supportTier && <><dt>Support</dt><dd>{e.supportTier}</dd></>}</>}
+          {!e && s.currentPeriodEnd && <><dt>Current period ends</dt><dd>{day(s.currentPeriodEnd)}</dd></>}
+          {s.pastDueSince && <><dt>Past due since</dt><dd>{day(s.pastDueSince)} · reviews pause after {e ? e.graceDays : s.graceDays} days</dd></>}
+          {subscribed && !ownKey && <><dt>Extra usage</dt><dd>{s.capUsd > 0 ? (s.admin ? `${usdText(s.overage)} of a ${usdText(s.capUsd * 1e6)} monthly cap` : "On") : "Off: reviews pause when the included usage runs out"}</dd></>}
           <dt>Reviews this month</dt><dd>{s.reviews}{s.blocked ? ` · ${s.blocked} blocked` : ""}</dd>
           <dt>Agent fixes this month</dt><dd>{s.fixes.limit ? `${s.fixes.used} of ${s.fixes.limit}` : `None ${unpaid ? "without a plan" : "on Free"}: copy prompts and your own agents still work`}</dd>
-          <dt>Seats</dt><dd>{s.activeSeats} active (owners, admins and members; viewers are free){s.billedSeats !== null ? ` · ${s.billedSeats} billed` : ""}</dd>
-          <dt>Plans</dt><dd>{s.freePlan && `Free: ${usdText(s.freeUsageMicros)} of model usage per workspace each month · `}Starter{process.env.BILLING_SEAT_PRICE_LABEL ? ` (${process.env.BILLING_SEAT_PRICE_LABEL})` : ""}: {usdText(s.usagePerSeatMicros)} and {s.starterFixesPerSeat} agent fixes per seat · Pro{process.env.BILLING_PRO_PRICE_LABEL ? ` (${process.env.BILLING_PRO_PRICE_LABEL})` : ""}: {usdText(s.proUsagePerSeatMicros)} and {s.proFixesPerSeat} agent fixes per seat, plus deep reviews, generated reproduction tests, requirements checks, learned conventions, API keys, analytics older than 30 days, SSO and the audit log. Pricier models use usage faster.</dd>
+          {!e && <><dt>Seats</dt><dd>{s.activeSeats} active (owners, admins and members; viewers are free){s.billedSeats !== null ? ` · ${s.billedSeats} billed` : ""}</dd></>}
+          {!e && <><dt>Plans</dt><dd>{s.freePlan && `Free: ${usdText(s.freeUsageMicros)} of model usage per workspace each month · `}Starter{process.env.BILLING_SEAT_PRICE_LABEL ? ` (${process.env.BILLING_SEAT_PRICE_LABEL})` : ""}: {usdText(s.usagePerSeatMicros)} and {s.starterFixesPerSeat} agent fixes per seat · Pro{process.env.BILLING_PRO_PRICE_LABEL ? ` (${process.env.BILLING_PRO_PRICE_LABEL})` : ""}: {usdText(s.proUsagePerSeatMicros)} and {s.proFixesPerSeat} agent fixes per seat, plus deep reviews, generated reproduction tests, requirements checks, learned conventions, API keys, analytics older than 30 days, SSO and the audit log. Pricier models use usage faster.</dd></>}
           {s.referral?.referred && <><dt>Referral</dt><dd>{referralFact(s.referral, referralConfig().discountLabel)}</dd></>}
           {s.referralCredit ? <><dt>Referral credit</dt><dd>{formatMoney(s.referralCredit)} applied from referral earnings · Stripe takes it off the next invoices</dd></> : null}
         </dl>
         {s.admin ? <div className="page-actions">
           {!subscribed && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="pro" /><button className="primary">{trial ? "Start Pro trial" : "Upgrade to Pro"}</button></form>}
           {!subscribed && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="starter" /><button>{trial ? "Start Starter trial" : "Choose Starter"}</button></form>}
-          {subscribed && <form action={changePlan}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value={s.plan === "pro" ? "starter" : "pro"} /><button className={s.plan === "pro" ? undefined : "primary"}>{s.plan === "pro" ? "Switch to Starter" : "Switch to Pro"}</button></form>}
+          {perSeat && <form action={changePlan}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value={s.plan === "pro" ? "starter" : "pro"} /><button className={s.plan === "pro" ? undefined : "primary"}>{s.plan === "pro" ? "Switch to Starter" : "Switch to Pro"}</button></form>}
         </div> : <p className="muted">Only workspace owners and admins can change billing.</p>}
-        {s.admin && subscribed && <p className="muted">Switching plans takes effect now and is prorated: the price difference for the rest of this period is on the next invoice.</p>}
-        {s.admin && subscribed && <form action={setSpendingCap} className="setting-row cap-row stack"><input type="hidden" name="organizationId" value={organizationId} />
+        {s.admin && perSeat && <p className="muted">Switching plans takes effect now and is prorated: the price difference for the rest of this period is on the next invoice.</p>}
+        {s.admin && e && <p className="muted">Contract changes go through your OpenReview account manager.</p>}
+        {s.admin && subscribed && !ownKey && <form action={setSpendingCap} className="setting-row cap-row stack"><input type="hidden" name="organizationId" value={organizationId} />
           <div><strong id="cap-label">Extra usage cap per month</strong><p>Usage past the included amount is billed at the end of the period, up to this cap (USD, 0 = off). During a trial, reviews stop at the included usage instead.</p></div>
           <span className="days-field">$<input type="number" name="capUsd" min={0} max={1000000} step="0.01" defaultValue={s.capUsd} required aria-labelledby="cap-label" /><button>Save cap</button></span>
         </form>}
       </div>
     </section>
+    {e?.contributors && <><div className="section-heading minor"><div><h2 id="contributors-heading">Contributors this month</h2><p>Everyone whose pull request got a completed review this month. One person on two code hosts counts once when they link both accounts in Personal Settings.</p></div></div>
+    <div className="table-box"><table aria-labelledby="contributors-heading">
+      <thead><tr><th>Contributor</th><th>Code host</th><th>First review</th><th>Billing</th></tr></thead>
+      <tbody>{e.contributors.map((c) => <tr key={c.key}><td>{c.login}</td><td>{c.provider}</td><td>{day(c.firstAt)}</td><td>{c.billed ? "Billed" : <span className="muted">Not billed</span>}</td></tr>)}
+        {!e.contributors.length && <tr><td colSpan={4} className="table-empty">No reviewed pull requests yet this month</td></tr>}</tbody>
+    </table></div></>}
     <div className="section-heading minor"><h2 id="payment-heading">Payment Details</h2>{s.admin && (s.hasCustomer ? portal(<><Icon name="plus" />Add Payment Method</>) : !subscribed && <a className="button" href="#plan-heading"><Icon name="plus" />Add Payment Method</a>)}</div>
     <div className="table-box"><table aria-labelledby="payment-heading">
       <thead><tr><th>Name</th><th><span className="sr-only">Actions</span></th></tr></thead>

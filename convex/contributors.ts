@@ -27,13 +27,21 @@ export async function recordContributor(ctx: MutationCtx, review: Doc<"reviews">
   const userId = await userFor(ctx, connectionId, login), key = contributorKey({ provider, connectionId, login, userId })!, period = periodKey(at);
   const existing = await ctx.db.query("activeContributors").withIndex("by_org_period_key", (q) => q.eq("organizationId", review.organizationId).eq("period", period).eq("key", key)).first();
   if (existing) return;
-  const account = await ctx.db.query("billingAccounts").withIndex("by_org", (q) => q.eq("organizationId", review.organizationId)).unique();
+  const own = await ctx.db.query("billingAccounts").withIndex("by_org", (q) => q.eq("organizationId", review.organizationId)).unique();
+  // A workspace billed under another's contract follows that contract's non-billable authors.
+  const account = own?.contractGroupId ? await ctx.db.query("billingAccounts").withIndex("by_org", (q) => q.eq("organizationId", own.contractGroupId!)).unique() : own;
   await ctx.db.insert("activeContributors", { organizationId: review.organizationId, period, key, login, provider, userId, firstReviewId: review._id, firstAt: at, bot: isBotAuthor(login, account?.contract?.nonBillableAuthors) });
 }
 
-const rowsOf = (ctx: QueryCtx, organizationId: Id<"organizations">, period: string) => ctx.db.query("activeContributors").withIndex("by_org_period_key", (q) => q.eq("organizationId", organizationId).eq("period", period)).collect();
+export const contributorRows = (ctx: QueryCtx, organizationId: Id<"organizations">, period: string) => ctx.db.query("activeContributors").withIndex("by_org_period_key", (q) => q.eq("organizationId", organizationId).eq("period", period)).collect();
+/** A month's rows across the workspaces of one contract, one per person: someone active in two of them counts once. */
+export async function groupContributorRows(ctx: QueryCtx, organizationIds: Id<"organizations">[], period: string) {
+  const byKey = new Map<string, Doc<"activeContributors">>();
+  for (const id of organizationIds) for (const row of await contributorRows(ctx, id, period)) { const seen = byKey.get(row.key); if (!seen || row.firstAt < seen.firstAt) byKey.set(row.key, row); }
+  return [...byKey.values()];
+}
 /** Billable contributors in a month (bots are listed but not counted). */
-export const contributorCount = async (ctx: QueryCtx, organizationId: Id<"organizations">, period: string) => (await rowsOf(ctx, organizationId, period)).filter((r) => !r.bot).length;
+export const contributorCount = async (ctx: QueryCtx, organizationId: Id<"organizations">, period: string) => (await contributorRows(ctx, organizationId, period)).filter((r) => !r.bot).length;
 
 // Rebuilds one month from its reviews: at contract start, and after an author links an account or the contract's
 // non-billable list changes. Run with `npx convex run contributors:backfill '{"organizationId":"…","period":"2026-11"}'`.
@@ -42,7 +50,7 @@ export const contributorCount = async (ctx: QueryCtx, organizationId: Id<"organi
 export const backfill = internalMutation({ args: { organizationId: v.id("organizations"), period: v.string(), cursor: v.optional(v.string()) }, handler: async (ctx, a) => {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(a.period)) throw new Error("period is YYYY-MM");
   const [year, month] = a.period.split("-").map(Number), start = Date.UTC(year, month - 1, 1), end = Date.UTC(year, month, 1);
-  if (!a.cursor) for (const row of await rowsOf(ctx, a.organizationId, a.period)) await ctx.db.delete(row._id);
+  if (!a.cursor) for (const row of await contributorRows(ctx, a.organizationId, a.period)) await ctx.db.delete(row._id);
   // by_org_time is by creation; a review created up to 31 days before the month can still finish in it.
   const page = await ctx.db.query("reviews").withIndex("by_org_time", (q) => q.eq("organizationId", a.organizationId).gte("createdAt", start - 31 * 86400000).lt("createdAt", end)).paginate({ cursor: a.cursor ?? null, numItems: 200 });
   for (const review of page.page) if (review.status === "completed" && review.finishedAt !== undefined && review.finishedAt >= start && review.finishedAt < end) await recordContributor(ctx, review, review.finishedAt);

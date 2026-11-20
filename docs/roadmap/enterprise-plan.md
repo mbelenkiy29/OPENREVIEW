@@ -329,7 +329,8 @@ done: 2026-11-18 · uncommitted on `enterprise-phase-0` · tests: `tests/enterpr
 
 ## Phase 3: What customers see
 
-### - [ ] E3.1 Billing & Usage for an Enterprise workspace
+### - [x] E3.1 Billing & Usage for an Enterprise workspace
+done except the e2e test (human step still open): 2026-11-18 · uncommitted on `enterprise-phase-0` · tests: `tests/contributors.spec.ts` (admins get the price and the list, members only counts). `status` returns `enterprise`; the card reads "Enterprise plan" with the badge "Invoiced". Not done: the e2e render at 390px in both themes, because the local environment has no sign-in; the panel has been type-checked but never seen in a browser. DESIGN.md was not changed: the card reuses existing classes.
 **Why:** admins must see what they committed to, who counted this month, and what the next invoice may hold.
 **Depends on:** E0.4, E1.2
 **Files:** `convex/billing.ts` (`status`), `app/dashboard/billing.tsx` (`BillingPanel`), `app/dashboard/sections/usage.tsx`, `app/dashboard/locked.tsx` (unchanged), DESIGN.md.
@@ -350,7 +351,8 @@ done: 2026-11-18 · uncommitted on `enterprise-phase-0` · tests: `tests/enterpr
 
 **Human steps:** create the Enterprise portal configuration in Stripe.
 
-### - [ ] E3.2 Pricing page and docs
+### - [x] E3.2 Pricing page and docs
+done: 2026-11-18 · uncommitted on `enterprise-phase-0` · tests: `tests/plans.test.ts` (`enterpriseOffer`). The card was checked in a browser at desktop and 375px widths. The contact link must be `mailto:` or `https:`. The onboarding line links to the same contact URL and is hidden without it.
 **Why:** buyers need to know Enterprise exists and how it is billed before they talk to us.
 **Depends on:** E0.2
 **Files:** `app/page.tsx` (pricing section), `app/dashboard/onboarding/[step]/page.tsx` (plan step), `docs/billing.md`, `README.md`.
@@ -362,7 +364,8 @@ done: 2026-11-18 · uncommitted on `enterprise-phase-0` · tests: `tests/enterpr
 
 **Tests:** the pricing page renders the card only with a contact URL and never when billing is off.
 
-### - [ ] E3.3 Self-host support and updates contract
+### - [x] E3.3 Self-host support and updates contract
+done (docs only; human steps still open): 2026-11-18 · uncommitted on `enterprise-phase-0`. The section is in `docs/deployment.md` and in `docs/public/self-hosting.md`, which is the page the site serves at `/docs/self-hosting`.
 **Why:** self-hosting companies want a vendor to call. The code stays MIT and ungated.
 **Depends on:** none
 **Files:** `docs/deployment.md`, `README.md`, `app/page.tsx` (one line under Pricing).
@@ -376,7 +379,8 @@ done: 2026-11-18 · uncommitted on `enterprise-phase-0` · tests: `tests/enterpr
 
 ## Phase 4: Later
 
-### - [ ] E4.1 SCIM users (`auth.scim`)
+### - [x] E4.1 SCIM users (`auth.scim`)
+done: 2026-11-19 · uncommitted on `enterprise-phase-0` · tests: `tests/scim.test.ts`, `tests/scim.spec.ts`. Built in `src/scim.ts`, `convex/scim.ts`, `src/scim-server.ts` and four routes under `app/api/scim/v2`, with a settings card under Enterprise SSO. People are matched by verified email; someone without an account joins at first SSO sign-in (`scimJoin` in `convex/sso.ts`). Request bodies cross to Convex as JSON text, because Convex values cannot carry SCIM's `$ref` field. Not built: `/Bulk`, `/Schemas`, `/ServiceProviderConfig`. Not verified against a live identity provider, and the settings card has not been seen in a browser. `auth.scim` and `audit.export` are Enterprise only; Pro and grandfathered Starter keep every earlier feature.
 **Why:** large customers deprovision from their IdP. Not in the first release.
 **Depends on:** E0.4
 **Files:** `convex/sso.ts`, `convex/schema.ts`, new `app/api/scim/v2/Users/route.ts`, `src/plans.ts`.
@@ -392,12 +396,14 @@ done: 2026-11-18 · uncommitted on `enterprise-phase-0` · tests: `tests/enterpr
 - Unknown attributes are ignored.
 - Rate limits apply.
 
-### - [ ] E4.2 SCIM groups and role mapping
+### - [x] E4.2 SCIM groups and role mapping
+done: 2026-11-19 · uncommitted on `enterprise-phase-0` · tests: `tests/scim.spec.ts`. Stricter than the text below: SCIM never changes an owner's role at all, and the last owner cannot be deprovisioned (409). Once any group is mapped, someone in no mapped group is a member.
 **Depends on:** E4.1
 **Build:** `/Groups` with a mapping from IdP group to role (admin, member, viewer). The owner role is never assigned by SCIM.
 **Tests:** a group change updates roles, and SCIM can never remove the last owner.
 
-### - [ ] E4.3 Audit log export (`audit.export`)
+### - [x] E4.3 Audit log export (`audit.export`)
+done: 2026-11-19 · uncommitted on `enterprise-phase-0` · tests: `tests/audit-export.test.ts`, `tests/enterprise.spec.ts`. `scopes.activityExport` pages 500 rows; `app/api/audit/export` streams CSV or JSON. CSV cells that would start a spreadsheet formula are quoted as text. Confirmed: nothing pruned `auditEvents` before; E4.5 adds the only prune, and only when a contract asks for it. The route itself (streaming, download headers) has no automated test.
 **Depends on:** E0.2
 **Files:** `convex/scopes.ts` (audit queries at the `audit.log` checks), `app/dashboard/scopes.tsx`, `convex/schema.ts` (`auditEvents`).
 **Build:**
@@ -406,7 +412,8 @@ done: 2026-11-18 · uncommitted on `enterprise-phase-0` · tests: `tests/enterpr
 
 **Tests:** the export contains only the workspace's own rows, the range is respected, and members are refused.
 
-### - [ ] E4.4 One contract across several workspaces
+### - [x] E4.4 One contract across several workspaces
+done: 2026-11-19 · uncommitted on `enterprise-phase-0` · tests: `tests/enterprise.spec.ts`. `billingAccounts.contractGroupId` names the billed workspace (index `by_contract_group`); `contractGroup` in `convex/billing.ts` resolves it for every billing decision. Extra usage is metered to the billed workspace. Known limits: agent fix runs and usage alert emails are still counted per workspace, not pooled; a group is read up to 100 workspaces.
 **Depends on:** E2.3, E1.2
 **Build:**
 - An optional `contractGroupId` on `billingAccounts`. One workspace is billed, and the others point to it.
@@ -418,7 +425,8 @@ done: 2026-11-18 · uncommitted on `enterprise-phase-0` · tests: `tests/enterpr
 - Usage pools across the group.
 - Removing a workspace from the group returns it to its own plan.
 
-### - [ ] E4.5 Custom retention terms
+### - [x] E4.5 Custom retention terms
+done: 2026-11-19 · uncommitted on `enterprise-phase-0` · tests: `tests/enterprise.spec.ts`. `contract.retention` holds `minDays`, `maxDays` and `auditDays`. The terms apply only once the workspace is on Enterprise. With a contract maximum, "unlimited" is refused and an older unlimited setting is treated as the maximum.
 **Depends on:** E0.3
 **Files:** `convex/dataControls.ts` (`saveSettings`, `retentionSweep`).
 **Build:**
@@ -430,7 +438,8 @@ done: 2026-11-18 · uncommitted on `enterprise-phase-0` · tests: `tests/enterpr
 - The sweep honours contract bounds.
 - With no contract, behaviour is unchanged.
 
-### - [ ] E4.6 SLA and support terms
+### - [x] E4.6 SLA and support terms
+done (the numbers are the owner's to fill in): 2026-11-19 · uncommitted on `enterprise-phase-0` · tests: `tests/enterprise.spec.ts`. `contract.supportTier` shows on the Operator page and in Billing & Usage. `docs/sla.md` describes the structure and deliberately states no response or availability numbers and no status page address.
 **Depends on:** E2.2
 **Build:**
 - A `contract.supportTier` field (display only) shown on the operator page and in Billing & Usage.
@@ -439,7 +448,8 @@ done: 2026-11-18 · uncommitted on `enterprise-phase-0` · tests: `tests/enterpr
 
 **Tests:** the field is displayed.
 
-### - [ ] E4.7 Own cloud account for Own-key mode
+### - [x] E4.7 Own cloud account for Own-key mode
+done: 2026-11-19 · uncommitted on `enterprise-phase-0` · tests: `tests/cloud-models.test.ts`. `src/cloud-models.ts` adds Bedrock, Azure OpenAI and Vertex through each provider's OpenAI-compatible endpoint, so the existing client is reused. Auth is a Bedrock API key (bearer), an Azure `api-key` header, and a Vertex access token minted from a service account key. Endpoints were read from the providers' docs on 2026-11-19; nothing was run against a real account. Limits: Bedrock's endpoint serves only models whose model card lists Chat Completions (AWS's docs do not say Claude does), there is no SigV4 or Converse support, a Vertex token is minted once per job and lasts an hour, and the Azure key check accepts any answer except 401 or 403.
 **Why:** "own key or cloud account" is in the offer, but `modelKeys.save` accepts only `anthropic`, `openai` and `openrouter`.
 **Depends on:** E0.4
 **Files:** `convex/modelKeys.ts`, `convex/modelKeyJobs.ts`, `convex/budgetModel.ts`, `src/egress.ts`.

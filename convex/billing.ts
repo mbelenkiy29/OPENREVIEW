@@ -7,7 +7,7 @@ import { audit, authorize } from "./auth";
 import { billingConfig, billingDecision, fixRunLimit, reviewsLeft, freeTakenReason, keepsFree, liveSubscription, paidPlanReason, nextPeriodStart, openSubscription, periodKey, resetText, seatCount, trialEndsFrom } from "../src/billing";
 import { entitled, entitlements, planCatalog, planEntitlements, planForPrice, upgradeNote, type Entitlement, type Plan } from "../src/plans";
 import { referralConfig } from "../src/referrals";
-import { contributorCount } from "./contributors";
+import { contributorCount, contributorRows, groupContributorRows } from "./contributors";
 import { anyCommission, chargeEvent, invoiceFacts, mayHaveCommission, referralCredit, referralStatus, verifiedEmail } from "./referralLedger";
 import { lifecycleEmail } from "./lifecycleEmails";
 import { recordConversion } from "./conversions";
@@ -81,10 +81,31 @@ async function freeBlocked(ctx: QueryCtx, organizationId: Id<"organizations">, n
   return taken && freeTakenReason(taken);
 }
 // billingDecision with who keeps Free, which only a Free workspace looks up.
-// An Enterprise contract's included usage follows the month's active contributors; no other plan reads the ledger.
-const activeFor = async (ctx: QueryCtx, organizationId: Id<"organizations">, account: Parameters<typeof billingDecision>[0], period: string) => account.plan === "enterprise" && account.contract ? contributorCount(ctx, organizationId, period) : 0;
-async function decide(ctx: QueryCtx, organizationId: Id<"organizations">, account: Parameters<typeof billingDecision>[0], used: number, now: number, request = 0) {
-  const config = await configFor(ctx, organizationId), decision = billingDecision(account, used, now, config, request, undefined, await activeFor(ctx, organizationId, account, periodKey(now)));
+// One contract across several workspaces: the billed workspace holds the contract and the others name it in
+// contractGroupId. Returns the account that billing decisions use and every workspace in the group, or null for a
+// workspace on its own (including when the contract is gone, which returns each workspace to its own plan).
+export async function contractGroup(ctx: QueryCtx, organizationId: Id<"organizations">, account: { contractGroupId?: string; plan?: string; contract?: unknown } | null | undefined) {
+  const billedId = ctx.db.normalizeId("organizations", account?.contractGroupId ?? organizationId);
+  if (!billedId) return null;
+  const others = await ctx.db.query("billingAccounts").withIndex("by_contract_group", (q) => q.eq("contractGroupId", billedId)).take(100);
+  if (!others.length) return null;
+  const billed = await accountOf(ctx, billedId);
+  if (!billed || billed.plan !== "enterprise" || !billed.contract) return null;
+  return { account: billed, billedId, organizationIds: [billedId, ...others.map((o) => o.organizationId)] };
+}
+type Group = NonNullable<Awaited<ReturnType<typeof contractGroup>>>;
+// What the other workspaces of the group have used this month (settled only, or with in-flight reservations).
+async function othersUsed(ctx: QueryCtx, group: Group | null, organizationId: Id<"organizations">, period: string, reserved: boolean) {
+  let total = 0;
+  for (const id of group?.organizationIds ?? []) if (id !== organizationId) { const usage = await usageOf(ctx, id, period); total += reserved ? spent(usage) : usage?.usedMicros ?? 0; }
+  return total;
+}
+// An Enterprise contract's included usage follows the month's active contributors, counted once across its group; no other plan reads the ledger.
+const activeFor = async (ctx: QueryCtx, organizationId: Id<"organizations">, account: Parameters<typeof billingDecision>[0], period: string, group: Group | null = null) => group ? (await groupContributorRows(ctx, group.organizationIds, period)).filter((r) => !r.bot).length : account.plan === "enterprise" && account.contract ? contributorCount(ctx, organizationId, period) : 0;
+async function decide(ctx: QueryCtx, organizationId: Id<"organizations">, own: Parameters<typeof billingDecision>[0], ownUsed: number, now: number, request = 0) {
+  // In a contract group the decision is the billed workspace's, against usage pooled across the group.
+  const group = await contractGroup(ctx, organizationId, own), account = group?.account ?? own, used = ownUsed + await othersUsed(ctx, group, organizationId, periodKey(now), true);
+  const config = await configFor(ctx, organizationId), decision = billingDecision(account, used, now, config, request, undefined, await activeFor(ctx, organizationId, account, periodKey(now), group));
   return decision.plan === "free" ? billingDecision(account, used, now, config, request, await freeBlocked(ctx, organizationId, now)) : decision;
 }
 // Free needs no Stripe confirmation, so the workspace can start at once. Returns the name of the owner's
@@ -108,7 +129,7 @@ export const chooseFreePlan = mutation({ args: { token: v.string(), organization
 export async function hasEntitlement(ctx: QueryCtx, organizationId: Id<"organizations">, key: Entitlement) {
   const config = await configFor(ctx, organizationId);
   if (!config.enabled) return true;
-  const account = await accountOf(ctx, organizationId);
+  const own = await accountOf(ctx, organizationId), account = (await contractGroup(ctx, organizationId, own))?.account ?? own;
   return account ? entitled(billingDecision(account, 0, Date.now(), config).plan, key, account.legacy) : false;
 }
 const entitlementKey = v.union(...entitlements.map((key) => v.literal(key)));
@@ -172,15 +193,18 @@ export async function reserveUsage(ctx: MutationCtx, organizationId: Id<"organiz
 export async function settleUsage(ctx: MutationCtx, usageId: Id<"billingUsage">, reservedMicros: number, amount: number) {
   const usage = await ctx.db.get(usageId);
   if (!usage) return;
-  const account = await accountOf(ctx, usage.organizationId), decision = account ? billingDecision(account, 0, Date.now(), await configFor(ctx, usage.organizationId), 0, undefined, await activeFor(ctx, usage.organizationId, account, usage.period)) : null;
-  const before = usage.usedMicros ?? 0, after = before + amount, limit = decision && decision.plan !== "free" && decision.plan !== "disabled" ? decision.limit! : null;
+  const own = await accountOf(ctx, usage.organizationId), group = await contractGroup(ctx, usage.organizationId, own), account = group?.account ?? own;
+  const decision = account ? billingDecision(account, 0, Date.now(), await configFor(ctx, usage.organizationId), 0, undefined, await activeFor(ctx, usage.organizationId, account, usage.period, group)) : null;
+  // In a contract group the included usage is one pool, so overage starts where the group's total passes it.
+  const pooled = await othersUsed(ctx, group, usage.organizationId, usage.period, false), before = pooled + (usage.usedMicros ?? 0), after = before + amount, limit = decision && decision.plan !== "free" && decision.plan !== "disabled" ? decision.limit! : null;
   const overage = limit === null ? 0 : Math.max(0, after - limit) - Math.max(0, before - limit);
   // Usage alerts: each threshold once per period; a jump past both sends only the 100% email.
   const sent = usage.alertsSent ?? [], crossed = decision?.limit ? [80, 100].filter((p) => !sent.includes(p) && after * 100 >= decision.limit! * p) : [];
-  await ctx.db.patch(usage._id, { usedMicros: after, reservedMicros: Math.max(0, (usage.reservedMicros ?? 0) - reservedMicros), ...(overage ? { overageMicros: (usage.overageMicros ?? 0) + overage } : {}), ...(crossed.length ? { alertsSent: [...sent, ...crossed] } : {}) });
+  await ctx.db.patch(usage._id, { usedMicros: after - pooled, reservedMicros: Math.max(0, (usage.reservedMicros ?? 0) - reservedMicros), ...(overage ? { overageMicros: (usage.overageMicros ?? 0) + overage } : {}), ...(crossed.length ? { alertsSent: [...sent, ...crossed] } : {}) });
   if (crossed.length) await ctx.scheduler.runAfter(0, internal.notificationJobs.usageAlert, { usageId, threshold: crossed.at(-1)! });
   if (!overage) return;
-  const id = await ctx.db.insert("billingMeterEvents", { organizationId: usage.organizationId, period: usage.period, micros: overage, status: "pending", attempts: 0, createdAt: Date.now() });
+  // Extra usage is billed to the workspace that holds the contract.
+  const id = await ctx.db.insert("billingMeterEvents", { organizationId: group?.billedId ?? usage.organizationId, period: usage.period, micros: overage, status: "pending", attempts: 0, createdAt: Date.now() });
   await ctx.scheduler.runAfter(0, internal.billingJobs.reportUsage, { id });
 }
 
@@ -231,7 +255,7 @@ export const queueContributorReports = internalMutation({ args: { final: v.optio
     if (!contract || account.plan !== "enterprise" || !liveSubscription(account) || contract.startsAt >= nextPeriodStart(start) || contract.endsAt <= start || (a.final && contract.endsAt !== ends)) continue;
     const events = await ctx.db.query("billingMeterEvents").withIndex("by_org_status", (q) => q.eq("organizationId", account.organizationId)).collect();
     if (events.some((e) => e.kind === "contributors" && e.period === period)) continue;
-    const quantity = Math.max(0, await contributorCount(ctx, account.organizationId, period) - contract.committedContributors);
+    const quantity = Math.max(0, await activeFor(ctx, account.organizationId, account, period, await contractGroup(ctx, account.organizationId, account)) - contract.committedContributors);
     const id = await ctx.db.insert("billingMeterEvents", { organizationId: account.organizationId, period, micros: 0, kind: "contributors", quantity, status: "pending", attempts: 0, createdAt: Date.now() });
     await ctx.scheduler.runAfter(0, internal.billingJobs.reportUsage, { id });
     queued++;
@@ -248,20 +272,25 @@ export const status = query({ args: { token: v.string(), organizationId: v.id("o
   const stored = await accountOf(ctx, a.organizationId);
   const account = stored ?? { status: "trial", seats: 0, trialEndsAt: 0 } as Pick<Doc<"billingAccounts">, "status" | "seats" | "trialEndsAt"> & Partial<Doc<"billingAccounts">>;
   const now = Date.now(), usage = await usageOf(ctx, a.organizationId, periodKey(now));
-  const facts = { status: account.status, seats: account.seats, trialEndsAt: account.trialEndsAt, pastDueSince: account.pastDueSince, subscriptionId: account.subscriptionId, spendCapUsd: account.spendCapUsd, plan: account.plan, contract: account.contract };
+  const facts = { status: account.status, seats: account.seats, trialEndsAt: account.trialEndsAt, pastDueSince: account.pastDueSince, subscriptionId: account.subscriptionId, spendCapUsd: account.spendCapUsd, plan: account.plan, contract: account.contract, contractGroupId: account.contractGroupId };
   const decision = await decide(ctx, a.organizationId, facts, spent(usage), now);
   const organization = await ctx.db.get(a.organizationId);
   const admin = ["owner", "admin"].includes(member.role), referrals = admin && referralConfig().enabled;
   // A subscription with neither recorded yet (from before they were) counts as having one: Checkout always collects a card.
   const cards = [account.subscriptionPaymentMethod, account.customerPaymentMethod], hasPaymentMethod = cards.includes(true) || (Boolean(account.subscriptionId) && cards.every((c) => c === undefined));
-  return { enabled: true as const, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, planName: decision.plan === "disabled" ? null : planCatalog[decision.plan].name, legacy: Boolean(account.legacy && decision.plan === "starter"), entitlements: planEntitlements(decision.plan, account.legacy), allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: usage?.usedMicros ?? 0, reserved: usage?.reservedMicros ?? 0, overage: usage?.overageMicros ?? 0, capUsd: account.spendCapUsd ?? 0, resetsAt: nextPeriodStart(now), reviews: usage?.reviews ?? 0, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: paidTrialEndsAt(account, now), trialStarted: Boolean(account.customerId), trialDays: config.trialDays, freeUsageMicros: config.freeUsageMicros, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, usagePerSeatMicros: config.usagePerSeatMicros, proUsagePerSeatMicros: config.proUsagePerSeatMicros, hasCustomer: Boolean(account.customerId), hasPaymentMethod, freePlan: keepsFree(organization), fixes: { used: usage?.fixes ?? 0, limit: fixRunLimit(decision, account.seats, config) }, starterFixesPerSeat: config.starterFixesPerSeat, proFixesPerSeat: config.proFixesPerSeat, reviewsLeft: reviewsLeft(decision.limit, (usage?.usedMicros ?? 0) + (usage?.reservedMicros ?? 0), (await ctx.db.query("usageEvents").withIndex("by_org_time", (q) => q.eq("organizationId", a.organizationId).gt("createdAt", now - 30 * 86400000)).order("desc").take(2000)).filter((e) => e.kind === "review")) };
+  // Enterprise: the contract's terms, and who counted this month. Prices and the list of people are for admins.
+  const group = await contractGroup(ctx, a.organizationId, account), pooled = await othersUsed(ctx, group, a.organizationId, periodKey(now), false);
+  const contract = decision.plan === "enterprise" ? (group?.account ?? account).contract : undefined, rows = !contract ? [] : group ? await groupContributorRows(ctx, group.organizationIds, periodKey(now)) : await contributorRows(ctx, a.organizationId, periodKey(now));
+  const enterprise = contract ? { mode: contract.mode, startsAt: contract.startsAt, endsAt: contract.endsAt, committed: contract.committedContributors, minimum: contract.minimumContributors, includedUsagePerContributorUsd: contract.includedUsagePerContributorUsd, netDays: contract.netDays, graceDays: contract.graceDays, renewed: Boolean((group?.account ?? account).nextContract?.stripe?.scheduleId), workspaces: group?.organizationIds.length ?? 1, billedHere: !group || group.billedId === a.organizationId, supportTier: contract.supportTier ?? null, active: rows.filter((r) => !r.bot).length,
+    priceCents: admin ? contract.contributorPriceCents : null, contributors: admin ? rows.map((r) => ({ key: r.key, login: r.login, provider: r.provider, firstAt: r.firstAt, billed: !r.bot })).sort((x, y) => Number(y.billed) - Number(x.billed) || x.login.localeCompare(y.login)) : null } : null;
+  return { enabled: true as const, enterprise, planRequired: Boolean(organization?.planRequired), planSelected: Boolean(organization?.planSelectedAt), planMissing: Boolean(organization?.planRequired && !organization.planSelectedAt), admin, referral: referrals ? await referralStatus(ctx, user._id, member.role, a.organizationId) : null, referralCredit: referrals ? await referralCredit(ctx, a.organizationId) : null, status: account.status, plan: decision.plan, planName: decision.plan === "disabled" ? null : planCatalog[decision.plan].name, legacy: Boolean(account.legacy && decision.plan === "starter"), entitlements: planEntitlements(decision.plan, account.legacy), allowed: decision.allowed, reason: decision.reason ?? null, limit: decision.limit, used: (usage?.usedMicros ?? 0) + pooled, reserved: usage?.reservedMicros ?? 0, overage: usage?.overageMicros ?? 0, capUsd: account.spendCapUsd ?? 0, resetsAt: nextPeriodStart(now), reviews: usage?.reviews ?? 0, blocked: usage?.blocked ?? 0, activeSeats: seatCount(await members(ctx, a.organizationId)), billedSeats: account.subscriptionId ? account.seats : null, trialEndsAt: paidTrialEndsAt(account, now), trialStarted: Boolean(account.customerId), trialDays: config.trialDays, freeUsageMicros: config.freeUsageMicros, currentPeriodEnd: account.currentPeriodEnd ?? null, pastDueSince: account.pastDueSince ?? null, graceDays: config.graceDays, usagePerSeatMicros: config.usagePerSeatMicros, proUsagePerSeatMicros: config.proUsagePerSeatMicros, hasCustomer: Boolean(account.customerId), hasPaymentMethod, freePlan: keepsFree(organization), fixes: { used: usage?.fixes ?? 0, limit: fixRunLimit(decision, account.seats, config) }, starterFixesPerSeat: config.starterFixesPerSeat, proFixesPerSeat: config.proFixesPerSeat, reviewsLeft: reviewsLeft(decision.limit, (usage?.usedMicros ?? 0) + (usage?.reservedMicros ?? 0), (await ctx.db.query("usageEvents").withIndex("by_org_time", (q) => q.eq("organizationId", a.organizationId).gt("createdAt", now - 30 * 86400000)).order("desc").take(2000)).filter((e) => e.kind === "review")) };
 } });
 
 export const checkoutContext = internalQuery({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
   const { user } = await authorize(ctx, a.token, a.organizationId, true);
   if (!billingConfig().enabled) throw new Error("Billing is disabled on this deployment");
   const account = await accountOf(ctx, a.organizationId);
-  return { userId: user._id, customerId: account?.customerId ?? null, signupCustomerId: (await ctx.db.get(a.organizationId))?.stripeCustomerId ?? null, subscriptionId: account?.subscriptionId ?? null, subscriptionItemId: account?.subscriptionItemId ?? null, plan: account?.plan === "pro" ? "pro" as const : "starter" as const, contract: Boolean(account?.contract), status: account?.status ?? "trial", trialEndsAt: paidTrialEndsAt(account, Date.now()), seats: Math.max(1, seatCount(await members(ctx, a.organizationId))) };
+  return { userId: user._id, customerId: account?.customerId ?? null, signupCustomerId: (await ctx.db.get(a.organizationId))?.stripeCustomerId ?? null, subscriptionId: account?.subscriptionId ?? null, subscriptionItemId: account?.subscriptionItemId ?? null, plan: account?.plan === "pro" ? "pro" as const : "starter" as const, contract: Boolean(account?.contract || account?.contractGroupId), enterprise: account?.plan === "enterprise", status: account?.status ?? "trial", trialEndsAt: paidTrialEndsAt(account, Date.now()), seats: Math.max(1, seatCount(await members(ctx, a.organizationId))) };
 } });
 // The webhook records the new plan from the seat price; this only audits who asked for it.
 export const auditPlanChange = internalMutation({ args: { organizationId: v.id("organizations"), userId: v.id("users"), plan: v.union(v.literal("starter"), v.literal("pro")) }, handler: (ctx, a) => audit(ctx, a.organizationId, a.userId, "billing.plan_change_requested", a.plan) });

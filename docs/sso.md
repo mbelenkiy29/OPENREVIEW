@@ -39,3 +39,24 @@ People sign in from the landing page with **Use single sign-on**. Their email do
   - For OIDC, it must also not be marked `email_verified: false`.
   - An IdP therefore cannot take over accounts at other domains.
 - **Changing the identity provider** (protocol, SAML sign-in URL, signing certificate or entity ID, OIDC issuer or client ID) unverifies every domain with a new TXT token, turns the SSO requirement off and forgets every SSO sign-in made through the old IdP (people sign in again and relink by verified email). SSO sign-in pauses until a domain is verified again, so an admin cannot point the connection at an IdP they control and sign in as existing users. Rotating the OIDC client secret is not an IdP change and keeps domains, enforcement and SSO sign-ins. Rotating the SAML signing certificate is an IdP change, because its key can sign any assertion, so it requires re-verifying every domain's DNS record: plan certificate rollovers for that.
+
+## SCIM provisioning (Enterprise)
+
+With SCIM your identity provider creates, deactivates and groups people, and the workspace's members follow. It is on the Enterprise plan (`auth.scim`) and on self-hosted installs.
+
+**Set it up:** a workspace admin opens Organization Settings → Organization → SCIM provisioning and creates a token. It is shown once and stored only as a hash. Give the identity provider:
+- **Base URL:** `https://<your OpenReview host>/api/scim/v2`
+- **Authentication:** the token as a bearer token.
+
+**What is supported:** SCIM 2.0 `/Users` and `/Groups`: list (with `userName eq "…"` or `displayName eq "…"` and paging), read, create, replace, patch and delete. Attributes OpenReview does not use are ignored. There is no `/Bulk`, `/Schemas` or `/ServiceProviderConfig` endpoint.
+
+**How people are matched:** `userName` must be the person's email address. Someone who already has an OpenReview account with that verified email becomes a member at once. Someone who does not joins at their first SSO sign-in.
+
+**Rules:**
+- **Deactivating or deleting a user** removes them from the workspace and signs them out everywhere, and revokes their API keys for the workspace.
+- **Groups and roles:** an admin maps a provisioned group to Admin, Member or Viewer. Someone in several mapped groups gets the role with the most access. Once any group is mapped, someone in none of the mapped groups is a Member.
+- **Owners:** SCIM never makes anyone an owner and never changes an owner's role. The last owner cannot be deprovisioned (the request gets `409`).
+- **Billing:** Enterprise bills active contributors, counted from pull requests, so provisioning never changes an invoice.
+- **Limits:** 600 requests a minute per workspace; past that the answer is `429`.
+
+Not tested against a live identity provider yet. The request shapes follow RFC 7643 and 7644, including Microsoft Entra ID's string booleans (`"False"`).

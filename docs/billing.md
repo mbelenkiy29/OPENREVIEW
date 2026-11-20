@@ -116,6 +116,23 @@ Enterprise is sold by contract, not through Checkout. It bills **active contribu
 
 **Renewal and end of term:** 60 and 30 days before a contract ends, the workspace's owners and the operators get one email each, unless a renewal is signed. To renew, use the same form for that workspace: it creates the next year's contract, which must start the day the term ends, with its own prices. Without a renewal the subscription cancels at the end of the term and the workspace is left as after a cancelled Pro subscription. The term's last month of contributors is reported at 23:30 UTC on its last day, before the subscription ends.
 
+**What customers see:** Organization Settings → Billing & Usage shows the contract term, this month's active contributors against the commitment, and the included usage (or "Your own model key, nothing metered"). Admins also see the price and the list of contributors, with bots marked not billed. There is no Checkout, plan switch or seat count. The billing portal opens with `STRIPE_ENTERPRISE_PORTAL_CONFIGURATION_ID` when it is set: create that portal configuration in Stripe with invoices and payment details on, and cancellation and plan switching off.
+
+**Pricing page:** the Enterprise card shows only when `BILLING_ENTERPRISE_CONTACT_URL` is set on the web app (a `mailto:` or `https:` link). `BILLING_ENTERPRISE_PRICE_LABEL` is its price text, for example "From $22 per active contributor".
+
+**Enterprise-only features:**
+- **SCIM provisioning** (`auth.scim`): see [SSO → SCIM provisioning](sso.md#scim-provisioning-enterprise).
+- **Audit log export** (`audit.export`): Organization Settings → Audit has an export of any date range as CSV or JSON. Audit events are kept forever unless the contract sets a retention period.
+- **Retention terms:** a contract can set the shortest and longest review and transcript retention a workspace may choose, and how long audit events are kept. The settings form follows those bounds, and the daily sweep applies them even to a setting saved earlier.
+- **Support tier:** a line of text on the contract, shown to the customer in Billing & Usage. See [support and service levels](sla.md).
+- **One contract across several workspaces:** on the Operator page, a workspace without its own subscription can be billed under another workspace's contract. A person active in several of them counts once, included usage is one pool, and extra usage is billed to the workspace that holds the contract. Taking a workspace out returns it to its own plan.
+
+**Own cloud account** (Own-key mode, and any plan with its own model key): besides Anthropic, OpenAI and OpenRouter keys, a workspace can run on its own AWS Bedrock, Azure OpenAI or Google Vertex AI account (Organization Settings → API Keys → Model provider key). All three are called in the OpenAI Chat Completions format, and none of those calls is metered.
+- **AWS Bedrock:** a Bedrock API key and a region. Calls go to `https://bedrock-runtime.<region>.amazonaws.com/openai/v1`. Only models whose model card lists the OpenAI Chat Completions API work there; AWS's docs do not say that Anthropic models do. ([AWS docs](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-chat-completions.html))
+- **Azure OpenAI:** the resource's key and name, with the deployment name as the model. Calls go to `https://<resource>.openai.azure.com/openai/v1` with an `api-key` header. ([Microsoft docs](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/api-version-lifecycle))
+- **Google Vertex AI:** a service account key file (JSON), a project ID and a location (default `global`), with a model such as `google/gemini-3.5-flash`. OpenReview exchanges the key for a one-hour access token for each job. ([Google docs](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/openai))
+- These three have been tested against recorded request shapes only, never against a real cloud account. Structured JSON output is not requested from them, so replies are checked by the app as for any OpenAI-compatible endpoint.
+
 **Stripe setup (once):**
 1. Create the product, the contributors meter and the shared overage price, and set the four settings above on Convex.
 2. In Billing settings, leave a past-due invoiced subscription **past due**. The contract's grace days decide when reviews pause.

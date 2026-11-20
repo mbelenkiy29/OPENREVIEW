@@ -132,6 +132,7 @@ import type * as ruleAssistantJobs from "../ruleAssistantJobs.js";
 import type * as runtime from "../runtime.js";
 import type * as runtimeJobs from "../runtimeJobs.js";
 import type * as scm from "../scm.js";
+import type * as scim from "../scim.js";
 import type * as scopes from "../scopes.js";
 import type * as searchData from "../searchData.js";
 import type * as searchJobs from "../searchJobs.js";
@@ -278,6 +279,7 @@ declare const fullApi: ApiFromModules<{
   runtime: typeof runtime;
   runtimeJobs: typeof runtimeJobs;
   scm: typeof scm;
+  scim: typeof scim;
   scopes: typeof scopes;
   searchData: typeof searchData;
   searchJobs: typeof searchJobs;

@@ -24,6 +24,8 @@ type Configuration = {
   taskModels?: Record<string, string>;
   // A workspace's own key: the operator's LLM_MODEL_<TASK> routing names models for another provider.
   workspaceKey?: true;
+  // The header that carries the key on an OpenAI-format endpoint that does not use a bearer token (Azure: "api-key").
+  keyHeader?: string;
 };
 // Defaults when LLM_PROVIDER=anthropic and no model is configured (IDs checked 2026-10-14 against
 // platform.claude.com/docs/en/about-claude/models/overview).
@@ -177,7 +179,7 @@ export class HttpModel implements ModelProvider {
               "x-api-key": this.config.apiKey,
               "anthropic-version": "2023-06-01",
             }
-          : { authorization: `Bearer ${this.config.apiKey}` }),
+          : this.config.keyHeader ? { [this.config.keyHeader]: this.config.apiKey } : { authorization: `Bearer ${this.config.apiKey}` }),
       },
       body: JSON.stringify(body),
       signal: AbortSignal.any([

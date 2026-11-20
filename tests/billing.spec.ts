@@ -7,7 +7,7 @@ import {api,internal} from '../convex/_generated/api';
 import type {Id} from '../convex/_generated/dataModel';
 import {STALE_RESERVATION_MS} from '../convex/inferenceBudget';
 import {choosePlanMessage,fixAllowance,releaseFix} from '../convex/billing';
-import {entitlements,upgradeNote} from '../src/plans';
+import {proEntitlements,upgradeNote} from '../src/plans';
 import {paidPlanReason} from '../src/billing';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='billing-session-secret-at-least-32-characters',whsec='whsec_billing_fixture';
@@ -182,7 +182,7 @@ test('signed Stripe webhooks link the workspace, apply once, and ignore replays 
  expect(await deep()).toBe(false);
  const proItem=(id:string,price:string,at:number)=>({id,type:'customer.subscription.updated',created:at,data:{object:{id:'sub_1',customer:'cus_1',status:'active',metadata:{organizationId:org},items:{data:[{id:'si_1',quantity:3,current_period_end:at+30*86400,price:{id:price}}]}}}});
  await deliver(t,proItem('evt_pro','price_pro',created+25));
- expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'pro',planName:'Pro',limit:3*20000,entitlements:[...entitlements]});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'pro',planName:'Pro',limit:3*20000,entitlements:[...proEntitlements]});
  expect(await deep()).toBe(true);
  // An unknown price keeps the plan.
  await deliver(t,proItem('evt_unknown_price','price_other',created+26));
@@ -464,7 +464,7 @@ test('subscriptions from before plans keep every Pro feature while they stay on 
  expect(await t.mutation(internal.billing.grandfatherSubscriptions,{confirm:'grandfather-pre-plan-subscriptions'})).toBe(1);
  expect(await t.mutation(internal.billing.grandfatherSubscriptions,{confirm:'grandfather-pre-plan-subscriptions'})).toBe(0);
  expect([await deep(org),await deep(other),await deep(lapsed)]).toEqual([true,true,false]);
- expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'starter',legacy:true,entitlements:[...entitlements]});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'starter',legacy:true,entitlements:[...proEntitlements]});
  // Renewals keep it; cancelling ends it.
  await deliver(t,subscription('evt_renew','customer.subscription.updated','active',1,Math.floor(Date.now()/1000),org));
  expect(await deep(org)).toBe(true);

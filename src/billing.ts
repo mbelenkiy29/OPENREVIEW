@@ -30,9 +30,13 @@ export type BillingContract = {
   netDays: number; graceDays: number; nonBillableAuthors: string[];
   stripe?: { productId?: string; commitPriceId?: string; contributorPriceId?: string; usagePriceId?: string; scheduleId?: string };
   notes?: string; remindersSent?: number[];
+  supportTier?: string; retention?: { minDays?: number; maxDays?: number; auditDays?: number };
 };
+/** The bounds a workspace's review and transcript retention settings must stay in: 7 to 3,650 days unless its
+ *  Enterprise contract says otherwise. With a contract maximum, "unlimited" is not allowed. */
+export const retentionBounds = (contract?: Pick<BillingContract, "retention"> | null) => ({ min: contract?.retention?.minDays ?? 7, max: contract?.retention?.maxDays ?? 3650, unlimited: contract?.retention?.maxDays === undefined });
 /** What an operator enters for a contract (convex/enterprise.ts); the rest of BillingContract is derived. */
-export type ContractTerms = Pick<BillingContract, "mode" | "startsAt" | "committedContributors" | "contributorPriceCents" | "includedUsagePerContributorUsd" | "overageMultiplier" | "netDays" | "graceDays" | "nonBillableAuthors" | "notes"> & { usagePriceId?: string };
+export type ContractTerms = Pick<BillingContract, "mode" | "startsAt" | "committedContributors" | "contributorPriceCents" | "includedUsagePerContributorUsd" | "overageMultiplier" | "netDays" | "graceDays" | "nonBillableAuthors" | "notes" | "supportTier" | "retention"> & { usagePriceId?: string };
 const whole = (n: number, min: number, max: number) => Number.isInteger(n) && n >= min && n <= max;
 /** Why contract terms are refused, or null when they can be saved. */
 export function contractTermsError(t: ContractTerms, config: BillingConfig): string | null {
@@ -46,6 +50,9 @@ export function contractTermsError(t: ContractTerms, config: BillingConfig): str
   if (t.usagePriceId !== undefined && !/^price_[A-Za-z0-9]{1,250}$/.test(t.usagePriceId)) return "The custom overage price must be a Stripe price ID (price_…)";
   if (t.nonBillableAuthors.length > 100 || t.nonBillableAuthors.some((a) => !a.trim() || a.length > 100)) return "List at most 100 non-billable authors, each up to 100 characters";
   if ((t.notes?.length ?? 0) > 2000) return "Notes are limited to 2,000 characters";
+  if ((t.supportTier?.length ?? 0) > 60) return "The support tier is limited to 60 characters";
+  const r = t.retention, days = [r?.minDays, r?.maxDays, r?.auditDays].filter((n): n is number => n !== undefined);
+  if (days.some((n) => !whole(n, 1, 3650)) || (r?.minDays !== undefined && r.maxDays !== undefined && r.minDays > r.maxDays)) return "Retention terms are whole days from 1 to 3,650, with the minimum no higher than the maximum";
   return null;
 }
 /** When a contract starting at `startsAt` ends: the same day a year later. */
@@ -55,7 +62,7 @@ export const contractEnd = (startsAt: number) => { const d = new Date(startsAt);
 export const contractPreview = (t: Pick<ContractTerms, "mode" | "committedContributors" | "contributorPriceCents" | "includedUsagePerContributorUsd">) => ({
   firstInvoiceCents: t.committedContributors * t.contributorPriceCents * 12, perExtraContributorCents: t.contributorPriceCents,
   includedUsageUsd: t.mode === "ownKey" ? 0 : t.committedContributors * t.includedUsagePerContributorUsd });
-export type BillingAccount = { status: string; seats: number; trialEndsAt: number; pastDueSince?: number; subscriptionId?: string; spendCapUsd?: number; plan?: string; contract?: BillingContract };
+export type BillingAccount = { status: string; seats: number; trialEndsAt: number; pastDueSince?: number; subscriptionId?: string; spendCapUsd?: number; plan?: string; contract?: BillingContract; contractGroupId?: string };
 // limit, used and capMicros are micro-dollars; overage is true when this request runs past the included usage.
 // units is the billed contributors of an Enterprise contract (the higher of committed and active); absent on seat plans.
 export type BillingDecision = { allowed: boolean; plan: "disabled" | Plan; limit: number | null; used: number; capMicros: number; overage: boolean; reason?: string; units?: number };
