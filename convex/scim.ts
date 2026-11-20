@@ -63,8 +63,10 @@ async function users(ctx: MutationCtx, org: Id<"organizations">, a: { method: st
     const renamed = Boolean(input.userName && input.userName !== row.userName);
     if (renamed && row.userId && row.active) await sync(ctx, { ...row, active: false });
     const next = { ...row, ...(input.userName ? { userName: input.userName } : {}), ...(input.externalId ? { externalId: input.externalId } : {}), ...(input.displayName ? { displayName: input.displayName } : {}), ...(input.active === undefined ? {} : { active: input.active }), ...(renamed ? { userId: undefined } : {}), updatedAt: Date.now() };
-    await ctx.db.patch(row._id, { userName: next.userName, externalId: next.externalId, displayName: next.displayName, active: next.active, userId: next.userId, updatedAt: next.updatedAt });
+    // Membership first: a refused last-owner deprovision must not leave the SCIM row inactive.
     await sync(ctx, next);
+    const userId = (await ctx.db.get(row._id))?.userId ?? next.userId;
+    await ctx.db.patch(row._id, { userName: next.userName, externalId: next.externalId, displayName: next.displayName, active: next.active, userId, updatedAt: next.updatedAt });
     return { status: 200, body: userResource(next, base) };
   };
   if (a.method === "GET" && !a.id) {
