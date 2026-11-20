@@ -45,6 +45,9 @@ test("the widget loads on the public board and the dashboard, not on every publi
   assert.equal(userJotNeeded("/feedback/roadmap"), true);
   assert.equal(userJotNeeded("/dashboard"), true);
   assert.equal(userJotNeeded("/dashboard/settings"), true);
+  assert.equal(userJotNeeded("/dashboard/onboarding"), false);
+  assert.equal(userJotNeeded("/dashboard/onboarding/plan"), false);
+  assert.equal(userJotNeeded("/dashboard/onboarding/connect"), false);
   assert.equal(userJotNeeded("/"), false);
   assert.equal(userJotNeeded("/docs/quickstart"), false);
   assert.equal(userJotNeeded("/login"), false);

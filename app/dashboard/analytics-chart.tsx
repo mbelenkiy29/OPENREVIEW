@@ -8,7 +8,7 @@ import { Icon, type IconName } from "../ui/icons";
 // summary, the plot, then a leaderboard. Bars stack their series; lines can show a dashed average.
 // Hovering or arrowing through the plot shows a tooltip over a full-height band; a hidden table carries
 // every value for screen readers.
-export type ChartView = { label: string; kind: "bar" | "line"; series: { label: string; values: (number | null)[] }[]; unit?: "" | "%" | "h" | "$"; average?: boolean; yTitle: string };
+export type ChartView = { label: string; kind: "bar" | "line"; series: { label: string; values: (number | null)[] }[]; unit?: "" | "%" | "h" | "$"; average?: boolean; yTitle: string; empty?: string };
 const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 const format = (v: number, unit = "") => unit === "$" ? `$${v.toFixed(v > 0 && v < 10 ? 2 : 0)}` : `${Number(v.toFixed(unit === "%" ? 0 : 1))}${unit}`;
 const day = (label: string) => [String(Number(label.slice(8))), months[Number(label.slice(5, 7)) - 1]] as const;
@@ -29,8 +29,10 @@ function Plot({ title, labels, view, wide }: { title: string; labels: string[]; 
   const [active, setActive] = useState<number | null>(null), [focused, setFocused] = useState(false);
   const n = labels.length, unit = view.unit ?? "", stacked = view.kind === "bar";
   const totals = labels.map((_, i) => stacked ? view.series.reduce((sum, s) => sum + (s.values[i] ?? 0), 0) : Math.max(0, ...view.series.map((s) => s.values[i] ?? 0)));
-  // Rates run 0–100%; counts keep a 0–2 axis at least (Greptile's half steps), so an empty chart still has one.
-  const peak = Math.max(0, ...totals), ticks = niceTicks(unit === "%" ? Math.max(peak, 100) : peak && unit ? peak : Math.max(peak, 2)), top = ticks.at(-1)!;
+  // Rates run 0–100%. Count charts use integer ticks from 0 so all-zero data never shows 0.5–2.
+  const peak = Math.max(0, ...totals), counts = unit === "";
+  const empty = counts && view.series.every((s) => s.values.every((v) => v == null || v === 0));
+  const ticks = niceTicks(unit === "%" ? Math.max(peak, 100) : empty ? 1 : peak || (unit ? 1 : 1), 4, counts), top = ticks.at(-1)!;
   const y = (v: number) => `${(Math.max(0, v) / top) * 100}%`, x = (i: number) => `${((i + 0.5) / n) * 100}%`;
   const known = view.series[0]?.values.filter((v): v is number => v !== null) ?? [];
   const average = view.average ? known.reduce((sum, v) => sum + v, 0) / (known.length || 1) : null;
@@ -51,7 +53,8 @@ function Plot({ title, labels, view, wide }: { title: string; labels: string[]; 
       onFocus={() => { setFocused(true); setActive((a) => a ?? n - 1); }} onBlur={() => { setFocused(false); setActive(null); }}>
       {active !== null && <i className="chart-band" style={{ left: `${(active / n) * 100}%`, width: `${100 / n}%` }} />}
       {ticks.map((t) => (average !== 0 || t > 0) && <i key={t} className="chart-gridline" style={{ bottom: y(t) }} />)}
-      {stacked ? <div className="chart-bars" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}>{totals.map((t, i) => <span key={i} className="chart-bar" style={{ height: y(t) }}>{view.series.map((s, si) => s.values[i] ? <i key={si} className={`s${si}`} style={{ flexGrow: s.values[i]! }} /> : null)}</span>)}</div>
+      {empty ? <p className="chart-empty">{view.empty ?? "No reviews yet"}</p>
+        : stacked ? <div className="chart-bars" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}>{totals.map((t, i) => <span key={i} className="chart-bar" style={{ height: y(t) }}>{view.series.map((s, si) => s.values[i] ? <i key={si} className={`s${si}`} style={{ flexGrow: s.values[i]! }} /> : null)}</span>)}</div>
         : <svg className="chart-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{view.series.map((s, si) => segments(s.values.map((v, i) => v === null ? null : `${((i + 0.5) / n) * 100},${100 - (Math.max(0, v) / top) * 100}`)).map((points, j) => <polyline key={`${si}-${j}`} className={`s${si}`} points={points} vectorEffect="non-scaling-stroke" />))}</svg>}
       {!stacked && view.series.map((s, si) => s.values.map((v, i) => v !== null && (i === active || ((s.values[i - 1] ?? null) === null && (s.values[i + 1] ?? null) === null)) ? <i key={`${si}-${i}`} className={`chart-dot s${si}`} style={{ left: x(i), bottom: y(v) }} /> : null))}
       {average !== null && <><i className="chart-average" style={{ bottom: y(average) }} /><span className="chart-average-label" style={{ bottom: y(average) }}>Average</span></>}

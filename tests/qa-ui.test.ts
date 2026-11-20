@@ -29,3 +29,21 @@ test("narrow public tables keep a thin visible scrollbar when they still overflo
   assert.match(mobile, /\.docs-content \.table-scroll \{\n\s*scrollbar-width: thin;/);
   assert.match(mobile, /\.docs-content \.table-scroll::-webkit-scrollbar \{\n\s*display: block;/);
 });
+
+test("onboarding keeps the referral field and step label clear of the sticky bar and UserJot launcher", () => {
+  assert.match(css, /\.wizard-referral \{\n\s*scroll-margin-bottom: 96px;/);
+  assert.match(css, /scroll-margin-bottom: 180px;/);
+  assert.match(css, /body:has\(\.wizard\) :is\(\[id\*="userjot" i\], \[class\*="userjot" i\], iframe\[src\*="userjot"\]\):not\(\[data-userjot-embed\]\)/);
+  const desktop = css.slice(css.indexOf("/* Wide screens: the bar stays put"));
+  assert.match(desktop.slice(0, desktop.indexOf("\n}\n\n")), /\.wizard \.wizard-bar \{\n\s*position: relative;/);
+  assert.match(desktop, /padding-bottom: 96px;/);
+  const phone = css.slice(css.lastIndexOf("@media (max-width: 520px)"));
+  assert.match(phone, /\.wizard \.wizard-position \{\n\s*justify-self: start;/);
+  assert.match(phone, /white-space: normal;/);
+});
+
+test("empty analytics charts and custom context tables have dedicated empty styles", () => {
+  assert.match(css, /\.chart-empty \{/);
+  assert.match(css, /\.ctx-empty-page \.empty-state \{/);
+  assert.match(css, /\.trial-banner \.button\.optional \{/);
+});

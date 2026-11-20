@@ -50,5 +50,5 @@ export function ReadOnlyNote({ admin }: { admin: boolean }) {
 }
 /** Optional on the plan step: HTML required would draw the red asterisk. Empty submit is a no-op. */
 export function ReferralCodeField({ organizationId, defaultCode, disclosure }: { organizationId: string; defaultCode?: string; disclosure: string }) {
-  return <><form action={applyReferralCode} className="form-grid"><input type="hidden" name="organizationId" value={organizationId} /><label>Referral code <span className="muted">(optional)</span><input name="code" defaultValue={defaultCode ?? ""} maxLength={64} autoComplete="off" spellCheck={false} /></label><button>Apply code</button></form><p className="muted">{disclosure}</p></>;
+  return <><form action={applyReferralCode} className="form-grid wizard-referral"><input type="hidden" name="organizationId" value={organizationId} /><label>Referral code <span className="muted">(optional)</span><input name="code" defaultValue={defaultCode ?? ""} maxLength={64} autoComplete="off" spellCheck={false} /></label><button>Apply code</button></form><p className="muted">{disclosure}</p></>;
 }

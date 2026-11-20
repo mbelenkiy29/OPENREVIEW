@@ -34,6 +34,7 @@ test("the plan step's referral field is optional and is not marked required", ()
   const html = renderToStaticMarkup(ReferralCodeField({ organizationId: "org1", disclosure: "Codes are optional." }));
   expect(html).toContain("(optional)");
   expect(html).toContain("Codes are optional.");
+  expect(html).toContain("wizard-referral");
   expect(html).not.toMatch(/\srequired(=""|>)/);
   expect(html).not.toMatch(/<input[^>]*name="code"[^>]*required/);
 });

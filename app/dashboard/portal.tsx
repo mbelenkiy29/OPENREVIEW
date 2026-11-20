@@ -14,7 +14,7 @@ import { referralConfig } from "../../src/referrals";
 
 // The app chrome, rendered once by the portal layout and kept mounted across navigations: Greptile's
 // trial banner, identity row (organization menu, icon buttons, account menu) and the eight tabs.
-export function PortalNav({ login, avatar, email, role, organizationId, name, organizations, teams, savedTeam, trialDaysLeft, trialCharge, usage, billingPortal, operator, dismissedAnnouncements }: { login: string; avatar?: string; email?: string; role: string; organizationId: string; name: string; organizations: { _id: string; name: string }[]; teams: { _id: string; name: string }[]; savedTeam?: string; trialDaysLeft?: number; trialCharge?: { plan: string; date: string }; usage?: { text: string; admin: boolean; free: boolean }; billingPortal?: boolean; operator?: boolean; dismissedAnnouncements: string[] }) {
+export function PortalNav({ login, avatar, email, role, organizationId, name, organizations, teams, savedTeam, trialDaysLeft, trialEndsOn, trialCharge, usage, billingPortal, operator, dismissedAnnouncements }: { login: string; avatar?: string; email?: string; role: string; organizationId: string; name: string; organizations: { _id: string; name: string }[]; teams: { _id: string; name: string }[]; savedTeam?: string; trialDaysLeft?: number; trialEndsOn?: string; trialCharge?: { plan: string; date: string }; usage?: { text: string; admin: boolean; free: boolean }; billingPortal?: boolean; operator?: boolean; dismissedAnnouncements: string[] }) {
   const feedback = Boolean(userJotConfig()), referrals = referralConfig().enabled;
   // The provider's avatar, at most 45px: next/image would need every avatar host allow-listed for no gain.
   // eslint-disable-next-line @next/next/no-img-element
@@ -29,9 +29,9 @@ export function PortalNav({ login, avatar, email, role, organizationId, name, or
     {!usage && trialDaysLeft !== undefined && trialCharge && <div className="trial-banner"><span>Your {trialCharge.plan} trial ends in {trialDaysLeft} {trialDaysLeft === 1 ? "day" : "days"}; your card will be charged on {trialCharge.date}.</span>
       {billingPortal ? <form action={openBillingPortal}><input type="hidden" name="organizationId" value={organizationId} /><button className="button small">Manage billing</button></form>
         : <Link className="button small" href="/dashboard/organization/billing">Billing</Link>}</div>}
-    {!usage && trialDaysLeft !== undefined && !trialCharge && <div className="trial-banner"><span>{trialDaysLeft} {trialDaysLeft === 1 ? "day" : "days"} left in your free trial!</span>
-      {billingPortal ? <form action={openBillingPortal}><input type="hidden" name="organizationId" value={organizationId} /><button className="button small"><Icon name="plus" />Add Payment Method</button></form>
-        : <Link className="button small" href="/dashboard/organization/billing#payment-heading"><Icon name="plus" />Add Payment Method</Link>}</div>}
+    {!usage && trialDaysLeft !== undefined && !trialCharge && <div className="trial-banner"><span>{trialEndsOn ? `Your trial runs until ${trialEndsOn}. Add a card anytime to keep reviewing after it ends.` : `${trialDaysLeft} ${trialDaysLeft === 1 ? "day" : "days"} left in your free trial. Add a card anytime to keep reviewing after it ends.`}</span>
+      {billingPortal ? <form action={openBillingPortal}><input type="hidden" name="organizationId" value={organizationId} /><button className="button small optional"><Icon name="plus" />Add a card</button></form>
+        : <Link className="button small optional" href="/dashboard/organization/billing#payment-heading"><Icon name="plus" />Add a card</Link>}</div>}
     <div className="portal-identity">
       <IdentityLeft><Link className="brand" href="/dashboard" aria-label="OpenReview home"><Mark /></Link><WorkspaceMenu organizationId={organizationId} name={name} role={role} organizations={organizations} teams={teams} savedTeam={savedTeam} /></IdentityLeft>
       <div className="header-actions">

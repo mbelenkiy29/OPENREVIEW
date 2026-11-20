@@ -1237,6 +1237,13 @@ tr:last-child td {
 [data-userjot] .wizard-bar {
   padding-right: 76px;
 }
+/* Guided setup: hide the launcher so it cannot cover Logout, Back, or the step label. */
+body:has(.wizard) :is([id*="userjot" i], [class*="userjot" i], iframe[src*="userjot"]):not([data-userjot-embed]) {
+  display: none !important;
+}
+html[data-userjot]:has(.wizard) .wizard-bar {
+  padding-right: 16px;
+}
 @media (max-width: 460px) {
   [data-userjot] .consent {
     bottom: 72px;
@@ -4346,6 +4353,20 @@ input.switch:checked::before {
   height: auto;
   overflow: visible;
 }
+.wizard-stage-title {
+  position: absolute;
+  top: 20px;
+  right: 16px;
+  left: 16px;
+  z-index: 1;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-align: center;
+  text-transform: uppercase;
+  color: var(--text);
+}
 .wizard-caption {
   position: absolute;
   right: 16px;
@@ -4358,6 +4379,19 @@ input.switch:checked::before {
   text-align: center;
   text-transform: uppercase;
   color: var(--muted);
+}
+.wizard-referral {
+  scroll-margin-bottom: 96px;
+}
+@media (max-width: 900px) {
+  .wizard-referral {
+    scroll-margin-bottom: 140px;
+  }
+}
+@media (max-width: 520px) {
+  .wizard-referral {
+    scroll-margin-bottom: 180px;
+  }
 }
 .art-dot {
   fill: var(--line-strong);
@@ -5377,6 +5411,12 @@ input.switch:checked::before {
   --button-hover: color-mix(in srgb, var(--on-primary) 88%, var(--primary));
   color: var(--primary);
   font-weight: 400;
+}
+.trial-banner .button.optional {
+  --button-bg: transparent;
+  --button-line: color-mix(in srgb, var(--on-primary) 55%, transparent);
+  --button-hover: color-mix(in srgb, var(--on-primary) 16%, transparent);
+  color: var(--on-primary);
 }
 .portal .portal-identity {
   height: 49px;
@@ -6780,6 +6820,16 @@ dialog.modal::backdrop {
   grid-column: 3;
   outline-offset: 6px;
   touch-action: pan-y;
+}
+.chart-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
 }
 .chart-area > i,
 .chart-area > span {
@@ -9263,6 +9313,11 @@ a.name-link:hover {
   color: var(--text);
   text-align: center;
   white-space: normal;
+}
+.ctx-empty-page .empty-state {
+  padding: 48px 24px;
+  border: 1px dashed var(--line);
+  background: var(--surface);
 }
 .ctx-table tr.ctx-detail > td {
   padding: 0;
@@ -12489,6 +12544,13 @@ form.chat-delete {
   .wizard .wizard-body:not(.centered) > .wizard-panel,
   .wizard .wizard-body.centered {
     overflow-y: auto;
+    scroll-padding-bottom: 24px;
+  }
+  .wizard .wizard-body:not(.centered) > .wizard-panel {
+    padding-bottom: 96px;
+  }
+  .wizard .wizard-bar {
+    position: relative;
   }
   .wizard .wizard-body.centered {
     place-items: start center;
@@ -13286,6 +13348,10 @@ form.chat-delete {
 .wizard :is(.art-node, .art-sheet) {
   fill: var(--surface);
 }
+.wizard .wizard-stage-title {
+  top: 24px;
+  left: 19px;
+}
 .wizard .wizard-caption {
   bottom: 72px;
   left: 19px;
@@ -13432,6 +13498,10 @@ form.chat-delete {
   .wizard:is([data-step="summary"], [data-step="comments"], [data-step="triggers"], [data-step="tools"]) .wizard-stage::before {
     left: 0;
   }
+  .wizard .wizard-stage-title {
+    top: 16px;
+    left: 16px;
+  }
   .wizard .wizard-caption {
     bottom: 32px;
     left: 16px;
@@ -13449,11 +13519,17 @@ form.chat-delete {
   .wizard .wizard-bar {
     grid-template-columns: auto minmax(0, 1fr);
     gap: 10px 16px;
-    padding: 10px 16px;
+    min-height: 0;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
   }
   .wizard .wizard-nav {
     grid-column: 1 / -1;
     order: -1;
+  }
+  .wizard .wizard-position {
+    overflow: visible;
+    text-overflow: unset;
+    white-space: nowrap;
   }
   .wizard .wizard-steps {
     padding: 20px 16px;
@@ -13470,6 +13546,25 @@ form.chat-delete {
   }
 }
 @media (max-width: 520px) {
+  .wizard .wizard-bar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .wizard .wizard-exit {
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+  .wizard .wizard-position {
+    justify-self: start;
+    max-width: none;
+    overflow: visible;
+    text-overflow: unset;
+    white-space: normal;
+  }
+  .wizard .wizard-panel {
+    padding-bottom: 160px;
+  }
   .wizard .wizard-categories,
   .wizard .wizard-roles {
     grid-template-columns: minmax(0, 1fr);
