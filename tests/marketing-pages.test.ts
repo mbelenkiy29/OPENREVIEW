@@ -7,6 +7,7 @@ import sitemap from "../app/sitemap";
 import { metadata as pricingMetadata } from "../app/pricing/page";
 import ComparePage, { generateMetadata, generateStaticParams } from "../app/compare/[slug]/page";
 import Pricing from "../app/pricing/page";
+import { accountCta } from "../app/site-chrome";
 
 const isNotFound = (error: unknown) => typeof error === "object" && error !== null && "digest" in error && String((error as { digest?: string }).digest).includes("404");
 
@@ -17,6 +18,8 @@ test("compare slugs are greptile and coderabbit, and unknown slugs are absent", 
   assert.equal(comparePage("greptile")?.file, "docs/compare/greptile.md");
   assert.equal(comparePage("coderabbit")?.file, "docs/compare/coderabbit.md");
   assert.equal(comparePage("not-a-competitor"), undefined);
+  assert.equal(comparePage("toString"), undefined);
+  assert.equal(comparePage("__proto__"), undefined);
   for (const slug of compareSlugs) assert.ok(existsSync(comparePages[slug].file), comparePages[slug].file);
 });
 
@@ -34,6 +37,8 @@ test("compare pages render their markdown with canonical and social titles; unkn
     assert.equal(meta.openGraph?.siteName, siteName);
   }
   await assert.rejects(() => ComparePage({ params: Promise.resolve({ slug: "not-a-competitor" }) }), isNotFound);
+  await assert.rejects(() => ComparePage({ params: Promise.resolve({ slug: "toString" }) }), isNotFound);
+  await assert.rejects(() => ComparePage({ params: Promise.resolve({ slug: "__proto__" }) }), isNotFound);
   const empty = await generateMetadata({ params: Promise.resolve({ slug: "not-a-competitor" }) });
   assert.deepEqual(empty, {});
 });
@@ -45,6 +50,8 @@ test("the pricing page renders and names OpenReview.tech in social titles", () =
   assert.equal(pricingMetadata.openGraph?.title, pageSocialTitle("pricing"));
   assert.equal(pricingMetadata.twitter?.title, pageSocialTitle("pricing"));
   assert.equal(pricingMetadata.openGraph?.siteName, siteName);
+  assert.match(String(pricingMetadata.description), /Starter and Pro/);
+  assert.doesNotMatch(String(pricingMetadata.description), /Enterprise/);
 });
 
 test("root metadata sets og:title, twitter:title and og:site_name to OpenReview.tech", () => {
@@ -73,6 +80,8 @@ test("hero, pricing cards and FAQ match the cardless Starter trial", () => {
   const signup = readFileSync("app/auth-screen.tsx", "utf8");
   assert.match(home, /Starter trial, no credit card/);
   assert.match(home, /Pro collects a card at checkout/);
+  assert.match(home, /href="\/pricing">See pricing/);
+  assert.doesNotMatch(home, /href="#pricing"/);
   assert.match(home, /Do I need a credit card\?/);
   assert.doesNotMatch(home, /Cancel anytime/);
   assert.doesNotMatch(cards, /days free/);
@@ -87,4 +96,23 @@ test("the footer links to compare pages and /pricing", () => {
   assert.match(chrome, /\/compare\/greptile/);
   assert.match(chrome, /\/compare\/coderabbit/);
   assert.match(chrome, /href="\/pricing"/);
+});
+
+test("logged-out public headers show Sign in; a valid session shows Dashboard", () => {
+  assert.deepEqual(accountCta(false), { href: "/login", label: "Sign in" });
+  assert.deepEqual(accountCta(true), { href: "/dashboard", label: "Dashboard" });
+  const chrome = readFileSync("app/site-chrome.tsx", "utf8");
+  assert.match(chrome, /sessionJwtValid/);
+  assert.match(chrome, /accountCta\(/);
+  assert.doesNotMatch(chrome, /home \?\s*<Link className="site-account"/);
+  assert.doesNotMatch(chrome, /home \? <Link href="\/login">Sign in<\/Link>/);
+});
+
+test("compare pages last-checked date and Starter trial copy", () => {
+  for (const slug of compareSlugs) {
+    const markdown = readFileSync(comparePages[slug].file, "utf8");
+    assert.match(markdown, /Last checked Nov 20, 2026/);
+    assert.match(markdown, /14-day Starter trial, no card; Pro collects a card at checkout/);
+    assert.doesNotMatch(markdown, /14-day trial(?!.*Starter)/);
+  }
 });

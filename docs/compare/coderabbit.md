@@ -1,6 +1,6 @@
 # OpenReview vs CodeRabbit
 
-_Last checked Nov 16, 2026. CodeRabbit facts come from its public pricing and home pages as read on that date. They change, so re-check before publishing. OpenReview facts come from this repository. We have not benchmarked either product and make no accuracy claims._
+_Last checked Nov 20, 2026. CodeRabbit facts come from its public pricing and home pages as read on that date. They change, so re-check before publishing. OpenReview facts come from this repository. We have not benchmarked either product and make no accuracy claims._
 
 ## At a glance
 
@@ -10,7 +10,7 @@ _Last checked Nov 16, 2026. CodeRabbit facts come from its public pricing and ho
 | License | MIT, source on GitHub | Closed source |
 | Self-hosting | Free and unlimited. Docker Compose, Helm chart, AWS Terraform module, offline mode | Enterprise plan lists "custom deployment options" |
 | SSO, RBAC, audit logs | SAML 2.0 and OIDC SSO, roles and audit logs are in the open-source code. SSO and audit log are in the cloud Pro plan | Enterprise plan |
-| Cloud pricing (list) | Starter $12 and Pro $24 per seat per month. Included model usage $6 and $12 per seat, then optional capped pay-as-you-go. 14-day trial | Essentials $24, Team $48, Advanced $72 per user per month as displayed on the pricing page (the page has an annual toggle that saves 20%; we did not record which state the prices showed). Extra reviews after the plan limit: $0.25 per reviewed file |
+| Cloud pricing (list) | Starter $12 and Pro $24 per seat per month. Included model usage $6 and $12 per seat, then optional capped pay-as-you-go. 14-day Starter trial, no card; Pro collects a card at checkout | Essentials $24, Team $48, Advanced $72 per user per month as displayed on the pricing page (the page has an annual toggle that saves 20%; we did not record which state the prices showed). Extra reviews after the plan limit: $0.25 per reviewed file |
 | Who is billed | Owners, admins and members are seats. Viewers are free | Developers who create pull requests |
 | Free for open-source projects | Not offered in the billing docs today | Free reviews on public repositories |
 | Model choice | Anthropic, OpenAI, OpenRouter or any OpenAI-compatible endpoint, hard inference budget | Not stated on the pricing page |
@@ -39,8 +39,8 @@ _Last checked Nov 16, 2026. CodeRabbit facts come from its public pricing and ho
 
 ## Sources
 
-- CodeRabbit pricing: https://www.coderabbit.ai/pricing (read Nov 16, 2026)
-- CodeRabbit home page: https://www.coderabbit.ai (read Nov 16, 2026)
+- CodeRabbit pricing: https://www.coderabbit.ai/pricing (read Nov 20, 2026)
+- CodeRabbit home page: https://www.coderabbit.ai (read Nov 20, 2026)
 - OpenReview pricing and demo: https://openreview.tech
 - OpenReview billing: [docs/billing.md](../billing.md)
 - OpenReview data controls: [docs/data-controls.md](../data-controls.md)

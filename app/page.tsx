@@ -69,7 +69,7 @@ export default function Home() {
           <Link className="button primary large" href="/signup">Connect a repository</Link>
           <Link className="button large" href="/login">Sign in</Link>
         </div>
-        {billing.enabled && <p className="hero-note">{billing.trialDays}-day Starter trial, no credit card. Pro collects a card at checkout. <Link href="#pricing">See pricing</Link></p>}
+        {billing.enabled && <p className="hero-note">{billing.trialDays}-day Starter trial, no credit card. Pro collects a card at checkout. <Link href="/pricing">See pricing</Link></p>}
         <p className="hero-links"><Link href="/docs/quickstart">Read the quickstart →</Link></p>
       </section>
       <div className="stage hero-stage"><ReviewReplica /><p className="stage-hint">Live demo with sample data. Click around.</p></div>
