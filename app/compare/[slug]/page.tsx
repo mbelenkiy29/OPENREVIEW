@@ -11,6 +11,7 @@ import { markdownTableLabels } from "../../../src/markdown-tables";
 import { compareSocialTitle, socialMeta } from "../../../src/structured-data";
 import { ScrollTable } from "../../dashboard/scroll-table";
 import { SiteFooter, SiteHeader } from "../../site-chrome";
+import { CompareTable } from "../table";
 
 export const dynamicParams = false;
 export function generateStaticParams() { return compareStaticParams(); }
@@ -28,7 +29,7 @@ export default async function ComparePage({ params }: { params: Promise<{ slug: 
   const source = await fs.readFile(path.join(process.cwd(), "docs", "compare", `${page.slug}.md`), "utf8");
   const labels = markdownTableLabels(source);
   let table = 0;
-  return <div className="docs-layout single">
+  return <div className="docs-layout single compare-page">
     <SiteHeader />
     <main id="main" className="docs-content review-markdown"><Markdown remarkPlugins={[remarkGfm]} skipHtml disallowedElements={["img"]} components={{
       a: ({ href, children }) => {
@@ -38,7 +39,7 @@ export default async function ComparePage({ params }: { params: Promise<{ slug: 
           : <Link href={link.url}>{children}</Link>;
       },
       pre: ({ children }) => <pre tabIndex={0}>{children}</pre>,
-      table: ({ children }) => <ScrollTable label={labels[table++] ?? "Table"} className="table-scroll"><table>{children}</table></ScrollTable>,
+      table: ({ children }) => <ScrollTable label={labels[table++] ?? "Table"} className="table-scroll"><CompareTable>{children}</CompareTable></ScrollTable>,
     }}>{source}</Markdown></main>
     <SiteFooter />
   </div>;
