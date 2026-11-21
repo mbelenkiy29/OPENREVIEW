@@ -6,7 +6,7 @@ import { basename, graphLayout, litCount } from "../../../src/onboarding-graph";
 
 const SIZE = 320;
 // fig: an optional plate label above the drawing, as Greptile's "FIG.1 CODEGRAPH FOR …" (decorative).
-export function Stage({ title, caption, fig, children }: { title?: string; caption: string; fig?: ReactNode; children: ReactNode }) {
+export function Stage({ title, caption, fig, children }: { title?: string; caption: string; fig?: ReactNode; children?: ReactNode }) {
   return <div className="wizard-stage">
     {title && <p className="wizard-stage-title">{title}</p>}
     {fig && <p className="wizard-fig" aria-hidden="true">{fig}</p>}
