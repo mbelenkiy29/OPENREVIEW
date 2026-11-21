@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { homeStructuredData, jsonLd, priceFromLabel } from "../src/structured-data";
+import { compareSocialTitle, homeStructuredData, jsonLd, pageSocialTitle, priceFromLabel, siteName, socialTitle } from "../src/structured-data";
 
 const base = { url: "https://openreview.tech", repository: "https://github.com/acme/openreview" };
 const offersOf = (data: ReturnType<typeof homeStructuredData>) => (data["@graph"][2] as { offers?: { name: string; price: string }[] }).offers;
@@ -20,6 +20,14 @@ test("structured data names the site and app, and lists prices only when billing
   assert.deepEqual(offersOf(on)?.map((o) => [o.name, o.price]), [["Starter", "12"], ["Pro", "24"]]);
   const unlabeled = homeStructuredData({ ...base, billing: { enabled: true } });
   assert.equal(offersOf(unlabeled), undefined, "no made-up price without a label");
+});
+
+test("social titles name OpenReview.tech, not the academic openreview.net platform", () => {
+  assert.equal(siteName, "OpenReview.tech");
+  assert.equal(socialTitle, "OpenReview.tech: open-source AI code review");
+  assert.equal(pageSocialTitle("pricing"), "OpenReview.tech: pricing");
+  assert.equal(compareSocialTitle("Greptile"), "OpenReview.tech vs Greptile");
+  assert.equal(compareSocialTitle("CodeRabbit"), "OpenReview.tech vs CodeRabbit");
 });
 
 test("JSON-LD cannot close its script tag", () => {

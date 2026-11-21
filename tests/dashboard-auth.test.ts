@@ -74,7 +74,7 @@ test("public pages and API health checks are not redirected", async () => {
   assert.ok(!runs("/api/auth/callback"));
   assert.ok(runs("/dashboard"));
   assert.ok(runs("/login"));
-  for (const path of ["/", "/login", "/signup", "/changelog", "/docs/quickstart", "/privacy", "/api/health", "/oauth/consent"]) {
+  for (const path of ["/", "/login", "/signup", "/changelog", "/docs/quickstart", "/privacy", "/pricing", "/compare/greptile", "/compare/coderabbit", "/api/health", "/oauth/consent"]) {
     const response = await middleware(request(path));
     assert.equal(response.status, 200, path);
     assert.equal(response.headers.get("location"), null, path);

@@ -24,7 +24,7 @@ await backend.mutation(api.onboarding.start, { token, organizationId: org, pause
 const billing = (await backend.query(api.billing.status, { token, organizationId: org })).enabled;
 // Old addresses that redirect: Findings moved under Analytics, Memory and Settings into Greptile's tabs (next.config.ts).
 const moved: Record<string, string> = { "/dashboard/pulls/findings": "/dashboard/analytics/findings", "/dashboard/settings/people": "/dashboard/organization/people", "/dashboard/memory/rules": "/dashboard/context", "/dashboard/settings/repositories": "/dashboard/repositories" };
-const routes = [...["connect", "indexing", "summary", "comments", "triggers", "tools", "team", ...(billing ? ["plan"] : []), "done"].map((step) => `/dashboard/onboarding/${step}`), "/dashboard/analytics", "/dashboard/analytics/findings", "/dashboard/chat", "/dashboard/repositories", "/dashboard/repositories/knowledge", "/dashboard/code-review", "/dashboard/code-review/model", "/dashboard/code-review/automation", "/dashboard/context", "/dashboard/context/learned", "/dashboard/context/cross-repo", "/dashboard/pulls", "/dashboard/providers", "/dashboard/integrations", "/dashboard/organization", "/dashboard/organization/people", "/dashboard/organization/teams", "/dashboard/organization/billing", "/dashboard/organization/api-keys", "/dashboard/organization/notifications", "/dashboard/organization/audit", "/dashboard/account", "/dashboard/account/review", "/dashboard/account/referrals", ...Object.keys(moved), "/dashboard/organization/nope", "/invite?token=bad", "/r/AAAAAAAA", "/", "/docs/quickstart", "/privacy", "/terms", "/security"];
+const routes = [...["connect", "indexing", "summary", "comments", "triggers", "tools", "team", ...(billing ? ["plan"] : []), "done"].map((step) => `/dashboard/onboarding/${step}`), "/dashboard/analytics", "/dashboard/analytics/findings", "/dashboard/chat", "/dashboard/repositories", "/dashboard/repositories/knowledge", "/dashboard/code-review", "/dashboard/code-review/model", "/dashboard/code-review/automation", "/dashboard/context", "/dashboard/context/learned", "/dashboard/context/cross-repo", "/dashboard/pulls", "/dashboard/providers", "/dashboard/integrations", "/dashboard/organization", "/dashboard/organization/people", "/dashboard/organization/teams", "/dashboard/organization/billing", "/dashboard/organization/api-keys", "/dashboard/organization/notifications", "/dashboard/organization/audit", "/dashboard/account", "/dashboard/account/review", "/dashboard/account/referrals", ...Object.keys(moved), "/dashboard/organization/nope", "/invite?token=bad", "/r/AAAAAAAA", "/", "/docs/quickstart", "/privacy", "/terms", "/security", "/pricing", "/compare/greptile", "/compare/coderabbit", "/compare/not-a-competitor"];
 let failures = 0;
 for (const route of routes) {
   const response = await fetch(base + route, { headers: { cookie: `openreview_session=${token}` }, redirect: "manual" });
@@ -34,8 +34,10 @@ for (const route of routes) {
   const headings = [...html.matchAll(/<h1[^>]*>([^<]{1,60})/g)].map((m) => m[1]).filter((h) => h !== "Loading…");
   const heading = headings.at(-1) ?? "(no heading)";
   const expected = route === "/dashboard/organization/nope" ? /Not found/ : null;
+  const missing = route === "/compare/not-a-competitor";
+  const expectOk = ["/pricing", "/compare/greptile", "/compare/coderabbit"].includes(route);
   const misdirected = route in moved && !(response.status === 307 && response.headers.get("location")?.endsWith(moved[route]));
-  if (response.status >= 500 || broken || misdirected || (expected && !expected.test(html))) failures++;
+  if (missing ? response.status !== 404 : ((expectOk && response.status !== 200) || response.status >= 500 || broken || misdirected || (expected && !expected.test(html)))) failures++;
   console.log(`${String(response.status).padEnd(4)} ${route.padEnd(36)} ${broken ? "ERROR-MARKUP " : ""}${heading}`);
 }
 console.log(failures ? `FAILURES ${failures}` : "all routes rendered");

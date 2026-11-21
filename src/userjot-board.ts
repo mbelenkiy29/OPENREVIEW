@@ -12,7 +12,7 @@ export function userJotNeeded(pathname: string) {
   return boardView(pathname) !== null || pathname === "/dashboard" || pathname.startsWith("/dashboard/");
 }
 
-/** The page title for a board path, before the layout's " · OpenReview" suffix. */
+/** The page title for a board path, before the layout's " · OpenReview.tech" suffix. */
 export const boardTitle = (pathname: string) => boardView(pathname) === "roadmap" ? "Roadmap" : "Feedback";
 
 /**

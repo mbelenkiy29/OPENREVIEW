@@ -2,6 +2,14 @@
 
 <!-- Everything here is live on openreview.tech. Add entries under the current month; start a new "## Month YYYY" heading when the month changes. -->
 
+## November 2026
+
+### Site
+- Comparison pages at `/compare/greptile` and `/compare/coderabbit`, rendered from the markdown in `docs/compare/` and linked from the footer.
+- `/pricing` is a real page that reuses the home-page plan cards.
+- Open Graph and Twitter titles say **OpenReview.tech** (for example `OpenReview.tech: open-source AI code review`) so shares are not confused with openreview.net.
+- The home page, pricing cards and FAQ say the 14-day Starter trial needs no credit card, and that Pro collects a card at checkout.
+
 ## October 2026
 
 ### Issues and Autofix

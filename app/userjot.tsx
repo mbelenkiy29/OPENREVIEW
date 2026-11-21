@@ -113,7 +113,7 @@ export function UserJotEmbed({ basePath }: { basePath: string }) {
   }, [basePath, theme]);
   // Browsing the embed changes the URL without a navigation, so the layout's title template is
   // applied here too.
-  useEffect(() => { document.title = `${boardTitle(pathname)} · OpenReview`; }, [pathname]);
+  useEffect(() => { document.title = `${boardTitle(pathname)} · OpenReview.tech`; }, [pathname]);
   return <div ref={container} className="board-embed" data-userjot-embed />;
 }
 

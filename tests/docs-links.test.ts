@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { comparePages, compareSlugs } from "../src/compare-pages";
 import { docPages, resolveDocLink } from "../src/docs-manifest";
 import { markdownTableLabels } from "../src/markdown-tables";
 
@@ -51,6 +52,11 @@ test("each docs and legal table is labelled from the nearest heading, uniquely o
   }
   for (const file of ["privacy", "terms", "security"]) {
     const labels = markdownTableLabels(readFileSync(path.join("legal", `${file}.md`), "utf8"));
+    assert.equal(new Set(labels).size, labels.length, file);
+  }
+  for (const slug of compareSlugs) {
+    const file = comparePages[slug].file;
+    const labels = markdownTableLabels(readFileSync(file, "utf8"));
     assert.equal(new Set(labels).size, labels.length, file);
   }
   assert.match(readFileSync("app/legal.tsx", "utf8"), /ScrollTable/);
