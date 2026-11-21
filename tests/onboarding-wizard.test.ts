@@ -174,3 +174,15 @@ test("the tools step shows fix pull requests and deep reviews as Pro, disabled, 
   assert.match(open, /<option value="deep" selected="">Deep<\/option>/);
   assert.match(open, /name="fixPullRequests"[^>]*checked/);
 });
+
+test("the trial calendar is labelled as trial days, not setup steps", async () => {
+  Object.assign(globalThis, { React });
+  const { Stage, TrialArt } = await import("../app/dashboard/onboarding/art");
+  const art = renderToStaticMarkup(createElement(TrialArt, { days: 14, elapsed: 0, subscribed: false }));
+  assert.match(art, /14-DAY FREE TRIAL/);
+  assert.doesNotMatch(art, /Step \d+ of/);
+  const stage = renderToStaticMarkup(createElement(Stage, { title: "14-day free trial", caption: "Day 1 of 14" }, createElement(TrialArt, { days: 14, elapsed: 0, subscribed: false })));
+  assert.match(stage, /wizard-stage-title/);
+  assert.match(stage, /14-day free trial/);
+  assert.match(stage, /Day 1 of 14/);
+});

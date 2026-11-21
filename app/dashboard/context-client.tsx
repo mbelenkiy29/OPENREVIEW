@@ -56,14 +56,13 @@ export function ContextTable({ label, columns, rows, bulk, empty }: { label: str
       </Dialog>
       <form action={bulkRules} onSubmit={() => setSelected([])}>{ids}<button className="primary" name="op" value={op}>{op === "deactivate" ? "Deactivate" : "Activate"} ({n})</button></form>
     </div>}
-    <div className="table-box ctx-table-box">
+    {!rows.length ? <div className="ctx-empty-page" role="status">{empty ?? <p>No results.</p>}</div> : <div className="table-box ctx-table-box">
       <table className="ctx-table" aria-label={label}>
         <thead><tr>
           {bulk && <th className="check-col"><input type="checkbox" aria-label="Select all rules on this page" checked={all} disabled={!choosable.length} ref={(el) => { if (el) el.indeterminate = n > 0 && !all; }} onChange={() => setSelected(all ? [] : choosable.map((r) => r.id))} /></th>}
           {columns.map((c) => <th key={c} scope="col">{c}</th>)}
         </tr></thead>
         <tbody>
-          {!rows.length && <tr><td colSpan={span} className="ctx-empty">{empty ?? "No results."}</td></tr>}
           {rows.map((r) => {
             const expanded = open.includes(r.id);
             return <Fragment key={r.id}>
@@ -81,7 +80,7 @@ export function ContextTable({ label, columns, rows, bulk, empty }: { label: str
           })}
         </tbody>
       </table>
-    </div>
+    </div>}
   </>;
 }
 

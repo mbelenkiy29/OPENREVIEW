@@ -6,8 +6,9 @@ import { basename, graphLayout, litCount } from "../../../src/onboarding-graph";
 
 const SIZE = 320;
 // fig: an optional plate label above the drawing, as Greptile's "FIG.1 CODEGRAPH FOR …" (decorative).
-export function Stage({ caption, fig, children }: { caption: string; fig?: ReactNode; children: ReactNode }) {
+export function Stage({ title, caption, fig, children }: { title?: string; caption: string; fig?: ReactNode; children?: ReactNode }) {
   return <div className="wizard-stage">
+    {title && <p className="wizard-stage-title">{title}</p>}
     {fig && <p className="wizard-fig" aria-hidden="true">{fig}</p>}
     <figure className="wizard-art" aria-hidden="true">{children}</figure>
     <p className="wizard-caption" aria-live="polite">{caption}</p>
@@ -109,14 +110,15 @@ export function TeamArt({ invited }: { invited: number }) {
 }
 
 /** The trial as a calendar: elapsed days fill in and the last day carries the ember mark; the
- *  card below turns solid once a payment method is on file. */
+ *  card below turns solid once a payment method is on file. Numbered cells are trial days, not setup steps. */
 export function TrialArt({ days, elapsed, subscribed }: { days: number; elapsed: number; subscribed: boolean }) {
   const shown = Math.max(1, Math.min(days, 35)), cols = Math.min(7, shown), rows = Math.ceil(shown / cols), cell = 28, gap = 8;
   const width = cols * cell + (cols - 1) * gap, height = rows * cell + (rows - 1) * gap;
-  const x0 = (SIZE - width) / 2, y0 = 40 + Math.max(0, (160 - height) / 2), done = Math.max(0, Math.min(shown, elapsed));
+  const x0 = (SIZE - width) / 2, y0 = 52 + Math.max(0, (148 - height) / 2), done = Math.max(0, Math.min(shown, elapsed));
   const at = (i: number) => ({ x: x0 + (i % cols) * (cell + gap), y: y0 + Math.floor(i / cols) * (cell + gap) }), last = at(shown - 1);
   return <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className={subscribed ? "connected" : "waiting"}>
     <Grid />
+    <text className="art-label strong" x="160" y="28" textAnchor="middle">{shown}-DAY FREE TRIAL</text>
     {Array.from({ length: shown }, (_, i) => {
       const { x, y } = at(i);
       return <g key={i} className={`art-day${i < done ? " elapsed" : ""}${i === done && !subscribed ? " today" : ""}`} style={{ ["--i" as string]: i }}>

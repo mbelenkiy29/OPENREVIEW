@@ -133,7 +133,7 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
     const nextLabel = paid || free ? "Continue" : confirming ? "Waiting for Stripe…" : primary === "starter" && carries ? `Start ${trialLeft}-day Starter trial` : primary === "starter" ? "Start Starter trial" : carries ? `Start ${trialLeft}-day Pro trial` : `Choose ${primaryName}`;
     return <WizardFrame step="plan" {...frame} nextLabel={nextLabel}>
       <div className="wizard-panel">
-        <Heading step="plan">{paid && cardless ? `Your 14-day Starter trial is running. Add a card in Organization Settings → Billing & Usage before ${new Date(billing.trialEndsAt).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" })} to keep reviews posting.`
+        <Heading step="plan">{paid && cardless ? `Your trial runs until ${new Date(billing.trialEndsAt).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" })}. Add a card anytime in Organization Settings → Billing & Usage to keep reviewing after it ends.`
           : paid ? `Your workspace is on the ${billing.planName} plan. Seats follow your team, so there is nothing else to set up.`
           : free ? "Your workspace is on the Free plan. Starter and Pro add usage per seat, agent fixes and more; upgrade here or anytime in Organization Settings → Billing & Usage."
           : `Choose a plan. Starter starts a ${billing.trialDays}-day trial with no card. Pro is billed per seat; Checkout collects a card. Change plans anytime in Organization Settings → Billing & Usage.`}</Heading>
@@ -161,9 +161,8 @@ export default async function SetupStep({ params, searchParams }: { params: Prom
         {admin && (paid || free || (confirming && !required)) && <StepForm action={advanceSetup}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="step" value="plan" /></StepForm>}
         <Live active={confirming} />
       </div>
-      <Stage caption={paid && cardless ? `${trialLeft}-day Starter trial · no card yet`
-        : paid ? `${billing.plan} plan · ${billing.activeSeats} ${billing.activeSeats === 1 ? "seat" : "seats"}`
-        : carries ? `${trialLeft}-day trial on Starter, no card required` : free ? `free plan · ${percent}% of this month's usage used` : "Starter trial or Pro · billed per seat"}>
+      <Stage title={paid && !cardless ? undefined : `${billing.trialDays}-day free trial`} caption={paid && !cardless ? `${billing.plan} plan · ${billing.activeSeats} ${billing.activeSeats === 1 ? "seat" : "seats"}`
+        : `Day ${Math.min(billing.trialDays, Math.max(1, elapsed + 1))} of ${billing.trialDays}${paid && cardless ? " · add a card anytime after setup" : free ? ` · free plan · ${percent}% of this month's usage used` : carries ? " · no card required for Starter" : ""}`}>
         <TrialArt days={billing.trialDays} elapsed={elapsed} subscribed={paid || confirming} />
       </Stage>
     </WizardFrame>;

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { backend } from "../../src/server";
@@ -23,8 +24,8 @@ export async function NotificationsPanel({ token, organizationId, repositories, 
       <div className="section-heading"><div><h2 id="slack-heading">Slack</h2><p>Post review updates to channels, and answer @OpenReview questions there.</p></div>
         {s.slack && !s.offline && s.slackConfigured && <Confirm trigger="Disconnect Slack" triggerClassName="danger" title="Disconnect Slack" action={disconnectSlack} fields={{ organizationId }} confirm="Disconnect Slack">OpenReview stops posting to <strong>{s.slack.teamName}</strong> and unlinks every channel.</Confirm>}</div>
       <section aria-labelledby="slack-heading">
-        {s.offline ? <p className="card-line">Offline mode is on (OPENREVIEW_OFFLINE=true), so Slack is turned off for this deployment.</p>
-          : !s.slackConfigured ? <p className="card-line">Slack is not configured for this deployment. An operator must create the Slack app from docs/slack-app-manifest.yml and set SLACK_CLIENT_ID, SLACK_CLIENT_SECRET and SLACK_SIGNING_SECRET.</p>
+        {s.offline ? <p className="card-line">Offline mode is on, so Slack is turned off for this deployment.</p>
+          : !s.slackConfigured ? <p className="card-line">Slack isn&apos;t configured on this deployment. <Link href="/docs/notifications">Slack and email</Link></p>
           : !s.slack ? <div className="setting-row"><div><strong>Not connected</strong><p>Connect a Slack workspace to link channels.</p></div><a className="button primary" href={`/api/slack/install?organization=${organizationId}`}>Add to Slack</a></div>
           : <>
             <p className="card-line">Connected to <strong>{s.slack.teamName}</strong>. In linked channels, members can mention @OpenReview with a question about the linked repositories, and run <code>/openreview status</code>.</p>

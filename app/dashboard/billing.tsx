@@ -49,8 +49,9 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
           {s.referral?.referred && <><dt>Referral</dt><dd>{referralFact(s.referral, referralConfig().discountLabel)}</dd></>}
           {s.referralCredit ? <><dt>Referral credit</dt><dd>{formatMoney(s.referralCredit)} applied from referral earnings · Stripe takes it off the next invoices</dd></> : null}
         </dl>
+        {s.admin && cardless && s.trialEndsAt && <p className="muted">Your trial runs until {day(s.trialEndsAt)}. Add a card anytime to keep reviewing after it ends.</p>}
         {s.admin ? <div className="page-actions">
-          {cardless && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="starter" /><button className="primary">Add a card to keep reviewing</button></form>}
+          {cardless && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="starter" /><button>Add a card</button></form>}
           {!subscribed && !cardless && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="pro" /><button className="primary">{trial ? "Start Pro trial" : "Upgrade to Pro"}</button></form>}
           {!subscribed && !cardless && <form action={startCheckout}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value="starter" /><button>{trial ? "Start Starter trial" : "Choose Starter"}</button></form>}
           {perSeat && <form action={changePlan}><input type="hidden" name="organizationId" value={organizationId} /><input type="hidden" name="plan" value={s.plan === "pro" ? "starter" : "pro"} /><button className={s.plan === "pro" ? undefined : "primary"}>{s.plan === "pro" ? "Switch to Starter" : "Switch to Pro"}</button></form>}
@@ -69,7 +70,7 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
       <tbody>{e.contributors.map((c) => <tr key={c.key}><td>{c.login}</td><td>{c.provider}</td><td>{day(c.firstAt)}</td><td>{c.billed ? "Billed" : <span className="muted">Not billed</span>}</td></tr>)}
         {!e.contributors.length && <tr><td colSpan={4} className="table-empty">No reviewed pull requests yet this month</td></tr>}</tbody>
     </table></div></>}
-    <div className="section-heading minor"><h2 id="payment-heading">Payment Details</h2>{s.admin && (s.hasCustomer ? portal(<><Icon name="plus" />Add Payment Method</>) : (!subscribed || cardless) && <a className="button" href="#plan-heading"><Icon name="plus" />Add Payment Method</a>)}</div>
+    <div className="section-heading minor"><div><h2 id="payment-heading">Payment Details</h2>{(cardless || s.status === "trialing") && s.trialEndsAt && <p>Your trial runs until {day(s.trialEndsAt)}. Add a card anytime to keep reviewing after it ends.</p>}</div>{s.admin && (s.hasCustomer ? portal(<><Icon name="plus" />{cardless || s.status === "trialing" ? "Add a card" : "Add Payment Method"}</>) : (!subscribed || cardless) && <a className="button" href="#plan-heading"><Icon name="plus" />{cardless || s.status === "trialing" ? "Add a card" : "Add Payment Method"}</a>)}</div>
     <div className="table-box"><table aria-labelledby="payment-heading">
       <thead><tr><th>Name</th><th><span className="sr-only">Actions</span></th></tr></thead>
       <tbody>{s.hasCustomer ? <tr><td>Kept by Stripe <span className="muted">· cards and bank details never reach OpenReview</span></td><td>{s.admin && portal("Manage", "Manage payment methods", "small")}</td></tr>
@@ -83,7 +84,7 @@ export async function BillingPanel({ token, organizationId, filters }: { token: 
     <div className="section-heading"><h2 id="portal-heading">Billing Portal</h2></div>
     <section aria-labelledby="portal-heading" className="setting-row portal-card">
       <div><strong>Manage Billing <span className="role-badge">{badge}</span></strong>
-        <p>{(s.status === "trialing" || s.cardlessTrial) && s.trialEndsAt ? `You’re on a free trial until ${day(s.trialEndsAt)}. ${s.cardlessTrial ? "Add a card before then or reviews pause; nothing is deleted." : ""}` : ""}{s.hasCustomer ? "Visit the portal to update your payment method, download invoices or manage your plan." : s.cardlessTrial ? "Choose Add a card above; Checkout collects a payment method and reviews keep running." : "The Stripe billing portal opens once this workspace has a plan with a payment method."}</p></div>
+        <p>{(s.status === "trialing" || s.cardlessTrial) && s.trialEndsAt ? `You’re on a free trial until ${day(s.trialEndsAt)}. Add a card anytime to keep reviewing after it ends. ` : ""}{s.hasCustomer ? "Visit the portal to update your payment method, download invoices or manage your plan." : s.cardlessTrial ? "Checkout collects a payment method; reviews keep running until the trial ends either way." : "The Stripe billing portal opens once this workspace has a plan with a payment method."}</p></div>
       {s.admin && s.hasCustomer && portal("Manage", "Manage billing")}
     </section>
     {s.referral?.canApply && <><div className="section-heading"><div><h2 id="referral-code-heading">Referral code</h2><p>Were you referred by someone already on OpenReview? Add their code before you subscribe{referralConfig().discountLabel ? ` to get ${referralConfig().discountLabel}` : ""}.</p></div></div>

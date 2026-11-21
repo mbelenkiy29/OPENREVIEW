@@ -67,7 +67,7 @@ export async function IntegrationsPanel({token,organizationId,admin,repositories
      return <Fragment key={p.kind}>
       <tr>
        <td><div className="integration-cell"><span className="brand-mark" aria-hidden="true">{label(p.kind)[0]}</span><div><strong>{label(p.kind)}</strong><small>{p.description}</small></div></div></td>
-       <td>{active?<span className="status-dot ok mono-status">Connected{active>1?` · ${active}`:""}</span>:<span className="status-dot mono-status">{p.ready||!admin?"Not configured":"Setup required"}</span>}</td>
+       <td>{active?<span className="status-dot ok mono-status">Connected{active>1?` · ${active}`:""}</span>:<span className="status-dot mono-status">Not configured</span>}</td>
        <td>{admin&&!isOffline&&(lockedOut?<button disabled title="Requirements integrations are on the Pro plan">{active?"Connect another":"Connect"}</button>:p.ready?<a className="button" href={p.connect} aria-label={p.aria}><Icon name="plus"/>{active?"Connect another":"Connect"}</a>
         :<Dialog trigger="Set up" title={`Set up ${label(p.kind)}`} description="An OpenReview operator step before workspaces can connect.">{<div className="modal-body">{p.setup}<div className="modal-footer"><DialogClose>Close</DialogClose></div></div>}</Dialog>)}</td>
       </tr>

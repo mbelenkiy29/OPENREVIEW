@@ -20,3 +20,11 @@ test("nice ticks: zero-based, about four even steps, last at or above the maximu
   assert.deepEqual(niceTicks(100), [0, 25, 50, 75, 100]);
   assert.deepEqual(niceTicks(0.3), [0, 0.1, 0.2, 0.3]);
 });
+
+test("integer ticks start at 0 and skip half-steps used on empty count charts", () => {
+  assert.deepEqual(niceTicks(1, 4, true), [0, 1]);
+  assert.deepEqual(niceTicks(2, 4, true), [0, 1, 2]);
+  assert.deepEqual(niceTicks(3, 4, true), [0, 1, 2, 3]);
+  assert.ok(niceTicks(2, 4, true).every(Number.isInteger));
+  assert.equal(niceTicks(2, 4, true)[0], 0);
+});

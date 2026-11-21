@@ -75,7 +75,8 @@ export function RulesSection({ ctx }: { ctx: DashboardContext }) {
       {last?.status === "failed" && !busy && <p className="ctx-note error" role="status">The last rule assistant run failed: {last.error ?? "unknown error"}</p>}
       {requestedRepository && <p className="ctx-note">Showing rules that apply to {ctx.repoName(requestedRepository)}, including inherited workspace, team and pattern rules.</p>}
       <ContextTable label="Custom rules" columns={["Rules", "Scope", "Type", "Usage", "Last updated", "Status"]} rows={rows} bulk={isAdmin ? { organizationId: organization._id } : undefined}
-        empty={filters.q || filters.cursor ? "No rules match this search." : <div className="empty-state"><strong>Your codebase, your conventions</strong><p>Add specific rules such as requiring organization membership validation in API endpoints.</p></div>} />
+        empty={filters.q || filters.cursor ? <div className="empty-state"><strong>No matching rules</strong><p>Try a different search, or clear filters to see every rule.</p></div>
+          : <div className="empty-state"><strong>No custom rules yet</strong><p>Teach OpenReview your conventions so reviews follow how this team writes code.</p>{isAdmin && <div className="actions"><AddContext organizationId={organization._id} returnTo={href()} open={false} teams={teams} repositories={repositories} initialScope={requestedRepository ? "repo:" + requestedRepository : ""} busy={busy} /></div>}</div>} />
       {rulesPage && (filters.cursor || !rulesPage.isDone) && <div className="pagination">
         <span>{visibleRules.length} {visibleRules.length === 1 ? "rule" : "rules"} on this page</span>
         <nav aria-label="Rules pagination">{filters.cursor && <Link href={href({}, "")}>Newest</Link>}{!rulesPage.isDone && <Link href={href({}, rulesPage.continueCursor)}>Older<Icon name="caretRight" /></Link>}</nav>

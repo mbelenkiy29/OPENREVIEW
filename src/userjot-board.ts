@@ -7,9 +7,12 @@ export function boardView(pathname: string): "roadmap" | "feedback" | null {
   return /^\/feedback(\/|$)/.test(pathname) ? "feedback" : null;
 }
 
-/** Load the UserJot SDK only on the public board and the signed-in dashboard (menu buttons). */
+/** Load the UserJot SDK only on the public board and the signed-in dashboard (menu buttons).
+ *  Guided setup keeps a sticky footer, so the launcher stays off those pages. */
 export function userJotNeeded(pathname: string) {
-  return boardView(pathname) !== null || pathname === "/dashboard" || pathname.startsWith("/dashboard/");
+  if (boardView(pathname) !== null) return true;
+  if (pathname === "/dashboard/onboarding" || pathname.startsWith("/dashboard/onboarding/")) return false;
+  return pathname === "/dashboard" || pathname.startsWith("/dashboard/");
 }
 
 /** The page title for a board path, before the layout's " · OpenReview" suffix. */

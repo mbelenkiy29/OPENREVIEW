@@ -25,14 +25,15 @@ export default async function PortalLayout({ children }: { children: React.React
   const trialLeft = billing?.enabled && onTrial ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / 86400000)) : undefined;
   // Without a card the banner runs the whole trial; with one it reminds in the last 3 days that the card will be charged.
   const trialDaysLeft = trialLeft !== undefined && (!billing?.hasPaymentMethod || trialLeft <= 3) ? trialLeft : undefined;
-  const trialCharge = trialDaysLeft !== undefined && billing?.enabled && billing.hasPaymentMethod ? { plan: billing.planName ?? "paid", date: new Date(billing.trialEndsAt).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }) } : undefined;
+  const trialEndsOn = trialDaysLeft !== undefined && billing?.enabled ? new Date(billing.trialEndsAt).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }) : undefined;
+  const trialCharge = trialDaysLeft !== undefined && billing?.enabled && billing.hasPaymentMethod ? { plan: billing.planName ?? "paid", date: trialEndsOn ?? new Date(billing.trialEndsAt).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }) } : undefined;
   // Every page warns from 80% of the included usage, and when reviews are blocked, not just Billing & Usage.
   const percent = billing?.enabled && billing.limit ? Math.round(((billing.used + billing.reserved) / billing.limit) * 100) : 0;
   const usage = billing?.enabled && (!billing.allowed || percent >= 80) ? { admin: billing.admin, free: billing.plan === "free", text: !billing.allowed ? billing.reason ?? "This workspace can’t run more reviews this month." : `This workspace used ${Math.min(100, percent)}% of this month’s included usage${billing.reviewsLeft !== null ? `, about ${billing.reviewsLeft} reviews left` : ""}.` } : undefined;
   return <div className="shell portal">
     <PortalNav login={user.user.login} avatar={user.user.avatar || undefined} email={user.email} role={organization.role} organizationId={organization._id} name={organization.name ?? "Workspace"}
       organizations={user.organizations.flatMap((o) => o._id ? [{ _id: o._id, name: o.name ?? "Workspace" }] : [])}
-      teams={teamChoices(scopes).map((t) => ({ _id: t._id, name: t.name }))} savedTeam={jar.get("openreview_team")?.value} trialDaysLeft={trialDaysLeft} trialCharge={trialCharge} usage={usage} billingPortal={Boolean(billing?.enabled && billing.admin && billing.hasCustomer)} operator={user.operator} dismissedAnnouncements={user.user.dismissedAnnouncements ?? []} />
+      teams={teamChoices(scopes).map((t) => ({ _id: t._id, name: t.name }))} savedTeam={jar.get("openreview_team")?.value} trialDaysLeft={trialDaysLeft} trialEndsOn={trialEndsOn} trialCharge={trialCharge} usage={usage} billingPortal={Boolean(billing?.enabled && billing.admin && billing.hasCustomer)} operator={user.operator} dismissedAnnouncements={user.user.dismissedAnnouncements ?? []} />
     {children}
   </div>;
 }

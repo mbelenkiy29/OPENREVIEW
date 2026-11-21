@@ -16,7 +16,7 @@ Repository files are stored as Convex file blobs. Metadata, symbols, the code gr
 3. Register your [GitHub App](github-app.md) or connect another provider.
 4. Optionally add:
    - embeddings (`EMBEDDING_MODEL`, `EMBEDDING_API_KEY`).
-   - Slack and email ([notifications](../notifications.md)).
+   - Slack and email ([notifications](../notifications.md)): `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`.
    - more sign-in methods ([identity](../identity.md)).
 5. Decide on outbound advisory lookups: security checks query OSV.dev for changed dependency versions. Set `OSV_ENABLED=false` on the backend to stop those requests (pattern checks still run), or set `OSV_API_URL` to an internal OSV mirror.
 6. Leave `BILLING_ENABLED` unset. [Billing](../billing.md) is for hosted cloud deployments only, and self-hosted installs have no quotas.
