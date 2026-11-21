@@ -19,11 +19,46 @@ test("notifications do not name Slack operator env vars in the customer UI", () 
   assert.doesNotMatch(notifications, /SLACK_CLIENT_ID|SLACK_CLIENT_SECRET|SLACK_SIGNING_SECRET|slack-app-manifest/);
 });
 
+const operatorEnv = [
+  "SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "SLACK_SIGNING_SECRET",
+  "RESEND_API_KEY", "EMAIL_FROM", "OPENREVIEW_OFFLINE",
+  "LINEAR_CLIENT_ID", "ATLASSIAN_CLIENT_ID", "ATLASSIAN_CLIENT_SECRET",
+  "NOTION_CLIENT_ID", "NOTION_CLIENT_SECRET",
+];
+const customerCopy = (source: string) => source.replace(/process\.env\.\w+/g, "");
+
+test("email and integration setup do not name operator env vars in customer copy", () => {
+  assert.match(notifications, /Email isn&apos;t configured on this deployment/);
+  assert.match(integrations, /Linear isn&apos;t configured on this deployment/);
+  assert.match(integrations, /Notion isn&apos;t configured on this deployment/);
+  assert.match(integrations, /Atlassian isn&apos;t configured on this deployment/);
+  assert.match(integrations, /href="\/docs\/linear"/);
+  assert.match(integrations, /href="\/docs\/notion"/);
+  assert.match(integrations, /href="\/docs\/atlassian"/);
+  for (const name of operatorEnv) {
+    assert.doesNotMatch(customerCopy(notifications), new RegExp(name));
+    assert.doesNotMatch(customerCopy(integrations), new RegExp(name));
+  }
+});
+
 test("self-host docs list Slack env var names only", () => {
   for (const name of ["SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "SLACK_SIGNING_SECRET"]) {
     assert.match(notificationsDoc, new RegExp("`" + name + "`"));
     assert.match(selfHostDoc, new RegExp("`" + name + "`"));
     assert.doesNotMatch(notificationsDoc, new RegExp(name + "\\s*="));
+    assert.doesNotMatch(selfHostDoc, new RegExp(name + "\\s*="));
+  }
+});
+
+test("self-host docs list email and integration env var names only", () => {
+  for (const name of ["RESEND_API_KEY", "EMAIL_FROM"]) {
+    assert.match(notificationsDoc, new RegExp("`" + name + "`"));
+    assert.match(selfHostDoc, new RegExp("`" + name + "`"));
+    assert.doesNotMatch(notificationsDoc, new RegExp(name + "\\s*="));
+    assert.doesNotMatch(selfHostDoc, new RegExp(name + "\\s*="));
+  }
+  for (const name of ["LINEAR_CLIENT_ID", "ATLASSIAN_CLIENT_ID", "ATLASSIAN_CLIENT_SECRET", "NOTION_CLIENT_ID", "NOTION_CLIENT_SECRET"]) {
+    assert.match(selfHostDoc, new RegExp("`" + name + "`"));
     assert.doesNotMatch(selfHostDoc, new RegExp(name + "\\s*="));
   }
 });
