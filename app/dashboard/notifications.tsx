@@ -60,7 +60,7 @@ export async function NotificationsPanel({ token, organizationId, repositories, 
     </>}
     <div className="section-heading"><div><h2 id="email-heading">Email</h2><p>Your own notifications for this workspace.</p></div></div>
     <section aria-labelledby="email-heading">
-      {!s.emailConfigured && <p className="notice-banner"><Icon name="warning" />{s.offline ? "Offline mode is on (OPENREVIEW_OFFLINE=true), so email is turned off." : "Email delivery is not configured for this deployment (RESEND_API_KEY and EMAIL_FROM)."} Preferences are saved but nothing is sent.</p>}
+      {!s.emailConfigured && <p className="notice-banner"><Icon name="warning" />{s.offline ? "Offline mode is on, so email is turned off." : <>Email isn&apos;t configured on this deployment. <Link href="/docs/notifications">Slack and email</Link></>}</p>}
       <form action={setNotificationEmail} className="setting-row stack">
         <input type="hidden" name="organizationId" value={organizationId} />
         <div><strong id="notify-email">Notification email</strong><p>{s.preferences.email ? (s.preferences.verified ? "Verified." : "Waiting for verification: check your inbox for the link.") : "No address set."}</p></div>

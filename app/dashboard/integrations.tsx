@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Fragment, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { backend, origin } from "../../src/server";
+import { backend } from "../../src/server";
 import { configureLinear, configureAtlassian, configureNotion, disconnectLinear, refreshLinear } from "./actions";
 import { ResourcePicker } from "./resource-picker";
 import { offline } from "../../src/egress";
@@ -46,16 +46,16 @@ export async function IntegrationsPanel({token,organizationId,admin,repositories
   </DialogForm>:undefined);
  const providers:{kind:string;description:string;ready:boolean;connect:string;aria:string;setup:ReactNode}[]=[
   {kind:"atlassian",description:"Jira issues and Confluence pages linked from a pull request",ready:Boolean(process.env.ATLASSIAN_CLIENT_ID&&process.env.ATLASSIAN_CLIENT_SECRET),connect:"/api/integrations/atlassian/connect?organization="+organizationId,aria:"Connect Atlassian sites",
-   setup:<><p>The OpenReview operator registers a distributable OAuth 3LO app with read-only Jira and Confluence scopes and offline access. Set <code>ATLASSIAN_CLIENT_ID</code> and server-only <code>ATLASSIAN_CLIENT_SECRET</code> on the web application and Convex backend. Register this callback:</p><code className="integration-callback">{origin()+"/api/integrations/atlassian/callback"}</code></>},
+   setup:<p>Atlassian isn&apos;t configured on this deployment. <Link href="/docs/atlassian">Jira and Confluence</Link></p>},
   {kind:"linear",description:"Issues from selected teams and projects",ready:Boolean(process.env.LINEAR_CLIENT_ID),connect:"/api/integrations/linear/connect?organization="+organizationId,aria:"Connect Linear workspace",
-   setup:<><p>Create a Linear OAuth application with read scope and PKCE. Set <code>LINEAR_CLIENT_ID</code> on the web application and Convex backend. Register this callback:</p><code className="integration-callback">{origin()+"/api/integrations/linear/callback"}</code></>},
+   setup:<p>Linear isn&apos;t configured on this deployment. <Link href="/docs/linear">Linear</Link></p>},
   {kind:"notion",description:"Pages shared with OpenReview and linked from a pull request",ready:Boolean(process.env.NOTION_CLIENT_ID&&process.env.NOTION_CLIENT_SECRET),connect:"/api/integrations/notion/connect?organization="+organizationId,aria:"Connect Notion workspace",
-   setup:<><p>The OpenReview operator creates a public Notion integration with read content capability only. Set <code>NOTION_CLIENT_ID</code> and server-only <code>NOTION_CLIENT_SECRET</code> on the web application and Convex backend. Register this redirect URI:</p><code className="integration-callback">{origin()+"/api/integrations/notion/callback"}</code></>},
+   setup:<p>Notion isn&apos;t configured on this deployment. <Link href="/docs/notion">Notion</Link></p>},
  ];
  return <div className="ctx-locked">
   {error&&<p role="alert" className="notice-banner error"><Icon name="warningCircle"/><span>{error==="disconnect"?"Disconnect failed. Check workspace admin access and retry.":error==="linear-refresh"?"Connection refresh failed. Retry after any refresh in progress finishes, or reconnect if Linear access was revoked.":error.endsWith("-connect")?"Authorization failed or expired. Reconnect and approve read-only access.":"Scope could not be saved. Check your permissions and refresh the resource list before retrying."}</span></p>}
   {saved&&(saved!=="linear-refresh"||Boolean(connection))&&<p role="status" className="success-banner"><Icon name="checkCircle"/><span>{saved==="disconnected"?"Connection disconnected. Requirements access removed.":saved==="linear-refresh"?"Linear connection refreshed.":"Resource scope saved."}</span></p>}
-  {isOffline&&<p role="status" className="notice-banner"><Icon name="info"/><span>Offline mode is on (OPENREVIEW_OFFLINE=true): requirements integrations are turned off, and reviews do not fetch tickets or documents.</span></p>}
+  {isOffline&&<p role="status" className="notice-banner"><Icon name="info"/><span>Offline mode is on, so requirements integrations are turned off.</span></p>}
   {discoveryFailed&&<div role="alert" className="notice-banner error"><Icon name="warningCircle"/><span>Integration resources could not be loaded. Access may have expired, or another request is refreshing the token. <Link href={"/dashboard/integrations?integration="+selected}>Retry resource discovery</Link></span></div>}
   <div className="ctx-heading"><div><h2>Requirements integrations</h2><p>Connect Linear, Atlassian or Notion with read-only access. Select resources and the repositories allowed to use their requirements.</p></div></div>
   <Locked feature="context.requirements" locked={locked} note="Requirements integrations (Linear, Jira, Confluence and Notion) are on the Pro plan."/>
