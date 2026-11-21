@@ -41,7 +41,7 @@ _Last checked Nov 20, 2026. CodeRabbit facts come from its public pricing and ho
 
 - CodeRabbit pricing: https://www.coderabbit.ai/pricing (read Nov 20, 2026)
 - CodeRabbit home page: https://www.coderabbit.ai (read Nov 20, 2026)
-- OpenReview pricing and demo: https://openreview.tech
+- OpenReview pricing and demo: https://openreview.tech/pricing
 - OpenReview billing: [docs/billing.md](../billing.md)
 - OpenReview data controls: [docs/data-controls.md](../data-controls.md)
 - OpenReview SSO: [docs/sso.md](../sso.md)

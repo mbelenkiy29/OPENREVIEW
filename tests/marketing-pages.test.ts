@@ -116,3 +116,10 @@ test("compare pages last-checked date and Starter trial copy", () => {
     assert.doesNotMatch(markdown, /14-day trial(?!.*Starter)/);
   }
 });
+
+test("compare pages cite /pricing as the OpenReview pricing source", () => {
+  for (const slug of compareSlugs) {
+    const markdown = readFileSync(comparePages[slug].file, "utf8");
+    assert.match(markdown, /OpenReview pricing and demo: https:\/\/openreview\.tech\/pricing/);
+  }
+});
