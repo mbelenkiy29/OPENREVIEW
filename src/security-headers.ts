@@ -35,8 +35,10 @@ export function contentSecurityPolicy(nonce?: string, anyFormTarget = false, dev
     // Profile pictures come from the sign-in provider (src/identity.ts): GitHub, Google (lh3–lh6), and GitLab.com
     // uploads or Gravatar for GitLab accounts without one.
     "img-src 'self' data: blob: https://media.userjot.com https://cdn.userjot.com https://alb.reddit.com https://avatars.githubusercontent.com https://*.googleusercontent.com https://gitlab.com https://secure.gravatar.com",
-    // Our fonts ship in the bundle (@fontsource); UserJot's Inter comes from Google Fonts.
-    "font-src 'self' https://fonts.gstatic.com",
+    // Our fonts ship in the bundle (@fontsource). UserJot self-hosts Inter woff2 files on
+    // cdn.userjot.com (sdk/v3/.../assets/inter-*.woff2); its install docs list that origin for
+    // font-src and say no Google Fonts allowance is needed.
+    "font-src 'self' https://cdn.userjot.com",
     // PostHog and Sentry go through same-origin proxies (src/telemetry.ts). UserJot's API, live updates,
     // SDK CSS, Google Fonts CSS fetch, and jotlens collector; OpenAI Ads and Reddit pixels (src/ads-pixel.ts,
     // src/reddit-pixel.ts). Turnstile's widget may `fetch("data:,")` as a capability probe; that is not

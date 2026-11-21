@@ -12,7 +12,7 @@ const formTargets = "'self' https://checkout.stripe.com https://billing.stripe.c
 const fetchPolicy = [
   "style-src 'self' 'unsafe-inline' https://cdn.userjot.com https://fonts.googleapis.com",
   "img-src 'self' data: blob: https://media.userjot.com https://cdn.userjot.com https://alb.reddit.com https://avatars.githubusercontent.com https://*.googleusercontent.com https://gitlab.com https://secure.gravatar.com",
-  "font-src 'self' https://fonts.gstatic.com",
+  "font-src 'self' https://cdn.userjot.com",
   "connect-src 'self' https://widget.userjot.com wss://widget.userjot.com https://cdn.userjot.com https://collect.jotlens.com https://fonts.googleapis.com https://bzrcdn.openai.com https://bzr.openai.com https://pixel-config.reddit.com https://alb.reddit.com",
   "frame-src https://challenges.cloudflare.com https://*.userjot.com",
   "media-src 'self'",
@@ -69,6 +69,10 @@ test("pages get a nonce script policy from middleware; everything it skips gets 
   assert.match(staticPolicy, /connect-src [^;]*https:\/\/collect\.jotlens\.com/);
   assert.match(staticPolicy, /connect-src [^;]*https:\/\/fonts\.googleapis\.com/);
   assert.doesNotMatch(/connect-src [^;]*/.exec(staticPolicy)![0], /(\s|^)data:/);
+  // UserJot Inter is self-hosted on cdn.userjot.com (not fonts.userjot.com, *.userjot.com, or Google Fonts).
+  const fontSrc = /font-src ([^;]*)/.exec(staticPolicy)![1].split(" ");
+  assert.deepEqual(fontSrc.filter((source) => source.startsWith("https://")), ["https://cdn.userjot.com"]);
+  assert.ok(!fontSrc.some((source) => source === "*" || source.startsWith("https://*.") || source === "https:" || source === "data:"));
 });
 
 test("forms lead only to known hosts, except on pages with sign-in (any SSO IdP) and MCP OAuth consent (any redirect URI)", async () => {
