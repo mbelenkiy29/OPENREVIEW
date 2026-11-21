@@ -4,7 +4,7 @@ import { PricingSection } from "../pricing-cards";
 import { SiteFooter, SiteHeader } from "../site-chrome";
 
 const title = pageSocialTitle("pricing");
-const description = "Starter, Pro and Enterprise plans for hosted OpenReview. The 14-day Starter trial needs no credit card; Pro collects a card at checkout.";
+const description = "Starter and Pro plans for hosted OpenReview. The 14-day Starter trial needs no credit card; Pro collects a card at checkout.";
 
 export const metadata: Metadata = {
   title: "Pricing",

@@ -19,5 +19,5 @@ export const comparePages = {
 
 export type CompareSlug = keyof typeof comparePages;
 export const compareSlugs = Object.keys(comparePages) as CompareSlug[];
-export const comparePage = (slug: string) => (slug in comparePages ? comparePages[slug as CompareSlug] : undefined);
+export const comparePage = (slug: string) => (Object.hasOwn(comparePages, slug) ? comparePages[slug as CompareSlug] : undefined);
 export const compareStaticParams = () => compareSlugs.map((slug) => ({ slug }));

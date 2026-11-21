@@ -1,6 +1,6 @@
 # OpenReview vs Greptile
 
-_Last checked Nov 16, 2026. Competitor facts come from the public pages linked below as read on that date. They change, so re-check before publishing. OpenReview facts come from this repository. We have not benchmarked either product and make no accuracy claims._
+_Last checked Nov 20, 2026. Competitor facts come from the public pages linked below as read on that date. They change, so re-check before publishing. OpenReview facts come from this repository. We have not benchmarked either product and make no accuracy claims._
 
 ## At a glance
 
@@ -11,7 +11,7 @@ _Last checked Nov 16, 2026. Competitor facts come from the public pages linked b
 | Self-hosting | Free and unlimited. Docker Compose, Helm chart, AWS Terraform module, offline mode | Listed under the Enterprise plan, custom pricing |
 | SSO and SAML | In the open-source code (SAML 2.0 and OIDC). Included in the cloud Pro plan | Enterprise plan |
 | Audit log, roles | In the open-source code | Role-based access control on Enterprise |
-| Cloud pricing (list) | Starter $12 per seat per month with $6 of model usage per seat. Pro $24 with $12 of usage. 14-day trial | Starter free for 1 developer (50 credits a month). Pro is $1 per credit with no seat fees. A base review is 1 credit, Plus 3, Apex 10 |
+| Cloud pricing (list) | Starter $12 per seat per month with $6 of model usage per seat. Pro $24 with $12 of usage. 14-day Starter trial, no card; Pro collects a card at checkout | Starter free for 1 developer (50 credits a month). Pro is $1 per credit with no seat fees. A base review is 1 credit, Plus 3, Apex 10 |
 | Free for open-source projects | Not offered in the billing docs today | Free for qualified non-commercial projects with an OSI-approved license |
 | Model choice | Anthropic, OpenAI, OpenRouter or any OpenAI-compatible endpoint, per-task routing, hard inference budget | Not stated on the pricing page |
 | Code hosts | GitHub, GitHub Enterprise, GitLab, Azure DevOps, Bitbucket Cloud and Data Center, Gitea, Perforce | GitHub on all plans. GitHub Enterprise, GitLab Self-Managed, Bitbucket Data Center, Gitea and Perforce are listed under Enterprise |
@@ -41,8 +41,8 @@ _Last checked Nov 16, 2026. Competitor facts come from the public pages linked b
 
 ## Sources
 
-- Greptile pricing: https://www.greptile.com/pricing (read Nov 16, 2026)
-- Greptile home page: https://www.greptile.com (read Nov 16, 2026)
+- Greptile pricing: https://www.greptile.com/pricing (read Nov 20, 2026)
+- Greptile home page: https://www.greptile.com (read Nov 20, 2026)
 - OpenReview pricing and demo: https://openreview.tech
 - OpenReview billing: [docs/billing.md](../billing.md)
 - OpenReview self-hosting kit: [docs/self-hosting-kit.md](../self-hosting-kit.md)

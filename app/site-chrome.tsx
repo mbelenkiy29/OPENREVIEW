@@ -1,5 +1,7 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { billingConfig } from "../src/billing";
+import { sessionCookie, sessionJwtValid } from "../src/session-token";
 import { userJotConfig } from "../src/userjot";
 import { CookieSettings } from "./consent";
 import { ThemePicker } from "./theme";
@@ -26,10 +28,12 @@ function SiteNavLinks({ home = false, current }: { home?: boolean; current?: "do
   </>;
 }
 
-export function SiteHeader({ home = false, current }: { home?: boolean; current?: "docs" | "changelog" | "pricing" }) {
-  const account = home
-    ? <Link className="site-account" href="/login">Sign in</Link>
-    : <Link className="site-account" href="/dashboard">Dashboard</Link>;
+export const accountCta = (signedIn: boolean) => signedIn
+  ? { href: "/dashboard" as const, label: "Dashboard" as const }
+  : { href: "/login" as const, label: "Sign in" as const };
+
+export async function SiteHeader({ home = false, current }: { home?: boolean; current?: "docs" | "changelog" | "pricing" }) {
+  const { href, label } = accountCta(await sessionJwtValid((await cookies()).get(sessionCookie)?.value));
   return <header className="site-header">
     <Link className="brand" href="/"><Mark /> OpenReview</Link>
     <nav className="site-nav" aria-label="Site"><SiteNavLinks home={home} current={current} /></nav>
@@ -38,10 +42,10 @@ export function SiteHeader({ home = false, current }: { home?: boolean; current?
         <summary><Icon name="list" /> <span>Menu</span></summary>
         <nav className="site-menu-panel" aria-label="Site">
           <SiteNavLinks home={home} current={current} />
-          {home ? <Link href="/login">Sign in</Link> : <Link href="/dashboard">Dashboard</Link>}
+          <Link href={href}>{label}</Link>
         </nav>
       </details>
-      {account}
+      <Link className="site-account" href={href}>{label}</Link>
       <Link className="button primary small" href="/signup">Get started</Link>
     </div>
     {/* How far down the landing page the visitor is; app/landing/motion.tsx draws it. */}
