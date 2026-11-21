@@ -1,0 +1,90 @@
+name: Live eval
+
+# Reviews real pull requests from Greptile's public benchmark with a real model, using the
+# LLM_API_KEY repository secret, and commits the results to reports/live/ on this branch.
+on:
+  workflow_dispatch:
+  # A commit message containing [probe] only checks whether the key is configured; no model calls.
+  push:
+    branches: [claude/live-eval]
+    paths: [".github/workflows/live-eval.yml", "scripts/live-eval.ts", "evals/live/**"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: live-eval
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Review benchmark pull requests
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
+      LLM_MODEL: ${{ vars.LLM_MODEL }}
+      LLM_INPUT_COST_PER_MILLION: ${{ vars.LLM_INPUT_COST_PER_MILLION || '0' }}
+      LLM_OUTPUT_COST_PER_MILLION: ${{ vars.LLM_OUTPUT_COST_PER_MILLION || '0' }}
+      # Stop starting new reviews once this many model tokens have been used in the run.
+      TOKEN_BUDGET: ${{ vars.LIVE_EVAL_TOKEN_BUDGET || '4000000' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the model key is configured (presence only)
+        id: key
+        env:
+          P_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          P_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          P_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          P_LLM_KEY: ${{ secrets.LLM_KEY }}
+          P_OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+          P_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_KEY }}
+          P_VAR_LLM_API_KEY: ${{ vars.LLM_API_KEY }}
+        run: |
+          for n in P_OPENAI_API_KEY P_ANTHROPIC_API_KEY P_OPENROUTER_API_KEY P_LLM_KEY P_OPENAI_KEY P_ANTHROPIC_KEY P_VAR_LLM_API_KEY; do
+            if [ -n "${!n}" ]; then echo "${n#P_}: present"; else echo "${n#P_}: absent"; fi
+          done | tee reports-presence.txt
+          mkdir -p reports/live
+          if [ -n "$LLM_API_KEY" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
+          echo "{\"checkedAt\":\"$(date -u +%FT%TZ)\",\"otherNames\":$(jq -Rn '[inputs]' < reports-presence.txt),\"LLM_API_KEY\":$([ -n "$LLM_API_KEY" ] && echo true || echo false),\"LLM_PROVIDER\":\"$LLM_PROVIDER\",\"LLM_MODEL\":\"$LLM_MODEL\"}" > reports/live/secret-probe.json
+          cat reports/live/secret-probe.json
+      - uses: pnpm/action-setup@v4
+        if: steps.key.outputs.present == 'true' && !contains(github.event.head_commit.message, '[probe]')
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.present == 'true' && !contains(github.event.head_commit.message, '[probe]')
+        with:
+          node-version: 24
+          cache: pnpm
+      - if: steps.key.outputs.present == 'true' && !contains(github.event.head_commit.message, '[probe]')
+        run: pnpm install --frozen-lockfile
+      - name: Review each case
+        if: steps.key.outputs.present == 'true' && !contains(github.event.head_commit.message, '[probe]')
+        run: |
+          set -u
+          used=0
+          for row in $(jq -c '.cases[]' evals/live/cases.json); do
+            id=$(jq -r .id <<<"$row"); repo=$(jq -r .repo <<<"$row"); pr=$(jq -r .pr <<<"$row")
+            if [ "$used" -ge "$TOKEN_BUDGET" ]; then echo "Token budget reached; skipping $id"; continue; fi
+            meta=$(gh api "repos/$repo/pulls/$pr")
+            base=$(jq -r .base.sha <<<"$meta"); head=$(jq -r .head.sha <<<"$meta")
+            mergebase=$(gh api "repos/$repo/compare/$base...$head" --jq .merge_base_commit.sha)
+            title=$(jq -r .title <<<"$meta"); body=$(jq -r '.body // ""' <<<"$meta")
+            dir="$RUNNER_TEMP/$id"; rm -rf "$dir"; git init -q "$dir"
+            git -C "$dir" remote add origin "https://github.com/$repo"
+            git -C "$dir" fetch -q --depth=1 origin "$mergebase" "$head"
+            npx tsx scripts/live-eval.ts --dir "$dir" --base "$mergebase" --head "$head" --id "$id" --title "$title" --description "$body" --out "reports/live/$id.json" || true
+            jq --arg repo "$repo" --argjson pr "$pr" --argjson c "$row" '. + {repo:$repo, pr:$pr, case:$c}' "reports/live/$id.json" > "reports/live/$id.tmp" && mv "reports/live/$id.tmp" "reports/live/$id.json"
+            t=$(jq '((.inputTokens // 0) + (.outputTokens // 0) + (.tokens // 0))' "reports/live/$id.json"); used=$((used + t))
+            rm -rf "$dir"
+          done
+          echo "Total tokens: $used"
+      - name: Commit results
+        if: always()
+        run: |
+          git config user.name "openreview-live-eval"
+          git config user.email "actions@users.noreply.github.com"
+          git add reports/live
+          git commit -qm "Live eval results [skip ci]" || exit 0
+          for i in 1 2 3; do git pull -q --rebase origin claude/live-eval && git push -q origin HEAD:claude/live-eval && break; sleep 5; done
