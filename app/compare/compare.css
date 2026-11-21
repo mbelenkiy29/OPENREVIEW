@@ -1,0 +1,65 @@
+/* Compare pages only. Desktop keeps the markdown table; ≤640px stacks each row as a card. */
+
+@media (max-width: 640px) {
+  .compare-page .table-scroll {
+    overflow: visible;
+    scrollbar-width: none;
+  }
+  .compare-page .table-scroll::-webkit-scrollbar {
+    display: none;
+  }
+  .compare-page .compare-table,
+  .compare-page .compare-table :is(thead, tbody, tr, th, td) {
+    display: block;
+    width: auto;
+  }
+  /* Keep thead in the accessibility tree; cards use data-label for the visual labels. */
+  .compare-page .compare-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .compare-page .compare-table tbody tr {
+    margin: 0 0 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+  .compare-page .compare-table tbody tr:last-child {
+    margin-bottom: 0;
+  }
+  .compare-page .compare-table tbody :is(th, td) {
+    border: 0;
+    padding: 8px 0;
+    overflow-wrap: break-word;
+  }
+  .compare-page .compare-table tbody tr > :first-child {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    color: var(--text);
+    padding-top: 0;
+    padding-bottom: 10px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .compare-page .compare-table tbody tr > :not(:first-child)::before {
+    content: attr(data-label) ": ";
+    font-weight: 500;
+    color: var(--muted);
+  }
+}
+
+@media speech {
+  .compare-page .compare-table tbody tr > :not(:first-child)::before {
+    content: none;
+  }
+}
