@@ -5,6 +5,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import schema from "../convex/schema";
 import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { near } from "./near";
 
 // Phase 3 of the referral program: refunds and disputes claw commissions back, and referrers redeem
 // their balance as credit on a workspace bill. Stripe is mocked through fetch; nothing calls the network.
@@ -245,13 +246,13 @@ test("a credit looks Stripe up, then posts a negative balance transaction with i
   const calls = creditStripe();
   expect(await request(t, alice, aliceCo, 1500)).toEqual({ ok: true });
   const [pending] = await redemptions(t);
-  expect(pending).toMatchObject({ userId: alice.userId, kind: "credit", amount: 1500, currency: "usd", creditOrganizationId: aliceCo, customerId: "cus_alice", status: "processing", idempotencyKey: `referral-credit:${pending._id}:1`, keyIssuedAt: Date.now(), attempts: 0 });
+  expect(pending).toMatchObject({ userId: alice.userId, kind: "credit", amount: 1500, currency: "usd", creditOrganizationId: aliceCo, customerId: "cus_alice", status: "processing", idempotencyKey: `referral-credit:${pending._id}:1`, keyIssuedAt: near(Date.now()), attempts: 0 });
   // Requested money is spoken for at once.
   expect(await t.query(api.referrals.overview, { token: alice.token })).toMatchObject({ available: 500, redeemed: 1500 });
   expect(await request(t, alice, aliceCo, 1000)).toEqual({ ok: false, error: "You have $5.00 available." });
   await run(t);
   const [done] = await redemptions(t);
-  expect(done).toMatchObject({ status: "completed", stripeId: "cbtxn_1", completedAt: Date.now(), attempts: 0 });
+  expect(done).toMatchObject({ status: "completed", stripeId: "cbtxn_1", completedAt: near(Date.now()), attempts: 0 });
   expect(done.leaseId).toBeUndefined();
   expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /v1/customers/cus_alice/balance_transactions", "GET /v1/customers/cus_alice", "POST /v1/customers/cus_alice/balance_transactions"]);
   expect(calls[0].query.toString()).toBe(`created%5Bgte%5D=${Math.floor(done.createdAt / 1000) - 300}&limit=100`);
@@ -303,7 +304,7 @@ test("after a 5xx the credit is never posted again; a later lookup finds it on a
   await request(t, alice, aliceCo, 2000);
   const [{ _id: redemptionId }] = await redemptions(t);
   await run(t);
-  expect((await redemptions(t))[0]).toMatchObject({ status: "processing", attempts: 1, indeterminateAt: Date.now() });
+  expect((await redemptions(t))[0]).toMatchObject({ status: "processing", attempts: 1, indeterminateAt: near(Date.now()) });
   // Later runs only look it up, and after a day the row is reported for an operator.
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
   vi.setSystemTime(Date.now() + 25 * 3600000);

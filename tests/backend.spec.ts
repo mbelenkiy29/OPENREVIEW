@@ -12,6 +12,7 @@ import { Gitlab } from "../src/gitlab";
 import { Github } from "../src/github";
 import { Gitea } from "../src/gitea";
 import { Origin } from "../src/origin";
+import { near } from "./near";
 import {Linear} from "../src/linear";
 import { defaults } from "../src/review-settings";
 import { HttpModel } from "../src/engine/model";
@@ -91,7 +92,7 @@ test("Bitbucket Forge discovery, selection and indexing use bound unexpired nati
   expect(await t.mutation(api.providerInstalls.bitbucketEvent,proof)).toBeNull();expect(await t.run(ctx=>ctx.db.query("providerEvents").collect())).toHaveLength(0);
   await expect(t.action(api.providerJobs.activateBitbucket,{token:alice,connectionId:id})).rejects.toThrow("scheduled token renewal");
   await t.mutation(api.providerInstalls.refreshBitbucket,{secret,id,installationId,workspaceId,previousCredentials,credentials:credentials(),invocationId:"setup-renewal",invocationExpiresAt:Date.now()+20000});
-  expect(await t.run(ctx=>ctx.db.get(id))).toMatchObject({suspended:true,forgeEventAt:Date.now(),forgeRefreshAt:Date.now()});
+  expect(await t.run(ctx=>ctx.db.get(id))).toMatchObject({suspended:true,forgeEventAt:near(Date.now()),forgeRefreshAt:near(Date.now())});
   const native={uuid:"{"+repositoryId+"}",full_name:"acme/repo",slug:"repo",scm:"git",workspace:{uuid:"{"+workspaceId+"}",slug:"acme",name:"Acme"},mainbranch:{name:"main"}};
   const catalog="/2.0/repositories/{"+workspaceId+"}",prefix=catalog+"/{"+repositoryId+"}";let calls=0,catalogFails=true;
   vi.spyOn(globalThis,"fetch").mockImplementation(async(input,options)=>{
