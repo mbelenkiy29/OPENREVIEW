@@ -4,6 +4,7 @@ import { SignJWT } from "jose";
 import { createHash, randomBytes } from "node:crypto";
 import schema from "../convex/schema";
 import { api, internal } from "../convex/_generated/api";
+import { near } from "./near";
 
 // Phase 4 of the referral program: cash payouts to a Stripe Connect account (Accounts v2, recipient).
 // Stripe is mocked through fetch; nothing calls the network.
@@ -69,7 +70,7 @@ test("payout setup creates the Connect account once, with the exact v2 body and 
   expect(json(calls[0])).toEqual({ contact_email: "alice@example.com", identity: { country: "us" }, dashboard: "express", defaults: { responsibilities: { fees_collector: "application", losses_collector: "application" } }, configuration: { recipient: { capabilities: { stripe_balance: { stripe_transfers: { requested: true } } } } }, metadata: { userId: alice.userId }, include: ["configuration.recipient", "identity", "requirements"] });
   expect(json(calls[1])).toEqual({ account: "acct_1Alice", use_case: { type: "account_onboarding", account_onboarding: { configurations: ["recipient"], refresh_url: `${back}refresh`, return_url: `${back}return` } } });
   const [saved] = await payoutAccounts(t);
-  expect(saved).toMatchObject({ userId: alice.userId, accountId: "acct_1Alice", country: "US", transfers: "pending", requirements: "currently_due", createdAt: Date.now() });
+  expect(saved).toMatchObject({ userId: alice.userId, accountId: "acct_1Alice", country: "US", transfers: "pending", requirements: "currently_due", createdAt: near(Date.now()) });
   expect(saved.onboardedAt).toBeUndefined();
   expect((await overview(t, alice)).payouts).toEqual({ state: "incomplete", countries: ["US"], minPayout: 5000, reviewAbove: 50000 });
   // Continue setup reuses the account.
@@ -158,15 +159,16 @@ test("the account status is re-read from Stripe: onboardedAt is set once, and a 
   // At most one read a minute: the account was saved just now.
   expect(await t.action(api.referralJobs.refreshMyPayoutAccount, { token: alice.token })).toBe("pending");
   expect(calls).toEqual([]);
-  vi.advanceTimersByTime(60000);
+  vi.advanceTimersByTime(60_010);
   expect(await t.action(api.referralJobs.refreshMyPayoutAccount, { token: alice.token })).toBe("active");
   expect(calls[0].query.toString()).toBe("include%5B0%5D=configuration.recipient&include%5B1%5D=requirements");
-  const onboardedAt = Date.now();
   let [row] = await payoutAccounts(t);
-  expect(row).toMatchObject({ transfers: "active", onboardedAt, updatedAt: onboardedAt });
+  const onboardedAt = row.onboardedAt;
+  expect(row).toMatchObject({ transfers: "active", onboardedAt: near(Date.now()), updatedAt: near(Date.now()) });
+  expect(onboardedAt).toBe(row.updatedAt);
   expect(row.requirements).toBeUndefined();
   expect((await overview(t, alice)).payouts?.state).toBe("active");
-  vi.advanceTimersByTime(60000);
+  vi.advanceTimersByTime(60_010);
   status = () => account("restricted", "past_due");
   expect(await t.action(internal.referralJobs.refreshPayoutAccount, { accountId: "acct_1Alice" })).toBe("restricted");
   [row] = await payoutAccounts(t);
@@ -175,10 +177,10 @@ test("the account status is re-read from Stripe: onboardedAt is set once, and a 
   expect(await start(t, alice.token)).toEqual({ ok: true, url: onboardingUrl });
   expect(json(calls.at(-1)!)).toEqual({ account: "acct_1Alice", use_case: { type: "account_update", account_update: { configurations: ["recipient"], refresh_url: `${back}refresh`, return_url: `${back}return` } } });
   // Active again, or an unexpected shape: onboardedAt never moves.
-  vi.advanceTimersByTime(60000);
+  vi.advanceTimersByTime(60_010);
   status = () => account("active");
   await t.action(api.referralJobs.refreshMyPayoutAccount, { token: alice.token });
-  vi.advanceTimersByTime(60000);
+  vi.advanceTimersByTime(60_010);
   status = () => Response.json({ id: "acct_1Alice", configuration: null, requirements: null });
   expect(await t.action(api.referralJobs.refreshMyPayoutAccount, { token: alice.token })).toBe("unknown");
   expect((await payoutAccounts(t))[0]).toMatchObject({ transfers: "unknown", onboardedAt });
@@ -260,7 +262,7 @@ test("a cash-out looks the transfer up, re-reads the account, then posts one tra
   expect(await request(t, alice, 10000)).toEqual({ ok: true, review: false });
   await run(t);
   const [done] = await redemptions(t);
-  expect(done).toMatchObject({ kind: "payout", status: "completed", stripeId: "tr_1", completedAt: Date.now(), attempts: 0 });
+  expect(done).toMatchObject({ kind: "payout", status: "completed", stripeId: "tr_1", completedAt: near(Date.now()), attempts: 0 });
   expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /v1/transfers", "GET /v2/core/accounts/acct_1Alice", "POST /v1/transfers"]);
   expect(calls[0].query.toString()).toBe(`transfer_group=referral-redemption-${done._id}&limit=1`);
   expect(form(calls[2])).toEqual({ amount: "10000", currency: "usd", destination: "acct_1Alice", transfer_group: `referral-redemption-${done._id}`, description: "OpenReview referral payout", "metadata[referralRedemptionId]": done._id });
@@ -291,7 +293,7 @@ test("balance_insufficient: once the lookup finds no transfer, the next try uses
   await request(t, alice, 10000);
   await run(t);
   const [waiting] = await redemptions(t);
-  expect(waiting).toMatchObject({ status: "processing", attempts: 1, idempotencyKey: `referral-transfer:${waiting._id}:2`, keyIssuedAt: Date.now(), error: "Stripe request failed (400 invalid_request_error balance_insufficient)" });
+  expect(waiting).toMatchObject({ status: "processing", attempts: 1, idempotencyKey: `referral-transfer:${waiting._id}:2`, keyIssuedAt: near(Date.now()), error: "Stripe request failed (400 invalid_request_error balance_insufficient)" });
   expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /v1/transfers", "GET /v2/core/accounts/acct_1Alice", "POST /v1/transfers", "GET /v1/transfers"]);
   expect(await overview(t, alice)).toMatchObject({ available: 50000 });
   // After a top-up the cron posts again, with the new key.
@@ -311,7 +313,7 @@ test("with payouts switched off, a cash-out pauses without a transfer, isn't rep
   process.env.REFERRAL_PAYOUTS_ENABLED = "false";
   await run(t);
   const [paused] = await redemptions(t);
-  expect(paused).toMatchObject({ status: "processing", pausedAt: Date.now(), attempts: 0 });
+  expect(paused).toMatchObject({ status: "processing", pausedAt: near(Date.now()), attempts: 0 });
   expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /v1/transfers"]);
   // Days later the cron still leaves it alone, without calling Stripe or reporting it as stuck; it only counts it.
   const log = vi.spyOn(console, "error").mockImplementation(() => {}), info = vi.spyOn(console, "log").mockImplementation(() => {});

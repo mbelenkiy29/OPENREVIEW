@@ -5,6 +5,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import schema from "../convex/schema";
 import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { near } from "./near";
 
 // Phase 2 of the referral program: the Checkout coupon, codes added in Organization Settings → Billing & Usage, and the
 // commission ledger fed by invoice.paid. Stripe is mocked through fetch; nothing calls the network.
@@ -152,7 +153,7 @@ test("Checkout moves an unpaid referral only for the owner of a never-paid works
   expect(coupon()).toBeNull();
   await checkout(t, carol, newer);
   expect(coupon()).toBe("referral-20-3mo");
-  expect(await referralOf(t, carol.userId)).toMatchObject({ status: "pending", referredOrganizationId: newer, boundAt: Date.now() });
+  expect(await referralOf(t, carol.userId)).toMatchObject({ status: "pending", referredOrganizationId: newer, boundAt: near(Date.now()) });
   // Until its first payment, Bob's referral follows the workspace he subscribes from; the one it left keeps nothing.
   const second = await workspace(t, bob, "Bob Two");
   await checkout(t, bob, second);
@@ -248,7 +249,7 @@ test("referral codes added in Organization Settings → Billing & Usage follow t
   vi.advanceTimersByTime(3600_000);
   expect(await apply(frank, frankCo, hankCode)).toEqual({ ok: true });
   const applied = await referralOf(t, frank.userId);
-  expect(applied).toMatchObject({ referrerId: hank.userId, referredOrganizationId: frankCo, source: "code", status: "pending", attributedAt: Date.now(), boundAt: Date.now() });
+  expect(applied).toMatchObject({ referrerId: hank.userId, referredOrganizationId: frankCo, source: "code", status: "pending", attributedAt: near(Date.now()), boundAt: near(Date.now()) });
   expect((await t.run((ctx) => ctx.db.query("auditEvents").collect())).filter((e) => e.action === "referral.code_applied").map((e) => [e.organizationId, e.userId, e.target])).toEqual([[frankCo, frank.userId, applied._id]]);
   expect(await apply(frank, frankCo, code)).toEqual({ ok: false, error: "This workspace already has a referral." });
   expect(await apply(frank, paidCo, code)).toMatchObject({ ok: false, error: "A referral code can’t be added to a workspace that has subscribed." });
@@ -410,7 +411,7 @@ test("a referrer who is or was a member of the workspace voids the referral and 
   vi.advanceTimersByTime(86400000);
   await deliver(t, paid("in_2", Date.now()));
   await run(t);
-  expect(await referralOf(t, bob.userId)).toMatchObject({ status: "void", voidReason: "referrer is or was a member of the workspace", voidedAt: Date.now() });
+  expect(await referralOf(t, bob.userId)).toMatchObject({ status: "void", voidReason: "referrer is or was a member of the workspace", voidedAt: near(Date.now()) });
   expect((await commissions(t)).map((c) => [c.invoiceId, c.status])).toEqual([["in_1", "void"], ["in_0", "accrued"]]);
   expect((await commissions(t)).find((c) => c._id === released)?.status).toBe("accrued");
   // Void referrals earn nothing more and get no coupon.
@@ -441,7 +442,7 @@ test("the referrer gets exactly one email when a workspace they referred first p
   expect(mails[0]).toMatchObject({ to: ["alice@example.com"], subject: "@bob subscribed to OpenReview" });
   expect(mails[0].text).toMatch(/https:\/\/review\.example\.com\/dashboard\/account\/referrals/);
   const referral = await referralOf(t, bob.userId);
-  expect(referral.noticeSentAt).toBe(Date.now());
+  expect(referral.noticeSentAt).toEqual(near(Date.now()));
   expect(await t.action(internal.referralJobs.sendConversionNotice, { referralId: referral._id })).toBe("skipped");
   expect(mails).toHaveLength(1);
 });

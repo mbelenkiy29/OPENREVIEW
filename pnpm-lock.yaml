@@ -114,8 +114,8 @@ importers:
         specifier: ^19.2.7
         version: 19.3.0(@types/react@19.3.0)
       convex-test:
-        specifier: ^0.0.60
-        version: 0.0.60(convex@1.51.0(react@19.3.1))
+        specifier: ^0.0.72
+        version: 0.0.72(convex@1.51.0(react@19.3.1))
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
@@ -2052,10 +2052,10 @@ packages:
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
 
-  convex-test@0.0.60:
-    resolution: {integrity: sha512-qCAFx+CO6bmpXNc9s1jZvw8NJPS4yM074ib87PUY675FsiaRRW4ALotEB+RbVCYDRMYxh623KMnYZBlrMJIv1Q==}
+  convex-test@0.0.72:
+    resolution: {integrity: sha512-yeI8w2PKT/TO3VnXLWJPz2CDCwaKx8sIcy8HaFJDvcqwdXZBKY+EtD2MOU+iIih+O87Saudx2SVl/1sJZmZyOA==}
     peerDependencies:
-      convex: ^1.43.0
+      convex: ^1.46.0
 
   convex@1.51.0:
     resolution: {integrity: sha512-Y5gS+JmT2JBq76S3CrQDrdL/Ijs4ZRKsvz3cu5EmHf/QxW18QrHunb5j9WC6lAbWbWc/gvmqpa5lvXzLXFQVJA==}
@@ -5790,7 +5790,7 @@ snapshots:
 
   convert-source-map@2.0.0: {}
 
-  convex-test@0.0.60(convex@1.51.0(react@19.3.1)):
+  convex-test@0.0.72(convex@1.51.0(react@19.3.1)):
     dependencies:
       convex: 1.51.0(react@19.3.1)
 

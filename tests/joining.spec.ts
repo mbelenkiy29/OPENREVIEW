@@ -5,6 +5,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import schema from '../convex/schema';
 import {api,internal} from '../convex/_generated/api';
 import type {Id} from '../convex/_generated/dataModel';
+import {near} from './near';
 
 // "Join a team" requests and the People → Member link (convex/joinRequests.ts, convex/identity.ts).
 const modules=import.meta.glob('../convex/**/*.ts');
@@ -140,7 +141,7 @@ test('a member link stops working after 30 days',async()=>{
  const created=await workspace(t);
  let owner=created.owner;const {organizationId}=created;
  await t.mutation(api.identity.setMemberLink,{token:owner.token,organizationId,tokenHash:hash('soon-stale')});
- expect(await t.query(api.identity.invitationPreview,{tokenHash:hash('soon-stale')})).toMatchObject({role:'member',expiresAt:Date.UTC(2026,10,26)});
+ expect(await t.query(api.identity.invitationPreview,{tokenHash:hash('soon-stale')})).toMatchObject({role:'member',expiresAt:near(Date.UTC(2026,10,26))});
  vi.setSystemTime(Date.UTC(2026,10,26,0,0,1));
  owner=await user(t,'owner',owner.id);
  const erin=await user(t,'erin');

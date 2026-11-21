@@ -9,6 +9,7 @@ import {STALE_RESERVATION_MS} from '../convex/inferenceBudget';
 import {choosePlanMessage,fixAllowance,releaseFix} from '../convex/billing';
 import {proEntitlements,upgradeNote} from '../src/plans';
 import {paidPlanReason,trialEndedReason,trialUsedReason} from '../src/billing';
+import {near} from './near';
 const modules=import.meta.glob('../convex/**/*.ts');
 const secret='billing-session-secret-at-least-32-characters',whsec='whsec_billing_fixture';
 const env={SESSION_SECRET:secret,SERVICE_SECRET:'billing-service',BILLING_ENABLED:'true',BILLING_FREE_USAGE_USD:'0.02',BILLING_USAGE_PER_SEAT_USD:'0.01',BILLING_PRO_USAGE_PER_SEAT_USD:'0.02',BILLING_GRACE_DAYS:'7',STRIPE_WEBHOOK_SECRET:whsec,STRIPE_SECRET_KEY:'sk_test_fixture',STRIPE_SEAT_PRICE_ID:'price_seat',STRIPE_PRO_PRICE_ID:'price_pro',APP_URL:'https://review.example.com'};
@@ -74,13 +75,13 @@ test('the paid-plan trial starts at the first Checkout, however long the workspa
  // Weeks of Free reviews later, the trial has not started and is still a full one.
  vi.setSystemTime(Date.UTC(2026,11,20,12));
  expect((await reviewOf(t,await enqueue(t,repo._id,2)))?.status).toBe('queued');
- expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'free',allowed:true,trialStarted:false,trialDays:14,trialEndsAt:Date.now()+14*86400000});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({plan:'free',allowed:true,trialStarted:false,trialDays:14,trialEndsAt:near(Date.now()+14*86400000)});
  // The first Checkout links a customer and starts the clock; a later Checkout does not restart it.
  await t.mutation(internal.billing.linkCustomer,{organizationId:org,customerId:'cus_trial'});
- expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({trialStarted:true,trialEndsAt:Date.UTC(2027,0,3,12)});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({trialStarted:true,trialEndsAt:near(Date.UTC(2027,0,3,12))});
  vi.setSystemTime(Date.UTC(2026,11,25,12));
  await t.mutation(internal.billing.linkCustomer,{organizationId:org,customerId:'cus_trial'});
- expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).trialEndsAt).toBe(Date.UTC(2027,0,3,12));
+ expect((await t.query(api.billing.status,{token:alice.token,organizationId:org})).trialEndsAt).toEqual(near(Date.UTC(2027,0,3,12)));
 });
 
 test('switching Stripe modes drops test customers and subscriptions and returns workspaces to Free',async()=>{
@@ -127,7 +128,7 @@ test('every new workspace becomes a Stripe customer that Checkout reuses, withou
  await t.action(api.billingJobs.checkout,{token:alice.token,organizationId:org});
  expect(customers()).toHaveLength(1);
  expect(new URLSearchParams(calls.at(-1)!.body).get('customer')).toBe(customer);
- expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({hasCustomer:true,trialStarted:true,trialEndsAt:Date.now()+14*86400000});
+ expect(await t.query(api.billing.status,{token:alice.token,organizationId:org})).toMatchObject({hasCustomer:true,trialStarted:true,trialEndsAt:near(Date.now()+14*86400000)});
  // A Stripe outage leaves the workspace without a customer, and nothing else.
  down=true;
  const side=await t.mutation(api.users.createOrganization,{token:alice.token,name:'Side'});
@@ -680,7 +681,7 @@ test('a new workspace starts a 14-day Starter trial with no card; a second start
  await expect(t.mutation(api.billing.startTrial,{token:bob.token,organizationId:fresh})).rejects.toThrow(/Forbidden/);
  expect(await t.mutation(api.billing.startTrial,{token:alice.token,organizationId:fresh})).toEqual({started:true});
  const started=await t.query(api.billing.status,{token:alice.token,organizationId:fresh});
- expect(started).toMatchObject({plan:'starter',planName:'Starter',planMissing:false,planSelected:true,allowed:true,cardlessTrial:true,trialStarted:true,status:'trial',trialEndsAt:Date.now()+14*86400000});
+ expect(started).toMatchObject({plan:'starter',planName:'Starter',planMissing:false,planSelected:true,allowed:true,cardlessTrial:true,trialStarted:true,status:'trial',trialEndsAt:near(Date.now()+14*86400000)});
  if(!started.enabled)throw new Error('expected billing');
  expect(await t.query(internal.billing.entitlement,{organizationId:fresh,key:'fix.pullRequests'})).toBe(true);
  expect(await t.query(internal.billing.entitlement,{organizationId:fresh,key:'review.deep'})).toBe(false);

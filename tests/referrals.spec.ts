@@ -6,6 +6,7 @@ import schema from "../convex/schema";
 import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { bindReferralOnWorkspace, everMember, isMember, recordReferralSignup, verifiedEmail } from "../convex/referralLedger";
+import { near } from "./near";
 
 const modules = import.meta.glob("../convex/**/*.ts");
 const secret = "referral-session-secret-at-least-32-characters", svc = "referral-service";
@@ -54,7 +55,7 @@ test("only accounts this sign-in creates are attributed, through OAuth and magic
   const carol = await signIn(t, github(3, "carol"));
   // A new Google user through Alice's link (typed loosely): one signed-up referral.
   const bob = await signIn(t, google("g-bob", "bob@example.com"), { referralCode: dashed(code) });
-  expect(await referralOf(t, bob.userId)).toMatchObject([{ referrerId: alice.userId, source: "link", status: "signed_up", attributedAt: Date.now() }]);
+  expect(await referralOf(t, bob.userId)).toMatchObject([{ referrerId: alice.userId, source: "link", status: "signed_up", attributedAt: near(Date.now()) }]);
   // Returning users never are, even with another code: Bob again, and Carol who signed up without one.
   await signIn(t, google("g-bob", "bob@example.com"), { referralCode: ginaCode });
   await signIn(t, github(3, "carol"), { referralCode: code });
@@ -69,13 +70,17 @@ test("only accounts this sign-in creates are attributed, through OAuth and magic
   // Magic links: the code is stored on the token in canonical form and counts when the link creates the user.
   process.env.RESEND_API_KEY = "re_fixture"; process.env.EMAIL_FROM = "OpenReview <noreply@example.com>";
   const mails: string[] = [];
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (_u: string | URL | Request, init?: RequestInit) => { mails.push(JSON.parse(String(init?.body)).text); return Response.json({ id: "m" + mails.length }); });
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_u: string | URL | Request, init?: RequestInit) => {
+    const text = init?.body ? JSON.parse(String(init.body)).text : undefined;
+    if (typeof text === "string" && text.includes("token=")) mails.push(text);
+    return Response.json({ id: "m" + mails.length });
+  });
   const consume = async () => t.mutation(api.identity.consumeLoginToken, { secret: svc, tokenHash: createHash("sha256").update(/token=([A-Za-z0-9_-]+)/.exec(mails.at(-1)!)![1]).digest("hex"), sessionHash: session().hash });
   await t.action(api.identityJobs.requestMagicLink, { secret: svc, email: "Frank@Example.com", referralCode: dashed(code) });
   expect((await t.run((ctx) => ctx.db.query("loginTokens").collect())).map((l) => l.referralCode)).toEqual([code]);
   const frank = (await consume())!;
   expect(await referralOf(t, frank)).toMatchObject([{ referrerId: alice.userId, status: "signed_up" }]);
-  vi.advanceTimersByTime(60_000); // past the one-minute resend cooldown
+  vi.advanceTimersByTime(60_010); // past the one-minute resend cooldown (convex-test pins Date.now 1ms behind)
   await t.action(api.identityJobs.requestMagicLink, { secret: svc, email: "frank@example.com", referralCode: ginaCode });
   expect(await consume()).toBe(frank);
   expect(await referralOf(t, frank)).toMatchObject([{ referrerId: alice.userId }]);
@@ -95,7 +100,7 @@ test("the referred person's first workspace carries the referral; later and alre
   const first = await t.mutation(api.users.createOrganization, { token: bob.token, name: "Bob Co" });
   vi.advanceTimersByTime(60_000);
   await t.mutation(api.users.createOrganization, { token: bob.token, name: "Second" });
-  expect(await referralOf(t, bob.userId)).toMatchObject([{ status: "pending", referredOrganizationId: first, boundAt: Date.UTC(2026, 9, 14, 12) }]);
+  expect(await referralOf(t, bob.userId)).toMatchObject([{ status: "pending", referredOrganizationId: first, boundAt: near(Date.UTC(2026, 9, 14, 12)) }]);
   // One referral per workspace: Carol's cannot bind to Bob's workspace.
   await t.run((ctx) => bindReferralOnWorkspace(ctx, carol.userId, first));
   expect(await referralOf(t, carol.userId)).toMatchObject([{ status: "signed_up" }]);
@@ -112,7 +117,7 @@ test("the referred person's first workspace carries the referral; later and alre
   const referralId = (await referralOf(t, bob.userId))[0]._id;
   await t.mutation(internal.referralOps.voidReferral, { referralId, reason: "same person" });
   await t.mutation(internal.referralOps.voidReferral, { referralId, reason: "again" });
-  expect(await t.run((ctx) => ctx.db.get(referralId))).toMatchObject({ status: "void", voidReason: "same person", voidedAt: Date.now() });
+  expect(await t.run((ctx) => ctx.db.get(referralId))).toMatchObject({ status: "void", voidReason: "same person", voidedAt: near(Date.now()) });
   expect((await t.run((ctx) => ctx.db.query("auditEvents").collect())).filter((e) => e.action === "referral.voided").map((e) => [e.organizationId, e.target])).toEqual([[first, referralId]]);
   expect(await t.query(api.referrals.overview, { token: alice.token })).toMatchObject({ signedUp: 1, pending: 1 });
 });

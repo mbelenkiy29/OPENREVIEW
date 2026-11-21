@@ -11,6 +11,7 @@ import {HttpModel} from '../src/engine/model';
 import {encryptCredential} from '../src/credentials';
 import type {ModelRequest} from '../src/engine/types';
 import type {z} from 'zod';
+import {near} from './near';
 
 // Pro gates (src/plans.ts): each is off on Free and Starter (except fix pull requests), on for Pro, and everything is unlocked with billing off.
 const holder=vi.hoisted(()=>({t:undefined as unknown as ReturnType<typeof convexTest>,user:undefined as unknown}));
@@ -151,7 +152,7 @@ test('memory.conventions: learning is skipped without Pro, without moving the cu
  // No provider or model is reached: ingest only marks the repository synced so the sweep moves on.
  expect(await t.action(internal.conventionJobs.ingest,{repositoryId:repo._id})).toEqual({added:0,merged:0,rejected:0});
  const after=await t.run(ctx=>ctx.db.get(repo._id));
- expect(after).toMatchObject({conventionsCursor:7,conventionsSyncedAt:Date.now()});
+ expect(after).toMatchObject({conventionsCursor:7,conventionsSyncedAt:near(Date.now())});
  expect(await t.run(ctx=>ctx.db.query('learnedRules').collect())).toMatchObject([{status:'approved',text:'Prefer early returns'}]);
 });
 
