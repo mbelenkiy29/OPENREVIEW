@@ -1,4 +1,4 @@
-name: Feature
+name: Feature request
 description: A new capability or a change to documented behaviour.
 title: "[Feature] "
 labels: ["enhancement"]
@@ -7,6 +7,8 @@ body:
     attributes:
       value: |
         Describe the problem before the solution. Keep the change scoped; reuse the shared review engine for new SCM or API adapters.
+
+        Usage questions belong in [Discussions Q&A](https://github.com/mbelenkiy29/OPENREVIEW/discussions/categories/q-a). Security reports go to [SECURITY.md](https://github.com/mbelenkiy29/OPENREVIEW/blob/main/SECURITY.md), not here.
   - type: textarea
     id: problem
     attributes:

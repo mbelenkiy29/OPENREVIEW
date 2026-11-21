@@ -1,8 +1,11 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Security report
+  - name: Setup and usage questions
+    url: https://github.com/mbelenkiy29/OPENREVIEW/discussions/categories/q-a
+    about: Ask how to install, configure, or use OpenReview. Use Discussions Q&A instead of an issue.
+  - name: Security vulnerabilities
     url: https://github.com/mbelenkiy29/OPENREVIEW/blob/main/SECURITY.md
-    about: Email the contact in SECURITY.md. Do not file public issues for vulnerabilities or live credentials.
+    about: Do not file public issues for vulnerabilities. Follow SECURITY.md and email the contact listed there.
   - name: Documentation
-    url: https://github.com/mbelenkiy29/OPENREVIEW/blob/main/docs/public/quickstart.md
-    about: Quickstart, self-hosting, and CLI install from this checkout.
+    url: https://github.com/mbelenkiy29/OPENREVIEW/blob/main/docs/troubleshooting.md
+    about: Troubleshooting FAQ, plus quickstart, GitHub App setup, and self-hosting from this checkout.

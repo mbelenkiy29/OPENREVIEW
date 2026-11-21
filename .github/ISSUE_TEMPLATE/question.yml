@@ -1,0 +1,36 @@
+name: Question
+description: A question about using OpenReview. Prefer Discussions Q&A.
+title: "[Question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Setup and usage questions are answered faster in [Discussions Q&A](https://github.com/mbelenkiy29/OPENREVIEW/discussions/categories/q-a).** Check the [troubleshooting FAQ](https://github.com/mbelenkiy29/OPENREVIEW/blob/main/docs/troubleshooting.md) first.
+
+        Use this form only if you already looked there and still need a tracked issue. Do not paste secrets, API keys, private keys, or webhook secrets. Report vulnerabilities privately per [SECURITY.md](https://github.com/mbelenkiy29/OPENREVIEW/blob/main/SECURITY.md).
+  - type: checkboxes
+    id: already-asked
+    attributes:
+      label: Before filing
+      options:
+        - label: I checked Discussions Q&A and the troubleshooting FAQ, and this still needs an issue
+          required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What you are trying to do, and what you already tried.
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment type
+      options:
+        - Hosted (openreview.tech)
+        - Self-hosted
+        - Local
+        - Not sure
+    validations:
+      required: true

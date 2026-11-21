@@ -451,6 +451,8 @@ CI on each pull request runs lint, typecheck, test, and build. `pnpm test` runs 
 
 ## Troubleshooting
 
+See the [troubleshooting FAQ](docs/troubleshooting.md) for GitHub App setup, webhooks, Convex, and model credentials. **Where to get help:** [Discussions Q&A](https://github.com/mbelenkiy29/OPENREVIEW/discussions/categories/q-a) for setup and usage; report vulnerabilities privately per [SECURITY.md](SECURITY.md), not as public issues.
+
 * Sign-in unavailable: configure GitHub client ID/secret and exact callback URL.
 * Invalid installation state: sign in again and restart installation within ten minutes.
 * No reviews: verify App permissions, webhook URL/secret, repository enabled status, draft behavior, branch filters, and automatic reviews.
