@@ -3218,6 +3218,7 @@ form.catalog-review {
   border: 0;
   border-radius: 0;
 }
+.landing main > section > h1,
 .landing main > section > h2,
 .how-inner > h2,
 .feature-copy > h2 {

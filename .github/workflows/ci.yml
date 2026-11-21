@@ -42,3 +42,5 @@ jobs:
       - run: pnpm build
         env:
           APP_URL: http://localhost:3000
+      - name: Smoke marketing routes
+        run: pnpm exec tsx scripts/marketing-smoke.ts

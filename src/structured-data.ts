@@ -4,6 +4,15 @@
 import type { BillingConfig } from "./billing";
 
 export const siteDescription = "Repository-aware pull request reviews with exact-quote evidence. Self-host it or use the cloud.";
+/** Site name in Open Graph / Twitter tags, distinct from the academic openreview.net platform. */
+export const siteName = "OpenReview.tech";
+export const socialTitle = `${siteName}: open-source AI code review`;
+export const pageSocialTitle = (page: string) => `${siteName}: ${page}`;
+export const compareSocialTitle = (competitor: string) => `${siteName} vs ${competitor}`;
+export const socialMeta = (title: string, description?: string) => ({
+  openGraph: { type: "website" as const, title, description, siteName },
+  twitter: { card: "summary_large_image" as const, title, description },
+});
 
 /** The amount in a price label such as "$12 per seat / month"; undefined when the label has none. */
 export function priceFromLabel(label?: string) {

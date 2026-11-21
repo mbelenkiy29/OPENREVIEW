@@ -12,15 +12,13 @@ export const sourceRepository = "https://github.com/mbelenkiy29/OPENREVIEW";
 
 // Public-site header and footer shared by the landing page, docs, changelog and feedback board. On
 // the landing page links are in-page anchors; elsewhere they point back to the landing sections.
-function SiteNavLinks({ home = false, current }: { home?: boolean; current?: "docs" | "changelog" }) {
+function SiteNavLinks({ home = false, current }: { home?: boolean; current?: "docs" | "changelog" | "pricing" }) {
   const base = home ? "" : "/";
-  // Pricing lives on the landing page, which shows it when billing is enabled at build time; other
-  // pages skip the link.
-  const pricing = home && billingConfig().enabled, feedback = Boolean(userJotConfig());
+  const pricing = billingConfig().enabled, feedback = Boolean(userJotConfig());
   return <>
     <Link href={`${base}#features`}>Features</Link>
     <Link href={`${base}#how`}>How it works</Link>
-    {pricing && <Link href={`${base}#pricing`}>Pricing</Link>}
+    {pricing && <Link href="/pricing" aria-current={current === "pricing" ? "page" : undefined}>Pricing</Link>}
     <Link href="/docs/quickstart" aria-current={current === "docs" ? "page" : undefined}>Docs</Link>
     <Link href="/changelog" aria-current={current === "changelog" ? "page" : undefined}>Changelog</Link>
     {feedback && <BoardNavLinks />}
@@ -28,7 +26,7 @@ function SiteNavLinks({ home = false, current }: { home?: boolean; current?: "do
   </>;
 }
 
-export function SiteHeader({ home = false, current }: { home?: boolean; current?: "docs" | "changelog" }) {
+export function SiteHeader({ home = false, current }: { home?: boolean; current?: "docs" | "changelog" | "pricing" }) {
   const account = home
     ? <Link className="site-account" href="/login">Sign in</Link>
     : <Link className="site-account" href="/dashboard">Dashboard</Link>;
@@ -55,10 +53,11 @@ const columns: [string, [string, string][]][] = [
   ["Docs", [["/docs/quickstart", "Quickstart"], ["/docs/reviews", "How reviews work"], ["/docs/configuration", "Configuration"], ["/docs/self-hosting", "Self-hosting"]]],
   ["Developers", [["/docs/api", "Public API"], ["/docs/mcp", "MCP"], ["/docs/cli", "CLI"], ["/docs/openapi.yaml", "OpenAPI spec"]]],
   ["Integrations", [["/docs/github-app", "GitHub App"], ["/docs/notifications", "Slack and email"], ["/docs/linear", "Linear"], ["/docs/atlassian", "Jira and Confluence"]]],
+  ["Compare", [["/compare/greptile", "vs Greptile"], ["/compare/coderabbit", "vs CodeRabbit"]]],
 ];
 
-export function SiteFooter({ home = false }: { home?: boolean }) {
-  const pricing = home && billingConfig().enabled, feedback = Boolean(userJotConfig());
+export function SiteFooter() {
+  const pricing = billingConfig().enabled, feedback = Boolean(userJotConfig());
   return <footer className="site-footer">
     <div className="footer-grid">
       <div>
@@ -69,7 +68,7 @@ export function SiteFooter({ home = false }: { home?: boolean }) {
         <h2>Product</h2>
         <Link href="/#features">Features</Link>
         <Link href="/#how">How it works</Link>
-        {pricing && <Link href="/#pricing">Pricing</Link>}
+        {pricing && <Link href="/pricing">Pricing</Link>}
         <Link href="/changelog">Changelog</Link>
         {feedback && <><Link href="/feedback/roadmap">Roadmap</Link><Link href="/feedback">Feedback</Link></>}
       </nav>

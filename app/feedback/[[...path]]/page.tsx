@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { pageSocialTitle, socialMeta } from "../../../src/structured-data";
 import { userJotConfig } from "../../../src/userjot";
 import { boardTitle } from "../../../src/userjot-board";
 import { SiteFooter, SiteHeader } from "../../site-chrome";
@@ -9,7 +10,8 @@ type Props = { params: Promise<{ path?: string[] }> };
 const description = "Request features, report bugs, vote on what comes next and follow the OpenReview roadmap.";
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { path = [] } = await params;
-  return { title: boardTitle(`/feedback/${path.join("/")}`), description };
+  const title = boardTitle(`/feedback/${path.join("/")}`);
+  return { title, description, ...socialMeta(pageSocialTitle(title), description) };
 }
 // The public UserJot board inside the site: posts, votes and the roadmap. Deep links such as
 // /feedback/roadmap and /feedback/board/p/<post> open that view (UserJotEmbed keeps the URL in sync).

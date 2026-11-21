@@ -18,6 +18,8 @@ test("keyboard users get a skip link to #main before page chrome", () => {
   assert.match(css, /\.skip-link:focus\s*\{/);
   assert.match(readFileSync("app/page.tsx", "utf8"), /<main id="main"/);
   assert.match(readFileSync("app/docs/[[...slug]]/page.tsx", "utf8"), /<main id="main"/);
+  assert.match(readFileSync("app/compare/[slug]/page.tsx", "utf8"), /<main id="main"/);
+  assert.match(readFileSync("app/pricing/page.tsx", "utf8"), /<main id="main"/);
   assert.match(readFileSync("app/dashboard/(portal)/[[...section]]/page.tsx", "utf8"), /<main id="main"/);
 });
 

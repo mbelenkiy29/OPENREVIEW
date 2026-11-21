@@ -8,11 +8,13 @@ import remarkGfm from "remark-gfm";
 import { parseChangelog } from "../../src/changelog";
 import { resolveDocLink } from "../../src/docs-manifest";
 import { emailOnWeb } from "../../src/email";
+import { pageSocialTitle, socialMeta } from "../../src/structured-data";
 import { turnstileConfig } from "../../src/turnstile";
 import { SiteFooter, SiteHeader } from "../site-chrome";
 import { ChangelogEmail } from "./email-form";
 
-export const metadata: Metadata = { title: "Changelog", description: "What changed in OpenReview.", alternates: { canonical: "/changelog", types: { "application/rss+xml": "/changelog/feed.xml" } } };
+const description = "What changed in OpenReview.";
+export const metadata: Metadata = { title: "Changelog", description, alternates: { canonical: "/changelog", types: { "application/rss+xml": "/changelog/feed.xml" } }, ...socialMeta(pageSocialTitle("Changelog"), description) };
 
 // Each month and section heading has an id, so the RSS feed and other pages can link to it.
 export default async function Changelog() {

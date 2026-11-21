@@ -6,6 +6,7 @@ import { notFound } from "next/navigation";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { docBySlug, docPages, resolveDocLink } from "../../../src/docs-manifest";
+import { pageSocialTitle, socialMeta } from "../../../src/structured-data";
 import { markdownTableLabels } from "../../../src/markdown-tables";
 import { docHeadings, type DocsEntry } from "../../../src/docs-search";
 import { DocsSearch } from "../docs-search";
@@ -18,7 +19,7 @@ export function generateStaticParams() { return [{ slug: [] }, ...docPages.map((
 const pageFor = (slug: string[] = []) => (slug.length === 0 ? docPages[0] : slug.length === 1 ? docBySlug(slug[0]) : undefined);
 export async function generateMetadata({ params }: { params: Promise<{ slug?: string[] }> }): Promise<Metadata> {
   const page = pageFor((await params).slug);
-  return page ? { title: page.title, description: page.description, alternates: { canonical: `/docs/${page.slug}` } } : {};
+  return page ? { title: page.title, description: page.description, alternates: { canonical: `/docs/${page.slug}` }, ...socialMeta(pageSocialTitle(page.title), page.description) } : {};
 }
 // The search index: each page's title, section, description and headings, read once per build.
 let searchIndex: Promise<DocsEntry[]> | undefined;

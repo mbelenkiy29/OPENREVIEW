@@ -34,7 +34,7 @@ export async function AuthScreen({ mode, query }: { mode: AuthMode; query: AuthQ
       ? <>Don’t have an account? <Link href={`/signup${carry}`}>Sign up</Link></>
       : <>Already have an account? <Link href={`/login${carry}`}>Login</Link></>}</p>
     {referrer && <p className="auth-note">{referralInvite(referrer.login, discount)} {referralDisclosure(referrer.login)}</p>}
-    {mode === "signup" && billing.enabled && <p className="auth-note">Starter and Pro come with a {billing.trialDays}-day free trial.</p>}
+    {mode === "signup" && billing.enabled && <p className="auth-note">Starter starts a {billing.trialDays}-day trial with no credit card. Pro collects a card at checkout.</p>}
     {message && <p role={message.tone} className={message.tone === "alert" ? "error" : "auth-status"}>{message.text}</p>}
     <SignInOptions next={next} mode={mode} referral={referral} sentTo={to} cooldown={query.email === "sent"} />
   </AuthChrome>;

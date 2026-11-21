@@ -6,9 +6,9 @@ import { AgentReplica, AnalyticsReplica, ChatReplica, FindingReplica, ReviewRepl
 import { LandingMotion } from "./landing/motion-loader";
 import { Copy } from "./dashboard/live";
 import { ScrollTable } from "./dashboard/scroll-table";
-import { billingConfig, usdText } from "../src/billing";
-import { enterpriseOffer } from "../src/plans";
+import { billingConfig } from "../src/billing";
 import { homeStructuredData, jsonLd } from "../src/structured-data";
+import { PricingSection } from "./pricing-cards";
 
 export const metadata: Metadata = { alternates: { canonical: "/" } };
 
@@ -32,12 +32,13 @@ const more = [
   ["Many providers", "GitHub, GitHub Enterprise, GitLab, Azure DevOps, Bitbucket Cloud and Data Center, Gitea and Perforce."],
   ["Your model, your budget", "Bring Anthropic, OpenAI or a compatible endpoint. A hard inference budget and per-task usage accounting keep spend predictable."],
 ] as const;
-const faq = [
+const faq = (trialDays: number) => [
   ["Does OpenReview run our code?", "No. Reviews read source and never execute it. Test results appear only when a paired runtime worker records them for that commit."],
   ["Where does our code go?", "Self-hosted, it stays in your Convex deployment and goes only to the model provider you configure. Secret-looking values are redacted before model calls."],
   ["Can a pull request turn its own review off?", "No. Repository configuration is read from the base branch, and admins can lock settings."],
   ["Will it flood our PRs with comments?", "Findings must pass confidence, severity and evidence thresholds. You choose the maximum comment count, strictness and categories, and learned preferences reduce repeat noise."],
   ["Which models are supported?", "Claude and OpenAI models, or any OpenAI-compatible endpoint, with per-task model routing."],
+  ["Do I need a credit card?", `The ${trialDays}-day Starter trial needs no credit card. Pro collects a card at checkout.`],
 ] as const;
 // What a reviewer that sees only the diff can do, by definition, next to what this page says OpenReview does.
 const versus = [
@@ -55,7 +56,6 @@ const commands = ["pnpm install", "CONVEX_AGENT_MODE=anonymous pnpm exec convex 
 // items rise in, data-stagger lists bring their children in turn, and data-speed sets parallax.
 export default function Home() {
   const billing = billingConfig();
-  const enterprise = enterpriseOffer(billing.enabled);
   const structured = homeStructuredData({ url: process.env.APP_URL ?? "http://localhost:3000", repository: sourceRepository, billing, priceLabel: process.env.BILLING_SEAT_PRICE_LABEL, proPriceLabel: process.env.BILLING_PRO_PRICE_LABEL });
   return <div className="landing">
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(structured) }} />
@@ -69,7 +69,7 @@ export default function Home() {
           <Link className="button primary large" href="/signup">Connect a repository</Link>
           <Link className="button large" href="/login">Sign in</Link>
         </div>
-        {billing.enabled && <p className="hero-note">{billing.trialDays}-day free trial. Cancel anytime. <Link href="#pricing">See pricing</Link></p>}
+        {billing.enabled && <p className="hero-note">{billing.trialDays}-day Starter trial, no credit card. Pro collects a card at checkout. <Link href="#pricing">See pricing</Link></p>}
         <p className="hero-links"><Link href="/docs/quickstart">Read the quickstart →</Link></p>
       </section>
       <div className="stage hero-stage"><ReviewReplica /><p className="stage-hint">Live demo with sample data. Click around.</p></div>
@@ -135,19 +135,11 @@ export default function Home() {
         </tbody></table></ScrollTable>
       </section>
 
-      {billing.enabled && <section id="pricing" className="pricing" aria-labelledby="pricing-heading">
-        <h2 id="pricing-heading" data-split>Pricing</h2>
-        <div className="feature-grid" data-stagger>
-          <article className="feature-card"><h3>Starter</h3><p className="price">{process.env.BILLING_SEAT_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.usagePerSeatMicros)} of model usage per seat each month, pooled across the workspace, then optional pay-as-you-go extra usage up to a cap you set. {billing.starterFixesPerSeat} OpenReview agent fixes per seat each month, each opened as a pull request, and your own model key. Owners, admins and members are seats; viewers are free.</p><p className="pricing-action"><Link className="button" href={`/signup?next=${encodeURIComponent("/dashboard/onboarding/plan?intent=starter")}`}>Choose Starter</Link></p></article>
-          <article className="feature-card"><h3>Pro</h3><p className="price">{process.env.BILLING_PRO_PRICE_LABEL ?? "Per seat, billed monthly"}</p><p>{usdText(billing.proUsagePerSeatMicros)} of model usage and {billing.proFixesPerSeat} OpenReview agent fixes per seat each month, plus deep reviews with the agentic engines, generated reproduction tests, requirements checks, SSO, the audit log and API keys. {billing.trialDays} days free.</p><p className="pricing-action"><Link className="button primary" href={`/signup?next=${encodeURIComponent("/dashboard/onboarding/plan?intent=pro")}`}>Start Pro trial</Link></p></article>
-          {enterprise && <article className="feature-card"><h3>Enterprise</h3><p className="price">{enterprise.priceLabel}</p><p>Pay for active contributors, not seats: only people whose pull requests were reviewed that month count, and bots never do. From {billing.enterpriseMinContributors} contributors, on an annual contract paid by invoice. Run reviews on our model with usage included, or on your own model key with nothing metered. Everything in Pro, plus SCIM provisioning, audit log export, one contract across several workspaces, custom retention terms and a named support tier.</p><p className="pricing-action"><a className="button" href={enterprise.contactUrl}>Talk to us</a></p></article>}
-        </div>
-        <p className="muted" data-reveal>Self-hosting is free and unlimited: <Link href="/docs/self-hosting">self-hosting guide</Link>. Companies that self-host can buy a support and updates contract; it unlocks nothing, because nothing is locked.</p>
-      </section>}
+      {billing.enabled && <PricingSection />}
 
       <section className="faq-band" aria-labelledby="faq-heading">
         <h2 id="faq-heading" data-split>Questions</h2>
-        <div className="faq" data-stagger>{faq.map(([q, a], i) => <details key={q} open={i === 0}><summary>{q}</summary><p>{a}</p></details>)}</div>
+        <div className="faq" data-stagger>{faq(billing.trialDays).map(([q, a], i) => <details key={q} open={i === 0}><summary>{q}</summary><p>{a}</p></details>)}</div>
       </section>
 
       <section className="cta" aria-labelledby="cta-heading">
@@ -158,7 +150,7 @@ export default function Home() {
         </div>
       </section>
     </main>
-    <SiteFooter home />
+    <SiteFooter />
     </div></div>
     <LandingMotion />
   </div>;

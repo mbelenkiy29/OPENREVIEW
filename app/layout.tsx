@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import {siteDescription as description} from "../src/structured-data";
+import {siteDescription as description, siteName, socialTitle} from "../src/structured-data";
 import {themeScript} from "../src/theme";
 import {ThemeProvider} from "./theme";
 import {ConsentBanner} from "./consent";
@@ -20,10 +20,10 @@ import "@fontsource/eb-garamond/500.css";
 import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.APP_URL ?? "http://localhost:3000"),
-  title: { default: "OpenReview: repository-aware pull request reviews", template: "%s · OpenReview" },
+  title: { default: `${siteName}: repository-aware pull request reviews`, template: `%s · ${siteName}` },
   description,
-  openGraph: { type: "website", siteName: "OpenReview", title: "OpenReview", description },
-  twitter: { card: "summary_large_image", title: "OpenReview", description },
+  openGraph: { type: "website", siteName, title: socialTitle, description },
+  twitter: { card: "summary_large_image", title: socialTitle, description },
 };
 export default async function RootLayout({
   children,
