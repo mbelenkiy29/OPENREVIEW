@@ -1,4 +1,4 @@
-name: Bug
+name: Bug report
 description: Something is broken or does not match documented behaviour.
 title: "[Bug] "
 labels: ["bug"]
@@ -6,20 +6,47 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a bug. Do not include secrets, `.env` files, private repository source, or webhook payloads that contain tokens.
+        Thanks for reporting a bug.
+
+        **Do not paste secrets.** Redact API keys, private keys, webhook secrets, `.env` files, session tokens, and webhook payloads that contain credentials. Report live credentials and vulnerabilities privately per [SECURITY.md](https://github.com/mbelenkiy29/OPENREVIEW/blob/main/SECURITY.md), not here.
+
+        For setup or usage questions, use [Discussions Q&A](https://github.com/mbelenkiy29/OPENREVIEW/discussions/categories/q-a) or the [troubleshooting FAQ](https://github.com/mbelenkiy29/OPENREVIEW/blob/main/docs/troubleshooting.md).
 
         The CLI package is **not on npm yet**. `npm install -g openreview-cli` 404s. Install from this checkout (`pnpm install` then `npm link`, or `pnpm cli`). See CONTRIBUTING.md.
-  - type: textarea
-    id: what
+  - type: input
+    id: version
     attributes:
-      label: What happened
-      description: What you saw, including the exact command or page.
+      label: Version or commit
+      description: Release tag, `package.json` version, or git commit SHA of the checkout you ran.
+      placeholder: 0.1.0 / abcdef12
     validations:
       required: true
-  - type: textarea
-    id: expected
+  - type: dropdown
+    id: deployment
     attributes:
-      label: What you expected
+      label: Deployment type
+      options:
+        - Hosted (openreview.tech)
+        - Self-hosted
+        - Local
+    validations:
+      required: true
+  - type: dropdown
+    id: scm
+    attributes:
+      label: SCM provider
+      options:
+        - GitHub
+        - GitHub Enterprise
+        - GitLab
+        - Azure DevOps
+        - Bitbucket Cloud
+        - Bitbucket Data Center
+        - Gitea
+        - Perforce
+        - Origin
+        - CLI / none
+        - Other
     validations:
       required: true
   - type: textarea
@@ -31,6 +58,19 @@ body:
         1.
         2.
         3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What you saw, including the exact command or page.
     validations:
       required: true
   - type: dropdown
@@ -51,13 +91,17 @@ body:
     id: env
     attributes:
       label: Environment
-      description: Node.js version, pnpm version, hosted vs self-hosted, OS.
-      placeholder: Node 24.11, pnpm 11, self-hosted Docker, Ubuntu
+      description: Node.js version, pnpm version, OS. Hosted vs self-hosted is already captured above.
+      placeholder: Node 24.11, pnpm 11, Ubuntu
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
       label: Logs
-      description: Redact secrets. Paste only the failing lines.
+      description: >
+        Paste only the failing lines. Redact secrets, API keys, private keys, webhook secrets,
+        tokens, and anything from `.env` files before posting.
+      placeholder: |
+        [redacted] error message only
       render: text
