@@ -53,8 +53,8 @@ importers:
         specifier: ^7.0.16
         version: 7.0.16
       jose:
-        specifier: ^6.2.17
-        version: 6.2.17
+        specifier: ^6.2.18
+        version: 6.2.18
       mermaid:
         specifier: 12.3.0
         version: 12.3.0
@@ -68,8 +68,8 @@ importers:
         specifier: ^4.0.7
         version: 4.0.7
       posthog-js:
-        specifier: 1.450.1
-        version: 1.450.1(@types/react@19.3.0)(react@19.3.1)
+        specifier: 1.451.2
+        version: 1.451.2(@types/react@19.3.0)(react@19.3.1)
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -2963,8 +2963,8 @@ packages:
     resolution: {integrity: sha512-H0dkQoCa3b2VEeKQBOxFph+JAbcrQdE7KC0UkqwpLmv2EC4P41QXP+rqo9wYodACiG5/WM5s9oDApTU8utwj9g==}
     engines: {node: '>= 0.4'}
 
-  jose@6.2.17:
-    resolution: {integrity: sha512-wOuK9V1yujQFH5S0ZWmLcDZN7+IKh9bUCC2ZPCf2HDlol3WWHy+PPyNjEI75FXRLMp3vDKQcupP59xhVU95hcg==}
+  jose@6.2.18:
+    resolution: {integrity: sha512-doV4thUwgkrycJH4yLeqwTGIIZphHl+pk7CPReuMIhYhncmgzdko85MaCG4YQFTxqMFr1/oEH32tZuKKovcDEg==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -3519,8 +3519,8 @@ packages:
     resolution: {integrity: sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A==}
     engines: {node: ^10 || ^12 || >=14}
 
-  posthog-js@1.450.1:
-    resolution: {integrity: sha512-Fp4BMRTyajprDouZ9883K53CD9pY4MaGVKkC5c7crgm7jtlUhq4UNsOVpVnPPdw/Zz/su6OarpXbAIDvHhLXHg==}
+  posthog-js@1.451.2:
+    resolution: {integrity: sha512-hQONmvuydcK5w3L20GH1XvssuGQN9yir5gXcH8GTJrvmA8yHPwEbjOa217VFU2vVQ2ZqNGxDknt8oVZwb/BwUA==}
     peerDependencies:
       '@types/react': '>=16.8.0'
       react: '>=16.8.0'
@@ -4739,7 +4739,7 @@ snapshots:
       express: 5.3.0
       express-rate-limit: 8.7.2(express@5.3.0)
       hono: 4.13.14
-      jose: 6.2.17
+      jose: 6.2.18
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 4.0.0
@@ -6946,7 +6946,7 @@ snapshots:
       has-symbols: 1.1.0
       set-function-name: 2.0.2
 
-  jose@6.2.17: {}
+  jose@6.2.18: {}
 
   js-tokens@4.0.0: {}
 
@@ -7601,7 +7601,7 @@ snapshots:
 
   openid-client@6.9.0:
     dependencies:
-      jose: 6.2.17
+      jose: 6.2.18
       oauth4webapi: 3.8.8
 
   optionator@0.9.4:
@@ -7714,7 +7714,7 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.2
 
-  posthog-js@1.450.1(@types/react@19.3.0)(react@19.3.1):
+  posthog-js@1.451.2(@types/react@19.3.0)(react@19.3.1):
     dependencies:
       '@posthog/browser-common': 0.12.0
       '@posthog/core': 1.69.1
