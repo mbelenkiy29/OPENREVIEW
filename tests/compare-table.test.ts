@@ -38,6 +38,7 @@ test("hosted compare markdown tables get OpenReview and competitor data-labels",
     assert.match(html, /<table class="compare-table">/);
     assert.match(html, /<td data-label="">Positioning<\/td>/);
     assert.match(html, /data-label="OpenReview"/);
+    assert.match(html, /href="https:\/\/openreview\.tech\/pricing"/);
     assert.match(html, new RegExp(`data-label="${page.competitor}"`));
     const rows = (html.match(/<tbody>[\s\S]*?<\/tbody>/)?.[0].match(/<tr>/g) ?? []).length;
     assert.equal((html.match(/data-label="OpenReview"/g) ?? []).length, rows, slug);

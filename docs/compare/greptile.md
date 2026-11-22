@@ -43,7 +43,7 @@ _Last checked Nov 20, 2026. Competitor facts come from the public pages linked b
 
 - Greptile pricing: https://www.greptile.com/pricing (read Nov 20, 2026)
 - Greptile home page: https://www.greptile.com (read Nov 20, 2026)
-- OpenReview pricing and demo: https://openreview.tech
+- OpenReview pricing and demo: https://openreview.tech/pricing
 - OpenReview billing: [docs/billing.md](../billing.md)
 - OpenReview self-hosting kit: [docs/self-hosting-kit.md](../self-hosting-kit.md)
 - OpenReview parity report: [docs/parity/REPORT.md](../parity/REPORT.md)
