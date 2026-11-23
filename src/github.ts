@@ -486,7 +486,10 @@ export class Github {
   }
   // Check runs need checks:write; without it the feature is skipped (returns null), never an error.
   async startCheckRun(repository: string, sha: string, externalId: string, detailsUrl?: string): Promise<number | null> {
-    if (this.permissions?.checks !== "write") return null;
+    if (this.permissions?.checks !== "write") {
+      console.warn(JSON.stringify({ event: "review.check_run_skipped", reason: "GitHub App installation does not have Checks: write" }));
+      return null;
+    }
     const run = await this.request(`/repos/${repository}/check-runs`, z.object({ id: z.number() }), { method: "POST", body: JSON.stringify({ name: "OpenReview", head_sha: sha, status: "in_progress", started_at: new Date().toISOString(), external_id: externalId, ...(detailsUrl ? { details_url: detailsUrl } : {}), output: { title: "Review in progress", summary: "OpenReview is reviewing this revision." } }) });
     return run.id;
   }
@@ -673,7 +676,7 @@ export class Github {
   ): Promise<{
     id: number;
     reused: boolean;
-    comments?: { id: number; fingerprint: string }[];
+    comments?: { id: number; fingerprint: string; url?: string }[];
   }> {
     const prefix=`/repos/${repository}/pulls/${number}`;
     // Findings outside the changed lines live in the summary only; never post them inline.
@@ -692,7 +695,7 @@ export class Github {
     );
     // Inline findings go in a review (idempotent per run marker); the summary is one issue
     // comment per pull request, edited in place on every run.
-    let review: { id: number; reused: boolean; comments: { id: number; fingerprint: string }[] } | undefined;
+    let review: { id: number; reused: boolean; comments: { id: number; fingerprint: string; url?: string }[] } | undefined;
     if (prior) review = { id: prior.id, reused: true, comments: await this.findingComments(repository, number, prior.id, findings, sha) };
     else if (findings.length) {
       const patches=new Map<string,string>();
@@ -798,14 +801,14 @@ export class Github {
     const publisher=await this.publisherLogin();
     const comments = await this.paginate(
       this.positionIsLine ? `/repos/${repository}/pulls/${number}/reviews/${reviewId}/comments` : `/repos/${repository}/pulls/${number}/comments`,
-      z.object({ id: z.number(), body: z.string(),user:z.object({login:z.string()}),path:z.string(),line:z.number().nullable().optional(),start_line:z.number().nullable().optional(),position:z.number().nullable().optional(),commit_id:z.string(),pull_request_review_id:z.number().nullable(),in_reply_to_id:z.number().optional() }),
+      z.object({ id: z.number(), body: z.string(),html_url:z.string().optional(),user:z.object({login:z.string()}),path:z.string(),line:z.number().nullable().optional(),start_line:z.number().nullable().optional(),position:z.number().nullable().optional(),commit_id:z.string(),pull_request_review_id:z.number().nullable(),in_reply_to_id:z.number().optional() }),
     );
     const mapped=comments.flatMap((c) => {
       if(c.user.login!==publisher||c.pull_request_review_id!==reviewId||c.in_reply_to_id!==undefined||(sha!==undefined&&c.commit_id!==sha))return [];
       const fingerprint=findingFingerprint(c.body);
       // Multi-line comments report their first line as start_line and their last as line.
       const first=c.start_line??(c.line===undefined?c.position:c.line);
-      return fingerprint&&(!findings||findings.some(f=>f.fingerprint===fingerprint&&f.filePath===c.path&&f.startLine===first)) ? [{ id: c.id, fingerprint }] : [];
+      return fingerprint&&(!findings||findings.some(f=>f.fingerprint===fingerprint&&f.filePath===c.path&&f.startLine===first)) ? [{ id: c.id, fingerprint, ...(c.html_url ? { url: c.html_url } : {}) }] : [];
     });
     if(findings&&findings.some(f=>!mapped.some(c=>c.fingerprint===f.fingerprint)))throw new Error("Finding publication incomplete; retry or re-review the current revision");return mapped;
   }

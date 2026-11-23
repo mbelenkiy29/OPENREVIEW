@@ -4,6 +4,9 @@
 
 ## November 2026
 
+### Reviews
+- GitHub **OpenReview** check runs are posted on every reviewed pull request when the App has Checks: write. A completed review reports **success** by default. Set **minimum blocking severity** (`off`, `critical`, `high`, `medium`, `low`) in Code Review Settings or `.openreview.json` so findings at that severity fail the check. Incomplete and failed reviews never report success. See [Make OpenReview a required check](docs/public/required-check.md).
+
 ### Site
 - Comparison pages at `/compare/greptile` and `/compare/coderabbit`, rendered from the markdown in `docs/compare/` and linked from the footer.
 - `/pricing` is a real page that reuses the home-page plan cards.

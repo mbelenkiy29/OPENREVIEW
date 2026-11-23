@@ -25,7 +25,7 @@ export type Scm = Pick<Github,"tree"|"blob"|"branches"|"sourceUrl"> & {
  changeMetadata(repository:string,number:number):Promise<ChangeMetadata>;
  openChanges(repository:string,cursor:string|null):Promise<ChangePage>;
  pullRequest(repository:string,number:number):Promise<ScmChange>;
- publish(repository:string,number:number,sha:string,summary:string,findings:Finding[],marker:string,style?:string,revisionKey?:string,unresolvedCount?:number,options?:import("./github").PublishOptions):Promise<{id:ExternalId;reused:boolean;comments?:{id:ExternalId;fingerprint:string}[]}>;
+ publish(repository:string,number:number,sha:string,summary:string,findings:Finding[],marker:string,style?:string,revisionKey?:string,unresolvedCount?:number,options?:import("./github").PublishOptions):Promise<{id:ExternalId;reused:boolean;comments?:{id:ExternalId;fingerprint:string;url?:string}[]}>;
  reply(repository:string,number:number,body:string,parent?:ExternalId,marker?:string):Promise<{id:ExternalId}>;
   // Optional: commit ancestry/changes for incremental review, and resolving OpenReview-started finding threads.
   compare?(repository:string,base:string,head:string):Promise<{status:"ahead"|"behind"|"diverged"|"identical";commits:number;complete:boolean;files:import("./engine/types").ChangedFile[]}>;
@@ -38,7 +38,7 @@ export type Scm = Pick<Github,"tree"|"blob"|"branches"|"sourceUrl"> & {
   reportStatus?(repository:string,number:number,state:"pending"|"succeeded"|"failed"|"notApplicable"|"error",description:string,targetUrl?:string):Promise<void>;
   // GitHub comment reactions: 👀 when a request is picked up, 👍 when it is done or acknowledged.
   react?(repository:string,commentId:number,inline:boolean,content:"eyes"|"+1"|"confused"):Promise<void>;
-  completeCheckRun?(repository:string,id:number,result:{conclusion:"success"|"failure"|"neutral"|"cancelled";title:string;summary:string;detailsUrl?:string}):Promise<void>;
+  completeCheckRun?(repository:string,id:number,result:{conclusion:"success"|"failure"|"neutral"|"cancelled"|"action_required";title:string;summary:string;detailsUrl?:string}):Promise<void>;
 };
 const note=z.object({id:z.number(),body:z.string(),author:z.object({username:z.string()}),position:z.object({new_path:z.string(),new_line:z.number().nullable(),head_sha:z.string().optional()}).nullish()});
 const prSchema=z.object({iid:z.number(),title:z.string(),description:z.string().nullable(),draft:z.boolean(),state:z.string(),web_url:z.string(),author:z.object({id:z.number().int().positive().optional(),username:z.string()}),source_branch:z.string(),target_branch:z.string(),diff_refs:z.object({base_sha:z.string(),head_sha:z.string(),start_sha:z.string()}),labels:z.array(z.string()).optional()});

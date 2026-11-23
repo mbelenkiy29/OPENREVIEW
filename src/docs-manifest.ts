@@ -6,6 +6,7 @@ export type DocPage = { slug: string; title: string; description: string; sectio
 export const docPages: DocPage[] = [
   { slug: "quickstart", title: "Quickstart", description: "Run OpenReview locally and review your first pull request.", section: "Getting started", file: "public/quickstart.md" },
   { slug: "github-app", title: "GitHub App setup", description: "Register the GitHub App, permissions and webhooks.", section: "Getting started", file: "public/github-app.md" },
+  { slug: "required-check", title: "Make OpenReview a required check", description: "Branch protection, rulesets and the Checks permission.", section: "Getting started", file: "public/required-check.md" },
   { slug: "reviews", title: "How reviews work", description: "Context, verification, publishing and pull request commands.", section: "Getting started", file: "public/reviews.md" },
   { slug: "configuration", title: "Repository configuration", description: ".openreview.json, rules.md and admin locks.", section: "Configure", file: "repo-config.md" },
   { slug: "rules", title: "Custom rules", description: "Team rules from the dashboard and repository files.", section: "Configure", file: "public/rules.md" },

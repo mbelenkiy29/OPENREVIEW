@@ -47,9 +47,10 @@ Before starting, confirm that the inference budget covers about 15 reviews or qu
 Requires Checks: Read and write (Needs human #11).
 
 1. Confirm:
-   - [ ] An `OpenReview` check is in progress during the review, then completes neutral.
-2. Set **GitHub check run** to fail at high severity and re-review. Confirm:
+   - [ ] An `OpenReview` check is in progress during the review, then completes with success when blocking severity is off.
+2. Set **Minimum blocking severity** to fail at high severity and re-review. Confirm:
    - [ ] The check fails while a high finding exists.
+   - [ ] The check summary lists the blocking finding and links to its inline comment.
 
 ## B7 Triggers and filters
 

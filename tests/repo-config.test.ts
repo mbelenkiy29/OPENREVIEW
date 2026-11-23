@@ -24,12 +24,14 @@ test("configuration is read from the base revision; head edits cannot weaken the
 });
 
 test("precedence: the repository file overrides dashboard values except admin-locked keys", () => {
-  const dashboard = { mode: "standard", minimumConfidence: 0.85, instructions: "Dashboard guidance.", lockedKeys: ["minimumConfidence"] };
-  const result = applyRepoConfig(dashboard, { settings: { mode: "fast", minimumConfidence: 0.6 }, directories: [] });
+  const dashboard = { mode: "standard", minimumConfidence: 0.85, instructions: "Dashboard guidance.", checkFailureSeverity: "off", lockedKeys: ["minimumConfidence"] };
+  const result = applyRepoConfig(dashboard, { settings: { mode: "fast", minimumConfidence: 0.6, checkFailureSeverity: "high" }, directories: [] });
   assert.equal(result.settings.mode, "fast");
   assert.equal(result.settings.minimumConfidence, 0.85);
-  assert.deepEqual(result.applied, ["mode"]);
+  assert.equal(result.settings.checkFailureSeverity, "high");
+  assert.deepEqual(result.applied, ["mode", "checkFailureSeverity"]);
   assert.deepEqual(result.blocked, ["minimumConfidence"]);
+  assert.equal(applyRepoConfig({ ...dashboard, lockedKeys: ["checkFailureSeverity"] }, { settings: { checkFailureSeverity: "low" }, directories: [] }).settings.checkFailureSeverity, "off");
   const scoped = applyRepoConfig({ instructions: "Base.", lockedKeys: [] as string[] }, { settings: {}, directories: [{ directory: "services/pay", instructions: "Amounts are cents." }] });
   assert.equal(scoped.settings.instructions, "Base.\n\nFor files under services/pay/: Amounts are cents.");
   assert.equal(applyRepoConfig({ instructions: "Base.", lockedKeys: ["instructions"] }, { settings: {}, directories: [{ directory: "x", instructions: "y" }] }).settings.instructions, "Base.");
@@ -149,6 +151,7 @@ test("rules.md rules can be disabled by their heading id, and nested exclusion g
   assert.equal(ruleApplies(rule("billing:only-not").globs, "src/a.ts"), false);
   assert.equal(ruleApplies(rule("billing:only-not").globs, "billing/a.ts"), true);
   assert.ok(defaults.assistantRules === false);
+  assert.equal(defaults.checkFailureSeverity, "off");
 });
 
 test("the dashboard's config snapshot stays valid JSON under 4,000 characters", () => {

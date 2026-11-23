@@ -1,7 +1,7 @@
 import { z } from "zod";
 import picomatch from "picomatch";
 import { categories, severities, type Rule } from "./engine/types";
-import { defaults, sectionLayouts, summarySections, validSectionLayout } from "./review-settings";
+import { checkFailureSeverities, defaults, sectionLayouts, summarySections, validSectionLayout } from "./review-settings";
 import { modes, type Mode } from "./review-tier";
 import { greptileConfig } from "./greptile-config";
 import { discoverRuleFiles, importCandidates, ruleText } from "./rule-files";
@@ -12,7 +12,7 @@ import { ruleProblem } from "./rule-assistant";
 // Precedence: workspace → team → repository dashboard → repository file, except admin-locked keys.
 // Greptile's files (greptile.json, .greptile/) are translated and read first, so OpenReview's own win.
 export const repoConfigFiles = [".openreview.json", ".openreview/config.json", ".openreview/rules.md"] as const;
-export const repoConfigurableKeys = ["mode", "minimumConfidence", "severityThreshold", "maxComments", "categories", "ignoredPaths", "instructions", "commentStyle", "summarySections", "strictness", "reviewEngine", "hideFooter", "sectionLayout", "assistantRules"] as const;
+export const repoConfigurableKeys = ["mode", "minimumConfidence", "severityThreshold", "maxComments", "categories", "ignoredPaths", "instructions", "commentStyle", "summarySections", "strictness", "reviewEngine", "hideFooter", "sectionLayout", "assistantRules", "checkFailureSeverity"] as const;
 export type RepoConfigurableKey = (typeof repoConfigurableKeys)[number];
 
 const ruleSchema = z.object({
@@ -38,6 +38,7 @@ export const repoSettingsSchema = z.object({
   hideFooter: z.boolean(),
   sectionLayout: z.record(z.string(), z.enum(sectionLayouts)).refine(validSectionLayout, "unknown summary section"),
   assistantRules: z.boolean(),
+  checkFailureSeverity: z.enum(checkFailureSeverities),
 }).partial().strict();
 export const repoConfigSchema = z.object({
   $schema: z.string().optional(),

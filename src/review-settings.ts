@@ -30,7 +30,7 @@ export const defaults = {
   // "agentic" uses the tool-calling investigator and "hypotheses" plans bug hypotheses investigated in
   // parallel; the default stays on the fixed pipeline until an approved live comparison says otherwise.
   reviewEngine: "pipeline",
-  // GitHub check run conclusion: "off" reports neutral; a severity fails the check when findings reach it.
+  // GitHub check run: "off" never fails on findings (completed reviews still succeed); a severity fails the check when findings reach it.
   checkFailureSeverity: "off",
   // Triggers and filters (GitHub webhooks): labels that start a review, excluded author globs,
   // size limits for automatic reviews (0 = none) and a strictness preset (0 = custom thresholds).
@@ -95,7 +95,7 @@ export function scopeDefaults(scopes:readonly {teamId?:string;settings:Partial<S
 export const reviewEngines=["pipeline","agentic","hypotheses"] as const;
 export const validReviewEngine=(value:string|undefined)=>value===undefined||(reviewEngines as readonly string[]).includes(value);
 // Optional trigger/limit settings stay valid when absent (older saved settings).
-export const lockableKeys=["mode","minimumConfidence","severityThreshold","maxComments","categories","ignoredPaths","instructions","commentStyle","summarySections","strictness","reviewEngine","hideFooter","sectionLayout","assistantRules"] as const;
+export const lockableKeys=["mode","minimumConfidence","severityThreshold","maxComments","categories","ignoredPaths","instructions","commentStyle","summarySections","strictness","reviewEngine","hideFooter","sectionLayout","assistantRules","checkFailureSeverity"] as const;
 export const validTriggerSettings=(s:{triggerLabels?:string[];excludedAuthors?:string[];maxFiles?:number;maxChangedLines?:number;strictness?:number;lockedKeys?:string[];agentTurns?:number;agentToolCalls?:number;hypothesisTurns?:number;hypothesisToolCalls?:number})=>
  [s.agentTurns??0,s.agentToolCalls??0,s.hypothesisTurns??0,s.hypothesisToolCalls??0].every(n=>Number.isInteger(n)&&n>=0&&n<=1000)&&
  (s.lockedKeys??[]).every(k=>(lockableKeys as readonly string[]).includes(k))&&
