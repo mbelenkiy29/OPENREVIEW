@@ -20,6 +20,7 @@ Rules can live in three places. Later sources add to earlier ones:
    - `.openreview.json` (`rules` array).
    - `.openreview/rules.md`: one `## Title` section per rule, optionally starting with `severity:`, `category:` and `globs:` lines.
    - Nested `<dir>/.openreview/rules.md` and `<dir>/.openreview/config.json` (or legacy `<dir>/.openreview.json`) files, which apply only under that directory.
+   - Agent skill and convention files (`SKILL.md` under `.claude/skills`, `.cursor/skills`, `.agents/skills` and `.github/skills`, plus `AGENTS.md`, `CLAUDE.md` and similar), applied as whole-file guidelines unless `"guidelines": { "agentFiles": false }`. See [repository configuration](../repo-config.md#agent-skill-and-convention-files).
 
 Because configuration is read from the base branch, a pull request cannot weaken its own review. Admins can lock settings so repository files cannot override them. See [repository configuration](../repo-config.md).
 

@@ -526,7 +526,7 @@ export async function reviewChange(
   usage.push(summary.usage);
   const reviewScore = capReviewScore(summary.value.reviewScore, [...findings, ...carriedForward], coverageIncomplete);
   return {
-    summary: reviewSummary({overview:summary.value.summary,files:input.fullDiff?input.fullDiff.filter((f)=>!ignored(f.path)):diff,findings:[...findings,...carriedForward],resolved:previous.filter(f=>resolvedFingerprints.includes(f.fingerprint)),score:reviewScore,assessment:summary.value.approvalAssessment,runtimeEvidence,coverageLimits,contextCount:context.length,candidates:candidates.length+deterministic.findings.length,suppressed:suppressions.length,requirementsContext:context,skippedFiles,fileSummaries:summary.value.files,sourceLink:input.sourceLink,diagram,incomplete:coverageIncomplete,knowledgeUsed:input.knowledge?.map(k=>k.subsystem),guidanceUsed:input.guidance?.map(g=>g.id+"@"+g.version),requirements},input.settings?.summarySections),
+    summary: reviewSummary({overview:summary.value.summary,files:input.fullDiff?input.fullDiff.filter((f)=>!ignored(f.path)):diff,findings:[...findings,...carriedForward],resolved:previous.filter(f=>resolvedFingerprints.includes(f.fingerprint)),score:reviewScore,assessment:summary.value.approvalAssessment,runtimeEvidence,coverageLimits,contextCount:context.length,candidates:candidates.length+deterministic.findings.length,suppressed:suppressions.length,requirementsContext:context,skippedFiles,fileSummaries:summary.value.files,sourceLink:input.sourceLink,diagram,incomplete:coverageIncomplete,knowledgeUsed:input.knowledge?.map(k=>k.subsystem),guidanceUsed:input.guidance?.map(g=>g.id+"@"+g.version),guidelinesUsed:input.guidelines?.map(g=>g.path),requirements},input.settings?.summarySections),
     findings,
     diagrams: diagram ? [diagram] : [],
     metadata: {
@@ -551,6 +551,7 @@ export async function reviewChange(
       ...(exploitability.length ? { exploitability } : {}),
       ...(input.knowledge?.length ? { knowledge: input.knowledge.map((k) => k.subsystem) } : {}),
       ...(input.guidance?.length ? { guidance: input.guidance.map(({ id, version, source }) => ({ id, version, source })) } : {}),
+      ...(input.guidelines?.length ? { guidelines: input.guidelines.map((g) => g.path) } : {}),
       ...(requirements ? { requirements, requirementsNotMet: blockingRequirements(requirements) } : {}),
       suppressions,
       carriedForward,

@@ -101,6 +101,7 @@ export const run = internalAction({
           preferences: [...preferences, ...(await ctx.runQuery(internal.conventions.approvedForRepo, { repositoryId: repo._id }))],
           guidance: selectPacks(guidance.packs, diff, sources).map(({ id, version, title, body, source }) => ({ id, version, title, body, source })),
           knowledge: selectKnowledge(await ctx.runQuery(internal.knowledge.forReview, { repositoryId: repo._id }), [...touched], new Set(inventory.keys()), knowledgeTokenBudgets[tier.mode]).selected,
+          guidelines: (repoConfig.agentGuidelines ?? []).map(({ path, title }) => ({ path, title })),
           settings: {
             minimumConfidence: thresholds.minimumConfidence,
             severityThreshold: z.enum(severities).parse(thresholds.severityThreshold),

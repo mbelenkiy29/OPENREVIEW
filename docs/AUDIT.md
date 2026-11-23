@@ -109,6 +109,7 @@ The original ranking uses public product descriptions, **user impact** (whether 
 | 8 | Org-wide learning defaults that ship useful without admin work | Medium | Medium | Greptile emphasises memory that just works. OpenReview’s conventions need admin approval unless auto-approve is on (correct for security, slower for “it got smarter”). |
 | 9 | Bitbucket Cloud Forge app actually listed | Medium | High (human) | Adapter exists; the Forge app is not registered. |
 | 10 | Windows/Linux native bridge verification | Low–medium | Medium (human) | macOS Codex path was verified; Windows/Linux remain Needs-human in the parity ledger. |
+| 11 | Agent skill / convention files as review guidelines | Medium | Low | **Shipped:** CodeRabbit (19 Nov 2026) reads `SKILL.md` in agent skill folders as repo-wide code guidelines. OpenReview now discovers `.claude/skills/*/SKILL.md`, `.cursor/skills/*/SKILL.md`, `.agents/skills/*/SKILL.md`, `.github/skills/*/SKILL.md`, plus `AGENTS.md` / `CLAUDE.md` / `.cursor/rules/*.mdc` / `.github/copilot-instructions.md` from the **base** revision (not head), caps file count and tokens, and lists applied files in Coverage. Opt out with `"guidelines": { "agentFiles": false }`. The older `assistantRules` setting still extracts individual directive lines when opted in. |
 
 **What OpenReview already has that those products often charge for or lock to cloud:** self-hosting, bring-your-own model, evidence-gated findings, configuration-as-code, MCP, offline mode, Helm/Terraform. Lead with those; do not claim “Greptile parity”.
 

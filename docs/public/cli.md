@@ -71,7 +71,7 @@ openreview review --local --engine agentic
 openreview review --local --resume  # continue an interrupted agentic review
 ```
 
-- **Repository config:** local reviews read `.openreview.json` from the base commit.
+- **Repository config:** local reviews read `.openreview.json` from the base commit, including agent skill and convention files as review guidelines (the same base-revision rule as server reviews).
 - **Limits:** they never execute repository code, and index at most 5,000 files or 20 MB.
 
 `--inline` prints each finding as a `file:line` block. The block includes two lines of code on either side, with the flagged lines marked `>`, then the priority, any tags, the explanation and the suggested fix.
