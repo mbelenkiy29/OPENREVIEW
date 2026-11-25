@@ -174,9 +174,14 @@ export const createEmailInvitation = internalMutation({ args: { token: v.string(
   await rateLimit(ctx, `email-invite:${a.organizationId}`, 20, 3600000);
   await rateLimit(ctx, `email-invite-user:${user._id}`, 30, 86_400_000);
   await otherUserEmailLimit(ctx);
+  // Reissuing an invitation to the same address replaces the earlier link, as GitHub-login invitations do, so a
+  // link sent with the wrong (higher) role stops working once the admin sends the corrected one.
+  for (const earlier of await ctx.db.query("emailInvitations").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId)).order("desc").take(100))
+    if (earlier.email === email && usable(earlier)) { await ctx.db.patch(earlier._id, { revokedAt: Date.now() }); await audit(ctx, a.organizationId, user._id, "invitation.email_replaced", earlier._id); }
   const id = await ctx.db.insert("emailInvitations", { organizationId: a.organizationId, email, role: a.role, tokenHash: a.tokenHash, invitedBy: user._id, expiresAt: Date.now() + 7 * 86400000, createdAt: Date.now() });
   await audit(ctx, a.organizationId, user._id, "invitation.email_created", id);
-  return { id, workspace: (await ctx.db.get(a.organizationId))?.name ?? "an OpenReview workspace", inviter: user.login, email };
+  // GitHub usernames only: an email or Google login is an address's local part, never shown to the invitee.
+  return { id, workspace: (await ctx.db.get(a.organizationId))?.name ?? "an OpenReview workspace", inviter: user.githubId !== undefined ? user.login : null, email };
 } });
 export const emailInvitations = query({ args: { token: v.string(), organizationId: v.id("organizations") }, handler: async (ctx, a) => {
   await authorize(ctx, a.token, a.organizationId, true);
