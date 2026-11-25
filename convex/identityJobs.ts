@@ -14,7 +14,7 @@ export const inviteByEmail = action({ args: { token: v.string(), organizationId:
   if (!emailConfigured()) throw new Error("Email delivery is not configured (RESEND_API_KEY and EMAIL_FROM)");
   const t = token();
   const created = await ctx.runMutation(internal.identity.createEmailInvitation, { token: a.token, organizationId: a.organizationId, email: a.email, role: a.role, tokenHash: t.hash });
-  const result = await sendEmail({ to: created.email, subject: `You're invited to ${created.workspace} on OpenReview`, text: `@${created.inviter} invited you to join ${created.workspace} on OpenReview as ${a.role}.\n\nAccept the invitation (single use, expires in 7 days):\n${appOrigin()}/invite?token=${t.raw}\n\nIf you were not expecting this, ignore this email.` });
+  const result = await sendEmail({ to: created.email, subject: `You're invited to ${created.workspace} on OpenReview`, text: `${created.inviter ? `@${created.inviter}` : "A teammate"} invited you to join ${created.workspace} on OpenReview as ${a.role}.\n\nAccept the invitation (single use, expires in 7 days):\n${appOrigin()}/invite?token=${t.raw}\n\nIf you were not expecting this, ignore this email.` });
   return "skipped" in result ? "skipped" : "sent";
 } });
 

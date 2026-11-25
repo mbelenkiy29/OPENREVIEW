@@ -300,7 +300,7 @@ export default defineSchema({
     acceptedBy: v.optional(v.id("users")),
     revokedAt: v.optional(v.number()),
     createdAt: v.number(),
-  }).index("by_token", ["tokenHash"]).index("by_org", ["organizationId"]),
+  }).index("by_token", ["tokenHash"]).index("by_org", ["organizationId"]).index("by_org_email", ["organizationId", "email"]),
   // Magic links, kept 30 days as the record of sign-in emails sent and used (convex/authFunnel.ts):
   // requestId ties a link to the web request's log line, resendId to Resend's log, and createdUser
   // says whether using it created the account.
