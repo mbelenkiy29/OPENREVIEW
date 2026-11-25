@@ -60,8 +60,10 @@ function choreograph(root: HTMLElement, desktop: boolean, context: gsap.Context,
     smoother = ScrollSmoother.create({
       wrapper: "#smooth-wrapper", content: "#smooth-content", smooth: 1.2, effects: true,
       // Keyboard focus that lands off-screen is brought into view, except for an anchor target,
-      // which the click handler below scrolls to smoothly.
-      onFocusIn: (_self, event) => event.target !== anchoring,
+      // which the click handler below scrolls to smoothly. Some in-app browsers (Facebook's Android
+      // webview) fire focusin on the window itself, which the smoother would try to measure and
+      // throw on (OPENREVIEW-7), so only elements are brought into view.
+      onFocusIn: (_self, event) => event.target instanceof Element && event.target !== anchoring,
       onUpdate: moved,
     });
     // Find in page, scrollIntoView and test drivers scroll the nearest scrollable box, which is the
