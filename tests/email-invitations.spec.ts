@@ -44,6 +44,16 @@ test('reissuing an invitation to the same address replaces the earlier link, so 
  expect((await t.query(api.users.me,{token:dana.token})).organizations.map(o=>[o.name,o.role])).toEqual([['Other','member'],['Acme','viewer']]);
 });
 
+test('reissuing finds the earlier link however many other invitations the workspace sent since',async()=>{
+ const t=convexTest(schema,modules),mails=mailbox();
+ const owner=await signIn(t,{provider:'github',providerUserId:'1',login:'owner',emailVerified:false});
+ const org=await t.mutation(api.users.createOrganization,{token:owner.token,name:'Acme'});
+ await t.action(api.identityJobs.inviteByEmail,{token:owner.token,organizationId:org,email:'dana@example.com',role:'admin'});
+ await t.run(async ctx=>{for(let i=0;i<150;i++)await ctx.db.insert('emailInvitations',{organizationId:org,email:`p${i}@example.com`,role:'member',tokenHash:createHash('sha256').update(`filler${i}`).digest('hex'),invitedBy:owner.userId,expiresAt:Date.now()+86400000,createdAt:Date.now()});});
+ await t.action(api.identityJobs.inviteByEmail,{token:owner.token,organizationId:org,email:'dana@example.com',role:'viewer'});
+ expect(await t.query(api.identity.invitationPreview,{tokenHash:hashOf(mails[0].text)})).toBeNull();
+});
+
 test('the invite email names a GitHub inviter by username and never shows an email login',async()=>{
  const t=convexTest(schema,modules),mails=mailbox();
  const gh=await signIn(t,{provider:'github',providerUserId:'1',login:'octo',emailVerified:false});

@@ -176,8 +176,8 @@ export const createEmailInvitation = internalMutation({ args: { token: v.string(
   await otherUserEmailLimit(ctx);
   // Reissuing an invitation to the same address replaces the earlier link, as GitHub-login invitations do, so a
   // link sent with the wrong (higher) role stops working once the admin sends the corrected one.
-  for (const earlier of await ctx.db.query("emailInvitations").withIndex("by_org", (q) => q.eq("organizationId", a.organizationId)).order("desc").take(100))
-    if (earlier.email === email && usable(earlier)) { await ctx.db.patch(earlier._id, { revokedAt: Date.now() }); await audit(ctx, a.organizationId, user._id, "invitation.email_replaced", earlier._id); }
+  for (const earlier of await ctx.db.query("emailInvitations").withIndex("by_org_email", (q) => q.eq("organizationId", a.organizationId).eq("email", email)).collect())
+    if (usable(earlier)) { await ctx.db.patch(earlier._id, { revokedAt: Date.now() }); await audit(ctx, a.organizationId, user._id, "invitation.email_replaced", earlier._id); }
   const id = await ctx.db.insert("emailInvitations", { organizationId: a.organizationId, email, role: a.role, tokenHash: a.tokenHash, invitedBy: user._id, expiresAt: Date.now() + 7 * 86400000, createdAt: Date.now() });
   await audit(ctx, a.organizationId, user._id, "invitation.email_created", id);
   // GitHub usernames only: an email or Google login is an address's local part, never shown to the invitee.
