@@ -24,7 +24,8 @@ The audit keeps 100 requests of the token's hourly limit in reserve (5 without a
 - **Cost:** list price per minute by runner (Linux $0.006, Windows $0.010, macOS $0.062, self-hosted $0), scaled by cores for larger runners. These are estimates: plan allowances are not subtracted, and public repositories do not pay for standard GitHub-hosted runners.
 - **Superseded:** a run of the same workflow, event and branch for a different commit started while this run was still going. The minutes after that moment are what `concurrency` with `cancel-in-progress: true` would not spend.
 - **Monthly saving:** superseded minutes scaled to 30 days, leaving out workflows that already cancel in progress and critical workflows (deploys, releases, backups, scheduled jobs), which should finish.
-- **Recommendations:** text checks on each workflow file at the default branch: missing `cancel-in-progress`, no draft guard for pull request runs, no `paths` filters, and scheduled workflows that have not run for more than two days.
+- **Recommendations:** text checks on each active workflow file at the default branch: missing `cancel-in-progress` (or one set by an expression, which is flagged to check), no draft guard for pull request runs, no `paths` filters, and scheduled workflows that have not run for more than two days or not at all in the window. A workflow started by a schedule is treated as critical even when its file could not be read.
+- **Runs not finished:** queued runs count as zero minutes and running ones only for the time so far.
 
 Draft pull request runs are not measured yet: telling them apart needs one more request per pull request.
 

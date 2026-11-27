@@ -17,8 +17,14 @@ const fail = (status: number, error: string) => NextResponse.json({ error }, { s
 export async function GET(request: Request) {
   const token = process.env.CI_AUDIT_GITHUB_TOKEN?.trim();
   if (!token) return fail(503, "The live check is not switched on for this site.");
-  const repository = parseRepository(new URL(request.url).searchParams.get("repo") ?? "")?.toLowerCase();
+  const url = new URL(request.url), raw = url.searchParams.get("repo") ?? "";
+  const repository = parseRepository(raw)?.toLowerCase();
   if (!repository) return fail(400, "Enter a public GitHub repository as owner/name or its github.com link.");
+  // One URL per repository, so the CDN caches each repository once however it was written.
+  if (raw !== repository || [...url.searchParams.keys()].some((k) => k !== "repo")) {
+    const canonical = new URL(url.pathname, url); canonical.searchParams.set("repo", repository);
+    return NextResponse.redirect(canonical, { status: 308, headers: { "cache-control": "public, s-maxage=86400" } });
+  }
   const ip = clientIp(request.headers), ipHash = ip ? await limitKey(ipBucket(ip)) : undefined;
   try {
     await backend().mutation(api.ciAudit.allowPublicCheck, { secret: process.env.SERVICE_SECRET ?? "", ...(ipHash ? { ipHash } : {}) });

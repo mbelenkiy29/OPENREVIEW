@@ -2,6 +2,7 @@ import { internalMutation, internalQuery, mutation, query } from "./_generated/s
 import { v } from "convex/values";
 import { audit, authorize } from "./auth";
 import { adminEmails } from "./notifications";
+import { workspacePurging } from "./dataControls";
 import { ciCostEnabled } from "../src/ci-audit-github";
 import type { CiAudit } from "../src/ci-audit";
 
@@ -33,6 +34,7 @@ export const save = mutation({
   handler: async (ctx, a) => {
     if (!ciCostEnabled()) throw new Error("The CI cost report is not switched on for this deployment");
     const { user } = await authorize(ctx, a.token, a.organizationId, true);
+    if (await workspacePurging(ctx, a.organizationId)) throw new Error("This workspace is being deleted");
     if (a.monthlyBudget !== undefined && !(Number.isFinite(a.monthlyBudget) && a.monthlyBudget > 0 && a.monthlyBudget <= 1_000_000)) throw new Error("Enter a monthly budget between $1 and $1,000,000, or leave it empty");
     if (a.critical.length > 50) throw new Error("Mark at most 50 critical workflows");
     for (const c of a.critical) {

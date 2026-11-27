@@ -3,6 +3,7 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { audit, authorizeRepository, visibleRepositories } from "./auth";
 import { cooldown } from "./rateLimit";
+import { workspacePurging } from "./dataControls";
 import { ciCostEnabled } from "../src/ci-audit-github";
 
 // In-app CI cost report (Organization Settings → CI Cost, behind CI_COST_ENABLED): a 30-day audit of a
@@ -29,6 +30,8 @@ export const request = mutation({
     if (!ciCostEnabled()) throw new Error("The CI cost report is not switched on for this deployment");
     const { user, repo } = await authorizeRepository(ctx, a.token, a.repositoryId, true, true);
     if (!repo.installationId || repo.connectionId) throw new Error("CI audits need a repository connected through the GitHub App");
+    // A purge that already emptied ciAudits never comes back for a row written after it.
+    if (await workspacePurging(ctx, repo.organizationId)) throw new Error("This workspace is being deleted");
     await cooldown(ctx, `ci-audit:${repo._id}`, 600000).catch(() => { throw new Error("This repository was audited in the last ten minutes. Try again shortly."); });
     const now = Date.now();
     const auditId = await ctx.db.insert("ciAudits", { organizationId: repo.organizationId, repositoryId: repo._id, requestedBy: user._id, status: "queued", createdAt: now, updatedAt: now });

@@ -33,7 +33,10 @@ test("runner class and larger-runner multiplier come from labels", () => {
 
 test("workflow hints find concurrency, cancel-in-progress, path filters and draft guards", () => {
   const plain = workflowHints("on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n");
-  assert.deepEqual(plain, { pullRequest: true, scheduled: false, concurrency: false, cancelsInProgress: false, pathFilters: false, draftGuard: false });
+  assert.deepEqual(plain, { pullRequest: true, scheduled: false, concurrency: false, cancelsInProgress: false, cancelsConditionally: false, pathFilters: false, draftGuard: false });
+  const conditional = workflowHints("concurrency:\n  group: x\n  cancel-in-progress: ${{ github.event_name == 'push' }}\n");
+  assert.equal(conditional.cancelsInProgress, false);
+  assert.equal(conditional.cancelsConditionally, true);
   const tuned = workflowHints("on:\n  pull_request:\n    paths:\n      - 'src/**'\nconcurrency:\n  group: ci-${{ github.ref }}\n  cancel-in-progress: true\njobs:\n  test:\n    if: github.event.pull_request.draft == false\n");
   assert.equal(tuned.concurrency && tuned.cancelsInProgress && tuned.pathFilters && tuned.draftGuard, true);
   assert.equal(workflowHints("on:\n  schedule:\n    - cron: '0 3 * * *'\n").scheduled, true);
@@ -138,4 +141,60 @@ test("fetchActionsHistory reads a day at a time, samples jobs, reads workflow fi
 
 test("fetchActionsHistory rejects malformed repository names before any request", async () => {
   await assert.rejects(fetchActionsHistory({ repository: "../etc", fetch: (() => { throw new Error("no request"); }) as unknown as typeof fetch }), /owner\/name/);
+});
+
+test("an expression-valued cancel-in-progress still counts the saving and asks to check the expression", () => {
+  const runs = [run(1, { start: 0, end: 20 }), run(2, { start: 5, end: 25 })];
+  const audit = auditActions(history(runs, { 1: [job(1, 0, 20)], 2: [job(2, 5, 25)] }, "on: pull_request\nconcurrency:\n  group: x\n  cancel-in-progress: ${{ github.event_name == 'push' }}\n"));
+  assert.equal(audit.monthly.savingMinutes, 15);
+  assert.match(audit.workflows[0].recommendations.join("\n"), /set by an expression/);
+});
+
+test("pull requests from different forks with the same branch name never supersede each other", () => {
+  const runs = [run(1, { start: 0, end: 20, headRepository: "alice/app", branch: "patch-1" }), run(2, { start: 5, end: 25, headRepository: "bob/app", branch: "patch-1" })];
+  const audit = auditActions(history(runs, { 1: [job(1, 0, 20)], 2: [job(2, 5, 25)] }));
+  assert.equal(audit.minutes.superseded, 0);
+});
+
+test("queued runs cost nothing and running ones only their time so far", () => {
+  const runs = [run(1, { start: 0, end: 20 }), run(2, { start: 100, end: 100, status: "queued", startedAt: null, branch: "other" }), run(3, { start: 200, end: 204, status: "in_progress", branch: "third" })];
+  const audit = auditActions(history(runs, { 1: [job(1, 0, 20)] }));
+  assert.equal(audit.minutes.total, 24);
+});
+
+test("an observed schedule run makes a workflow critical even when its file was not read", () => {
+  const runs = [run(1, { start: 0, end: 20, event: "schedule", branch: "main", name: "Nightly", path: ".github/workflows/nightly.yml" }), run(2, { start: 5, end: 25, event: "schedule", branch: "main", name: "Nightly", path: ".github/workflows/nightly.yml" })];
+  const audit = auditActions(history(runs, { 1: [job(1, 0, 20)], 2: [job(2, 5, 25)] }, undefined, { workflows: [{ id: 1, name: "Nightly", path: ".github/workflows/nightly.yml" }] }));
+  assert.equal(audit.workflows[0].critical, true);
+  assert.equal(audit.monthly.savingMinutes, 0);
+  assert.doesNotMatch(audit.workflows[0].recommendations.join("\n"), /cancel-in-progress: true/);
+});
+
+test("an active scheduled workflow with no runs in the window is reported as stopped", () => {
+  const audit = auditActions(history([], {}, undefined, { workflows: [{ id: 9, name: "Backup", path: ".github/workflows/backup.yml", state: "active", content: "on:\n  schedule:\n    - cron: '0 3 * * *'\n" }] }));
+  assert.equal(audit.workflows.length, 1);
+  assert.equal(audit.workflows[0].runs, 0);
+  assert.match(audit.workflows[0].recommendations.join("\n"), /did not run in the last 30 days/);
+});
+
+test("fetchActionsHistory keeps the reserve with requests in flight, reads every workflow page, and reports only complete days", async () => {
+  const now = Date.parse("2026-11-27T00:00:00Z");
+  let remaining = 108, listed = 0;
+  const fake = (async (url: string) => {
+    const u = new URL(url), json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "x-ratelimit-remaining": String(--remaining) } });
+    if (u.pathname === "/repos/acme/app") return json({ private: false, default_branch: "main", full_name: "acme/app" });
+    if (u.pathname === "/repos/acme/app/actions/workflows") {
+      const page = Number(u.searchParams.get("page"));
+      return json({ total_count: 101, workflows: page === 1 ? Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `W${i}`, path: `.github/workflows/w${i}.yml`, state: "disabled_manually" })) : [{ id: 101, name: "Backup", path: ".github/workflows/backup.yml", state: "active" }] });
+    }
+    if (u.pathname === "/repos/acme/app/actions/runs") { listed++; return json({ total_count: 0, workflow_runs: [] }); }
+    if (u.pathname.endsWith("/backup.yml")) return json({ encoding: "base64", content: Buffer.from("on:\n  schedule:\n    - cron: '0 3 * * *'\n").toString("base64") });
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  const result = await fetchActionsHistory({ repository: "acme/app", token: "t", days: 30, fetch: fake, now, reserve: 100 });
+  assert.equal(result.workflows.length, 101);
+  assert.ok(result.workflows.find((w) => w.id === 101)?.content, "the active workflow on page two was read");
+  assert.ok(listed < 30, "listing stopped at the reserve");
+  assert.equal(result.days, listed);
+  assert.match(result.truncated?.join("\n") ?? "", /Stopped listing runs before/);
 });
