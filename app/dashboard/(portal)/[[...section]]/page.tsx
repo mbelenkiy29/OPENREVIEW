@@ -21,7 +21,7 @@ import { pages } from "../../routes";
 import { Icon } from "../../../ui/icons";
 import { referralConfig } from "../../../../src/referrals";
 import { ciCostEnabled } from "../../../../src/ci-audit-github";
-import { CiCostPanel } from "../../ci-cost";
+import { CiCostPanel, SpendGuardPanel } from "../../ci-cost";
 import { WorkspaceInvitations } from "../../invitations";
 import { RepositoriesSection } from "../../sections/repositories";
 import { ReviewsSection } from "../../sections/reviews";
@@ -86,6 +86,7 @@ export default async function Dashboard(props: {
     {route === "settings" && section[1] === "review" && <ReviewSettingsSection ctx={ctx} />}
     {route === "settings" && section[1] === "keys" && <ApiKeysSection ctx={ctx} />}
     {route === "settings" && section[1] === "ci" && <CiCostPanel token={user.token} organizationId={organization._id} admin={isAdmin} />}
+    {route === "settings" && section[1] === "ci" && isAdmin && <SpendGuardPanel token={user.token} organizationId={organization._id} />}
   </>;
   const subnav = page && subnavTabs[page.tab];
   return (

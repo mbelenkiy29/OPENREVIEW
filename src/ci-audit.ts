@@ -101,6 +101,7 @@ export type WorkflowAudit = {
   supersededRuns: number;
   supersededMinutes: number;
   lastRunAt?: string;
+  lastConclusion?: string | null;
   critical: boolean;
   hints?: WorkflowHints;
   recommendations: string[];
@@ -207,7 +208,7 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
     };
     const e = estimate(run);
     w.runs++; w.events[run.event] = (w.events[run.event] ?? 0) + 1; w.minutes += e.minutes; w.cost += e.cost;
-    if (!w.lastRunAt || run.createdAt > w.lastRunAt) w.lastRunAt = run.createdAt;
+    if (!w.lastRunAt || run.createdAt > w.lastRunAt) { w.lastRunAt = run.createdAt; w.lastConclusion = run.conclusion; }
     totals.minutes += e.minutes; totals.cost += e.cost;
     for (const [k, m] of Object.entries(e.byRunner)) runners[k as RunnerClass] = (runners[k as RunnerClass] ?? 0) + m;
     if (run.conclusion === "cancelled") { w.cancelledRuns++; w.cancelledMinutes += e.minutes; totals.cancelled += e.minutes; totals.cancelledCost += e.cost; }

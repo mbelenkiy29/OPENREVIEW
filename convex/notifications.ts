@@ -140,7 +140,7 @@ export const reviewTargets = internalQuery({ args: { reviewId: v.id("reviews") }
   return { organizationId: repo.organizationId, installationId: slack?._id ?? null, notice: { repository: repo.fullName, prNumber: review.prNumber, prTitle: pr?.title, prUrl: pr?.url, headSha: review.headSha, findings }, channels, recipients };
 } });
 // Owners and admins with a verified notification email: who hears about usage and upgrade requests.
-async function adminEmails(ctx: QueryCtx, organizationId: Id<"organizations">) {
+export async function adminEmails(ctx: QueryCtx, organizationId: Id<"organizations">) {
   const recipients: { userId: Id<"users">; email: string }[] = [];
   for (const m of await ctx.db.query("organizationMembers").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).take(1000)) {
     if (m.role !== "owner" && m.role !== "admin") continue;
