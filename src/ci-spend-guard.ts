@@ -10,7 +10,8 @@ export const budgetSteps = [50, 80, 100] as const;
 export type BudgetStep = (typeof budgetSteps)[number];
 
 export type CriticalWorkflow = { repository: string; path: string };
-export type RepositorySpend = { repository: string; cost: number; minutes: number; audit?: CiAudit; error?: string };
+/** partial: only part of the month could be read, so cost is a lower bound. */
+export type RepositorySpend = { repository: string; cost: number; minutes: number; audit?: CiAudit; error?: string; partial?: boolean };
 export type CriticalProblem = { repository: string; path: string; name: string; problem: string };
 
 /** The UTC month ("2026-11") and the days of it elapsed, counting today. */
@@ -33,6 +34,8 @@ export function criticalProblems(critical: CriticalWorkflow[], spend: Repository
     const repo = spend.find((s) => s.repository.toLowerCase() === c.repository.toLowerCase());
     if (!repo?.audit) continue; // Could not be read today; reported with the repository's error instead.
     const w = repo.audit.workflows.find((x) => x.path === c.path);
+    // A partial history covers only the newest days, so a run may still have happened earlier in the month.
+    if ((!w || !w.lastRunAt) && repo.partial) continue;
     if (!w || !w.lastRunAt) { problems.push({ repository: c.repository, path: c.path, name: w?.name ?? c.path, problem: "has not run this month" }); continue; }
     const quiet = Math.floor((now - Date.parse(w.lastRunAt)) / 86400000);
     if (quiet >= 2) problems.push({ repository: c.repository, path: c.path, name: w.name, problem: `last ran ${quiet} days ago` });
@@ -43,13 +46,14 @@ export function criticalProblems(critical: CriticalWorkflow[], spend: Repository
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
-export function guardMessages(input: { workspace: string; period: string; budget?: number; spend: RepositorySpend[]; problems: CriticalProblem[]; step?: BudgetStep; url?: string }) {
+export function guardMessages(input: { workspace: string; period: string; budget?: number; spend: RepositorySpend[]; problems: CriticalProblem[]; step?: BudgetStep; url?: string; notes?: string[] }) {
   const total = input.spend.reduce((n, s) => n + s.cost, 0);
   const top = [...input.spend].sort((a, b) => b.cost - a.cost).slice(0, 5);
-  const lines = top.map((s) => s.error ? `- ${s.repository}: could not be read (${s.error})` : `- ${s.repository}: ${usd(s.cost)} (${Math.round(s.minutes)} min)`);
+  const lines = top.map((s) => s.error ? `- ${s.repository}: could not be read (${s.error})` : `- ${s.repository}: ${s.partial ? "at least " : ""}${usd(s.cost)} (${Math.round(s.minutes)} min)`);
   const budget = input.budget ? ` of the ${usd(input.budget)} monthly budget` : "";
-  const summary = `${input.workspace}: GitHub Actions spend for ${input.period} is about ${usd(total)}${budget}.`;
-  const tail = [...(input.url ? [`Details: ${input.url}`] : []), "Estimates at list price per runner minute; plan allowances are not subtracted."];
+  const incomplete = input.spend.some((s) => s.partial || s.error);
+  const summary = `${input.workspace}: GitHub Actions spend for ${input.period} is ${incomplete ? "at least" : "about"} ${usd(total)}${budget}.`;
+  const tail = [...(input.notes ?? []), ...(input.url ? [`Details: ${input.url}`] : []), "Estimates at list price per runner minute; plan allowances are not subtracted."];
   return {
     total,
     budget: input.step && input.budget ? {

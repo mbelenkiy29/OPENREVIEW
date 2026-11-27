@@ -51,6 +51,7 @@ export async function SpendGuardPanel({ token, organizationId }: { token: string
     {check && <p>Last check {new Date(check.at).toISOString().slice(0, 16).replace("T", " ")} UTC: about <strong>{usd(check.total)}</strong> in {check.period}{guard?.monthlyBudget ? ` of ${usd(guard.monthlyBudget)}` : ""}.
       {check.problems.length > 0 && <> {check.problems.map((p) => `${p.repository} ${p.name} ${p.problem}`).join("; ")}.</>}
       {check.repositories.some((r) => r.error) && <> Not read: {check.repositories.filter((r) => r.error).map((r) => `${r.fullName} (${r.error})`).join("; ")}.</>}</p>}
+    {check?.notes && check.notes.length > 0 && <ul className="muted">{check.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
     <form action={saveCiSpendGuard} className="stack">
       <input type="hidden" name="organizationId" value={organizationId} />
       <label>Monthly budget (USD)<input type="number" name="monthlyBudget" min="1" max="1000000" step="1" defaultValue={guard?.monthlyBudget ?? ""} placeholder="No budget" /></label>

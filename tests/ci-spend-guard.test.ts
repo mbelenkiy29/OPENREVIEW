@@ -35,10 +35,24 @@ test("guardMessages builds the budget, critical and daily messages", () => {
   const m = guardMessages({ workspace: "Acme", period: "2026-11", budget: 100, spend, problems: [{ repository: "acme/app", path: ".github/workflows/backup.yml", name: "Backup", problem: "last ran 5 days ago" }], step: 80, url: "https://openreview.tech/dashboard/organization/ci" });
   assert.equal(m.total, 85);
   assert.equal(m.budget?.subject, "GitHub Actions spend passed 80% of its budget");
-  assert.match(m.budget!.text, /about \$85\.00 of the \$100\.00 monthly budget/);
+  assert.match(m.budget!.text, /at least \$85\.00 of the \$100\.00 monthly budget/);
   assert.match(m.budget!.text, /acme\/web: could not be read/);
   assert.equal(m.critical?.subject, "Critical workflow Backup needs a look");
   assert.match(m.daily.subject, /\$85\.00 so far in 2026-11/);
   assert.equal(guardMessages({ workspace: "Acme", period: "2026-11", budget: 100, spend, problems: [], step: 100 }).budget?.subject, "GitHub Actions spend reached its $100.00 budget");
   assert.equal(guardMessages({ workspace: "Acme", period: "2026-11", spend, problems: [] }).budget, undefined);
+});
+
+test("a partial month is a lower bound, says so, and raises no has-not-run alarm", () => {
+  const partial = { ...spendFor([], 12), partial: true };
+  const m = guardMessages({ workspace: "Acme", period: "2026-11", spend: [partial], problems: [], notes: ["acme/app: only part of the month could be read, so its spend is at least the amount shown."] });
+  assert.match(m.daily.text, /is at least \$12\.00/);
+  assert.match(m.daily.text, /acme\/app: at least \$12\.00/);
+  assert.match(m.daily.text, /only part of the month could be read/);
+  assert.deepEqual(criticalProblems([{ repository: "acme/app", path: ".github/workflows/backup.yml" }], [partial], Date.parse("2026-11-27T00:00:00Z")), []);
+});
+
+test("a full month with every repository read says about", () => {
+  const m = guardMessages({ workspace: "Acme", period: "2026-11", spend: [spendFor([], 12)], problems: [] });
+  assert.match(m.daily.text, /is about \$12\.00/);
 });

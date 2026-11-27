@@ -25,6 +25,11 @@ export const guard = query({
       if (!latest?.report) continue;
       try { for (const w of (JSON.parse(latest.report) as CiAudit).workflows) if (w.path.startsWith(".github/workflows/")) workflows.push({ repositoryId: r._id, fullName: r.fullName, path: w.path, name: w.name }); } catch { /* unreadable report */ }
     }
+    for (const c of row?.critical ?? []) {
+      if (workflows.some((w) => w.repositoryId === c.repositoryId && w.path === c.path)) continue;
+      const r = repos.find((x) => x._id === c.repositoryId);
+      if (r) workflows.push({ repositoryId: r._id, fullName: r.fullName, path: c.path, name: c.path.split("/").at(-1) ?? c.path });
+    }
     return { guard: row, channels, workflows };
   },
 });
@@ -37,6 +42,7 @@ export const save = mutation({
     if (await workspacePurging(ctx, a.organizationId)) throw new Error("This workspace is being deleted");
     if (a.monthlyBudget !== undefined && !(Number.isFinite(a.monthlyBudget) && a.monthlyBudget > 0 && a.monthlyBudget <= 1_000_000)) throw new Error("Enter a monthly budget between $1 and $1,000,000, or leave it empty");
     if (a.critical.length > 50) throw new Error("Mark at most 50 critical workflows");
+    if (new Set(a.critical.map((c) => c.repositoryId)).size > maxRepositories) throw new Error(`Critical workflows can be in at most ${maxRepositories} repositories, the most the daily check reads`);
     for (const c of a.critical) {
       const repo = await ctx.db.get(c.repositoryId);
       if (!repo || repo.organizationId !== a.organizationId || !/^\.github\/workflows\/[\w./-]{1,200}$/.test(c.path)) throw new Error("Critical workflow not found in this workspace");
@@ -60,12 +66,16 @@ export const checkContext = internalQuery({
     const guard = await ctx.db.get(a.guardId);
     const organization = guard && await ctx.db.get(guard.organizationId);
     if (!guard || !organization) return null;
-    const repos = (await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", guard.organizationId)).take(500)).filter((r) => r.enabled && r.installationId && !r.connectionId).slice(0, maxRepositories);
+    // Repositories with critical workflows first, so a saved watch is always among those checked.
+    const watched = new Set(guard.critical.map((c) => c.repositoryId));
+    const eligible = (await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", guard.organizationId)).take(500)).filter((r) => r.enabled && r.installationId && !r.connectionId)
+      .sort((x, y) => Number(watched.has(y._id)) - Number(watched.has(x._id)));
+    const repos = eligible.slice(0, maxRepositories);
     const critical = (await Promise.all(guard.critical.map(async (c) => { const r = await ctx.db.get(c.repositoryId); return r ? { repository: r.fullName, path: c.path } : null; }))).filter((c) => c !== null);
     const channel = guard.channelId ? await ctx.db.get(guard.channelId) : null;
     return {
       guard, workspace: organization.name,
-      repositories: repos.map((r) => ({ repositoryId: r._id, fullName: r.fullName, installationId: r.installationId! })),
+      repositories: repos.map((r) => ({ repositoryId: r._id, fullName: r.fullName, installationId: r.installationId! })), skippedRepositories: eligible.length - repos.length,
       critical, recipients: await adminEmails(ctx, guard.organizationId),
       slack: channel ? { installationId: channel.installationId, channelId: channel.channelId } : null,
     };
@@ -73,7 +83,7 @@ export const checkContext = internalQuery({
 });
 
 export const recordCheck = internalMutation({
-  args: { guardId: v.id("ciSpendGuards"), at: v.number(), period: v.string(), total: v.number(), repositories: v.array(v.object({ repositoryId: v.id("repositories"), fullName: v.string(), cost: v.number(), minutes: v.number(), error: v.optional(v.string()) })), problems: v.array(v.object({ repository: v.string(), path: v.string(), name: v.string(), problem: v.string() })) },
+  args: { guardId: v.id("ciSpendGuards"), at: v.number(), period: v.string(), total: v.number(), repositories: v.array(v.object({ repositoryId: v.id("repositories"), fullName: v.string(), cost: v.number(), minutes: v.number(), error: v.optional(v.string()), partial: v.optional(v.boolean()) })), problems: v.array(v.object({ repository: v.string(), path: v.string(), name: v.string(), problem: v.string() })), notes: v.array(v.string()) },
   handler: async (ctx, { guardId, ...lastCheck }) => {
     if (await ctx.db.get(guardId)) await ctx.db.patch(guardId, { lastCheck });
   },

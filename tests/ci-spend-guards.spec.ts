@@ -35,7 +35,10 @@ test("saving a spend guard is admin-only, behind the flag, and validated", async
   const rows = await t.run((ctx) => ctx.db.query("ciSpendGuards").collect());
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ monthlyBudget: 200, dailySummary: false });
-  expect((await t.query(api.ciSpendGuards.guard, { token: admin.token, organizationId })).guard?.monthlyBudget).toBe(200);
+  const form = await t.query(api.ciSpendGuards.guard, { token: admin.token, organizationId });
+  expect(form.guard?.monthlyBudget).toBe(200);
+  // A saved critical workflow stays on the form even with no audit listing it.
+  expect(form.workflows).toEqual([expect.objectContaining({ repositoryId, path: ".github/workflows/backup.yml" })]);
 });
 
 test("the daily check records month-to-date spend, flags a stopped critical workflow, and alerts once", async () => {
@@ -61,4 +64,14 @@ test("the daily check records month-to-date spend, flags a stopped critical work
   expect(Object.keys(first).sort()).toEqual([`ci.budget.100:${organizationId}:2026-11:email:${admin.id}`, `ci.critical:${organizationId}:2026-11-27:email:${admin.id}`].sort());
   const second = await t.action(internal.ciSpendGuardJobs.check, { guardId, now });
   expect(Object.values(second).every((outcome) => outcome === "duplicate")).toBe(true);
+
+  // A history cut short is a lower bound and says so; the flag switched off stops queued checks.
+  history.mockResolvedValueOnce({ ...(await history.mock.results[0].value), from: "2026-11-20T00:00:00.000Z", truncated: ["Stopped listing runs before 2026-11-20 to stay within the GitHub rate limit or time limit."] });
+  await t.action(internal.ciSpendGuardJobs.check, { guardId, now });
+  const partial = await t.run((ctx) => ctx.db.get(guardId));
+  expect(partial?.lastCheck?.repositories[0]).toMatchObject({ partial: true });
+  expect(partial?.lastCheck?.notes?.join("\n")).toMatch(/only part of the month could be read/);
+  vi.stubEnv("CI_COST_ENABLED", "");
+  expect(await t.action(internal.ciSpendGuardJobs.check, { guardId, now })).toEqual({});
+  expect(history).toHaveBeenCalledTimes(3);
 });
