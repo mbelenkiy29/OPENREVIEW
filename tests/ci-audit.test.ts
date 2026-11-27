@@ -198,3 +198,13 @@ test("fetchActionsHistory keeps the reserve with requests in flight, reads every
   assert.equal(result.days, listed);
   assert.match(result.truncated?.join("\n") ?? "", /Stopped listing runs before/);
 });
+
+test("paid cost counts only what GitHub bills: everything in a private repository, larger runners in a public one", () => {
+  const runs = [run(1, { start: 0, end: 10 }), run(2, { start: 20, end: 30, branch: "other" })];
+  const jobs = { 1: [job(1, 0, 10)], 2: [job(2, 20, 30, ["ubuntu-24.04-8-cores"])] };
+  const privateAudit = auditActions(history(runs, jobs));
+  assert.equal(privateAudit.cost.paid, privateAudit.cost.total);
+  const publicAudit = auditActions(history(runs, jobs, undefined, { private: false }));
+  assert.equal(publicAudit.cost.total, privateAudit.cost.total);
+  assert.equal(publicAudit.cost.paid, 0.24);
+});

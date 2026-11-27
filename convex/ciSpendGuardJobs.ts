@@ -76,7 +76,8 @@ export const check = internalAction({
         // A history cut short (rate limit or time) is a lower bound for the month, and says so.
         const partial = Boolean(history.truncated?.length) || Date.parse(history.from) > monthStart + 3600000;
         if (partial) notes.push(`${r.fullName}: only part of the month could be read, so its spend is at least the amount shown.`);
-        spend.push({ repositoryId: r.repositoryId, repository: r.fullName, cost: auditResult.cost.total, minutes: auditResult.minutes.total, audit: auditResult, partial });
+        // The budget counts what GitHub bills: in a public repository, standard hosted runners are free.
+        spend.push({ repositoryId: r.repositoryId, repository: r.fullName, cost: auditResult.cost.paid, minutes: auditResult.minutes.total, audit: auditResult, partial });
       } catch (error) {
         spend.push({ repositoryId: r.repositoryId, repository: r.fullName, cost: 0, minutes: 0, error: redact(error instanceof Error ? error.message : String(error)).slice(0, 200) });
       }
