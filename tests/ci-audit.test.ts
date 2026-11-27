@@ -207,4 +207,26 @@ test("paid cost counts only what GitHub bills: everything in a private repositor
   const publicAudit = auditActions(history(runs, jobs, undefined, { private: false }));
   assert.equal(publicAudit.cost.total, privateAudit.cost.total);
   assert.equal(publicAudit.cost.paid, 0.24);
+
+test("fetchActionsHistory leaves out a run whose job pages were cut short", async () => {
+  const now = Date.parse("2026-11-27T00:00:00Z");
+  let remaining = 1000;
+  const fake = (async (url: string) => {
+    const u = new URL(url), json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "x-ratelimit-remaining": String(remaining) } });
+    if (u.pathname === "/repos/acme/app") return json({ private: true, default_branch: "main", full_name: "acme/app" });
+    if (u.pathname === "/repos/acme/app/actions/workflows") return json({ total_count: 0, workflows: [] });
+    if (u.pathname === "/repos/acme/app/actions/runs") {
+      const day = u.searchParams.get("created")?.slice(0, 10);
+      return json({ total_count: day === "2026-11-26" ? 1 : 0, workflow_runs: day === "2026-11-26" ? [{ id: 7, workflow_id: 1, name: "CI", path: ".github/workflows/ci.yml", event: "push", head_branch: "main", head_sha: "a", status: "completed", conclusion: "success", created_at: "2026-11-26T10:00:00Z", run_started_at: "2026-11-26T10:00:00Z", updated_at: "2026-11-26T10:30:00Z" }] : [] });
+    }
+    if (u.pathname === "/repos/acme/app/actions/runs/7/jobs") {
+      remaining = 100; // the reserve is reached after the first page
+      return json({ total_count: 150, jobs: Array.from({ length: 100 }, (_, i) => ({ name: `j${i}`, conclusion: "success", started_at: "2026-11-26T10:00:00Z", completed_at: "2026-11-26T10:01:00Z", labels: ["ubuntu-latest"] })) });
+    }
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  const result = await fetchActionsHistory({ repository: "acme/app", token: "t", days: 3, fetch: fake, now, reserve: 100 });
+  assert.equal(result.runs.length, 1);
+  assert.equal(result.jobs[7], undefined);
+  assert.match(result.truncated?.join("\n") ?? "", /left out because not all of its jobs could be read/);
 });
