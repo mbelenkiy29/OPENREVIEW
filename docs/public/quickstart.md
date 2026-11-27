@@ -35,5 +35,6 @@ Set `LLM_PROVIDER` (`anthropic`, `openai` or `compatible`) and `LLM_API_KEY` on 
 ## Next steps
 
 - Tune reviews with [repository configuration](../repo-config.md) and [custom rules](rules.md).
+- Make OpenReview a [required status check](required-check.md) on GitHub.
 - Ask questions about your code in [Chat](chat.md), from the [API](api.md) or over [MCP](mcp.md).
 - Run reviews locally with the [CLI](cli.md).

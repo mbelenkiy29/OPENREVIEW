@@ -422,7 +422,7 @@ export const review = internalAction({
         });
         await confirmRequest(github, repo.fullName, state.review.triggerComment);
         const verified = [...result.findings, ...(result.metadata?.carriedForward ?? [])];
-        await finishCheck(await beginCheck(ctx, github, args.reviewId, repo.fullName, state.review.headSha, state.review.prNumber), { ...checkOutcome({ findings: verified, score: state.review.reviewScore?.value, files: pr.diff.length, posted: published.reused ? 0 : published.comments?.length ?? 0, failureSeverity: settings.checkFailureSeverity, minimumScore: settings.checkMinimumScore, verdict: state.review.verdict }), detailsUrl: dashboardUrl(args.reviewId) });
+        await finishCheck(await beginCheck(ctx, github, args.reviewId, repo.fullName, state.review.headSha, state.review.prNumber), { ...checkOutcome({ findings: verified, score: state.review.reviewScore?.value, files: pr.diff.length, posted: published.reused ? 0 : published.comments?.length ?? 0, failureSeverity: settings.checkFailureSeverity, minimumScore: settings.checkMinimumScore, verdict: state.review.verdict, comments: published.comments }), detailsUrl: dashboardUrl(args.reviewId) });
         return;
       }
       if (pr.head.sha !== state.review.headSha || pr.state !== "open") {
@@ -763,7 +763,7 @@ export const review = internalAction({
       await confirmRequest(github, repo.fullName, state.review.triggerComment);
       await resolveFixedThreads(ctx, github, repo._id, repo.fullName, pr.number, pr.head.sha, result.metadata.resolvedFingerprints);
       const verified = [...result.findings, ...(result.metadata.carriedForward ?? [])];
-      const outcome = checkOutcome({ findings: verified, score: result.metadata.reviewScore?.value, files: scope.diff.length, posted: published.reused ? 0 : published.comments?.length ?? 0, failureSeverity: settings.checkFailureSeverity, minimumScore: settings.checkMinimumScore, verdict: result.metadata.verdict });
+      const outcome = checkOutcome({ findings: verified, score: result.metadata.reviewScore?.value, files: scope.diff.length, posted: published.reused ? 0 : published.comments?.length ?? 0, failureSeverity: effective.checkFailureSeverity, minimumScore: effective.checkMinimumScore, verdict: result.metadata.verdict, comments: published.comments });
       await finishCheck(check, { ...outcome, summary: [outcome.summary, ...(result.metadata.coverageLimits?.length ? ["", "Coverage limits:", ...result.metadata.coverageLimits.map((l) => "- " + l)] : [])].join("\n"), detailsUrl: dashboardUrl(args.reviewId) });
     } catch (error) {
       if (error instanceof AgentSuspended && await ctx.runMutation(internal.reviews.suspendAgent, args)) {
@@ -771,7 +771,7 @@ export const review = internalAction({
         return;
       }
       const message = error instanceof Error ? error.message : "Review failed";
-      await finishCheck(check, supersededCheck(message) ? { conclusion: "neutral", title: "Superseded by a newer revision", summary: "This review stopped because the pull request changed or closed while it ran. A review of the newer revision replaces it.", detailsUrl: dashboardUrl(args.reviewId) } : { conclusion: "neutral", title: "Review could not be completed", summary: /Billing: /.test(message) ? billingNoticeBody(process.env.APP_URL) : "OpenReview could not complete this review: " + redact(message).slice(0, 500), detailsUrl: dashboardUrl(args.reviewId) });
+      await finishCheck(check, supersededCheck(message) ? { conclusion: "neutral", title: "Superseded by a newer revision", summary: "This review stopped because the pull request changed or closed while it ran. A review of the newer revision replaces it.", detailsUrl: dashboardUrl(args.reviewId) } : { conclusion: "action_required", title: "Review could not be completed", summary: /Billing: /.test(message) ? billingNoticeBody(process.env.APP_URL) : "OpenReview could not complete this review: " + redact(message).slice(0, 500), detailsUrl: dashboardUrl(args.reviewId) });
       console.error(
         JSON.stringify({
           event: "review.failed",
@@ -824,7 +824,7 @@ async function confirmRequest(scm: Scm, repository: string, comment?: { id: numb
 }
 
 const dashboardUrl = (reviewId: Id<"reviews">) => { const app = process.env.APP_URL; return app && /^https:\/\//.test(app) ? new URL(`/dashboard/pulls/${encodeURIComponent(reviewId)}`, app).href : undefined; };
-// GitHub check runs (checks:write only; otherwise the provider returns null and nothing happens),
+// GitHub check runs (checks:write only; otherwise startCheckRun logs review.check_run_skipped and returns null),
 // or Azure DevOps pull request statuses (pending while reviewing, then the outcome).
 type CheckHandle = { scm: Scm; repository: string; id: number; prNumber?: number; status?: boolean };
 async function beginCheck(ctx: ActionCtx, scm: Scm, reviewId: Id<"reviews">, repository: string, sha: string, prNumber?: number): Promise<CheckHandle | null> {
@@ -847,7 +847,7 @@ async function beginCheck(ctx: ActionCtx, scm: Scm, reviewId: Id<"reviews">, rep
 }
 async function finishCheck(check: CheckHandle | null, result: { conclusion: CheckConclusion; title: string; summary: string; detailsUrl?: string }) {
   if (check?.status && check.prNumber && check.scm.reportStatus) {
-    const state = result.conclusion === "success" ? "succeeded" : result.conclusion === "failure" ? "failed" : result.conclusion === "cancelled" ? "error" : "notApplicable";
+    const state = result.conclusion === "success" ? "succeeded" : result.conclusion === "failure" || result.conclusion === "action_required" ? "failed" : result.conclusion === "cancelled" ? "error" : "notApplicable";
     try { await check.scm.reportStatus(check.repository, check.prNumber, state, result.title, result.detailsUrl); }
     catch (error) { console.error(JSON.stringify({ event: "review.status_failed", error: redact(error instanceof Error ? error.message : "failed").slice(0, 300) })); }
     return;

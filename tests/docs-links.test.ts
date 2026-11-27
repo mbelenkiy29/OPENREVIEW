@@ -28,7 +28,7 @@ test("internal QA logs live under docs/internal and are not published", () => {
 
 test("the published docs manifest is complete and its cross-links resolve to published pages", () => {
   assert.equal(new Set(docPages.map((d) => d.slug)).size, docPages.length);
-  for (const required of ["quickstart", "github-app", "configuration", "rules", "api", "mcp", "cli", "self-hosting", "gitlab", "bitbucket-cloud", "bitbucket-data-center", "gitea", "perforce"]) assert.ok(docPages.some((d) => d.slug === required), required);
+  for (const required of ["quickstart", "github-app", "required-check", "configuration", "rules", "api", "mcp", "cli", "self-hosting", "gitlab", "bitbucket-cloud", "bitbucket-data-center", "gitea", "perforce"]) assert.ok(docPages.some((d) => d.slug === required), required);
   assert.ok(existsSync("docs/AUDIT.md"));
   for (const page of docPages) {
     assert.ok(existsSync(path.join("docs", page.file)), page.file);

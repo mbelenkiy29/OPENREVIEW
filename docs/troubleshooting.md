@@ -33,7 +33,7 @@ Each deployment registers its own GitHub App under GitHub **Settings → Develop
 
 Turn **Redirect on update** on so changing repository access on GitHub returns to OpenReview and refreshes the repository list.
 
-**Required repository permissions:** Contents read, Metadata read, Pull requests read and write, Issues read, Checks read. Contents read/write is optional (fix pull requests). Checks read and write is optional (an "OpenReview" check run). OpenReview skips each optional feature when the permission is missing. After you add a permission, each installation's owner must accept it on GitHub.
+**Required repository permissions:** Contents read, Metadata read, Pull requests read and write, Issues read, Checks read. Contents read/write is optional (fix pull requests). Checks read and write is optional (an "OpenReview" check run, including as a [required status check](public/required-check.md)). OpenReview skips each optional feature when the permission is missing and logs `review.check_run_skipped` when Checks write is absent. After you add a permission, each installation's owner must accept it on GitHub.
 
 **Events:** Installation, Installation repositories, Pull request, Pull request review, Pull request review comment, Issue comment, Push, and Repository.
 

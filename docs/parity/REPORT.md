@@ -186,9 +186,9 @@ Each item lists what shipped, its evidence level, its tests and its known limits
 - Shipped:
   - The `checks:write` permission is detected at runtime.
   - The check is in progress during the review, then completes.
-  - The conclusion is configurable: neutral by default, or failure at a severity threshold.
-- Tests: `tests/check-runs.test.ts` (3).
-- Limits: needs the app permission (checklist step 13).
+  - Completed reviews report success by default. `checkFailureSeverity` (`off` / `critical` / `high` / `medium` / `low`) fails the check when findings reach that severity. Incomplete and failed reviews never report success (`action_required`). Missing Checks: write skips the check and logs a warning.
+- Tests: `tests/check-runs.test.ts`.
+- Limits: needs the app permission (checklist step 13). Guide: [Make OpenReview a required check](../public/required-check.md).
 
 **B7 Triggers and filters** (tested with fakes)
 - Shipped:

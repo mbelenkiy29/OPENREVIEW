@@ -126,10 +126,10 @@ export function ReviewSettingsSection({ ctx }: { ctx: DashboardContext }) {
         </div>
 
         <div id="review-checks" className="settings-group">
-          <SettingsHeading icon="checkCircle" title="Status Checks" sub="Report each review as a check run on the pull request (GitHub)" />
+          <SettingsHeading icon="checkCircle" title="Status Checks" sub="Report each review as a check run on the pull request (GitHub). A completed review succeeds by default, so OpenReview can be a required check." />
           <div className="settings-card">
-            <Row id="rs-checkFailureSeverity" title="GitHub check run" help="Fail the check when findings reach this severity.">
-              <select key={s.checkFailureSeverity} id="rs-checkFailureSeverity" name="checkFailureSeverity" defaultValue={s.checkFailureSeverity ?? "off"} aria-describedby="rs-checkFailureSeverity-help"><option value="off">neutral (never fails)</option>{["critical", "high", "medium", "low"].map((v) => <option key={v} value={v}>fail at {v} or above</option>)}</select>
+            <Row id="rs-checkFailureSeverity" title="Minimum blocking severity" help="Fail the OpenReview check when a verified finding reaches this severity. Off never fails on findings; a completed review still reports success, so the check can be required.">
+              <select key={s.checkFailureSeverity} id="rs-checkFailureSeverity" name="checkFailureSeverity" defaultValue={s.checkFailureSeverity ?? "off"} aria-describedby="rs-checkFailureSeverity-help"><option value="off">off (findings never fail the check)</option>{["critical", "high", "medium", "low"].map((v) => <option key={v} value={v}>fail at {v} or above</option>)}</select>
             </Row>
             <Row id="rs-checkMinimumScore" title="Check run minimum confidence" help="Fail the check when the review’s confidence score is below this.">
               <select key={s.checkMinimumScore} id="rs-checkMinimumScore" name="checkMinimumScore" defaultValue={String(s.checkMinimumScore ?? 0)} aria-describedby="rs-checkMinimumScore-help"><option value="0">off</option>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>fail below {n}/5</option>)}</select>

@@ -91,20 +91,20 @@ test("reactions go to the right comment kind and skip review bodies",async t=>{
 test("check runs report what was reviewed and fail below a required confidence score",()=>{
  const findings=[finding];
  const plain=checkOutcome({findings,score:4,files:3,posted:1});
- assert.equal(plain.conclusion,"neutral");
+ assert.equal(plain.conclusion,"success");
  assert.equal(plain.title,"Reviewed 3 files · 1 finding");
- assert.match(plain.summary,/^\*\*Needs changes\*\* · Confidence score \*\*4\/5\*\*\n\nReviewed 3 files · 1 finding; 1 new inline comment posted\.\n\n- 🟠 P1 Wrong amount returned \(`price\.ts:2`\)/);
+ assert.match(plain.summary,/^\*\*Needs changes\*\* · Confidence score \*\*4\/5\*\*\n\nReviewed 3 files · 1 finding; 1 new inline comment posted\.\n\nMinimum blocking severity is off; this check does not fail on findings\.\n\n- 🟠 P1 Wrong amount returned \(`price\.ts:2`\)/);
  const low=checkOutcome({findings,score:2,files:1,posted:0,minimumScore:4});
  assert.equal(low.conclusion,"failure");
  assert.equal(low.title,"Confidence 2/5 is below the required 4/5");
  assert.match(low.summary,/The review itself completed/);
  assert.equal(checkOutcome({findings:[],score:5,files:1,posted:0,minimumScore:4}).conclusion,"success");
- assert.equal(checkOutcome({findings:[],files:1,posted:0,minimumScore:4}).conclusion,"neutral","no score recorded: the gate is not applied");
+ assert.equal(checkOutcome({findings:[],files:1,posted:0,minimumScore:4}).conclusion,"action_required","no score recorded: the gate is not applied and the review is incomplete");
  const severe=checkOutcome({findings,score:5,files:1,posted:1,failureSeverity:"high",minimumScore:3});
  assert.equal(severe.conclusion,"failure");
  assert.equal(severe.title,"1 verified finding at or above high severity");
  assert.equal(checkOutcome({findings:[],score:5,files:2,posted:0,verdict:"incomplete"}).summary.split("\n")[0],"**Review incomplete**");
- assert.equal(checkOutcome({findings:[],score:5,files:2,posted:0,verdict:"incomplete",minimumScore:4}).conclusion,"neutral","an incomplete 5/5 does not pass a score gate");
+ assert.equal(checkOutcome({findings:[],score:5,files:2,posted:0,verdict:"incomplete",minimumScore:4}).conclusion,"action_required","an incomplete 5/5 does not pass a score gate");
  assert.ok(supersededCheck("Review cancelled")&&supersededCheck("Review is obsolete; pull request head changed or closed")&&!supersededCheck("Model timed out"));
 });
 

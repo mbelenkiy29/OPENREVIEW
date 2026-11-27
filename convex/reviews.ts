@@ -502,7 +502,7 @@ export const finished = internalMutation({
     reviewId: v.id("reviews"),
     githubReviewId: v.optional(v.union(v.number(),v.string())),
     comments: v.optional(
-      v.array(v.object({ id: v.union(v.number(),v.string()), fingerprint: v.string() })),
+      v.array(v.object({ id: v.union(v.number(),v.string()), fingerprint: v.string(), url: v.optional(v.string()) })),
     ),
     error: v.optional(v.string()),
   },

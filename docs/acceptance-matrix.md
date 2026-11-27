@@ -72,7 +72,7 @@ Evidence levels: *tested with fakes*, *verified locally end-to-end* or *verified
 | B2/B3 Summary, multi-line comments | `src/review-summary.ts`, `src/github.ts`; tested with fakes | [Runbook](runbooks/parity-features.md#b2-and-b3-summary-and-multi-line-comments) |
 | B4 Sequence diagrams | `src/diagrams.ts`; tested with fakes | [Runbook](runbooks/parity-features.md#b4-sequence-diagram) |
 | B5 Incremental review | `src/incremental.ts`, GraphQL thread resolution; tested with fakes | [Runbook](runbooks/parity-features.md#b5-incremental-review) |
-| B6 Check runs | `Github.startCheckRun`; tested with fakes | Checks write (Needs human #11) + [runbook](runbooks/parity-features.md#b6-check-runs) |
+| B6 Check runs | `Github.startCheckRun`; tested with fakes | Checks write (Needs human #11) + [Make OpenReview a required check](public/required-check.md) + [runbook](runbooks/parity-features.md#b6-check-runs) |
 | B7 Triggers and filters | `src/triggers.ts`; tested with fakes | [Runbook](runbooks/parity-features.md#b7-triggers-and-filters) |
 | B8 Configuration as code | `src/repo-config.ts`; tested with fakes | [Runbook](runbooks/parity-features.md#b8-configuration-as-code) |
 | C1 Reaction feedback | `convex/reactions.ts`; tested with fakes | GitLab emoji events (Needs human #12) + [runbook](runbooks/parity-features.md#c1-reactions) |

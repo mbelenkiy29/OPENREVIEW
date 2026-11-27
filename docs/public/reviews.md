@@ -9,7 +9,7 @@ When a pull request opens or updates, OpenReview:
 4. **Publishes:**
    - One summary, edited in place on every review. It opens with a verdict and the confidence score, followed by an overview, the issues, findings outside the changed code and an optional sequence diagram. On GitHub it goes at the end of the pull request description by default (see [Where the summary goes](#where-the-summary-goes)); other providers use one comment.
    - Inline findings, with committable suggestions where a small exact fix exists. On GitHub each one also has a collapsed **Prompt for your coding agent** with the file, lines, problem and suggested fix, ready to paste into Claude Code, Codex or Cursor.
-   - An optional check run.
+   - An "OpenReview" check run when the GitHub App has Checks: write (see [Make OpenReview a required check](required-check.md)).
 
 Later pushes are reviewed incrementally. Threads for findings fixed in the new commits are resolved automatically.
 
@@ -53,11 +53,11 @@ Reactions follow the same permission rules as replies: only people with write ac
 
 ## Check runs
 
-With the Checks: read and write permission, each GitHub review has an "OpenReview" check. It shows as in progress while the review runs, then reports the files reviewed, the findings, the verdict and the confidence score. By default the check is neutral. Two settings under Code Review Settings can make it fail:
-- **GitHub check run:** fails when a finding reaches the chosen severity.
+With the Checks: read and write permission, each GitHub review has an "OpenReview" check. It shows as in progress while the review runs, then reports the files reviewed, the findings, the verdict and the confidence score. A completed review reports **success** when nothing blocks merge. Two settings under Code Review Settings (and `checkFailureSeverity` in the repository config file) control failure:
+- **Minimum blocking severity:** fails when a finding reaches the chosen severity (`off` by default, so findings never fail the check). The summary lists blocking findings and links each one to its inline comment.
 - **Check run minimum confidence:** fails when the confidence score is below the chosen value (1–5). The check says the review itself completed, and it is not applied when no score was recorded.
 
-A review that stops because a newer commit arrived ends neutral as "Superseded by a newer revision".
+Incomplete and failed reviews never report success (`action_required`). A review that stops because a newer commit arrived ends neutral as "Superseded by a newer revision". To require the check on a protected branch, see [Make OpenReview a required check](required-check.md).
 
 ## When the plan blocks a review
 

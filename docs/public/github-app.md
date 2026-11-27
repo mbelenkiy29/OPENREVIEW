@@ -22,7 +22,7 @@ The required permissions are:
 - **Checks:** read.
 
 Two upgrades are optional, and OpenReview skips each feature at runtime when the permission is missing:
-- **Checks: read and write:** an "OpenReview" check run per review.
+- **Checks: read and write:** an "OpenReview" check run per review. Grant this if you want OpenReview as a [required status check](required-check.md). Until each installation accepts the permission, OpenReview skips the check and logs `review.check_run_skipped`.
 - **Contents: read and write:** fix pull requests, from `@openreview fix this in a new PR` or the **Open a fix PR** button on a finding's Fix page. They must also be enabled per repository. After you add the permission to the App, each installation's owner accepts it on GitHub (Settings → Applications → Installed GitHub Apps); Code Providers shows which installations granted it.
 
 ## Events
