@@ -21,7 +21,8 @@
     "stripe:listen": "tsx scripts/stripe-listen.ts",
     "mcp": "tsx src/mcp.ts",
     "runtime:worker": "tsx scripts/runtime-worker.ts",
-    "demo": "tsx scripts/demo.ts"
+    "demo": "tsx scripts/demo.ts",
+    "ci:audit": "tsx scripts/ci-audit.ts"
   },
   "engines": {
     "node": ">=24"
