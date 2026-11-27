@@ -207,6 +207,7 @@ test("paid cost counts only what GitHub bills: everything in a private repositor
   const publicAudit = auditActions(history(runs, jobs, undefined, { private: false }));
   assert.equal(publicAudit.cost.total, privateAudit.cost.total);
   assert.equal(publicAudit.cost.paid, 0.24);
+});
 
 test("fetchActionsHistory leaves out a run whose job pages were cut short", async () => {
   const now = Date.parse("2026-11-27T00:00:00Z");
