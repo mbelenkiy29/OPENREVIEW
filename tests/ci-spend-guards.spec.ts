@@ -65,12 +65,18 @@ test("the daily check records month-to-date spend, flags a stopped critical work
   const second = await t.action(internal.ciSpendGuardJobs.check, { guardId, now });
   expect(Object.values(second).every((outcome) => outcome === "duplicate")).toBe(true);
 
-  // A history cut short is a lower bound and says so; the flag switched off stops queued checks.
+  // A watched repository is checked even with reviews switched off. A history cut short is a lower bound and says so.
+  await t.run((ctx) => ctx.db.patch(repositoryId, { enabled: false }));
   history.mockResolvedValueOnce({ ...(await history.mock.results[0].value), from: "2026-11-20T00:00:00.000Z", truncated: ["Stopped listing runs before 2026-11-20 to stay within the GitHub rate limit or time limit."] });
   await t.action(internal.ciSpendGuardJobs.check, { guardId, now });
   const partial = await t.run((ctx) => ctx.db.get(guardId));
   expect(partial?.lastCheck?.repositories[0]).toMatchObject({ partial: true });
   expect(partial?.lastCheck?.notes?.join("\n")).toMatch(/only part of the month could be read/);
+  // A retry goes only to people who are still admins.
+  const member = await t.run((ctx) => ctx.db.query("organizationMembers").withIndex("by_org", (q) => q.eq("organizationId", organizationId)).filter((q) => q.eq(q.field("userId"), admin.id)).first());
+  await t.run((ctx) => ctx.db.patch(member!._id, { role: "member" }));
+  expect(await t.action(internal.ciSpendGuardJobs.redeliver, { guardId, organizationId, attempt: 2, sends: [{ key: "ci.retry:test", channel: "email", to: "admin@example.com", userId: admin.id, subject: "s", text: "t" }] })).toEqual({});
+  // The flag switched off stops queued checks.
   vi.stubEnv("CI_COST_ENABLED", "");
   expect(await t.action(internal.ciSpendGuardJobs.check, { guardId, now })).toEqual({});
   expect(history).toHaveBeenCalledTimes(3);

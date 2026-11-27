@@ -30,11 +30,11 @@ const appOrigin = () => { try { return process.env.APP_URL ? new URL(process.env
 // not reached are reported as not checked today rather than losing the whole check.
 const checkBudgetMs = 7 * 60000, repositoryMs = 60000;
 
-const sendValidator = v.object({ key: v.string(), channel: v.union(v.literal("email"), v.literal("slack")), to: v.string(), subject: v.string(), text: v.string() });
-type Send = { key: string; channel: "email" | "slack"; to: string; subject: string; text: string };
+const sendValidator = v.object({ key: v.string(), channel: v.union(v.literal("email"), v.literal("slack")), to: v.string(), userId: v.optional(v.id("users")), subject: v.string(), text: v.string() });
+type Send = { key: string; channel: "email" | "slack"; to: string; userId?: Id<"users">; subject: string; text: string };
 
 // Sends each message once (deliver claims its key); failed ones are retried with the same keys, at most three times.
-async function sendAll(ctx: ActionCtx, organizationId: Id<"organizations">, slackInstallationId: Id<"slackInstallations"> | undefined, sends: Send[], attempt: number) {
+async function sendAll(ctx: ActionCtx, guardId: Id<"ciSpendGuards">, organizationId: Id<"organizations">, slackInstallationId: Id<"slackInstallations"> | undefined, sends: Send[], attempt: number) {
   const outcome: Record<string, string> = {};
   const slack = slackInstallationId && sends.some((s) => s.channel === "slack") ? await slackClient(ctx, slackInstallationId) : null;
   for (const s of sends) {
@@ -43,15 +43,23 @@ async function sendAll(ctx: ActionCtx, organizationId: Id<"organizations">, slac
       : slack ? await deliver(ctx, organizationId, s.key, "slack", () => slack.postMessage({ channel: s.to, text: `*${escapeSlack(s.subject)}*\n${escapeSlack(s.text)}` })) : "skipped";
   }
   const failed = sends.filter((s) => outcome[s.key] === "failed");
-  if (failed.length && attempt < 3) await ctx.scheduler.runAfter(600000 * attempt, internal.ciSpendGuardJobs.redeliver, { organizationId, ...(slackInstallationId ? { slackInstallationId } : {}), sends: failed, attempt: attempt + 1 });
+  if (failed.length && attempt < 3) await ctx.scheduler.runAfter(600000 * attempt, internal.ciSpendGuardJobs.redeliver, { guardId, organizationId, ...(slackInstallationId ? { slackInstallationId } : {}), sends: failed, attempt: attempt + 1 });
   return outcome;
 }
 
 export const redeliver = internalAction({
-  args: { organizationId: v.id("organizations"), slackInstallationId: v.optional(v.id("slackInstallations")), sends: v.array(sendValidator), attempt: v.number() },
+  args: { guardId: v.id("ciSpendGuards"), organizationId: v.id("organizations"), slackInstallationId: v.optional(v.id("slackInstallations")), sends: v.array(sendValidator), attempt: v.number() },
   handler: async (ctx, a): Promise<Record<string, string>> => {
     if (!ciCostEnabled()) return {};
-    return sendAll(ctx, a.organizationId, a.slackInstallationId, a.sends, a.attempt);
+    // Recipients are resolved again: an admin removed, or a Slack channel unset, since the first try gets nothing.
+    const c = await ctx.runQuery(internal.ciSpendGuards.checkContext, { guardId: a.guardId });
+    if (!c) return {};
+    const sends = a.sends.flatMap((s): Send[] => {
+      if (s.channel === "slack") return c.slack && c.slack.channelId === s.to ? [s] : [];
+      const r = c.recipients.find((x) => x.userId === s.userId);
+      return r ? [{ ...s, to: r.email }] : [];
+    });
+    return sendAll(ctx, a.guardId, a.organizationId, c.slack?.installationId, sends, a.attempt);
   },
 });
 
@@ -100,9 +108,9 @@ export const check = internalAction({
       ...(c.guard.dailySummary ? [{ key: `ci.daily:${org}:${today}`, message: messages.daily }] : []),
     ];
     const sends: Send[] = messagesToSend.flatMap(({ key, message }) => [
-      ...c.recipients.map((r): Send => ({ key: `${key}:email:${r.userId}`, channel: "email", to: r.email, ...message })),
+      ...c.recipients.map((r): Send => ({ key: `${key}:email:${r.userId}`, channel: "email", to: r.email, userId: r.userId, ...message })),
       ...(c.slack ? [{ key: `${key}:slack:${c.slack.channelId}`, channel: "slack" as const, to: c.slack.channelId, ...message }] : []),
     ]);
-    return sendAll(ctx, org, c.slack?.installationId, sends, 1);
+    return sendAll(ctx, a.guardId, org, c.slack?.installationId, sends, 1);
   },
 });

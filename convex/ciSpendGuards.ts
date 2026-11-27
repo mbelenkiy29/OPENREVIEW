@@ -66,9 +66,9 @@ export const checkContext = internalQuery({
     const guard = await ctx.db.get(a.guardId);
     const organization = guard && await ctx.db.get(guard.organizationId);
     if (!guard || !organization) return null;
-    // Repositories with critical workflows first, so a saved watch is always among those checked.
+    // Repositories with critical workflows first (even with reviews switched off), so a saved watch is always checked.
     const watched = new Set(guard.critical.map((c) => c.repositoryId));
-    const eligible = (await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", guard.organizationId)).take(500)).filter((r) => r.enabled && r.installationId && !r.connectionId)
+    const eligible = (await ctx.db.query("repositories").withIndex("by_org", (q) => q.eq("organizationId", guard.organizationId)).take(500)).filter((r) => (r.enabled || watched.has(r._id)) && r.installationId && !r.connectionId)
       .sort((x, y) => Number(watched.has(y._id)) - Number(watched.has(x._id)));
     const repos = eligible.slice(0, maxRepositories);
     const critical = (await Promise.all(guard.critical.map(async (c) => { const r = await ctx.db.get(c.repositoryId); return r ? { repository: r.fullName, path: c.path } : null; }))).filter((c) => c !== null);
