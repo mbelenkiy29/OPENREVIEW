@@ -38,10 +38,11 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
   const maxJobRuns = Math.max(0, Math.floor(options.maxJobRuns ?? (token ? 600 : 25)));
   const progress = options.onProgress ?? (() => {});
   const truncated: string[] = [];
-  let remaining = Infinity;
+  let remaining = Infinity, inFlight = 0;
 
   async function get<T>(path: string, optional = false): Promise<T | undefined> {
     for (let attempt = 0; ; attempt++) {
+      inFlight++;
       const response = await http(base + path, {
         headers: {
           accept: "application/vnd.github+json",
@@ -49,7 +50,7 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
           "user-agent": "openreview-ci-audit",
           ...(token ? { authorization: `Bearer ${token}` } : {}),
         },
-      });
+      }).finally(() => { inFlight--; });
       const left = response.headers.get("x-ratelimit-remaining");
       if (left !== null) remaining = Number(left);
       if (response.ok) return (await response.json()) as T;
@@ -65,37 +66,64 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
       throw new GithubAuditError(detail, response.status);
     }
   }
-  const budgetLeft = () => remaining > reserve;
+  // Requests still in flight count as spent, so parallel workers cannot overrun the reserve.
+  const budgetLeft = () => remaining - inFlight > reserve;
 
   const repo = (await get<{ private: boolean; default_branch: string; full_name: string }>(`/repos/${repository}`))!;
-  const workflowList = (await get<{ workflows: { id: number; name: string; path: string; state: string }[] }>(`/repos/${repository}/actions/workflows?per_page=100`))!;
+  const workflowList: { id: number; name: string; path: string; state: string }[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const result = (await get<{ total_count: number; workflows: { id: number; name: string; path: string; state: string }[] }>(`/repos/${repository}/actions/workflows?per_page=100&page=${page}`))!;
+    workflowList.push(...result.workflows);
+    if (result.workflows.length < 100 || workflowList.length >= result.total_count) break;
+  }
+
+  // Workflow files at the default branch, to see which fixes are already in place. Every active workflow is
+  // read, not only those that ran (a scheduled job that stopped has no runs), and before the runs, so the
+  // checks survive a run listing that uses up the request budget.
+  const workflows: WorkflowFile[] = [];
+  let filesRead = 0;
+  for (const w of workflowList) {
+    const file: WorkflowFile = { id: w.id, name: w.name, path: w.path, state: w.state };
+    if (w.state === "active" && w.path.startsWith(".github/workflows/") && filesRead < 50 && budgetLeft()) {
+      filesRead++;
+      const content = await get<{ content?: string; encoding?: string }>(`/repos/${repository}/contents/${w.path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(repo.default_branch)}`, true);
+      if (content?.content && content.encoding === "base64") file.content = decodeBase64(content.content);
+    }
+    workflows.push(file);
+  }
 
   // The runs list returns at most 1,000 results for one query, so the window is read a day at a time,
   // and a day with more runs than that is split into smaller windows.
   const runs: ActionsRun[] = [];
   const from = now - days * day;
-  async function readWindow(start: number, end: number): Promise<void> {
+  async function readWindow(start: number, end: number): Promise<boolean> {
     const range = `${new Date(start).toISOString().replace(/\.\d{3}Z$/, "Z")}..${new Date(end - 1000).toISOString().replace(/\.\d{3}Z$/, "Z")}`;
     for (let page = 1; ; page++) {
-      if (!budgetLeft()) { truncated.push(`Stopped listing runs at ${range.split("..")[0]} to stay within the GitHub rate limit.`); return; }
+      if (!budgetLeft()) { truncated.push(`Stopped listing runs at ${range.split("..")[0]} to stay within the GitHub rate limit.`); return false; }
       const result = (await get<{ total_count: number; workflow_runs: RawRun[] }>(`/repos/${repository}/actions/runs?per_page=100&page=${page}&created=${encodeURIComponent(range)}`))!;
       if (page === 1 && result.total_count >= 1000 && end - start > 3600000) {
         const middle = start + Math.floor((end - start) / 2);
-        await readWindow(start, middle);
-        return readWindow(middle, end);
+        // Newer half first, matching the newest-first order of the days.
+        const later = await readWindow(middle, end);
+        return (await readWindow(start, middle)) && later;
       }
       runs.push(...result.workflow_runs.map(toRun));
       if (page === 1 && result.total_count > 1000) truncated.push(`More than 1,000 runs started in the hour from ${range.split("..")[0]}; only the first 1,000 were read.`);
-      if (result.workflow_runs.length < 100 || page * 100 >= Math.min(1000, result.total_count)) return;
+      if (result.workflow_runs.length < 100 || page * 100 >= Math.min(1000, result.total_count)) return true;
     }
   }
-  for (let start = from; start < now; start += day) {
-    const before = runs.length;
-    await readWindow(start, Math.min(now, start + day));
+  // Newest day first, so a run that stops early still covers the most recent days. Only days read in full
+  // count toward the window, so a shortened window is not projected as if it were the whole one.
+  let covered = now;
+  for (let end = now; end > from; end -= day) {
+    if (!budgetLeft()) { truncated.push(`Stopped listing runs before ${new Date(end).toISOString().slice(0, 10)} to stay within the GitHub rate limit.`); break; }
+    const before = runs.length, start = Math.max(from, end - day);
+    const complete = await readWindow(start, end);
     if (runs.length > before) progress(`Listed ${runs.length} runs`);
-    if (!budgetLeft()) break;
+    if (!complete) break;
+    covered = start;
   }
-  const unique = [...new Map(runs.map((r) => [r.id, r])).values()];
+  const unique = [...new Map(runs.map((r) => [r.id, r])).values()].filter((r) => Date.parse(r.createdAt) >= covered);
 
   // Jobs for an even spread of runs across the window, so averages are not skewed toward one day.
   const completed = unique.filter((r) => r.status === "completed").sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -108,6 +136,7 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
       const run = sample[next++];
       const list: ActionsJob[] = [];
       for (let page = 1; page <= 5; page++) {
+        if (page > 1 && !budgetLeft()) break;
         const result = await get<{ total_count: number; jobs: RawJob[] }>(`/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100&page=${page}`, true);
         if (!result) break;
         list.push(...result.jobs.map((j) => toJob(run.id, j)));
@@ -121,20 +150,9 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
   if (Object.keys(jobs).length < sample.length) truncated.push(`Read jobs for ${Object.keys(jobs).length} of ${sample.length} sampled runs before reaching the rate-limit reserve.`);
 
   // Workflow files at the default branch, to see which fixes are already in place.
-  const used = new Set(unique.map((r) => r.workflowId));
-  const workflows: WorkflowFile[] = [];
-  for (const w of workflowList.workflows) {
-    const file: WorkflowFile = { id: w.id, name: w.name, path: w.path, state: w.state };
-    if (used.has(w.id) && w.path.startsWith(".github/workflows/") && budgetLeft()) {
-      const content = await get<{ content?: string; encoding?: string }>(`/repos/${repository}/contents/${w.path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(repo.default_branch)}`, true);
-      if (content?.content && content.encoding === "base64") file.content = decodeBase64(content.content);
-    }
-    workflows.push(file);
-  }
-
   return {
-    repository: repo.full_name, private: repo.private, defaultBranch: repo.default_branch, days,
-    from: new Date(from).toISOString(), to: new Date(now).toISOString(), runs: unique, jobs, workflows,
+    repository: repo.full_name, private: repo.private, defaultBranch: repo.default_branch, days: Math.max(1, Math.round((now - covered) / day)),
+    from: new Date(covered).toISOString(), to: new Date(now).toISOString(), runs: unique, jobs, workflows,
     ...(truncated.length ? { truncated } : {}),
   };
 }
@@ -142,12 +160,13 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
 type RawRun = {
   id: number; workflow_id: number; name: string | null; path: string; event: string; head_branch: string | null; head_sha: string;
   status: string | null; conclusion: string | null; created_at: string; run_started_at?: string | null; updated_at: string; run_attempt?: number;
+  head_repository?: { full_name: string } | null;
 };
 type RawJob = { name: string; conclusion: string | null; started_at: string | null; completed_at: string | null; labels: string[] };
 const toRun = (r: RawRun): ActionsRun => ({
   id: r.id, workflowId: r.workflow_id, name: r.name ?? r.path, path: r.path.replace(/@.*$/, ""), event: r.event, branch: r.head_branch,
   headSha: r.head_sha, status: r.status ?? "unknown", conclusion: r.conclusion, createdAt: r.created_at, startedAt: r.run_started_at ?? null,
-  updatedAt: r.updated_at, attempt: r.run_attempt,
+  updatedAt: r.updated_at, attempt: r.run_attempt, headRepository: r.head_repository?.full_name ?? null,
 });
 const toJob = (runId: number, j: RawJob): ActionsJob => ({ runId, name: j.name, conclusion: j.conclusion, startedAt: j.started_at, completedAt: j.completed_at, labels: j.labels ?? [] });
 

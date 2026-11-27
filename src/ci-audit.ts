@@ -17,6 +17,8 @@ export type ActionsRun = {
   startedAt?: string | null;
   updatedAt: string;
   attempt?: number;
+  /** The fork (or this repository) a pull request run came from, so same-named branches in forks stay apart. */
+  headRepository?: string | null;
 };
 export type ActionsJob = {
   runId: number;
@@ -68,6 +70,8 @@ export type WorkflowHints = {
   scheduled: boolean;
   concurrency: boolean;
   cancelsInProgress: boolean;
+  /** cancel-in-progress is an expression, so whether it applies to a given run is unknown. */
+  cancelsConditionally: boolean;
   pathFilters: boolean;
   draftGuard: boolean;
 };
@@ -77,7 +81,8 @@ export function workflowHints(yaml: string): WorkflowHints {
     pullRequest: /(^|[\s[,{])pull_request(_target)?\b/m.test(yaml),
     scheduled: /^\s*schedule\s*:/m.test(yaml),
     concurrency: /^\s*concurrency\s*:/m.test(yaml),
-    cancelsInProgress: /cancel-in-progress\s*:\s*(true|\$\{\{)/.test(yaml),
+    cancelsInProgress: /cancel-in-progress\s*:\s*true\b/.test(yaml),
+    cancelsConditionally: /cancel-in-progress\s*:\s*\$\{\{/.test(yaml),
     pathFilters: /^\s*paths(-ignore)?\s*:/m.test(yaml),
     draftGuard: /draft\s*==\s*false|!\s*github\.event\.pull_request\.draft|draft\s*!=\s*true/.test(yaml),
   };
@@ -162,6 +167,11 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
   const estimate = (run: ActionsRun, after?: number): Estimate => {
     const jobs = history.jobs[run.id];
     if (jobs) return measure(jobs, after);
+    if (run.status !== "completed") {
+      // Queued or waiting runs have not used a runner; a running one has used its time so far, at Linux prices.
+      const minutes = run.startedAt && run.status === "in_progress" ? wallMinutes(run, after) : 0;
+      return { minutes, cost: minutes * rates.linux, byRunner: minutes ? { linux: minutes } : {} };
+    }
     const a = averages.get(run.workflowId);
     if (!a || !a.wall) {
       // No sample for this workflow: wall time on Linux, a lower bound for runs with parallel jobs.
@@ -181,7 +191,7 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
   const groups = new Map<string, ActionsRun[]>();
   for (const run of history.runs) {
     if (!run.branch) continue;
-    const key = `${run.workflowId}\u0000${run.event}\u0000${run.branch}`;
+    const key = `${run.workflowId}\u0000${run.event}\u0000${run.headRepository ?? ""}\u0000${run.branch}`;
     groups.set(key, [...(groups.get(key) ?? []), run]);
   }
   for (const runs of groups.values()) {
@@ -195,6 +205,7 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
 
   const byWorkflow = new Map<number, WorkflowAudit>();
   const totals = { minutes: 0, cost: 0, cancelled: 0, cancelledCost: 0, superseded: 0, supersededCost: 0, failed: 0, saving: 0, savingCost: 0 };
+  const supersededCost = new Map<number, number>();
   const runners: Partial<Record<RunnerClass, number>> = {};
   for (const run of history.runs) {
     const file = history.workflows.find((w) => w.id === run.workflowId);
@@ -216,21 +227,34 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
       const wasted = estimate(run, at);
       if (wasted.minutes > 0) {
         w.supersededRuns++; w.supersededMinutes += wasted.minutes; totals.superseded += wasted.minutes; totals.supersededCost += wasted.cost;
-        // Already cancelled in progress, or a workflow that must finish: not counted as a saving.
-        if (!w.critical && !hints?.cancelsInProgress) { totals.saving += wasted.minutes; totals.savingCost += wasted.cost; }
+        supersededCost.set(run.workflowId, (supersededCost.get(run.workflowId) ?? 0) + wasted.cost);
       }
     }
     byWorkflow.set(run.workflowId, w);
   }
 
+  // Active scheduled workflows with no runs in the window are the ones most likely to have stopped.
+  for (const file of history.workflows) {
+    const hints = hintsByPath.get(file.path);
+    if (byWorkflow.has(file.id) || !hints?.scheduled || (file.state && file.state !== "active")) continue;
+    byWorkflow.set(file.id, { workflowId: file.id, name: file.name, path: file.path, runs: 0, events: {}, minutes: 0, cost: 0, cancelledRuns: 0, cancelledMinutes: 0, failedRuns: 0, supersededRuns: 0, supersededMinutes: 0, critical: true, hints, recommendations: [] });
+  }
+
   const scale = 30 / Math.max(1, history.days);
   const workflows = [...byWorkflow.values()].sort((a, b) => b.cost - a.cost || b.minutes - a.minutes);
   for (const w of workflows) {
+    // A run started by a schedule makes a workflow critical even when its file could not be read.
+    if (w.events.schedule) w.critical = true;
+    // Already cancelled in progress, or a workflow that must finish: not counted as a saving.
+    if (!w.critical && !w.hints?.cancelsInProgress) { totals.saving += w.supersededMinutes; totals.savingCost += supersededCost.get(w.workflowId) ?? 0; }
     const prRuns = (w.events.pull_request ?? 0) + (w.events.pull_request_target ?? 0);
     if (w.critical) {
       w.recommendations.push("Critical workflow: keep it running and alert if it stops, rather than cancelling it.");
-      const quiet = w.lastRunAt ? (now - Date.parse(w.lastRunAt)) / 86400000 : Infinity;
-      if (w.hints?.scheduled && quiet > 2) w.recommendations.push(`Scheduled, but its last run was ${Math.floor(quiet)} days ago. Check that it still runs.`);
+      const quiet = w.lastRunAt ? (now - Date.parse(w.lastRunAt)) / 86400000 : undefined;
+      if (w.hints?.scheduled && quiet === undefined) w.recommendations.push(`Scheduled, but it did not run in the last ${history.days} days. Check that it still runs.`);
+      else if (w.hints?.scheduled && quiet !== undefined && quiet > 2) w.recommendations.push(`Scheduled, but its last run was ${Math.floor(quiet)} days ago. Check that it still runs.`);
+    } else if (w.supersededMinutes > 0 && w.hints?.cancelsConditionally && !w.hints.cancelsInProgress) {
+      w.recommendations.push(`\`cancel-in-progress\` is set by an expression: check that it is true for these runs. About ${Math.round(w.supersededMinutes * scale)} minutes a month were spent after a newer run started.`);
     } else if (w.supersededMinutes > 0 && !w.hints?.cancelsInProgress) {
       w.recommendations.push(`Add \`concurrency\` with \`cancel-in-progress: true\`: saves about ${Math.round(w.supersededMinutes * scale)} minutes a month.`);
     }
