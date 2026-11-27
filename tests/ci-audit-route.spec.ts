@@ -38,9 +38,17 @@ test("a rate-limited check answers 429 and reads nothing from GitHub", async () 
   expect(fetch).not.toHaveBeenCalled();
 });
 
+test("other spellings of a repository redirect to its one cached URL", async () => {
+  github();
+  const response = await get("https://github.com/Acme/App");
+  expect(response.status).toBe(308);
+  expect(new URL(response.headers.get("location")!).searchParams.get("repo")).toBe("acme/app");
+  expect(holder.calls).toHaveLength(0);
+});
+
 test("a private repository looks the same as a missing one", async () => {
   github(true);
-  const response = await get("https://github.com/Acme/App");
+  const response = await get("acme/app");
   expect(response.status).toBe(404);
   expect((await response.json()).error).toBe("No public repository by that name.");
 });
