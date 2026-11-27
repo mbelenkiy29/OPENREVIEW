@@ -1,0 +1,63 @@
+/* The /ci page only: the repository check form and its result. Layout comes from the landing styles. */
+
+.ci-page .ci-check-band {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+.ci-check-form label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+.ci-check-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ci-check-row input {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.ci-check-hint,
+.ci-notes,
+.ci-check-off {
+  color: var(--muted);
+  font-size: 14px;
+}
+.ci-check-error {
+  color: var(--error);
+}
+.ci-result {
+  margin-top: 24px;
+}
+.ci-result h3 {
+  margin: 0 0 16px;
+  overflow-wrap: anywhere;
+}
+.ci-workflows {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+  display: grid;
+  gap: 12px;
+}
+.ci-workflows > li {
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+.ci-workflows > li ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+@media (max-width: 640px) {
+  .ci-result .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ci-result .metrics > div:nth-child(2) {
+    border-right: 0;
+  }
+}

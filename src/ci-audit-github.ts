@@ -23,15 +23,30 @@ type Options = {
   now?: number;
   /** Waits at most this long (ms) for a rate limit to reset before stopping with what it has. */
   maxWait?: number;
+  /** Refuse private repositories (the public /ci check, whose token must never expose one). */
+  publicOnly?: boolean;
+  /** Stop listing and sampling at this time (ms since epoch) and report what was read. */
+  deadline?: number;
   onProgress?: (message: string) => void;
 };
 
+/** Whether the public /ci check has a token to read GitHub with. */
+export const ciCheckEnabled = (env: Record<string, string | undefined> = process.env) => Boolean(env.CI_AUDIT_GITHUB_TOKEN?.trim());
+
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+/** "owner/name" from what a visitor pastes: owner/name, or a github.com URL to the repository or a page in it. */
+export function parseRepository(input: string): string | null {
+  const value = input.trim().replace(/^(https?:\/\/)?(www\.)?github\.com\//i, "").replace(/\.git$/i, "");
+  const [owner, name] = value.split(/[/?#]/);
+  const repository = owner && name ? `${owner}/${name.replace(/\.git$/i, "")}` : "";
+  return repositoryPattern.test(repository) && !repository.split("/").some((part) => /^\.+$/.test(part)) ? repository : null;
+}
 const day = 86400000;
 
 export async function fetchActionsHistory(options: Options): Promise<ActionsHistory> {
   const { repository, token } = options;
-  if (!repositoryPattern.test(repository) || repository.split("/").some((part) => /^\.+$/.test(part))) throw new Error("Repository must look like owner/name");
+  if (parseRepository(repository) !== repository) throw new Error("Repository must look like owner/name");
   const days = Math.min(90, Math.max(1, Math.floor(options.days ?? 30)));
   const base = options.base ?? "https://api.github.com", http = options.fetch ?? fetch, now = options.now ?? Date.now();
   const reserve = options.reserve ?? (token ? 100 : 5), maxWait = options.maxWait ?? 60000;
@@ -65,9 +80,10 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
       throw new GithubAuditError(detail, response.status);
     }
   }
-  const budgetLeft = () => remaining > reserve;
+  const budgetLeft = () => remaining > reserve && (!options.deadline || Date.now() < options.deadline);
 
   const repo = (await get<{ private: boolean; default_branch: string; full_name: string }>(`/repos/${repository}`))!;
+  if (options.publicOnly && repo.private) throw new GithubAuditError("Repository not found, or it is not public", 404);
   const workflowList = (await get<{ workflows: { id: number; name: string; path: string; state: string }[] }>(`/repos/${repository}/actions/workflows?per_page=100`))!;
 
   // The runs list returns at most 1,000 results for one query, so the window is read a day at a time,
@@ -77,7 +93,7 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
   async function readWindow(start: number, end: number): Promise<void> {
     const range = `${new Date(start).toISOString().replace(/\.\d{3}Z$/, "Z")}..${new Date(end - 1000).toISOString().replace(/\.\d{3}Z$/, "Z")}`;
     for (let page = 1; ; page++) {
-      if (!budgetLeft()) { truncated.push(`Stopped listing runs at ${range.split("..")[0]} to stay within the GitHub rate limit.`); return; }
+      if (!budgetLeft()) { truncated.push(`Stopped listing runs at ${range.split("..")[0]} to stay within the GitHub rate limit or time limit.`); return; }
       const result = (await get<{ total_count: number; workflow_runs: RawRun[] }>(`/repos/${repository}/actions/runs?per_page=100&page=${page}&created=${encodeURIComponent(range)}`))!;
       if (page === 1 && result.total_count >= 1000 && end - start > 3600000) {
         const middle = start + Math.floor((end - start) / 2);
@@ -89,11 +105,14 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
       if (result.workflow_runs.length < 100 || page * 100 >= Math.min(1000, result.total_count)) return;
     }
   }
-  for (let start = from; start < now; start += day) {
-    const before = runs.length;
-    await readWindow(start, Math.min(now, start + day));
+  // Newest day first, so a run that stops early still covers the most recent days.
+  let listedFrom = now;
+  for (let end = now; end > from; end -= day) {
+    if (!budgetLeft()) { truncated.push(`Stopped listing runs before ${new Date(end).toISOString().slice(0, 10)} to stay within the GitHub rate limit or time limit.`); break; }
+    const before = runs.length, start = Math.max(from, end - day);
+    await readWindow(start, end);
+    listedFrom = start;
     if (runs.length > before) progress(`Listed ${runs.length} runs`);
-    if (!budgetLeft()) break;
   }
   const unique = [...new Map(runs.map((r) => [r.id, r])).values()];
 
@@ -118,7 +137,7 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
     }
   }
   await Promise.all(Array.from({ length: 6 }, worker));
-  if (Object.keys(jobs).length < sample.length) truncated.push(`Read jobs for ${Object.keys(jobs).length} of ${sample.length} sampled runs before reaching the rate-limit reserve.`);
+  if (Object.keys(jobs).length < sample.length) truncated.push(`Read jobs for ${Object.keys(jobs).length} of ${sample.length} sampled runs before reaching the rate-limit reserve or time limit.`);
 
   // Workflow files at the default branch, to see which fixes are already in place.
   const used = new Set(unique.map((r) => r.workflowId));
@@ -133,8 +152,9 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
   }
 
   return {
-    repository: repo.full_name, private: repo.private, defaultBranch: repo.default_branch, days,
-    from: new Date(from).toISOString(), to: new Date(now).toISOString(), runs: unique, jobs, workflows,
+    // The days actually listed, so a shortened window is not projected as if it were the whole one.
+    repository: repo.full_name, private: repo.private, defaultBranch: repo.default_branch, days: Math.max(1, Math.round((now - listedFrom) / day)),
+    from: new Date(listedFrom).toISOString(), to: new Date(now).toISOString(), runs: unique, jobs, workflows,
     ...(truncated.length ? { truncated } : {}),
   };
 }
