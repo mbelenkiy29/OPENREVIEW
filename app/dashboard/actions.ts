@@ -56,6 +56,17 @@ export async function createRuntimeWorker(_state:{error?:string;credential?:stri
   revalidatePath("/dashboard");return {credential,url:process.env.NEXT_PUBLIC_CONVEX_SITE_URL??""};
  }catch(e){return {error:userMessage(e,"Could not create worker")};}
 }
+// Organization Settings → CI Cost: start a CI audit of one repository (admins; convex/ciAudits.ts).
+export async function requestCiAudit(form: FormData) {
+  const { token } = await current();
+  try {
+    await backend().mutation(api.ciAudits.request, { token, repositoryId: text(form, "repositoryId") as Id<"repositories"> });
+    await notify("CI audit started. It takes a minute or two.");
+  } catch (error) {
+    await notify(`Couldn’t start the CI audit: ${userMessage(error, "please try again")}`, "error");
+  }
+  revalidatePath("/dashboard/organization/ci");
+}
 export async function revokeRuntimeWorker(form:FormData){const {token}=await current();await backend().mutation(api.runtime.revoke,{token,workerId:text(form,"workerId") as Id<"runtimeWorkers">});revalidatePath("/dashboard");}
 export async function createWorkspace(form: FormData) {
   const { token } = await current();
