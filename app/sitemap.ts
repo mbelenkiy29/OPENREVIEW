@@ -9,6 +9,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${origin}/` },
     { url: `${origin}/changelog` },
     { url: `${origin}/pricing` },
+    { url: `${origin}/ci` },
     ...compareSlugs.map((slug) => ({ url: `${origin}/compare/${slug}` })),
     ...(userJotConfig() ? [{ url: `${origin}/feedback` }, { url: `${origin}/feedback/roadmap` }] : []),
     { url: `${origin}/privacy` },

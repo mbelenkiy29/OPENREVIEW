@@ -23,15 +23,33 @@ type Options = {
   now?: number;
   /** Waits at most this long (ms) for a rate limit to reset before stopping with what it has. */
   maxWait?: number;
+  /** Refuse private repositories (the public /ci check, whose token must never expose one). */
+  publicOnly?: boolean;
+  /** Stop at this time (ms since epoch) and return what was read; requests in flight are aborted then. */
+  deadline?: number;
   onProgress?: (message: string) => void;
 };
 
+/** Whether the public /ci check has a token to read GitHub with. */
+export const ciCheckEnabled = (env: Record<string, string | undefined> = process.env) => Boolean(env.CI_AUDIT_GITHUB_TOKEN?.trim());
+
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+/** "owner/name" from what a visitor pastes: owner/name, or a github.com URL to the repository or a page in it. */
+export function parseRepository(input: string): string | null {
+  const value = input.trim().replace(/^(https?:\/\/)?(www\.)?github\.com\//i, "").replace(/\.git$/i, "");
+  const [owner, name] = value.split(/[/?#]/);
+  const repository = owner && name ? `${owner}/${name.replace(/\.git$/i, "")}` : "";
+  return repositoryPattern.test(repository) && !repository.split("/").some((part) => /^\.+$/.test(part)) ? repository : null;
+}
+
+/** Thrown inside the fetcher when the deadline passes; callers stop and keep what was read. */
+class DeadlineReached extends Error {}
 const day = 86400000;
 
 export async function fetchActionsHistory(options: Options): Promise<ActionsHistory> {
   const { repository, token } = options;
-  if (!repositoryPattern.test(repository) || repository.split("/").some((part) => /^\.+$/.test(part))) throw new Error("Repository must look like owner/name");
+  if (parseRepository(repository) !== repository) throw new Error("Repository must look like owner/name");
   const days = Math.min(90, Math.max(1, Math.floor(options.days ?? 30)));
   const base = options.base ?? "https://api.github.com", http = options.fetch ?? fetch, now = options.now ?? Date.now();
   const reserve = options.reserve ?? (token ? 100 : 5), maxWait = options.maxWait ?? 60000;
@@ -42,14 +60,20 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
 
   async function get<T>(path: string, optional = false): Promise<T | undefined> {
     for (let attempt = 0; ; attempt++) {
+      const msLeft = options.deadline ? options.deadline - Date.now() : Infinity;
+      if (msLeft <= 0) throw new DeadlineReached();
       inFlight++;
       const response = await http(base + path, {
+        ...(Number.isFinite(msLeft) ? { signal: AbortSignal.timeout(msLeft) } : {}),
         headers: {
           accept: "application/vnd.github+json",
           "x-github-api-version": "2022-11-28",
           "user-agent": "openreview-ci-audit",
           ...(token ? { authorization: `Bearer ${token}` } : {}),
         },
+      }).catch((error) => {
+        if (options.deadline && Date.now() >= options.deadline - 50) throw new DeadlineReached();
+        throw error;
       }).finally(() => { inFlight--; });
       const left = response.headers.get("x-ratelimit-remaining");
       if (left !== null) remaining = Number(left);
@@ -67,9 +91,14 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
     }
   }
   // Requests still in flight count as spent, so parallel workers cannot overrun the reserve.
-  const budgetLeft = () => remaining - inFlight > reserve;
+  const budgetLeft = () => remaining - inFlight > reserve && (!options.deadline || Date.now() < options.deadline);
+  // Runs a step that may hit the deadline; returns false when it did, so the caller stops and keeps what it has.
+  const beforeDeadline = async (step: () => Promise<unknown>) => {
+    try { await step(); return true; } catch (error) { if (error instanceof DeadlineReached) return false; throw error; }
+  };
 
   const repo = (await get<{ private: boolean; default_branch: string; full_name: string }>(`/repos/${repository}`))!;
+  if (options.publicOnly && repo.private) throw new GithubAuditError("Repository not found, or it is not public", 404);
   const workflowList: { id: number; name: string; path: string; state: string }[] = [];
   for (let page = 1; page <= 10; page++) {
     const result = (await get<{ total_count: number; workflows: { id: number; name: string; path: string; state: string }[] }>(`/repos/${repository}/actions/workflows?per_page=100&page=${page}`))!;
@@ -86,8 +115,10 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
     const file: WorkflowFile = { id: w.id, name: w.name, path: w.path, state: w.state };
     if (w.state === "active" && w.path.startsWith(".github/workflows/") && filesRead < 50 && budgetLeft()) {
       filesRead++;
-      const content = await get<{ content?: string; encoding?: string }>(`/repos/${repository}/contents/${w.path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(repo.default_branch)}`, true);
-      if (content?.content && content.encoding === "base64") file.content = decodeBase64(content.content);
+      await beforeDeadline(async () => {
+        const content = await get<{ content?: string; encoding?: string }>(`/repos/${repository}/contents/${w.path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(repo.default_branch)}`, true);
+        if (content?.content && content.encoding === "base64") file.content = decodeBase64(content.content);
+      });
     }
     workflows.push(file);
   }
@@ -99,8 +130,9 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
   async function readWindow(start: number, end: number): Promise<boolean> {
     const range = `${new Date(start).toISOString().replace(/\.\d{3}Z$/, "Z")}..${new Date(end - 1000).toISOString().replace(/\.\d{3}Z$/, "Z")}`;
     for (let page = 1; ; page++) {
-      if (!budgetLeft()) { truncated.push(`Stopped listing runs at ${range.split("..")[0]} to stay within the GitHub rate limit.`); return false; }
-      const result = (await get<{ total_count: number; workflow_runs: RawRun[] }>(`/repos/${repository}/actions/runs?per_page=100&page=${page}&created=${encodeURIComponent(range)}`))!;
+      if (!budgetLeft()) { truncated.push(`Stopped listing runs at ${range.split("..")[0]} to stay within the GitHub rate limit or time limit.`); return false; }
+      let result: { total_count: number; workflow_runs: RawRun[] } | undefined;
+      if (!await beforeDeadline(async () => { result = await get(`/repos/${repository}/actions/runs?per_page=100&page=${page}&created=${encodeURIComponent(range)}`); }) || !result) { truncated.push(`Stopped listing runs at ${range.split("..")[0]} at the time limit.`); return false; }
       if (page === 1 && result.total_count >= 1000 && end - start > 3600000) {
         const middle = start + Math.floor((end - start) / 2);
         // Newer half first, matching the newest-first order of the days.
@@ -116,7 +148,7 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
   // count toward the window, so a shortened window is not projected as if it were the whole one.
   let covered = now;
   for (let end = now; end > from; end -= day) {
-    if (!budgetLeft()) { truncated.push(`Stopped listing runs before ${new Date(end).toISOString().slice(0, 10)} to stay within the GitHub rate limit.`); break; }
+    if (!budgetLeft()) { truncated.push(`Stopped listing runs before ${new Date(end).toISOString().slice(0, 10)} to stay within the GitHub rate limit or time limit.`); break; }
     const before = runs.length, start = Math.max(from, end - day);
     const complete = await readWindow(start, end);
     if (runs.length > before) progress(`Listed ${runs.length} runs`);
@@ -138,7 +170,8 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
       let complete = false;
       for (let page = 1; page <= 5; page++) {
         if (page > 1 && !budgetLeft()) break;
-        const result = await get<{ total_count: number; jobs: RawJob[] }>(`/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100&page=${page}`, true);
+        let result: { total_count: number; jobs: RawJob[] } | undefined;
+        if (!await beforeDeadline(async () => { result = await get(`/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100&page=${page}`, true); })) { if (list.length) incomplete++; return; }
         if (!result) break;
         list.push(...result.jobs.map((j) => toJob(run.id, j)));
         if (list.length >= result.total_count || result.jobs.length < 100) { complete = true; break; }
@@ -150,7 +183,7 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
     }
   }
   await Promise.all(Array.from({ length: 6 }, worker));
-  if (Object.keys(jobs).length < sample.length) truncated.push(`Read jobs for ${Object.keys(jobs).length} of ${sample.length} sampled runs before reaching the rate-limit reserve.`);
+  if (Object.keys(jobs).length < sample.length) truncated.push(`Read jobs for ${Object.keys(jobs).length} of ${sample.length} sampled runs before reaching the rate-limit reserve or time limit.`);
   if (incomplete) truncated.push(`${incomplete} sampled ${incomplete === 1 ? "run was" : "runs were"} left out because not all of ${incomplete === 1 ? "its" : "their"} jobs could be read; ${incomplete === 1 ? "it is" : "they are"} estimated like unsampled runs.`);
 
   // Workflow files at the default branch, to see which fixes are already in place.

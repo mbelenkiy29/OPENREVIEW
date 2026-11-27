@@ -73,6 +73,7 @@ export function SiteFooter() {
         <Link href="/#features">Features</Link>
         <Link href="/#how">How it works</Link>
         {pricing && <Link href="/pricing">Pricing</Link>}
+        <Link href="/ci">CI cost audit</Link>
         <Link href="/changelog">Changelog</Link>
         {feedback && <><Link href="/feedback/roadmap">Roadmap</Link><Link href="/feedback">Feedback</Link></>}
       </nav>

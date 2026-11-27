@@ -119,7 +119,8 @@ export type CiAudit = {
   runs: number;
   sampledRuns: number;
   estimated: boolean;
-  minutes: { total: number; cancelled: number; superseded: number; failed: number };
+  /** wasted counts each run once: all of a cancelled run, or a superseded run's minutes after the newer run started. */
+  minutes: { total: number; cancelled: number; superseded: number; failed: number; wasted: number };
   cost: { total: number; cancelled: number; superseded: number };
   runners: Partial<Record<RunnerClass, number>>;
   /** Scaled to 30 days. The saving counts only superseded minutes that cancel-in-progress would stop. */
@@ -204,7 +205,7 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
   }
 
   const byWorkflow = new Map<number, WorkflowAudit>();
-  const totals = { minutes: 0, cost: 0, cancelled: 0, cancelledCost: 0, superseded: 0, supersededCost: 0, failed: 0, saving: 0, savingCost: 0 };
+  const totals = { minutes: 0, cost: 0, wasted: 0, cancelled: 0, cancelledCost: 0, superseded: 0, supersededCost: 0, failed: 0, saving: 0, savingCost: 0 };
   const supersededCost = new Map<number, number>();
   const runners: Partial<Record<RunnerClass, number>> = {};
   for (const run of history.runs) {
@@ -223,8 +224,9 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
     if (run.conclusion === "cancelled") { w.cancelledRuns++; w.cancelledMinutes += e.minutes; totals.cancelled += e.minutes; totals.cancelledCost += e.cost; }
     if (run.conclusion === "failure") { w.failedRuns++; totals.failed += e.minutes; }
     const at = supersededAt.get(run.id);
-    if (at !== undefined) {
-      const wasted = estimate(run, at);
+    const wasted = at === undefined ? undefined : estimate(run, at);
+    totals.wasted += run.conclusion === "cancelled" ? e.minutes : wasted?.minutes ?? 0;
+    if (wasted) {
       if (wasted.minutes > 0) {
         w.supersededRuns++; w.supersededMinutes += wasted.minutes; totals.superseded += wasted.minutes; totals.supersededCost += wasted.cost;
         supersededCost.set(run.workflowId, (supersededCost.get(run.workflowId) ?? 0) + wasted.cost);
@@ -274,7 +276,7 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
   return {
     repository: history.repository, private: history.private, days: history.days, from: history.from, to: history.to,
     runs: history.runs.length, sampledRuns, estimated: sampledRuns < history.runs.length,
-    minutes: { total: Math.round(totals.minutes), cancelled: Math.round(totals.cancelled), superseded: Math.round(totals.superseded), failed: Math.round(totals.failed) },
+    minutes: { total: Math.round(totals.minutes), cancelled: Math.round(totals.cancelled), superseded: Math.round(totals.superseded), failed: Math.round(totals.failed), wasted: Math.round(totals.wasted) },
     cost: { total: round2(totals.cost), cancelled: round2(totals.cancelledCost), superseded: round2(totals.supersededCost) },
     runners: Object.fromEntries(Object.entries(runners).map(([k, m]) => [k, Math.round(m)])),
     monthly: {
