@@ -130,24 +130,28 @@ export async function fetchActionsHistory(options: Options): Promise<ActionsHist
   const step = completed.length > maxJobRuns ? completed.length / maxJobRuns : 1;
   const sample = maxJobRuns ? Array.from({ length: Math.min(maxJobRuns, completed.length) }, (_, i) => completed[Math.floor(i * step)]) : [];
   const jobs: Record<number, ActionsJob[]> = {};
-  let next = 0;
+  let next = 0, incomplete = 0;
   async function worker() {
     while (next < sample.length && budgetLeft()) {
       const run = sample[next++];
       const list: ActionsJob[] = [];
+      let complete = false;
       for (let page = 1; page <= 5; page++) {
         if (page > 1 && !budgetLeft()) break;
         const result = await get<{ total_count: number; jobs: RawJob[] }>(`/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100&page=${page}`, true);
         if (!result) break;
         list.push(...result.jobs.map((j) => toJob(run.id, j)));
-        if (result.jobs.length < 100) break;
+        if (list.length >= result.total_count || result.jobs.length < 100) { complete = true; break; }
       }
-      jobs[run.id] = list;
+      // Only a run's full job list is a measurement; a partial one would understate it and every run estimated from it.
+      if (complete) jobs[run.id] = list;
+      else if (list.length) incomplete++;
       if (Object.keys(jobs).length % 50 === 0) progress(`Read jobs for ${Object.keys(jobs).length} of ${sample.length} runs`);
     }
   }
   await Promise.all(Array.from({ length: 6 }, worker));
   if (Object.keys(jobs).length < sample.length) truncated.push(`Read jobs for ${Object.keys(jobs).length} of ${sample.length} sampled runs before reaching the rate-limit reserve.`);
+  if (incomplete) truncated.push(`${incomplete} sampled ${incomplete === 1 ? "run was" : "runs were"} left out because not all of ${incomplete === 1 ? "its" : "their"} jobs could be read; ${incomplete === 1 ? "it is" : "they are"} estimated like unsampled runs.`);
 
   // Workflow files at the default branch, to see which fixes are already in place.
   return {
