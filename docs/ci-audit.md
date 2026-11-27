@@ -28,3 +28,11 @@ The audit keeps 100 requests of the token's hourly limit in reserve (5 without a
 - **Runs not finished:** queued runs count as zero minutes and running ones only for the time so far.
 
 Draft pull request runs are not measured yet: telling them apart needs one more request per pull request.
+
+## The /ci page
+
+`/ci` explains the audit and has a box where a visitor checks one public GitHub repository. The check runs only when the server has `CI_AUDIT_GITHUB_TOKEN`, a token that can read public repositories and nothing else; without it the page says how to run the CLI. Private repositories are refused even if the token could read them. Uncached checks are limited to 60 an hour for the deployment and 6 per visitor address, and answers are cached by the CDN for six hours per repository.
+
+## In the dashboard
+
+With `CI_COST_ENABLED=true` on both the web app and Convex, **Organization Settings → CI Cost** lists each GitHub App repository with its latest audit, and admins can run one (at most once per repository every ten minutes). The audit uses the installation's own token, so the GitHub App needs the optional **Actions: Read** permission. Adding that permission to the App makes GitHub ask every installation's owner to accept it; until they do, audits fail with that reason and nothing else changes. The latest five audits per repository are kept and are deleted with the workspace.

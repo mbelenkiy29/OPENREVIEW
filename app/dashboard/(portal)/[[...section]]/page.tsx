@@ -20,6 +20,8 @@ import { SettingsNav } from "../../sidebar";
 import { pages } from "../../routes";
 import { Icon } from "../../../ui/icons";
 import { referralConfig } from "../../../../src/referrals";
+import { ciCostEnabled } from "../../../../src/ci-audit-github";
+import { CiCostPanel } from "../../ci-cost";
 import { WorkspaceInvitations } from "../../invitations";
 import { RepositoriesSection } from "../../sections/repositories";
 import { ReviewsSection } from "../../sections/reviews";
@@ -83,6 +85,7 @@ export default async function Dashboard(props: {
     {route === "settings" && section[1] === "providers" && (isAdmin ? <ProvidersPanel token={user.token} organizationId={organization._id} connectionId={filters.connection} projectId={filters.project} after={filters.after} inspect={filters.inspect} /> : <p>Workspace admin access required.</p>)}
     {route === "settings" && section[1] === "review" && <ReviewSettingsSection ctx={ctx} />}
     {route === "settings" && section[1] === "keys" && <ApiKeysSection ctx={ctx} />}
+    {route === "settings" && section[1] === "ci" && <CiCostPanel token={user.token} organizationId={organization._id} admin={isAdmin} />}
   </>;
   const subnav = page && subnavTabs[page.tab];
   return (
@@ -108,7 +111,7 @@ export default async function Dashboard(props: {
         {page?.tab === "context" && <nav className="segmented" aria-label="Context views">{pages.context.map((p) => <Link key={p.path} href={`/dashboard/context${p.path ? "/" + p.path : ""}`} aria-current={p.path === page.path ? "page" : undefined}>{p.label}</Link>)}</nav>}
         {subnav ? <div className="settings-layout">
           <SettingsNav label={subnav} tab={page.tab} current={page.path} sections={page.tab === "code-review" && page.path === "" && Boolean(ctx.repoSettings)}
-            items={pages[page.tab].filter((p) => p.path !== "referrals" || referralConfig().enabled).map((p) => ({ path: p.path, label: p.label }))} />
+            items={pages[page.tab].filter((p) => (p.path !== "referrals" || referralConfig().enabled) && (p.path !== "ci" || ciCostEnabled())).map((p) => ({ path: p.path, label: p.label }))} />
           <div className="settings-body">{content}</div>
         </div> : content}
       </main>

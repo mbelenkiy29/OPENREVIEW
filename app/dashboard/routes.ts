@@ -53,6 +53,7 @@ export const pages: Record<string, Page[]> = {
     { path: "billing", internal: ["settings", "billing"], label: "Billing & Usage", title: "Billing", subtitle: "Manage your subscription, payment methods, and invoices." },
     { path: "api-keys", internal: ["settings", "keys"], label: "API Keys", title: "API Keys", subtitle: "Create and manage API keys for programmatic access." },
     { path: "notifications", internal: ["settings", "notifications"], label: "Notifications", title: "Notifications", subtitle: "Choose where OpenReview sends review updates." },
+    { path: "ci", internal: ["settings", "ci"], label: "CI Cost", title: "CI Cost", subtitle: "Where your GitHub Actions minutes go, and which runs bought nothing." },
     { path: "audit", internal: ["settings", "audit"], label: "Audit Log", title: "Audit Log", subtitle: "Who changed what in this organization." },
   ],
   // Personal Settings, from the account menu: its own header (‹ Back) and no tab bar.

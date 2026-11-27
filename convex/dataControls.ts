@@ -35,7 +35,7 @@ export const purgePlan: Step[] = [
   { table: "teamMembers", via: "child", parent: { table: "teams", index: "by_org" }, index: "by_team", field: "teamId" },
   { table: "indexSkippedFiles", via: "child", parent: { table: "indexJobs", index: "by_org" }, index: "by_job_path", field: "jobId" },
   // Per repository.
-  ...([["repositorySettings", "by_repo"], ["repositoryFiles", "by_repo"], ["graphModuleReferences", "by_path"], ["symbols", "by_repo"], ["relationships", "by_repo"], ["indexJobs", "by_repo"], ["knowledgeEntries", "by_repo"], ["pullCatalogJobs", "by_repo"], ["codeChunks", "by_file"], ["embeddings", "by_path"], ["chunkEmbeddings", "by_path"], ["conversations", "by_pr"], ["p4Identities", "by_repo_user"]] as const).map(([table, index]) => ({ table, via: "repo" as const, index })),
+  ...([["ciAudits", "by_repo"], ["repositorySettings", "by_repo"], ["repositoryFiles", "by_repo"], ["graphModuleReferences", "by_path"], ["symbols", "by_repo"], ["relationships", "by_repo"], ["indexJobs", "by_repo"], ["knowledgeEntries", "by_repo"], ["pullCatalogJobs", "by_repo"], ["codeChunks", "by_file"], ["embeddings", "by_path"], ["chunkEmbeddings", "by_path"], ["conversations", "by_pr"], ["p4Identities", "by_repo_user"]] as const).map(([table, index]) => ({ table, via: "repo" as const, index })),
   // Small tables without a workspace index.
   ...(["providerInstallRequests", "notificationDeliveries", "oauthCodes", "bridgeDevices"] as const).map((table) => ({ table, via: "scan" as const, match: "organizationId" as const })),
   { table: "providerIdentityGrants", via: "scan", match: "repositoryOrConnection" },

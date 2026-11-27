@@ -6,6 +6,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { backend, current } from "../../src/server";
 import { referralConfig } from "../../src/referrals";
+import { ciCostEnabled } from "../../src/ci-audit-github";
 import { knowledgeView } from "../../src/knowledge-view";
 import { navigation } from "./sections/shared";
 import { needsSetup } from "../../src/onboarding-steps";
@@ -60,6 +61,8 @@ export async function loadDashboard({
   if ((route === "settings" || route === "memory") && !page) notFound();
   // Referrals exists only while the referral program is on.
   if (route === "settings" && section[1] === "referrals" && !referralConfig().enabled) notFound();
+  // CI Cost exists only while the operator has switched it on (CI_COST_ENABLED=true).
+  if (route === "settings" && section[1] === "ci" && !ciCostEnabled()) notFound();
   // Findings live under Analytics → Bugs Caught; /dashboard/pulls/findings redirects there (next.config.ts).
   const view = route === "analytics" ? section[1] === "findings" ? "findings" : section[1] === "issues" ? "issues" : "overview" : route === "pulls" ? "reviews" : route === "memory" ? section[1] === "knowledge" ? "knowledge" : "rules" : route === "settings" ? ({ repositories: "repositories", people: "team", usage: "usage" }[section[1] ?? ""] ?? "settings") : route;
   const reviewDetailId = route === "pulls" && section[1] !== "findings" && section[1] !== "pr" ? section[1] : undefined;

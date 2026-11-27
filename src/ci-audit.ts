@@ -122,6 +122,8 @@ export type CiAudit = {
   /** wasted counts each run once: all of a cancelled run, or a superseded run's minutes after the newer run started. */
   minutes: { total: number; cancelled: number; superseded: number; failed: number; wasted: number };
   cost: { total: number; cancelled: number; superseded: number };
+  /** Why the window is shorter or less complete than asked (rate limit, time limit); also among notes. */
+  truncated?: string[];
   runners: Partial<Record<RunnerClass, number>>;
   /** Scaled to 30 days. The saving counts only superseded minutes that cancel-in-progress would stop. */
   monthly: { runs: number; minutes: number; cost: number; savingMinutes: number; savingCost: number };
@@ -275,6 +277,7 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
 
   return {
     repository: history.repository, private: history.private, days: history.days, from: history.from, to: history.to,
+    ...(history.truncated?.length ? { truncated: history.truncated } : {}),
     runs: history.runs.length, sampledRuns, estimated: sampledRuns < history.runs.length,
     minutes: { total: Math.round(totals.minutes), cancelled: Math.round(totals.cancelled), superseded: Math.round(totals.superseded), failed: Math.round(totals.failed), wasted: Math.round(totals.wasted) },
     cost: { total: round2(totals.cost), cancelled: round2(totals.cancelledCost), superseded: round2(totals.supersededCost) },

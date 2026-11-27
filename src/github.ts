@@ -9,6 +9,7 @@ import { z } from "zod";
 import type { ChangedFile, Finding, SourceFile } from "./engine/types";
 import {changedLines} from "./engine/diff";
 import {commentRange} from "./engine/patch-lines";
+import { fetchActionsHistory, type ActionsHistoryOptions } from "./ci-audit-github";
 import {findingComment} from "./review-summary";
 import {compactLayout,disclosureLayout,threadLinks,withDescriptionSummary,withoutDescriptionSummary} from "./summary-layout";
 
@@ -497,6 +498,13 @@ export class Github {
   // Fix pull requests need contents:write; without it the feature is skipped, never an error.
   // Only a new namespaced branch is created and written, from the reviewed head; the pull
   // request's own branch (and its base) is never written. Retries reuse the branch or open PR.
+  // CI audit (src/ci-audit.ts): Actions history read with this installation's token, which needs the
+  // optional Actions: Read permission. Read-only; the token never leaves this client.
+  get canReadActions() { return ["read", "write"].includes(this.permissions?.actions ?? ""); }
+  async actionsHistory(repository: string, options: Omit<ActionsHistoryOptions, "repository" | "token" | "base"> = {}) {
+    if (!this.canReadActions) throw new Error("The GitHub App does not have Actions: Read permission on this installation");
+    return fetchActionsHistory({ ...options, repository, token: this.token, base: this.base });
+  }
   // Why fix pull requests cannot be opened with this client, or null when they can.
   protected fixPullRequestBlocker(): string | null {
     return this.permissions?.contents === "write" ? null : "the GitHub App does not have Contents: Read and write permission";

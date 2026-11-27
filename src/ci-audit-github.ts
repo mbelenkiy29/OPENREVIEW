@@ -10,7 +10,7 @@ export class GithubAuditError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
-type Options = {
+export type ActionsHistoryOptions = {
   repository: string;
   token?: string;
   days?: number;
@@ -30,6 +30,8 @@ type Options = {
   onProgress?: (message: string) => void;
 };
 
+/** Whether the in-app CI cost report is switched on for this deployment (operator setting). */
+export const ciCostEnabled = (env: Record<string, string | undefined> = process.env) => env.CI_COST_ENABLED === "true";
 /** Whether the public /ci check has a token to read GitHub with. */
 export const ciCheckEnabled = (env: Record<string, string | undefined> = process.env) => Boolean(env.CI_AUDIT_GITHUB_TOKEN?.trim());
 
@@ -47,7 +49,7 @@ export function parseRepository(input: string): string | null {
 class DeadlineReached extends Error {}
 const day = 86400000;
 
-export async function fetchActionsHistory(options: Options): Promise<ActionsHistory> {
+export async function fetchActionsHistory(options: ActionsHistoryOptions): Promise<ActionsHistory> {
   const { repository, token } = options;
   if (parseRepository(repository) !== repository) throw new Error("Repository must look like owner/name");
   const days = Math.min(90, Math.max(1, Math.floor(options.days ?? 30)));
