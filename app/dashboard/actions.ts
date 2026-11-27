@@ -67,6 +67,23 @@ export async function requestCiAudit(form: FormData) {
   }
   revalidatePath("/dashboard/organization/ci");
 }
+// Organization Settings → CI Cost: the spend guard's budget, critical workflows and alert channel (admins).
+export async function saveCiSpendGuard(form: FormData) {
+  const { token } = await current();
+  const budget = String(form.get("monthlyBudget") ?? "").trim();
+  const critical = form.getAll("critical").map(String).flatMap((value) => {
+    const [repositoryId, path] = value.split("|");
+    return repositoryId && path ? [{ repositoryId: repositoryId as Id<"repositories">, path }] : [];
+  });
+  const channelId = String(form.get("channelId") ?? "");
+  try {
+    await backend().mutation(api.ciSpendGuards.save, { token, organizationId: text(form, "organizationId") as Id<"organizations">, ...(budget ? { monthlyBudget: Number(budget) } : {}), critical, dailySummary: form.get("dailySummary") === "on", ...(channelId ? { channelId: channelId as Id<"notificationChannels"> } : {}) });
+    await notify("Spend guard saved.");
+  } catch (error) {
+    await notify(`Couldn\u2019t save the spend guard: ${userMessage(error, "please try again")}`, "error");
+  }
+  revalidatePath("/dashboard/organization/ci");
+}
 export async function revokeRuntimeWorker(form:FormData){const {token}=await current();await backend().mutation(api.runtime.revoke,{token,workerId:text(form,"workerId") as Id<"runtimeWorkers">});revalidatePath("/dashboard");}
 export async function createWorkspace(form: FormData) {
   const { token } = await current();

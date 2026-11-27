@@ -27,6 +27,8 @@ export type ActionsHistoryOptions = {
   publicOnly?: boolean;
   /** Stop at this time (ms since epoch) and return what was read; requests in flight are aborted then. */
   deadline?: number;
+  /** Start of the window (ms since epoch), in place of `days` before now: the spend guard's month to date. */
+  since?: number;
   onProgress?: (message: string) => void;
 };
 
@@ -128,7 +130,7 @@ export async function fetchActionsHistory(options: ActionsHistoryOptions): Promi
   // The runs list returns at most 1,000 results for one query, so the window is read a day at a time,
   // and a day with more runs than that is split into smaller windows.
   const runs: ActionsRun[] = [];
-  const from = now - days * day;
+  const from = options.since !== undefined ? Math.max(now - 90 * day, Math.min(now - 60000, options.since)) : now - days * day;
   async function readWindow(start: number, end: number): Promise<boolean> {
     const range = `${new Date(start).toISOString().replace(/\.\d{3}Z$/, "Z")}..${new Date(end - 1000).toISOString().replace(/\.\d{3}Z$/, "Z")}`;
     for (let page = 1; ; page++) {

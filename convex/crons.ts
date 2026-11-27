@@ -8,6 +8,7 @@ crons.interval("Recover runtime worker jobs",{minutes:1},internal.runtime.recove
 crons.interval("Poll reactions on OpenReview comments",{minutes:60},internal.reactionJobs.sweep,{});
 crons.interval("Roll up today's and yesterday's analytics",{minutes:60},internal.analyticsRollup.sweep,{days:2});
 crons.interval("Roll up the last 35 days of analytics (addressed findings change)",{hours:24},internal.analyticsRollup.sweep,{days:35});
+crons.daily("Check CI spend against each workspace's budget and critical workflows (CI_COST_ENABLED)",{hourUTC:13,minuteUTC:0},internal.ciSpendGuardJobs.sweep,{});
 crons.interval("Learn team conventions from merged pull requests",{hours:24},internal.conventionJobs.sweep,{});
 crons.interval(
   "Recover interrupted background work",

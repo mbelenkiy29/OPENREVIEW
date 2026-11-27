@@ -106,6 +106,7 @@ export type WorkflowAudit = {
   supersededRuns: number;
   supersededMinutes: number;
   lastRunAt?: string;
+  lastConclusion?: string | null;
   critical: boolean;
   hints?: WorkflowHints;
   recommendations: string[];
@@ -121,7 +122,8 @@ export type CiAudit = {
   estimated: boolean;
   /** wasted counts each run once: all of a cancelled run, or a superseded run's minutes after the newer run started. */
   minutes: { total: number; cancelled: number; superseded: number; failed: number; wasted: number };
-  cost: { total: number; cancelled: number; superseded: number };
+  /** paid: what GitHub would bill. In a public repository only larger runners are billed; standard ones are free. */
+  cost: { total: number; cancelled: number; superseded: number; paid: number };
   /** Why the window is shorter or less complete than asked (rate limit, time limit); also among notes. */
   truncated?: string[];
   runners: Partial<Record<RunnerClass, number>>;
@@ -131,7 +133,7 @@ export type CiAudit = {
   notes: string[];
 };
 
-type Estimate = { minutes: number; cost: number; byRunner: Partial<Record<RunnerClass, number>> };
+type Estimate = { minutes: number; cost: number; paid: number; byRunner: Partial<Record<RunnerClass, number>> };
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export function auditActions(history: ActionsHistory, options: { rates?: Partial<Record<RunnerClass, number>>; now?: number } = {}): CiAudit {
@@ -141,25 +143,26 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
 
   // Measured cost of a run (its jobs), optionally only the minutes after a moment.
   const measure = (jobs: ActionsJob[], after?: number): Estimate => {
-    const e: Estimate = { minutes: 0, cost: 0, byRunner: {} };
+    const e: Estimate = { minutes: 0, cost: 0, paid: 0, byRunner: {} };
     for (const job of jobs) {
       const minutes = jobMinutes(job, after);
       if (!minutes) continue;
       const { runner, multiplier } = runnerFor(job.labels);
       e.minutes += minutes;
       e.cost += minutes * rates[runner] * multiplier;
+      if (history.private || multiplier > 1) e.paid += minutes * rates[runner] * multiplier;
       e.byRunner[runner] = (e.byRunner[runner] ?? 0) + minutes;
     }
     return e;
   };
 
   // Per-workflow averages from the sampled runs stand in for runs whose jobs were not fetched.
-  const averages = new Map<number, { minutes: number; cost: number; wall: number; runner: Partial<Record<RunnerClass, number>> }>();
+  const averages = new Map<number, { minutes: number; cost: number; paid: number; wall: number; runner: Partial<Record<RunnerClass, number>> }>();
   for (const run of history.runs) {
     const jobs = history.jobs[run.id];
     if (!jobs) continue;
-    const e = measure(jobs), a = averages.get(run.workflowId) ?? { minutes: 0, cost: 0, wall: 0, runner: {} };
-    a.minutes += e.minutes; a.cost += e.cost; a.wall += 1;
+    const e = measure(jobs), a = averages.get(run.workflowId) ?? { minutes: 0, cost: 0, paid: 0, wall: 0, runner: {} };
+    a.minutes += e.minutes; a.cost += e.cost; a.paid += e.paid; a.wall += 1;
     for (const [k, m] of Object.entries(e.byRunner)) a.runner[k as RunnerClass] = (a.runner[k as RunnerClass] ?? 0) + m;
     averages.set(run.workflowId, a);
   }
@@ -173,19 +176,19 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
     if (run.status !== "completed") {
       // Queued or waiting runs have not used a runner; a running one has used its time so far, at Linux prices.
       const minutes = run.startedAt && run.status === "in_progress" ? wallMinutes(run, after) : 0;
-      return { minutes, cost: minutes * rates.linux, byRunner: minutes ? { linux: minutes } : {} };
+      return { minutes, cost: minutes * rates.linux, paid: history.private ? minutes * rates.linux : 0, byRunner: minutes ? { linux: minutes } : {} };
     }
     const a = averages.get(run.workflowId);
     if (!a || !a.wall) {
       // No sample for this workflow: wall time on Linux, a lower bound for runs with parallel jobs.
       const minutes = wallMinutes(run, after);
-      return { minutes, cost: minutes * rates.linux, byRunner: minutes ? { linux: minutes } : {} };
+      return { minutes, cost: minutes * rates.linux, paid: history.private ? minutes * rates.linux : 0, byRunner: minutes ? { linux: minutes } : {} };
     }
     const share = after === undefined ? 1 : (wallMinutes(run) ? wallMinutes(run, after) / wallMinutes(run) : 0);
-    const minutes = (a.minutes / a.wall) * share, cost = (a.cost / a.wall) * share;
+    const minutes = (a.minutes / a.wall) * share, cost = (a.cost / a.wall) * share, paid = (a.paid / a.wall) * share;
     const byRunner: Partial<Record<RunnerClass, number>> = {};
     for (const [k, m] of Object.entries(a.runner)) byRunner[k as RunnerClass] = (m / a.minutes) * minutes;
-    return { minutes, cost, byRunner };
+    return { minutes, cost, paid, byRunner };
   };
 
   // A run is superseded when a run of the same workflow, event and branch for a newer commit starts while it is
@@ -207,7 +210,7 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
   }
 
   const byWorkflow = new Map<number, WorkflowAudit>();
-  const totals = { minutes: 0, cost: 0, wasted: 0, cancelled: 0, cancelledCost: 0, superseded: 0, supersededCost: 0, failed: 0, saving: 0, savingCost: 0 };
+  const totals = { minutes: 0, cost: 0, paid: 0, wasted: 0, cancelled: 0, cancelledCost: 0, superseded: 0, supersededCost: 0, failed: 0, saving: 0, savingCost: 0 };
   const supersededCost = new Map<number, number>();
   const runners: Partial<Record<RunnerClass, number>> = {};
   for (const run of history.runs) {
@@ -220,8 +223,8 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
     };
     const e = estimate(run);
     w.runs++; w.events[run.event] = (w.events[run.event] ?? 0) + 1; w.minutes += e.minutes; w.cost += e.cost;
-    if (!w.lastRunAt || run.createdAt > w.lastRunAt) w.lastRunAt = run.createdAt;
-    totals.minutes += e.minutes; totals.cost += e.cost;
+    if (!w.lastRunAt || run.createdAt > w.lastRunAt) { w.lastRunAt = run.createdAt; w.lastConclusion = run.conclusion; }
+    totals.minutes += e.minutes; totals.cost += e.cost; totals.paid += e.paid;
     for (const [k, m] of Object.entries(e.byRunner)) runners[k as RunnerClass] = (runners[k as RunnerClass] ?? 0) + m;
     if (run.conclusion === "cancelled") { w.cancelledRuns++; w.cancelledMinutes += e.minutes; totals.cancelled += e.minutes; totals.cancelledCost += e.cost; }
     if (run.conclusion === "failure") { w.failedRuns++; totals.failed += e.minutes; }
@@ -280,7 +283,7 @@ export function auditActions(history: ActionsHistory, options: { rates?: Partial
     ...(history.truncated?.length ? { truncated: history.truncated } : {}),
     runs: history.runs.length, sampledRuns, estimated: sampledRuns < history.runs.length,
     minutes: { total: Math.round(totals.minutes), cancelled: Math.round(totals.cancelled), superseded: Math.round(totals.superseded), failed: Math.round(totals.failed), wasted: Math.round(totals.wasted) },
-    cost: { total: round2(totals.cost), cancelled: round2(totals.cancelledCost), superseded: round2(totals.supersededCost) },
+    cost: { total: round2(totals.cost), cancelled: round2(totals.cancelledCost), superseded: round2(totals.supersededCost), paid: round2(totals.paid) },
     runners: Object.fromEntries(Object.entries(runners).map(([k, m]) => [k, Math.round(m)])),
     monthly: {
       runs: Math.round(history.runs.length * scale), minutes: Math.round(totals.minutes * scale), cost: round2(totals.cost * scale),

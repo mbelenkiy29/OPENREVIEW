@@ -18,12 +18,12 @@ import { service } from "./auth";
 import { egressAllowed } from "../src/egress";
 
 const appOrigin = () => { try { return process.env.APP_URL ? new URL(process.env.APP_URL).origin : undefined; } catch { return undefined; } };
-async function slackClient(ctx: ActionCtx, installationId: Id<"slackInstallations">) {
+export async function slackClient(ctx: ActionCtx, installationId: Id<"slackInstallations">) {
   if (!egressAllowed("slack")) return null;
   const install = await ctx.runQuery(internal.notifications.slackCredentials, { installationId });
   return install?.credentials ? new SlackApi(decryptCredential(install.credentials, `${install.organizationId}:slack`)) : null;
 }
-async function deliver(ctx: ActionCtx, organizationId: Id<"organizations">, key: string, channel: "slack" | "email", send: () => Promise<{ skipped?: string } | unknown>) {
+export async function deliver(ctx: ActionCtx, organizationId: Id<"organizations">, key: string, channel: "slack" | "email", send: () => Promise<{ skipped?: string } | unknown>) {
   if (!await ctx.runMutation(internal.notifications.claimDelivery, { organizationId, key, channel })) return "duplicate";
   try {
     const result = await send() as { skipped?: string } | undefined;

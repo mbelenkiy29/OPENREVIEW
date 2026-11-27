@@ -36,3 +36,13 @@ Draft pull request runs are not measured yet: telling them apart needs one more 
 ## In the dashboard
 
 With `CI_COST_ENABLED=true` on both the web app and Convex, **Organization Settings → CI Cost** lists each GitHub App repository with its latest audit, and admins can run one (at most once per repository every ten minutes). The audit uses the installation's own token, so the GitHub App needs the optional **Actions: Read** permission. Adding that permission to the App makes GitHub ask every installation's owner to accept it; until they do, audits fail with that reason and nothing else changes. The latest five audits per repository are kept and are deleted with the workspace.
+
+## Spend guard
+
+Also behind `CI_COST_ENABLED`, admins set a **spend guard** on the same page: a monthly budget, the workflows that must keep running (backups, deploys), an optional daily summary, and a Slack channel already linked under Notifications. Once a day (13:00 UTC) OpenReview audits each enabled GitHub App repository from the first of the month, up to 20 per workspace, and:
+
+- emails admins with a verified notification address, and posts to the chosen Slack channel, when spend reaches 50%, 80% and 100% of the budget (each step once a month);
+- warns once a day when a critical workflow has not run for two days, has not run this month, or its latest run failed;
+- sends the daily summary when it is turned on.
+
+It cannot keep GitHub running jobs past a spending limit set on GitHub; it warns before the budget runs out and as soon as a critical workflow stops.

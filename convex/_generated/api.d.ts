@@ -37,6 +37,8 @@ import type * as chatJobs from "../chatJobs.js";
 import type * as ciAudit from "../ciAudit.js";
 import type * as ciAuditJobs from "../ciAuditJobs.js";
 import type * as ciAudits from "../ciAudits.js";
+import type * as ciSpendGuardJobs from "../ciSpendGuardJobs.js";
+import type * as ciSpendGuards from "../ciSpendGuards.js";
 import type * as cliReviewJobs from "../cliReviewJobs.js";
 import type * as cliReviews from "../cliReviews.js";
 import type * as cloudHandoff from "../cloudHandoff.js";
@@ -187,6 +189,8 @@ declare const fullApi: ApiFromModules<{
   ciAudit: typeof ciAudit;
   ciAuditJobs: typeof ciAuditJobs;
   ciAudits: typeof ciAudits;
+  ciSpendGuardJobs: typeof ciSpendGuardJobs;
+  ciSpendGuards: typeof ciSpendGuards;
   cliReviewJobs: typeof cliReviewJobs;
   cliReviews: typeof cliReviews;
   cloudHandoff: typeof cloudHandoff;
