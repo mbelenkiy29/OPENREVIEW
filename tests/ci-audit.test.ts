@@ -231,3 +231,9 @@ test("fetchActionsHistory leaves out a run whose job pages were cut short", asyn
   assert.equal(result.jobs[7], undefined);
   assert.match(result.truncated?.join("\n") ?? "", /left out because not all of its jobs could be read/);
 });
+
+test("an audit cut short carries its truncation notes separately", () => {
+  const audit = auditActions(history([run(1, { start: 0, end: 10 })], { 1: [job(1, 0, 10)] }, undefined, { truncated: ["Stopped listing runs before 2026-11-20 at the time limit."] }));
+  assert.deepEqual(audit.truncated, ["Stopped listing runs before 2026-11-20 at the time limit."]);
+  assert.ok(audit.notes.includes(audit.truncated![0]));
+});
