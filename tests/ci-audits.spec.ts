@@ -7,6 +7,10 @@ import { Github } from "../src/github";
 
 // Organization Settings → CI Cost: admins request a CI audit of a GitHub App repository, members see the latest one.
 const modules = import.meta.glob("../convex/**/*.ts");
+async function signIn(t: ReturnType<typeof convexTest>, prefix: string, githubId: number) {
+  const id = await t.mutation(api.users.login, { secret: prefix + "-service", githubId, login: prefix + githubId, avatar: "" });
+  return { id, token: await new SignJWT({}).setSubject(id).setProtectedHeader({ alg: "HS256" }).setIssuer("openreview").setAudience("openreview").setExpirationTime("1h").sign(new TextEncoder().encode(process.env.SESSION_SECRET)) };
+}
 async function workspace(prefix: string) {
   process.env.SERVICE_SECRET = prefix + "-service";
   process.env.SESSION_SECRET = prefix + "-session-secret-at-least-32-characters";
@@ -20,6 +24,13 @@ async function workspace(prefix: string) {
 }
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
+test("requests are refused while the workspace is being deleted", async () => {
+  vi.stubEnv("CI_COST_ENABLED", "true");
+  const { t, admin, organizationId, repositoryId } = await workspace("ci-purge");
+  await t.run((ctx) => ctx.db.insert("workspaceDeletions", { organizationId, name: "ci-purge", requestedBy: admin.id, requestedAt: Date.now(), scheduledFor: Date.now(), status: "purging", step: 0, counts: {} }));
+  await expect(t.mutation(api.ciAudits.request, { token: admin.token, repositoryId })).rejects.toThrow(/being deleted/);
+});
+
 test("requests are refused while the CI cost report is switched off", async () => {
   const { t, admin, repositoryId } = await workspace("ci-off");
   await expect(t.mutation(api.ciAudits.request, { token: admin.token, repositoryId })).rejects.toThrow(/not switched on/);
@@ -29,6 +40,11 @@ test("an admin's request is queued, audited, rate-limited per repository and lis
   vi.stubEnv("CI_COST_ENABLED", "true");
   const { t, admin, outsider, organizationId, repositoryId } = await workspace("ci-on");
   await expect(t.mutation(api.ciAudits.request, { token: outsider.token, repositoryId })).rejects.toThrow();
+  // An ordinary member of the workspace cannot start one either.
+  const member = await signIn(t, "ci-on", 3);
+  await t.run((ctx) => ctx.db.insert("organizationMembers", { organizationId, userId: member.id, role: "member" }));
+  await expect(t.mutation(api.ciAudits.request, { token: member.token, repositoryId })).rejects.toThrow(/Forbidden/);
+  expect(await t.query(api.ciAudits.list, { token: member.token, organizationId })).toHaveLength(1);
   const auditId = await t.mutation(api.ciAudits.request, { token: admin.token, repositoryId });
   await expect(t.mutation(api.ciAudits.request, { token: admin.token, repositoryId })).rejects.toThrow(/last ten minutes/);
   expect((await t.run((ctx) => ctx.db.query("auditEvents").collect())).map((e) => e.action)).toContain("ci.audit.requested");
