@@ -46,6 +46,22 @@ test("a deadline stops listing early, newest days first, and the window shrinks 
   assert.match(result.truncated?.join("\n") ?? "", /Stopped listing runs/);
 });
 
+test("a request that stalls past the deadline is aborted and the history read so far is kept", async () => {
+  const now = Date.parse("2026-11-27T00:00:00Z");
+  const fake = (async (url: string, init?: RequestInit) => {
+    const u = new URL(url);
+    if (u.pathname === "/repos/acme/app") return new Response(JSON.stringify({ private: false, default_branch: "main", full_name: "acme/app" }));
+    if (u.pathname.endsWith("/actions/workflows")) return new Response(JSON.stringify({ workflows: [] }));
+    // The run listing never answers until the signal aborts it.
+    return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("timed out", "TimeoutError"))));
+  }) as typeof fetch;
+  const started = Date.now();
+  const result = await fetchActionsHistory({ repository: "acme/app", days: 30, fetch: fake, now, deadline: Date.now() + 200 });
+  assert.ok(Date.now() - started < 2000);
+  assert.equal(result.runs.length, 0);
+  assert.match(result.truncated?.join("\n") ?? "", /time limit/);
+});
+
 test("the sitemap lists the CI page", () => {
   assert.ok(sitemap().some((entry) => new URL(entry.url).pathname === "/ci"));
 });

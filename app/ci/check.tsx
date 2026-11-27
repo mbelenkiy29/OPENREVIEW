@@ -1,6 +1,7 @@
 "use client";
 import { useState, type FormEvent } from "react";
-import type { CiAudit } from "../../src/ci-audit";
+import type { CiAudit, WorkflowAudit } from "../../src/ci-audit";
+import { parseRepository } from "../../src/ci-audit-github";
 
 // The /ci page's repository check: sends one public repository to /api/ci/audit and shows the result.
 const usd = (n: number) => `$${n.toFixed(2)}`;
@@ -12,11 +13,12 @@ export function CiCheck({ enabled }: { enabled: boolean }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const value = repo.trim();
-    if (!value) return;
+    // One canonical form per repository, so every way of writing it shares the cached answer.
+    const value = parseRepository(repo)?.toLowerCase();
+    if (!value) { setState({ status: "error", message: "Enter a public GitHub repository as owner/name or its github.com link." }); return; }
     setState({ status: "loading" });
     try {
-      const response = await fetch(`/api/ci/audit?repo=${encodeURIComponent(value.toLowerCase())}`);
+      const response = await fetch(`/api/ci/audit?repo=${encodeURIComponent(value)}`);
       const body = await response.json().catch(() => ({}));
       setState(response.ok ? { status: "done", audit: body as CiAudit } : { status: "error", message: (body as { error?: string }).error ?? "The check could not finish." });
     } catch {
@@ -52,14 +54,19 @@ function CiResult({ audit: a }: { audit: CiAudit }) {
     </div>
     <p>{a.monthly.savingMinutes > 0
       ? `Cancelling superseded runs would save about ${a.monthly.savingMinutes} minutes (${usd(a.monthly.savingCost)}) a month.`
-      : "Superseded runs are already cancelled, or there were none to cancel."}</p>
-    <ul className="ci-workflows">
-      {a.workflows.slice(0, 6).map((w) => <li key={w.workflowId}>
-        <strong>{w.name}</strong> <span className="muted">{w.path}</span>
-        <div>{w.runs} runs, {w.minutes} min, {usd(w.cost)}; cancelled {w.cancelledMinutes} min, superseded {w.supersededMinutes} min</div>
-        {w.recommendations.length > 0 && <ul>{w.recommendations.map((r) => <li key={r}>{r}</li>)}</ul>}
-      </li>)}
-    </ul>
+      : "No saving from cancelling superseded runs: they are already cancelled, there were none, or they are in workflows that should finish, such as deploys and backups."}</p>
+    <ul className="ci-workflows">{a.workflows.slice(0, 6).map((w) => <WorkflowItem key={w.workflowId} w={w} />)}</ul>
+    {a.workflows.length > 6 && <details><summary>{a.workflows.length - 6} more workflows</summary>
+      <ul className="ci-workflows">{a.workflows.slice(6).map((w) => <WorkflowItem key={w.workflowId} w={w} />)}</ul>
+    </details>}
     {a.notes.length > 0 && <ul className="ci-notes">{a.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
   </div>;
+}
+
+function WorkflowItem({ w }: { w: WorkflowAudit }) {
+  return <li>
+    <strong>{w.name}</strong> <span className="muted">{w.path}</span>
+    <div>{w.runs} runs, {w.minutes} min, {usd(w.cost)}; cancelled {w.cancelledMinutes} min, superseded {w.supersededMinutes} min</div>
+    {w.recommendations.length > 0 && <ul>{w.recommendations.map((r) => <li key={r}>{r}</li>)}</ul>}
+  </li>;
 }
