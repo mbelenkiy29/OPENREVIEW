@@ -685,6 +685,7 @@ export const review = internalAction({
           preferences: [...preferences, ...(await ctx.runQuery(internal.conventions.approvedForRepo, { repositoryId: repo._id }))],
           guidance: selectPacks(guidance.packs, scope.diff, sources).map(({ id, version, title, body, source }) => ({ id, version, title, body, source })),
           knowledge: selectKnowledge(await ctx.runQuery(internal.knowledge.forReview, { repositoryId: repo._id }), scope.diff.map((f) => f.path), new Set(head.keys()), knowledgeTokenBudgets[tier.mode]).selected,
+          guidelines: (repoConfig.agentGuidelines ?? []).map(({ path, title }) => ({ path, title })),
           existingFindings,
           historicalFindings,
           runtimeEvidence: state.review.runtimeEvidence,

@@ -333,7 +333,8 @@ async function main() {
       blob: async (_repository, _path, sha) => ({ content: await git("cat-file", "blob", sha) }),
     }, root, baseSha);
     for (const warning of repoConfig.warnings) process.stderr.write(`OpenReview config: ${warning}\n`);
-    // Rules from CLAUDE.md, AGENTS.md and similar files only when the repository file sets assistantRules.
+    // Rules from CLAUDE.md, AGENTS.md and similar files as extracted bullets only when assistantRules is on.
+    // Whole-file agent guidelines (SKILL.md, AGENTS.md, …) are already in repoConfig.rules when not opted out.
     const rules: Rule[] = [...repoConfig.rules, ...(repoConfig.settings.assistantRules ? repoConfig.assistantRules ?? [] : [])];
     // --resume continues an interrupted agentic review of this checkout (same base and HEAD only).
     const engine = z.enum(["pipeline", "agentic"]).parse(values.engine ?? (values.resume ? "agentic" : "pipeline"));
@@ -351,6 +352,8 @@ async function main() {
         diff,
         files,
         rules,
+        coverageLimits: repoConfig.warnings,
+        guidelines: (repoConfig.agentGuidelines ?? []).map(({ path, title }) => ({ path, title })),
         runtimeEvidence: values["runtime-evidence"]
           ? runtimeEvidenceSchema.parse(
               JSON.parse(await readFile(values["runtime-evidence"], "utf8")),

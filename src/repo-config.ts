@@ -4,7 +4,7 @@ import { categories, severities, type Rule } from "./engine/types";
 import { checkFailureSeverities, defaults, sectionLayouts, summarySections, validSectionLayout } from "./review-settings";
 import { modes, type Mode } from "./review-tier";
 import { greptileConfig } from "./greptile-config";
-import { discoverRuleFiles, importCandidates, ruleText } from "./rule-files";
+import { agentGuidelineLimits, discoverAgentGuidelinePaths, discoverRuleFiles, importCandidates, ruleText, selectAgentGuidelines } from "./rule-files";
 import { ruleProblem } from "./rule-assistant";
 
 // Repository configuration as code, shared by the CLI and server reviews. Server reviews read it
@@ -46,6 +46,8 @@ export const repoConfigSchema = z.object({
   rules: z.array(ruleSchema).max(100).optional(),
   // Rule ids a nested folder turns off for its own subtree (rules from the root or a parent folder).
   disabledRules: z.array(z.string().min(1).max(100)).max(100).optional(),
+  // Whole-file agent guidelines (SKILL.md, AGENTS.md, …). Default on; false opts out.
+  guidelines: z.object({ agentFiles: z.boolean() }).partial().strict().optional(),
 }).strict();
 export type RepoConfig = z.infer<typeof repoConfigSchema>;
 
@@ -73,7 +75,7 @@ export function parseRulesMarkdown(text: string, idPrefix = "repo"): Rule[] {
 export const filesConfigSchema = z.object({ ignore: z.array(z.string().min(1).max(300)).max(200).optional(), include: z.array(z.string().min(1).max(300)).max(200).optional() }).strict();
 // One level of the cascade: the root ("") or a directory holding an .openreview/ folder.
 export type ConfigLevel = { directory: string; settings: z.infer<typeof repoSettingsSchema>; files?: z.infer<typeof filesConfigSchema>; sources: string[]; disabledRules?: string[] };
-export type LoadedRepoConfig = { settings: z.infer<typeof repoSettingsSchema>; rules: Rule[]; files: string[]; warnings: string[]; directories: { directory: string; instructions?: string }[]; guides?: { path: string; content: string }[]; levels?: ConfigLevel[]; assistantRules?: Rule[]; sections?: Record<string, boolean> };
+export type LoadedRepoConfig = { settings: z.infer<typeof repoSettingsSchema>; rules: Rule[]; files: string[]; warnings: string[]; directories: { directory: string; instructions?: string }[]; guides?: { path: string; content: string }[]; levels?: ConfigLevel[]; assistantRules?: Rule[]; agentGuidelines?: { path: string; title: string; truncated?: boolean }[]; sections?: Record<string, boolean> };
 type Source = { tree(repository: string, sha: string): Promise<{ path: string; sha: string; size?: number }[]>; blob(repository: string, path: string, sha: string): Promise<{ content: string; size?: number }> };
 // Greptile files are translated first; their ignorePatterns and section toggles travel alongside.
 type ParsedConfig = RepoConfig & { greptile?: { ignore: string[]; sections: Record<string, boolean> } };
@@ -103,9 +105,9 @@ const parseFiles = (text: string, file: string, warnings: string[]) => {
 export async function loadRepoConfig(source: Source, repository: string, sha: string): Promise<LoadedRepoConfig> {
   const tree = await source.tree(repository, sha);
   const warnings: string[] = [], files: string[] = [], rules: Rule[] = [], directories: LoadedRepoConfig["directories"] = [];
-  let settings: z.infer<typeof repoSettingsSchema> = {}, sections: Record<string, boolean> | undefined;
+  let settings: z.infer<typeof repoSettingsSchema> = {}, sections: Record<string, boolean> | undefined, agentFilesEnabled = true;
   // Each rule remembers the folder that defined it and its id as written, so disabledRules can find it.
-  type Kind = "openreview" | "greptile" | "assistant";
+  type Kind = "openreview" | "greptile" | "assistant" | "guideline";
   const origins = new Map<Rule, { directory: string; id: string; kind: Kind }>();
   const add = (rule: Rule, directory: string, id: string, kind: Kind) => { origins.set(rule, { directory, id, kind }); rules.push(rule); };
   const levels: ConfigLevel[] = [];
@@ -126,6 +128,7 @@ export async function loadRepoConfig(source: Source, repository: string, sha: st
     const config = text === undefined ? undefined : parseJson(text, path, warnings);
     if (!config) continue;
     settings = { ...settings, ...config.settings };
+    if (config.guidelines?.agentFiles !== undefined) agentFilesEnabled = config.guidelines.agentFiles;
     for (const r of config.rules ?? []) add(r, "", r.id, config.greptile ? "greptile" : "openreview");
     if (config.greptile) { ignoreFrom(level(""), config.greptile.ignore, path); if (Object.keys(config.greptile.sections).length) sections = config.greptile.sections; }
   }
@@ -172,11 +175,43 @@ export async function loadRepoConfig(source: Source, repository: string, sha: st
     if (config.disabledRules?.length) { const l = level(directory); l.disabledRules = [...(l.disabledRules ?? []), ...config.disabledRules]; l.sources.push(entry.path); }
     if (config.settings?.instructions) directories.push({ directory, instructions: config.settings.instructions.slice(0, 4000) });
   }
+  // Agent skill files and coding-agent convention files, read from this revision (callers pass the
+  // pull request's BASE SHA so a change cannot inject unreviewed guidelines). Off with
+  // `"guidelines": { "agentFiles": false }`. Each file becomes one low-severity rule.
+  const guidelinePaths = discoverAgentGuidelinePaths(tree.map((e) => e.path));
+  const agentGuidelines: NonNullable<LoadedRepoConfig["agentGuidelines"]> = [];
+  if (!agentFilesEnabled) {
+    if (guidelinePaths.length) warnings.push(`Agent guideline files were not applied because guidelines.agentFiles is false (${guidelinePaths.length} file${guidelinePaths.length === 1 ? "" : "s"} on the base revision).`);
+  } else {
+    const loadedFiles: { path: string; content: string; truncated?: boolean }[] = [];
+    for (const path of guidelinePaths) {
+      const entry = tree.find((e) => e.path === path);
+      if (!entry) continue;
+      const blob = await source.blob(repository, path, entry.sha);
+      const truncated = blob.content.length > agentGuidelineLimits.maxFileBytes;
+      loadedFiles.push({ path, content: truncated ? blob.content.slice(0, agentGuidelineLimits.maxFileBytes) : blob.content, truncated });
+    }
+    const selected = selectAgentGuidelines(loadedFiles);
+    for (const g of selected.included) {
+      const id = `guideline:${g.path}`.slice(0, 100);
+      if (ruleProblem({ title: g.title, instructions: g.instructions, globs: g.globs })) {
+        warnings.push(`Agent guideline file ${g.path} was not applied: failed the same safety checks as imported rules.`);
+        continue;
+      }
+      add({ id, instructions: g.instructions, severity: "low", category: "rules", globs: g.globs, enabled: true }, "", id, "guideline");
+      files.push(g.path);
+      agentGuidelines.push({ path: g.path, title: g.title, ...(g.truncated ? { truncated: true } : {}) });
+    }
+    for (const g of selected.included.filter((g) => g.truncated)) warnings.push(`Agent guideline file ${g.path} was truncated to fit the size and ${agentGuidelineLimits.maxTokens}-token budget.`);
+    for (const s of selected.skipped) warnings.push(`Agent guideline file ${s.path} was not applied: ${s.reason}.`);
+  }
   // AI assistant rule files (CLAUDE.md, AGENTS.md, Cursor rules and similar), read only when the
   // assistantRules setting opts in. They become low-severity rules through the same guard as imported rules.
+  // Files already included as whole-file guidelines are skipped so the same text is not applied twice.
   if (settings.assistantRules) {
+    const used = new Set(agentGuidelines.map((g) => g.path));
     const listed = (directory: string) => Promise.resolve(tree.filter((e) => e.path.startsWith(directory + "/") && !e.path.slice(directory.length + 1).includes("/")).map((e) => e.path.slice(directory.length + 1)));
-    const assistantFiles = await discoverRuleFiles({ read: async (path) => (await read(path)) ?? null, list: listed });
+    const assistantFiles = (await discoverRuleFiles({ read: async (path) => used.has(path) ? null : (await read(path)) ?? null, list: listed })).filter((f) => !used.has(f.path));
     for (const r of importCandidates(assistantFiles, 20).filter((r) => !ruleProblem(r))) {
       const id = `assistant:${r.source.path}:${r.source.line}`.slice(0, 100);
       add({ id, instructions: r.instructions, severity: "low", category: "rules", globs: r.globs, enabled: true }, "", id, "assistant");
@@ -195,12 +230,15 @@ export async function loadRepoConfig(source: Source, repository: string, sha: st
     if (text !== undefined) guides.push({ path: entry.path, content: text });
   }
   // OpenReview's own rules come first, then Greptile's: on a shared id OpenReview's wins, and so does the
-  // 100-rule cap. Assistant rules are returned apart, minus any that repeat a repository rule.
-  const rank: Record<Kind, number> = { openreview: 0, greptile: 1, assistant: 2 }, seen = new Set<string>();
+  // 100-rule cap. Agent guidelines are extra (capped separately). Assistant rules are returned apart,
+  // minus any that repeat a repository or guideline rule.
+  const rank: Record<Kind, number> = { openreview: 0, greptile: 1, guideline: 2, assistant: 3 }, seen = new Set<string>();
   const ordered = [...rules].sort((a, b) => rank[origins.get(a)!.kind] - rank[origins.get(b)!.kind]).filter((r) => !seen.has(r.id) && seen.add(r.id));
-  const own = ordered.filter((r) => origins.get(r)!.kind !== "assistant").slice(0, 100), known = new Set(own.map((r) => ruleText(r.instructions)));
+  const own = ordered.filter((r) => origins.get(r)!.kind === "openreview" || origins.get(r)!.kind === "greptile").slice(0, 100);
+  const guidelineRules = ordered.filter((r) => origins.get(r)!.kind === "guideline");
+  const known = new Set([...own, ...guidelineRules].map((r) => ruleText(r.instructions)));
   const assistantRules = ordered.filter((r) => origins.get(r)!.kind === "assistant" && !known.has(ruleText(r.instructions)));
-  return { settings, rules: own, files, warnings, directories, guides, levels: levels.filter((l) => l.sources.length), ...(assistantRules.length ? { assistantRules } : {}), ...(sections ? { sections } : {}) };
+  return { settings, rules: [...own, ...guidelineRules], files, warnings, directories, guides, levels: levels.filter((l) => l.sources.length), ...(assistantRules.length ? { assistantRules } : {}), ...(agentGuidelines.length ? { agentGuidelines } : {}), ...(sections ? { sections } : {}) };
 }
 
 // Applies the repository file on top of dashboard settings, skipping admin-locked keys.

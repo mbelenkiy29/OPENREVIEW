@@ -129,6 +129,7 @@ Each feature below has automated tests. The evidence level for each one (tests w
 - A rule assistant that drafts rules from a description, tightens vague rules, flags conflicting or duplicate rules, and suggests rules from findings fixed on several pull requests and from approved conventions. Every suggestion cites its sources and waits for an admin's approval.
 - Per-pull-request effort: comment `@openreview review fast|standard|deep` or add an `openreview:<tier>` label. An admin can cap the tier, and agent and hypothesis turn and tool-call budgets are configurable within operator hard caps (`AGENT_MAX_TURNS`, `AGENT_MAX_TOOL_CALLS`).
 - Configuration as code in `.openreview.json` and cascading `.openreview/` folders (per-directory categories, strictness, thresholds and ignore/include globs; the highest tier among touched directories), read from the base branch, with admin locks that a pull request cannot override.
+- Agent skill and convention files (`SKILL.md` under `.claude/skills`, `.cursor/skills`, `.agents/skills` and `.github/skills`, plus `AGENTS.md`, `CLAUDE.md` and similar) are read from the base branch as review guidelines. Opt out with `"guidelines": { "agentFiles": false }`.
 
 **Learning and memory**
 - 👍/👎 reactions and dashboard feedback become learned preferences. Reactions are polled on GitHub and arrive by webhook on GitLab.
@@ -269,7 +270,7 @@ Sign-in and accounts (see [docs/identity.md](docs/identity.md)): GitHub, GitLab,
 
 Azure DevOps (see [docs/azure-devops.md](docs/azure-devops.md)): connect an organization with a PAT or a Microsoft Entra service principal, and add service hooks secured by a shared-secret header. OpenReview computes diffs from the base and head blobs, posts findings as positioned comment threads, keeps one closed summary thread, and reports an `openreview` pull request status. Follow-up commands are not yet supported on Azure DevOps.
 
-Repository configuration as code: `.openreview.json`, `.openreview/config.json`, `.openreview/rules.md` and nested per-directory `.openreview.json` files are read from the pull request's base revision. They are applied after workspace, team and repository dashboard settings, except keys an administrator locks. Invalid files produce visible warnings without blocking the review. See [docs/repo-config.md](docs/repo-config.md).
+Repository configuration as code: `.openreview.json`, `.openreview/config.json`, `.openreview/rules.md` and nested per-directory `.openreview.json` files are read from the pull request's base revision. Agent skill files (`SKILL.md`) and convention files such as `AGENTS.md` are read from that same revision as review guidelines. They are applied after workspace, team and repository dashboard settings, except keys an administrator locks. Invalid files produce visible warnings without blocking the review. See [docs/repo-config.md](docs/repo-config.md).
 
 Triggers and filters (GitHub, configurable per workspace, team or repository):
 - With **Automatic reviews** off, reviews run only on `@openreview review` (or a bare `@openreview`) or a trigger label.

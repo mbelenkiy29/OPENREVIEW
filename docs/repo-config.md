@@ -13,7 +13,7 @@ OpenReview reads review configuration from the repository. Server reviews always
 | `<dir>/.openreview/config.json`, `rules.md`, `files.json` | A cascade level for files under `<dir>/` (see [Directory cascade](#directory-cascade)) |
 | `<dir>/.openreview.json` (nested) | Rules scoped to `<dir>/` (globs are prefixed; no globs means `<dir>/**`) plus scoped `settings.instructions`; other nested settings are ignored with a warning |
 | `greptile.json`, `.greptile/config.json`, `.greptile/rules.md`, `<dir>/.greptile/…` | Greptile's files, translated (see [Greptile files](#greptile-files)) |
-| `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.cursor/rules/*.mdc` and similar | Guidance for coding agents, read as low-severity rules when `assistantRules` is on (see [AI assistant rule files](#ai-assistant-rule-files)) |
+| `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.cursor/rules/*.mdc` and similar | Guidance for coding agents, read as whole-file review guidelines from the base revision (see [Agent skill and convention files](#agent-skill-and-convention-files)); `assistantRules` still extracts individual directive lines |
 
 ```json
 {
@@ -35,7 +35,10 @@ OpenReview reads review configuration from the repository. Server reviews always
   },
   "rules": [
     { "id": "cents", "instructions": "Never divide cents by 100.", "severity": "high", "category": "correctness", "globs": ["src/billing/**"], "enabled": true }
-  ]
+  ],
+  "guidelines": {
+    "agentFiles": true
+  }
 }
 ```
 
@@ -92,9 +95,33 @@ A repository moving from Greptile keeps its files. OpenReview reads `.greptile/c
 
 Trigger and filter keys (`autoReview`, `labels`, author, branch and keyword filters, `triggerOnDrafts`), `statusCheck`, `shouldUpdateDescription`, `autoApprove`, `context.repos`, `patternRepositories`, `customContext.files` and `.greptile/files.json` are not read from files. A review lists them in one warning; set their equivalents in the dashboard.
 
+## Agent skill and convention files
+
+On by default. When OpenReview reviews a pull request (the GitHub App pipeline and `openreview review --local`), it reads the conventions teams already write for their coding agents and applies them as review guidelines. Files are always taken from the pull request's **base** revision, not the head, so a change cannot inject its own unreviewed guidelines.
+
+| Path | What is read |
+| --- | --- |
+| `.claude/skills/*/SKILL.md` | Claude Code / agent skills |
+| `.cursor/skills/*/SKILL.md` | Cursor agent skills |
+| `.agents/skills/*/SKILL.md` | Generic agent skills |
+| `.github/skills/*/SKILL.md` | GitHub agent skills, when a repository uses that layout |
+| `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.windsurfrules`, `GEMINI.md`, `.github/copilot-instructions.md`, `.cursor/rules/*.mdc` | Existing assistant convention files |
+
+Each file becomes one low-severity rule in the `rules` category (Cursor `.mdc` files keep their `globs`). YAML frontmatter is stripped; `name` and `description` become the guideline title. Agent-workflow lines, fenced code, and text that tries to suppress findings, approve changes or change budgets are dropped. At most 20 files and about 8,000 tokens are used; oversized files are truncated. The review summary's Coverage section lists the files that were applied, and truncation or skips appear as coverage notes.
+
+Opt out in the repository config file:
+
+```json
+{
+  "guidelines": { "agentFiles": false }
+}
+```
+
+`disabledRules` can turn one off by its id (`guideline:<path>`). Plugin skill trees such as `plugins/*/skills/` are not read; only the folders above.
+
 ## AI assistant rule files
 
-Off by default. With `"assistantRules": true` in the repository file's `settings`, `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.windsurfrules`, `GEMINI.md`, `.github/copilot-instructions.md` and `.cursor/rules/*.mdc` at the root are read from the base revision. Up to 20 directive statements about code become low-severity rules in the `rules` category, after the repository's own rules; any that repeat a repository or dashboard rule are skipped, and `disabledRules` can turn one off by its id (`assistant:<file>:<line>`). Administrators can lock `assistantRules` off. To review these lines one by one instead, import them as suggestions with `openreview onboard`. Statements about the agent's own workflow (commits, branches, chatting) are dropped, and every rule passes the same safety checks as imported rules, so none can suppress findings, approve changes or change budgets. Cursor rules keep their `globs`.
+Off by default. With `"assistantRules": true` in the repository file's `settings`, the same convention files are also parsed as individual directive statements: up to 20 lines about code become low-severity rules after the repository's own rules. Files already applied as whole-file guidelines are skipped so the same text is not applied twice. Any line that repeats a repository or dashboard rule is skipped, and `disabledRules` can turn one off by its id (`assistant:<file>:<line>`). Administrators can lock `assistantRules` off. To review these lines one by one instead, import them as suggestions with `openreview onboard`. Statements about the agent's own workflow (commits, branches, chatting) are dropped, and every rule passes the same safety checks as imported rules. To use only extracted bullets and not whole files, set `"guidelines": { "agentFiles": false }` together with `"settings": { "assistantRules": true }`.
 
 ## Precedence
 
