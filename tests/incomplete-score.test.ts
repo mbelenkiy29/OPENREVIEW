@@ -201,7 +201,7 @@ test("a real source file dropped to fit the review budget still fails the check"
   assert.equal(check.conclusion, "action_required");
 });
 
-test("a fetched wasm asset is a policy skip and does not fail the check", async () => {
+test("a fetched wasm binary is skipped and still fails the check", async () => {
   const input: ReviewInput = {
     repository: "acme/app", baseSha: "base", headSha: "head", title: "Ship wasm", description: "",
     files: [
@@ -215,17 +215,15 @@ test("a fetched wasm asset is a policy skip and does not fail the check", async 
     rules: [], mode: "standard", settings: { categories: ["correctness"] },
   };
   const result = await reviewChange(input, new CleanModel());
-  assert.deepEqual(result.metadata.skippedFiles, [{ path: "public/module.wasm", reason: "Non-source asset" }]);
-  assert.equal(result.metadata.coverageIncomplete, false);
-  assert.equal(result.metadata.verdict, "ready");
-  assert.ok(!result.metadata.coverageLimits?.some((l) => l.includes("was unavailable") || l.includes("were not reviewed")));
-  assert.match(result.summary, /`public\/module\.wasm` · Non-source asset/);
+  assert.deepEqual(result.metadata.skippedFiles, [{ path: "public/module.wasm", reason: "Binary content" }]);
+  assert.equal(result.metadata.coverageIncomplete, true);
+  assert.equal(result.metadata.verdict, "incomplete");
+  assert.match(result.summary, /`public\/module\.wasm` · Binary content/);
   const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: input.diff.length, posted: 0, verdict: result.metadata.verdict });
-  assert.equal(check.conclusion, "success");
-  assert.doesNotMatch(check.summary, /did not cover every changed file/);
+  assert.equal(check.conclusion, "action_required");
 });
 
-test("a wasm asset dropped to fit the review budget does not fail the check", async () => {
+test("a wasm binary dropped to fit the review budget still fails the check", async () => {
   const input: ReviewInput = {
     repository: "acme/app", baseSha: "base", headSha: "head", title: "Ship wasm", description: "",
     files: [
@@ -239,12 +237,11 @@ test("a wasm asset dropped to fit the review budget does not fail the check", as
     rules: [], mode: "standard", settings: { categories: ["correctness"] },
   };
   const result = await reviewChange(input, new CleanModel());
-  assert.ok(result.metadata.skippedFiles?.some((f) => f.path === "public/module.wasm" && /budget|Non-source asset/.test(f.reason)));
-  assert.equal(result.metadata.coverageIncomplete, false);
-  assert.equal(result.metadata.verdict, "ready");
-  assert.ok(!result.metadata.coverageLimits?.some((l) => l.includes("was unavailable") || l.includes("were not reviewed")));
+  assert.ok(result.metadata.skippedFiles?.some((f) => f.path === "public/module.wasm"));
+  assert.equal(result.metadata.coverageIncomplete, true);
+  assert.equal(result.metadata.verdict, "incomplete");
   const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: input.diff.length, posted: 0, verdict: result.metadata.verdict });
-  assert.equal(check.conclusion, "success");
+  assert.equal(check.conclusion, "action_required");
 });
 
 test("a PR that adds a .gitignore entry hiding its own new .ts file stays incomplete", async () => {

@@ -60,7 +60,7 @@ const generated =
 const secret =
   /(^|\/)(\.env(?:\..*)?|id_rsa|id_ed25519)$|\.(pem|key|p12)$/i;
 const asset =
-  /\.(png|jpg|jpeg|gif|ico|webp|avif|woff2?|ttf|otf|eot|zip|gz|pdf|map|min\.js|wasm|mp3|mp4|webm|wav)$/i;
+  /\.(png|jpg|jpeg|gif|ico|webp|avif|woff2?|ttf|otf|eot|zip|gz|pdf|map|min\.js|mp3|mp4|webm|wav)$/i;
 const otherNonSource = /\.(sqlite|db)$/i;
 export const lockfileExcluded = "Lockfile excluded from source review";
 export const assetExcluded = "Non-source asset";
