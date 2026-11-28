@@ -75,7 +75,7 @@ export function parseRulesMarkdown(text: string, idPrefix = "repo"): Rule[] {
 export const filesConfigSchema = z.object({ ignore: z.array(z.string().min(1).max(300)).max(200).optional(), include: z.array(z.string().min(1).max(300)).max(200).optional() }).strict();
 // One level of the cascade: the root ("") or a directory holding an .openreview/ folder.
 export type ConfigLevel = { directory: string; settings: z.infer<typeof repoSettingsSchema>; files?: z.infer<typeof filesConfigSchema>; sources: string[]; disabledRules?: string[] };
-export type LoadedRepoConfig = { settings: z.infer<typeof repoSettingsSchema>; rules: Rule[]; files: string[]; warnings: string[]; directories: { directory: string; instructions?: string }[]; guides?: { path: string; content: string }[]; levels?: ConfigLevel[]; assistantRules?: Rule[]; agentGuidelines?: { path: string; title: string; truncated?: boolean }[]; sections?: Record<string, boolean> };
+export type LoadedRepoConfig = { settings: z.infer<typeof repoSettingsSchema>; rules: Rule[]; files: string[]; warnings: string[]; directories: { directory: string; instructions?: string }[]; guides?: { path: string; content: string }[]; levels?: ConfigLevel[]; assistantRules?: Rule[]; agentGuidelines?: { path: string; title: string; truncated?: boolean }[]; sections?: Record<string, boolean>; gitignore: string };
 type Source = { tree(repository: string, sha: string): Promise<{ path: string; sha: string; size?: number }[]>; blob(repository: string, path: string, sha: string): Promise<{ content: string; size?: number }> };
 // Greptile files are translated first; their ignorePatterns and section toggles travel alongside.
 type ParsedConfig = RepoConfig & { greptile?: { ignore: string[]; sections: Record<string, boolean> } };
@@ -105,6 +105,11 @@ const parseFiles = (text: string, file: string, warnings: string[]) => {
 export async function loadRepoConfig(source: Source, repository: string, sha: string): Promise<LoadedRepoConfig> {
   const tree = await source.tree(repository, sha);
   const warnings: string[] = [], files: string[] = [], rules: Rule[] = [], directories: LoadedRepoConfig["directories"] = [];
+  // Coverage decisions use this revision's .gitignore (callers pass the PR base SHA).
+  const ignoreEntry = tree.find((e) => e.path === ".gitignore");
+  const gitignore = ignoreEntry && (ignoreEntry.size ?? 0) <= 200_000
+    ? (await source.blob(repository, ignoreEntry.path, ignoreEntry.sha)).content
+    : "";
   let settings: z.infer<typeof repoSettingsSchema> = {}, sections: Record<string, boolean> | undefined, agentFilesEnabled = true;
   // Each rule remembers the folder that defined it and its id as written, so disabledRules can find it.
   type Kind = "openreview" | "greptile" | "assistant" | "guideline";
@@ -238,7 +243,7 @@ export async function loadRepoConfig(source: Source, repository: string, sha: st
   const guidelineRules = ordered.filter((r) => origins.get(r)!.kind === "guideline");
   const known = new Set([...own, ...guidelineRules].map((r) => ruleText(r.instructions)));
   const assistantRules = ordered.filter((r) => origins.get(r)!.kind === "assistant" && !known.has(ruleText(r.instructions)));
-  return { settings, rules: [...own, ...guidelineRules], files, warnings, directories, guides, levels: levels.filter((l) => l.sources.length), ...(assistantRules.length ? { assistantRules } : {}), ...(agentGuidelines.length ? { agentGuidelines } : {}), ...(sections ? { sections } : {}) };
+  return { settings, rules: [...own, ...guidelineRules], files, warnings, directories, guides, levels: levels.filter((l) => l.sources.length), gitignore, ...(assistantRules.length ? { assistantRules } : {}), ...(agentGuidelines.length ? { agentGuidelines } : {}), ...(sections ? { sections } : {}) };
 }
 
 // Applies the repository file on top of dashboard settings, skipping admin-locked keys.

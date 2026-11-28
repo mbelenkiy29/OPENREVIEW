@@ -140,6 +140,9 @@ export type ReviewInput = {
   guidance?: { id: string; version: number; title: string; body: string; source: "built-in" | "repository" }[];
   // Whole-file agent guidelines (SKILL.md, AGENTS.md, …) read from the base revision.
   guidelines?: { path: string; title: string }[];
+  // Base-revision .gitignore used only for coverage decisions. Never the PR head: a change
+  // cannot add a gitignore entry to hide its own files from a required check.
+  gitignore?: string;
   // Knowledge base entries about the changed code (derived background; never evidence).
   knowledge?: { subsystem: string; description: string; risks: string[]; conventions: string[]; files: string[] }[];
   mode: "fast" | "standard" | "deep";
@@ -180,8 +183,9 @@ export type ReviewResult = {
   metadata: {
     reviewScore?: z.infer<typeof reviewScoreSchema>;
     verdict?: "ready" | "fixes" | "changes" | "incomplete";
-    // Changed code went unreviewed (skipped files, failed specialists, unavailable sources or an
-    // exhausted agent budget), so the verdict cannot be "ready".
+    // Changed code went unreviewed (budget/provider skips, failed specialists, unavailable sources
+    // or an exhausted agent budget), so the verdict cannot be "ready". Policy skips are only
+    // lockfiles and non-code assets; they are listed but do not make coverage incomplete.
     coverageIncomplete?: boolean;
     approvalAssessment?: z.infer<typeof approvalAssessmentSchema>;
     coverageLimits?: string[];

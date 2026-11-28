@@ -21,6 +21,16 @@ test("configuration is read from the base revision; head edits cannot weaken the
   assert.deepEqual(loaded.rules.map((r) => r.id), ["cents"]);
   assert.deepEqual(loaded.files, [".openreview.json"]);
   assert.deepEqual(loaded.warnings, []);
+  assert.equal(loaded.gitignore, "");
+});
+
+test("loadRepoConfig reads .gitignore from the requested revision, never a later head", async () => {
+  const files = source({
+    [base]: { ".gitignore": "node_modules\n" },
+    [head]: { ".gitignore": "payload.ts\n" },
+  });
+  assert.equal((await loadRepoConfig(files, "o/r", base)).gitignore, "node_modules\n");
+  assert.equal((await loadRepoConfig(files, "o/r", head)).gitignore, "payload.ts\n");
 });
 
 test("precedence: the repository file overrides dashboard values except admin-locked keys", () => {

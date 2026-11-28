@@ -44,7 +44,7 @@ export const run = internalAction({
       const changed = new Set(diff.filter((f) => f.status !== "removed").map((f) => f.path)), touched = new Set(diff.map((f) => f.path));
       const sources: SourceFile[] = input.files.filter((f) => changed.has(f.path));
       // Repository config as code from the base revision, as for pull requests; an unpushed base has none.
-      const repoConfig = await provider(ctx, repo).then((scm) => loadRepoConfig(scm, repo.fullName, row.baseSha)).catch((): LoadedRepoConfig => ({ settings: {}, rules: [], files: [], directories: [], warnings: [] }));
+      const repoConfig = await provider(ctx, repo).then((scm) => loadRepoConfig(scm, repo.fullName, row.baseSha)).catch((): LoadedRepoConfig => ({ settings: {}, rules: [], files: [], directories: [], warnings: [], gitignore: "" }));
       const effective = applyRepoConfig(settings, repoConfig, [...touched]).settings;
       // A plan without deep reviews caps the tier at standard, below any admin cap.
       const deepAllowed = await ctx.runQuery(internal.billing.entitlement, { organizationId: repo.organizationId, key: "review.deep" }), adminCap = z.enum(tiers).catch("deep").parse(effective.maxReviewTier ?? "deep");
@@ -102,6 +102,7 @@ export const run = internalAction({
           guidance: selectPacks(guidance.packs, diff, sources).map(({ id, version, title, body, source }) => ({ id, version, title, body, source })),
           knowledge: selectKnowledge(await ctx.runQuery(internal.knowledge.forReview, { repositoryId: repo._id }), [...touched], new Set(inventory.keys()), knowledgeTokenBudgets[tier.mode]).selected,
           guidelines: (repoConfig.agentGuidelines ?? []).map(({ path, title }) => ({ path, title })),
+          gitignore: repoConfig.gitignore,
           settings: {
             minimumConfidence: thresholds.minimumConfidence,
             severityThreshold: z.enum(severities).parse(thresholds.severityThreshold),

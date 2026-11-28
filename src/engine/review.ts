@@ -20,7 +20,7 @@ import {
 } from "./types";
 import { changedLines, fingerprint, overlaps } from "./diff";
 import { contractChecks } from "./contract-checks";
-import { indexRepository, redact } from "./indexer";
+import { exclusionReason, expectedPolicySkip, indexRepository, redact, sourceCoverageGap } from "./indexer";
 import { retrieve } from "./retrieval";
 import { classifyChanges, riskScore } from "./classify";
 import {reviewSummary} from "../review-summary";
@@ -483,21 +483,48 @@ export async function reviewChange(
     resolvedFingerprints.push(...resolution.value.resolved.map(f=>f.fingerprint));
   }
   await progress("summarizing");
+  // Coverage gitignore is the PR base revision. Never read .gitignore from input.files (the head).
+  const gitignore = input.gitignore ?? "";
+  const indexedPaths = new Set(index.files.map((f) => f.path));
+  const listed = new Set(skippedFiles.map((s) => s.path));
+  const sourceGaps = diff.flatMap((file) => {
+    const gap = sourceCoverageGap(file, indexedPaths, input.files.find((s) => s.path === file.path), gitignore);
+    return gap ? [gap] : [];
+  });
+  const unavailable = sourceGaps.filter((g) => !g.policy);
+  // Policy skips and skipped-but-incomplete exclusions (gitignore, binary, vendored, secrets) are
+  // listed. Unfetched source stays a coverage-limit note so budget-drop accounting is unchanged.
+  for (const gap of sourceGaps) {
+    if (gap.reason === "Source could not be fetched" || listed.has(gap.path)) continue;
+    skippedFiles.push({ path: gap.path, reason: gap.reason });
+    listed.add(gap.path);
+  }
+  // Ignored-path skips and lockfile/asset policy skips are expected, including when a lockfile was
+  // dropped for the file or context budget. Gitignore, binary, vendored, and secret paths stay
+  // incomplete. Budget truncation of real source still fails coverage.
+  const expectedSkip = (s: SkippedFile) => {
+    if (s.reason.startsWith("Excluded by ") && s.reason !== "Excluded by .gitignore") return true;
+    const reason = exclusionReason({ path: s.path, sha: "", content: "" }, gitignore);
+    return !!reason && expectedPolicySkip(reason);
+  };
+  const expectedSkips = skippedFiles.filter(expectedSkip).length;
   const coverageLimits = [
     ...(input.coverageLimits ?? []),
     ...(previous.some(f=>!resolvedFingerprints.includes(f.fingerprint))?["Some previously reported findings could not be confirmed resolved at the current revision"]:[]),
     ...(index.files.some(f=>f.provenance&&(!context.some(c=>c.path===f.path)||context.some(c=>c.path===f.path&&(c.startLine!==1||c.content.length<f.content.length))))?["Some external context was omitted or truncated by the retrieval budget"]:[]),
     ...(ignoredCount ? ["Configured paths were excluded"] : []),
-    ...(skippedFiles.length > ignoredCount ? [`${skippedFiles.length - ignoredCount} changed files were not reviewed (provider limits or the risk-ranked review budget); see Skipped files`] : []),
+    ...(skippedFiles.length > expectedSkips ? [`${skippedFiles.length - expectedSkips} changed files were not reviewed (provider limits or the risk-ranked review budget); see Skipped files`] : []),
     ...(failedSpecialists.length ? [`Some review specialists failed and their categories were not reviewed: ${failedSpecialists.map((f) => f.category).join(", ")}`] : []),
     ...engineLimits,
     ...(diff.some(f => !f.patch.trim()) ? ["Some changed files have no textual diff"] : []),
-    ...(diff.some(f => f.status !== "removed" && !index.files.some(source => source.path === f.path)) ? ["Some changed source files were unavailable or excluded"] : []),
+    ...unavailable.slice(0, 20).map((g) => `${g.path} was unavailable: ${g.reason}`),
+    ...(unavailable.length > 20 ? [`${unavailable.length - 20} more changed source files were unavailable`] : []),
     ...(defaultCategories.some(c => c !== "rules" && !selected.includes(c)) ? ["Some review categories were disabled"] : []),
   ];
   // Changed code went unreviewed, so the verdict cannot be "ready" whatever the score says.
-  const coverageIncomplete = skippedFiles.length > ignoredCount || failedSpecialists.length > 0 || deterministic.incomplete || !!agentRun?.limits.length || !!hypothesisRun?.runs.some((r) => r.status !== "completed") ||
-    diff.some(f => f.status !== "removed" && !index.files.some(source => source.path === f.path));
+  // Policy-skipped lockfiles and non-code assets are listed, but they do not fail coverage.
+  const coverageIncomplete = skippedFiles.length > expectedSkips || failedSpecialists.length > 0 || deterministic.incomplete || !!agentRun?.limits.length || !!hypothesisRun?.runs.some((r) => r.status !== "completed") ||
+    unavailable.length > 0;
   // Sequence diagram of a changed cross-component interaction, grounded in exact source quotes.
   let diagram: string | undefined;
   if ((input.settings?.summarySections ?? summarySections).includes("diagram") && diagramEligible(diff, context)) {

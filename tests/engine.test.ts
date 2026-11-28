@@ -10,7 +10,7 @@ import {
   fingerprint,
   overlaps,
 } from "../src/engine/diff";
-import { eligibleFile, indexRepository, moduleReferencesCurrent, redact } from "../src/engine/indexer";
+import { eligibleFile, exclusionReason, indexRepository, moduleReferencesCurrent, redact, sourceCoverageGap } from "../src/engine/indexer";
 import { retrieve } from "../src/engine/retrieval";
 import { capReviewScore, grounded, reviewChange, reviewScoreCeiling, reviewSummarySchema, resolutionSchema } from "../src/engine/review";
 import { validateModelUrl, HttpModel } from "../src/engine/model";
@@ -524,6 +524,39 @@ test("same-revision re-review cannot resolve a finding and carries revalidated e
 test("oversized source is excluded by byte size even when the provider omits content",()=>{
  assert.equal(eligibleFile({path:"src/large.ts",sha:"a",content:"",size:200001}),false);
  assert.equal(eligibleFile({path:"src/unicode.ts",sha:"b",content:"é".repeat(100001)}),false);
+});
+test("lockfiles are policy exclusions even when oversized; unfetched source is a coverage gap",()=>{
+ for (const path of ["pnpm-lock.yaml","package-lock.json","yarn.lock","apps/web/pnpm-lock.yaml","poetry.lock"]) {
+  assert.equal(exclusionReason({path,sha:"",content:"lock",size:400000}),"Lockfile excluded from source review",path);
+  assert.equal(eligibleFile({path,sha:"",content:"lock"}),false,path);
+  assert.deepEqual(sourceCoverageGap({path,status:"modified"},new Set()),{path,reason:"Lockfile excluded from source review",policy:true},path);
+ }
+ assert.equal(exclusionReason({path:"src/app.ts",sha:"",content:"",size:200001}),"Exceeds 200 KB source limit");
+ assert.deepEqual(sourceCoverageGap({path:"src/app.ts",status:"modified"},new Set()),{path:"src/app.ts",reason:"Source could not be fetched",policy:false});
+ assert.deepEqual(sourceCoverageGap({path:"src/app.ts",status:"modified"},new Set(),{path:"src/app.ts",sha:"x",content:"",size:200001}),{path:"src/app.ts",reason:"Exceeds 200 KB source limit",policy:false});
+ assert.equal(sourceCoverageGap({path:"src/app.ts",status:"modified"},new Set(["src/app.ts"])),undefined);
+ assert.equal(sourceCoverageGap({path:"pnpm-lock.yaml",status:"removed"},new Set()),undefined);
+});
+test("only lockfiles and non-code assets are expected policy skips; gitignore, binary, vendored, and secrets stay incomplete",()=>{
+ for (const path of ["logo.png","photo.webp","icon.avif","fonts/Inter.woff2","fonts/Inter.ttf","fonts/Inter.otf","fonts/Inter.eot","src/app.min.js","assets/manual.pdf","bundle.js.map","vendor.zip","clip.mp3","clip.mp4","clip.webm","clip.wav"]) {
+  assert.deepEqual(sourceCoverageGap({path,status:"added"},new Set()),{path,reason:"Non-source asset",policy:true},path);
+ }
+ // Path-classified assets stay policy skips even when the blob is NUL-padded; wasm is executable and is not.
+ assert.deepEqual(sourceCoverageGap({path:"fonts/Inter.ttf",status:"modified"},new Set(),{path:"fonts/Inter.ttf",sha:"f",content:"\0ttf"}),{path:"fonts/Inter.ttf",reason:"Non-source asset",policy:true});
+ assert.deepEqual(sourceCoverageGap({path:"clip.mp4",status:"modified"},new Set(),{path:"clip.mp4",sha:"m",content:"\0mp4"}),{path:"clip.mp4",reason:"Non-source asset",policy:true});
+ assert.deepEqual(sourceCoverageGap({path:"public/module.wasm",status:"modified"},new Set(),{path:"public/module.wasm",sha:"w",content:"\0wasm"}),{path:"public/module.wasm",reason:"Binary content",policy:false});
+ const gitignored = sourceCoverageGap({path:"hidden.ts",status:"added"},new Set(),{path:"hidden.ts",sha:"h",content:"export const x = 1;\n"},"hidden.ts");
+ assert.deepEqual(gitignored,{path:"hidden.ts",reason:"Excluded by .gitignore",policy:false});
+ const binary = sourceCoverageGap({path:"src/app.ts",status:"modified"},new Set(),{path:"src/app.ts",sha:"b",content:"export const x = 1;\0"});
+ assert.deepEqual(binary,{path:"src/app.ts",reason:"Binary content",policy:false});
+ assert.deepEqual(sourceCoverageGap({path:"vendor/lib.ts",status:"added"},new Set()),{path:"vendor/lib.ts",reason:"Generated or vendored path",policy:false});
+ assert.deepEqual(sourceCoverageGap({path:"build/out.ts",status:"added"},new Set()),{path:"build/out.ts",reason:"Generated or vendored path",policy:false});
+ assert.deepEqual(sourceCoverageGap({path:".env",status:"added"},new Set()),{path:".env",reason:"Secret-looking path",policy:false});
+ assert.deepEqual(sourceCoverageGap({path:".env.local",status:"added"},new Set()),{path:".env.local",reason:"Secret-looking path",policy:false});
+ assert.deepEqual(sourceCoverageGap({path:"certs/site.pem",status:"added"},new Set()),{path:"certs/site.pem",reason:"Secret-looking path",policy:false});
+ // Coverage gitignore is the caller-supplied base revision, not a .gitignore file in `supplied`.
+ const headIgnore = sourceCoverageGap({path:"evil.ts",status:"added"},new Set(),{path:"evil.ts",sha:"e",content:"export const x = 1;\n"},"");
+ assert.deepEqual(headIgnore,{path:"evil.ts",reason:"Source was excluded from the review index",policy:false});
 });
 
 test("configurable summaries preserve evidence and validate risk prose, with one shared preview renderer",async()=>{
