@@ -463,7 +463,7 @@ export const review = internalAction({
       if(await ctx.runMutation(internal.runtime.request,{reviewId:args.reviewId}))return;
       check = await beginCheck(ctx, github, args.reviewId, repo.fullName, pr.head.sha, pr.number);
       // Repository config as code, read from the BASE revision so a change cannot weaken its own review.
-      const repoConfig = await loadRepoConfig(github, repo.fullName, pr.base.sha).catch((error): LoadedRepoConfig => ({ settings: {}, rules: [], files: [], directories: [], warnings: ["Repository config could not be read from the base revision: " + redact(error instanceof Error ? error.message : "unavailable").slice(0, 200)] }));
+      const repoConfig = await loadRepoConfig(github, repo.fullName, pr.base.sha).catch((error): LoadedRepoConfig => ({ settings: {}, rules: [], files: [], directories: [], warnings: ["Repository config could not be read from the base revision: " + redact(error instanceof Error ? error.message : "unavailable").slice(0, 200)], gitignore: "" }));
       const configured = applyRepoConfig(settings, repoConfig, pr.diff.map((f) => f.path));
       const effective = configured.settings;
       if (repoConfig.files.length || repoConfig.warnings.length || repo.configFile)
@@ -686,6 +686,7 @@ export const review = internalAction({
           guidance: selectPacks(guidance.packs, scope.diff, sources).map(({ id, version, title, body, source }) => ({ id, version, title, body, source })),
           knowledge: selectKnowledge(await ctx.runQuery(internal.knowledge.forReview, { repositoryId: repo._id }), scope.diff.map((f) => f.path), new Set(head.keys()), knowledgeTokenBudgets[tier.mode]).selected,
           guidelines: (repoConfig.agentGuidelines ?? []).map(({ path, title }) => ({ path, title })),
+          gitignore: repoConfig.gitignore,
           existingFindings,
           historicalFindings,
           runtimeEvidence: state.review.runtimeEvidence,

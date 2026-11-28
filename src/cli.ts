@@ -354,6 +354,7 @@ async function main() {
         rules,
         coverageLimits: repoConfig.warnings,
         guidelines: (repoConfig.agentGuidelines ?? []).map(({ path, title }) => ({ path, title })),
+        gitignore: repoConfig.gitignore,
         runtimeEvidence: values["runtime-evidence"]
           ? runtimeEvidenceSchema.parse(
               JSON.parse(await readFile(values["runtime-evidence"], "utf8")),

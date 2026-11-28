@@ -55,19 +55,35 @@ export function moduleReferencesCurrent(filePath:string,references:readonly {spe
 }
 const lockfile =
   /(^|\/)([^/]+\.lock|[^/]*lock\.(json|ya?ml)|[^/]+\.lockfile)$/i;
-const excluded =
-  /(^|\/)(node_modules|vendor|dist|build|coverage|\.git|\.next|__pycache__|target)(\/|$)|(^|\/)(\.env(?:\..*)?|id_rsa|id_ed25519)$|\.(lock|png|jpg|jpeg|gif|ico|woff2?|zip|gz|pdf|pem|key|p12|sqlite|db|map|min\.js)$/i;
+const generated =
+  /(^|\/)(node_modules|vendor|dist|build|coverage|\.git|\.next|__pycache__|target)(\/|$)/i;
+const secret =
+  /(^|\/)(\.env(?:\..*)?|id_rsa|id_ed25519)$|\.(pem|key|p12)$/i;
+const asset =
+  /\.(png|jpg|jpeg|gif|ico|woff2?|zip|gz|pdf|map|min\.js)$/i;
+const otherNonSource = /\.(sqlite|db)$/i;
+export const lockfileExcluded = "Lockfile excluded from source review";
+export const assetExcluded = "Non-source asset";
 export function exclusionReason(file: SourceFile, gitignore = ""): string | undefined {
-  // Path policy first so a huge lockfile or vendored blob is skipped as excluded, not as "too large".
-  if (lockfile.test(file.path)) return "Lockfile excluded from source review";
-  if (excluded.test(file.path)) return "Generated, dependency, secret, or non-source file";
+  // Path checks first so a huge lockfile or vendored blob is skipped as excluded, not as "too large".
+  if (lockfile.test(file.path)) return lockfileExcluded;
+  if (secret.test(file.path)) return "Secret-looking path";
+  if (generated.test(file.path)) return "Generated or vendored path";
+  if (asset.test(file.path)) return assetExcluded;
+  if (otherNonSource.test(file.path)) return "Non-source file";
   if (ignore().add(gitignore).ignores(file.path)) return "Excluded by .gitignore";
   if ((file.size ?? Buffer.byteLength(file.content,"utf8")) > 200_000) return "Exceeds 200 KB source limit";
   if (file.content.includes("\0")) return "Binary content";
 }
 export type SourceCoverageGap = { path: string; reason: string; policy: boolean };
-// A changed file missing from the review index: policy skips (lockfiles, generated, gitignore,
-// binary) vs real gaps (fetch failure or oversized source). Removed files are covered by the diff.
+// Only lockfiles and clearly non-code assets are expected policy skips. Gitignore, binary
+// content, generated/vendored directories, and secret-looking paths stay listed as skipped
+// and keep coverage incomplete so a required check cannot pass unreviewed code.
+export function expectedPolicySkip(reason: string): boolean {
+  return reason === lockfileExcluded || reason === assetExcluded;
+}
+// A changed file missing from the review index. `gitignore` must be the PR base revision's
+// .gitignore (never the head): a change cannot hide its own files from coverage.
 export function sourceCoverageGap(
   file: { path: string; status: string },
   indexed: ReadonlySet<string>,
@@ -76,11 +92,10 @@ export function sourceCoverageGap(
 ): SourceCoverageGap | undefined {
   if (file.status === "removed" || indexed.has(file.path)) return;
   const byPath = exclusionReason({ path: file.path, sha: "", content: "" }, gitignore);
-  if (byPath) return { path: file.path, reason: byPath, policy: true };
+  if (byPath) return { path: file.path, reason: byPath, policy: expectedPolicySkip(byPath) };
   if (!supplied) return { path: file.path, reason: "Source could not be fetched", policy: false };
   const reason = exclusionReason(supplied, gitignore);
-  if (reason === "Exceeds 200 KB source limit") return { path: file.path, reason, policy: false };
-  if (reason) return { path: file.path, reason, policy: true };
+  if (reason) return { path: file.path, reason, policy: expectedPolicySkip(reason) };
   return { path: file.path, reason: "Source was excluded from the review index", policy: false };
 }
 export function eligibleFile(file: SourceFile, gitignore = ""): boolean {

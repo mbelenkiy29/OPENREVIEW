@@ -537,6 +537,23 @@ test("lockfiles are policy exclusions even when oversized; unfetched source is a
  assert.equal(sourceCoverageGap({path:"src/app.ts",status:"modified"},new Set(["src/app.ts"])),undefined);
  assert.equal(sourceCoverageGap({path:"pnpm-lock.yaml",status:"removed"},new Set()),undefined);
 });
+test("only lockfiles and non-code assets are expected policy skips; gitignore, binary, vendored, and secrets stay incomplete",()=>{
+ for (const path of ["logo.png","fonts/Inter.woff2","src/app.min.js","assets/manual.pdf","bundle.js.map","vendor.zip"]) {
+  assert.deepEqual(sourceCoverageGap({path,status:"added"},new Set()),{path,reason:"Non-source asset",policy:true},path);
+ }
+ const gitignored = sourceCoverageGap({path:"hidden.ts",status:"added"},new Set(),{path:"hidden.ts",sha:"h",content:"export const x = 1;\n"},"hidden.ts");
+ assert.deepEqual(gitignored,{path:"hidden.ts",reason:"Excluded by .gitignore",policy:false});
+ const binary = sourceCoverageGap({path:"src/app.ts",status:"modified"},new Set(),{path:"src/app.ts",sha:"b",content:"export const x = 1;\0"});
+ assert.deepEqual(binary,{path:"src/app.ts",reason:"Binary content",policy:false});
+ assert.deepEqual(sourceCoverageGap({path:"vendor/lib.ts",status:"added"},new Set()),{path:"vendor/lib.ts",reason:"Generated or vendored path",policy:false});
+ assert.deepEqual(sourceCoverageGap({path:"build/out.ts",status:"added"},new Set()),{path:"build/out.ts",reason:"Generated or vendored path",policy:false});
+ assert.deepEqual(sourceCoverageGap({path:".env",status:"added"},new Set()),{path:".env",reason:"Secret-looking path",policy:false});
+ assert.deepEqual(sourceCoverageGap({path:".env.local",status:"added"},new Set()),{path:".env.local",reason:"Secret-looking path",policy:false});
+ assert.deepEqual(sourceCoverageGap({path:"certs/site.pem",status:"added"},new Set()),{path:"certs/site.pem",reason:"Secret-looking path",policy:false});
+ // Coverage gitignore is the caller-supplied base revision, not a .gitignore file in `supplied`.
+ const headIgnore = sourceCoverageGap({path:"evil.ts",status:"added"},new Set(),{path:"evil.ts",sha:"e",content:"export const x = 1;\n"},"");
+ assert.deepEqual(headIgnore,{path:"evil.ts",reason:"Source was excluded from the review index",policy:false});
+});
 
 test("configurable summaries preserve evidence and validate risk prose, with one shared preview renderer",async()=>{
  const data={overview:"Updates authentication without changing the public endpoint.",files:[{path:"auth.ts",status:"modified",patch:""},{path:"tests/auth.test.ts",status:"added",patch:""}],findings:[],resolved:[],assessment:undefined,runtimeEvidence:undefined,coverageLimits:["Security category excluded"],contextCount:2,candidates:0,suppressed:0};

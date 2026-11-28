@@ -201,6 +201,73 @@ test("a real source file dropped to fit the review budget still fails the check"
   assert.equal(check.conclusion, "action_required");
 });
 
+test("a PR that adds a .gitignore entry hiding its own new .ts file stays incomplete", async () => {
+  const input: ReviewInput = {
+    repository: "acme/app", baseSha: "base", headSha: "head", title: "Hide payload", description: "",
+    gitignore: "",
+    files: [
+      { path: ".gitignore", sha: "g", content: "payload.ts\n" },
+      { path: "payload.ts", sha: "p", content: "export const exploit = true;\n" },
+    ],
+    diff: [
+      { path: ".gitignore", status: "added", patch: "@@ -0,0 +1 @@\n+payload.ts\n" },
+      { path: "payload.ts", status: "added", patch: "@@ -0,0 +1 @@\n+export const exploit = true;\n" },
+    ],
+    rules: [], mode: "standard", settings: { categories: ["correctness"] },
+  };
+  const result = await reviewChange(input, new CleanModel());
+  assert.equal(result.metadata.coverageIncomplete, true);
+  assert.equal(result.metadata.verdict, "incomplete");
+  assert.ok(result.metadata.skippedFiles?.some((s) => s.path === "payload.ts"));
+  assert.ok(!result.metadata.skippedFiles?.some((s) => s.path === "payload.ts" && s.reason === "Excluded by .gitignore"));
+  const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: input.diff.length, posted: 0, verdict: result.metadata.verdict });
+  assert.equal(check.conclusion, "action_required");
+});
+
+test("a .ts file with a NUL byte stays incomplete", async () => {
+  const input: ReviewInput = {
+    repository: "acme/app", baseSha: "base", headSha: "head", title: "Binary source", description: "",
+    files: [{ path: "src/app.ts", sha: "a", content: "export const x = 1;\0" }],
+    diff: [{ path: "src/app.ts", status: "modified", patch: "@@ -1 +1 @@\n-export const x = 0;\n+export const x = 1;\n" }],
+    rules: [], mode: "standard", settings: { categories: ["correctness"] },
+  };
+  const result = await reviewChange(input, new CleanModel());
+  assert.equal(result.metadata.coverageIncomplete, true);
+  assert.deepEqual(result.metadata.skippedFiles, [{ path: "src/app.ts", reason: "Binary content" }]);
+  const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: 1, posted: 0, verdict: result.metadata.verdict });
+  assert.equal(check.conclusion, "action_required");
+});
+
+test("a new file under vendor/ or build/ stays incomplete", async () => {
+  for (const path of ["vendor/lib.ts", "build/out.ts"]) {
+    const input: ReviewInput = {
+      repository: "acme/app", baseSha: "base", headSha: "head", title: "Vendored", description: "",
+      files: [{ path, sha: "v", content: "export const x = 1;\n" }],
+      diff: [{ path, status: "added", patch: "@@ -0,0 +1 @@\n+export const x = 1;\n" }],
+      rules: [], mode: "standard", settings: { categories: ["correctness"] },
+    };
+    const result = await reviewChange(input, new CleanModel());
+    assert.equal(result.metadata.coverageIncomplete, true, path);
+    assert.deepEqual(result.metadata.skippedFiles, [{ path, reason: "Generated or vendored path" }], path);
+    const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: 1, posted: 0, verdict: result.metadata.verdict });
+    assert.equal(check.conclusion, "action_required", path);
+  }
+});
+
+test("a new .env file stays incomplete", async () => {
+  const input: ReviewInput = {
+    repository: "acme/app", baseSha: "base", headSha: "head", title: "Secrets", description: "",
+    files: [{ path: ".env", sha: "e", content: "SECRET=1\n" }],
+    diff: [{ path: ".env", status: "added", patch: "@@ -0,0 +1 @@\n+SECRET=1\n" }],
+    rules: [], mode: "standard", settings: { categories: ["correctness"] },
+  };
+  const result = await reviewChange(input, new CleanModel());
+  assert.equal(result.metadata.coverageIncomplete, true);
+  assert.deepEqual(result.metadata.skippedFiles, [{ path: ".env", reason: "Secret-looking path" }]);
+  const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: 1, posted: 0, verdict: result.metadata.verdict });
+  assert.equal(check.conclusion, "action_required");
+});
+
 test("(c) truncated agent guideline files do not fail the check", async () => {
   const input: ReviewInput = {
     repository: "acme/app", baseSha: "base", headSha: "head", title: "Bump node", description: "",
