@@ -10,7 +10,7 @@ import {
   fingerprint,
   overlaps,
 } from "../src/engine/diff";
-import { eligibleFile, indexRepository, moduleReferencesCurrent, redact } from "../src/engine/indexer";
+import { eligibleFile, exclusionReason, indexRepository, moduleReferencesCurrent, redact, sourceCoverageGap } from "../src/engine/indexer";
 import { retrieve } from "../src/engine/retrieval";
 import { capReviewScore, grounded, reviewChange, reviewScoreCeiling, reviewSummarySchema, resolutionSchema } from "../src/engine/review";
 import { validateModelUrl, HttpModel } from "../src/engine/model";
@@ -524,6 +524,18 @@ test("same-revision re-review cannot resolve a finding and carries revalidated e
 test("oversized source is excluded by byte size even when the provider omits content",()=>{
  assert.equal(eligibleFile({path:"src/large.ts",sha:"a",content:"",size:200001}),false);
  assert.equal(eligibleFile({path:"src/unicode.ts",sha:"b",content:"é".repeat(100001)}),false);
+});
+test("lockfiles are policy exclusions even when oversized; unfetched source is a coverage gap",()=>{
+ for (const path of ["pnpm-lock.yaml","package-lock.json","yarn.lock","apps/web/pnpm-lock.yaml","poetry.lock"]) {
+  assert.equal(exclusionReason({path,sha:"",content:"lock",size:400000}),"Lockfile excluded from source review",path);
+  assert.equal(eligibleFile({path,sha:"",content:"lock"}),false,path);
+  assert.deepEqual(sourceCoverageGap({path,status:"modified"},new Set()),{path,reason:"Lockfile excluded from source review",policy:true},path);
+ }
+ assert.equal(exclusionReason({path:"src/app.ts",sha:"",content:"",size:200001}),"Exceeds 200 KB source limit");
+ assert.deepEqual(sourceCoverageGap({path:"src/app.ts",status:"modified"},new Set()),{path:"src/app.ts",reason:"Source could not be fetched",policy:false});
+ assert.deepEqual(sourceCoverageGap({path:"src/app.ts",status:"modified"},new Set(),{path:"src/app.ts",sha:"x",content:"",size:200001}),{path:"src/app.ts",reason:"Exceeds 200 KB source limit",policy:false});
+ assert.equal(sourceCoverageGap({path:"src/app.ts",status:"modified"},new Set(["src/app.ts"])),undefined);
+ assert.equal(sourceCoverageGap({path:"pnpm-lock.yaml",status:"removed"},new Set()),undefined);
 });
 
 test("configurable summaries preserve evidence and validate risk prose, with one shared preview renderer",async()=>{

@@ -180,8 +180,9 @@ export type ReviewResult = {
   metadata: {
     reviewScore?: z.infer<typeof reviewScoreSchema>;
     verdict?: "ready" | "fixes" | "changes" | "incomplete";
-    // Changed code went unreviewed (skipped files, failed specialists, unavailable sources or an
-    // exhausted agent budget), so the verdict cannot be "ready".
+    // Changed code went unreviewed (budget/provider skips, failed specialists, unavailable sources
+    // or an exhausted agent budget), so the verdict cannot be "ready". Policy skips such as
+    // lockfiles are listed but do not make coverage incomplete.
     coverageIncomplete?: boolean;
     approvalAssessment?: z.infer<typeof approvalAssessmentSchema>;
     coverageLimits?: string[];

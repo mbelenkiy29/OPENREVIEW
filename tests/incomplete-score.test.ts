@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
+import { checkOutcome } from "../src/check-run";
 import { capReviewScore, reviewChange } from "../src/engine/review";
 import { compactLayout, disclosureLayout } from "../src/summary-layout";
 import { reviewSummary } from "../src/review-summary";
@@ -104,12 +105,77 @@ test("the engine drops a model-returned 5/5 when changed sources were unavailabl
   assert.equal(result.metadata.coverageIncomplete, true);
   assert.equal(result.metadata.reviewScore, undefined);
   assert.equal(result.metadata.verdict, "incomplete");
-  assert.ok(result.metadata.coverageLimits?.includes("Some changed source files were unavailable or excluded"));
+  assert.ok(result.metadata.coverageLimits?.includes("package.json was unavailable: Source could not be fetched"));
+  assert.ok(!result.metadata.coverageLimits?.includes("Some changed source files were unavailable or excluded"));
+  assert.ok(!result.metadata.coverageLimits?.some((l) => /pnpm-lock/.test(l)));
   assert.doesNotMatch(result.summary, /5\/5/);
   assert.match(result.summary, /^\*\*Review incomplete\*\*/);
   assert.match(result.summary, /n\/a \(review incomplete\)/);
-  assert.match(result.summary, /unavailable or excluded/);
+  assert.match(result.summary, /package\.json was unavailable: Source could not be fetched/);
+  assert.match(result.summary, /pnpm-lock\.yaml/);
   const layout = disclosureLayout(result.summary);
   assert.match(layout, /Confidence Score: n\/a \(review incomplete\)/);
   assert.doesNotMatch(layout, /5\/5/);
+});
+
+test("(a) a lockfile-only PR with package.json plus pnpm-lock.yaml passes the check", async () => {
+  const input: ReviewInput = {
+    repository: "acme/app", baseSha: "base", headSha: "head", title: "Bump next", description: "",
+    files: [{ path: "package.json", sha: "p", content: '{\n  "dependencies": { "next": "16.4.6" }\n}' }],
+    diff: [
+      { path: "package.json", status: "modified", patch: "@@ -1 +1 @@\n-\"next\": \"16.4.3\"\n+\"next\": \"16.4.6\"" },
+      { path: "pnpm-lock.yaml", status: "modified", patch: "@@ -1 +1 @@\n-16.4.3\n+16.4.6" },
+    ],
+    rules: [], mode: "standard", settings: { categories: ["correctness"] },
+  };
+  const result = await reviewChange(input, new CleanModel());
+  assert.equal(result.metadata.coverageIncomplete, false);
+  assert.equal(result.metadata.verdict, "ready");
+  assert.equal(result.metadata.reviewScore?.value, 5);
+  assert.deepEqual(result.metadata.skippedFiles, [{ path: "pnpm-lock.yaml", reason: "Lockfile excluded from source review" }]);
+  assert.ok(!result.metadata.coverageLimits?.includes("Some changed source files were unavailable or excluded"));
+  assert.ok(!result.metadata.coverageLimits?.some((l) => l.includes("was unavailable")));
+  assert.match(result.summary, /^\*\*Ready to merge\*\*/);
+  assert.match(result.summary, /`pnpm-lock\.yaml` · Lockfile excluded from source review/);
+  const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: input.diff.length, posted: 0, verdict: result.metadata.verdict });
+  assert.equal(check.conclusion, "success");
+  assert.doesNotMatch(check.summary, /did not cover every changed file/);
+});
+
+test("(b) a real source file that could not be fetched still fails the check", async () => {
+  const input: ReviewInput = {
+    repository: "acme/app", baseSha: "base", headSha: "head", title: "Fix totals", description: "",
+    files: [],
+    diff: [{ path: "src/total.ts", status: "modified", patch: "@@ -1 +1 @@\n-a\n+b" }],
+    rules: [], mode: "standard", settings: { categories: ["correctness"] },
+  };
+  const result = await reviewChange(input, new CleanModel());
+  assert.equal(result.metadata.coverageIncomplete, true);
+  assert.equal(result.metadata.verdict, "incomplete");
+  assert.ok(result.metadata.coverageLimits?.includes("src/total.ts was unavailable: Source could not be fetched"));
+  assert.ok(!result.metadata.coverageLimits?.includes("Some changed source files were unavailable or excluded"));
+  assert.match(result.summary, /src\/total\.ts was unavailable: Source could not be fetched/);
+  const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: 1, posted: 0, verdict: result.metadata.verdict });
+  assert.equal(check.conclusion, "action_required");
+  assert.equal(check.title, "Review incomplete");
+});
+
+test("(c) truncated agent guideline files do not fail the check", async () => {
+  const input: ReviewInput = {
+    repository: "acme/app", baseSha: "base", headSha: "head", title: "Bump node", description: "",
+    files: [{ path: "Dockerfile", sha: "d", content: "FROM node:26-bookworm-slim\n" }],
+    diff: [{ path: "Dockerfile", status: "modified", patch: "@@ -1 +1 @@\n-FROM node:24-bookworm-slim\n+FROM node:26-bookworm-slim" }],
+    coverageLimits: [
+      "Agent guideline file .claude/skills/gsap-core/SKILL.md was truncated to fit the size and 8000-token budget.",
+      "Agent guideline file .claude/skills/gsap-react/SKILL.md was truncated to fit the size and 8000-token budget.",
+    ],
+    rules: [], mode: "standard", settings: { categories: ["correctness"] },
+  };
+  const result = await reviewChange(input, new CleanModel());
+  assert.equal(result.metadata.coverageIncomplete, false);
+  assert.equal(result.metadata.verdict, "ready");
+  assert.ok(result.metadata.coverageLimits?.some((l) => l.includes("truncated to fit the size and 8000-token budget")));
+  const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: 1, posted: 0, verdict: result.metadata.verdict });
+  assert.equal(check.conclusion, "success");
+  assert.doesNotMatch(check.summary, /did not cover every changed file/);
 });
