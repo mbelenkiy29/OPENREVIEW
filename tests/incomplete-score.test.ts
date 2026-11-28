@@ -201,6 +201,52 @@ test("a real source file dropped to fit the review budget still fails the check"
   assert.equal(check.conclusion, "action_required");
 });
 
+test("a fetched wasm asset is a policy skip and does not fail the check", async () => {
+  const input: ReviewInput = {
+    repository: "acme/app", baseSha: "base", headSha: "head", title: "Ship wasm", description: "",
+    files: [
+      { path: "src/app.ts", sha: "a", content: "export const n = 1;\n" },
+      { path: "public/module.wasm", sha: "w", content: "\0wasm" },
+    ],
+    diff: [
+      { path: "src/app.ts", status: "modified", patch: "@@ -1 +1 @@\n-export const n = 0;\n+export const n = 1;" },
+      { path: "public/module.wasm", status: "modified", patch: "" },
+    ],
+    rules: [], mode: "standard", settings: { categories: ["correctness"] },
+  };
+  const result = await reviewChange(input, new CleanModel());
+  assert.deepEqual(result.metadata.skippedFiles, [{ path: "public/module.wasm", reason: "Non-source asset" }]);
+  assert.equal(result.metadata.coverageIncomplete, false);
+  assert.equal(result.metadata.verdict, "ready");
+  assert.ok(!result.metadata.coverageLimits?.some((l) => l.includes("was unavailable") || l.includes("were not reviewed")));
+  assert.match(result.summary, /`public\/module\.wasm` · Non-source asset/);
+  const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: input.diff.length, posted: 0, verdict: result.metadata.verdict });
+  assert.equal(check.conclusion, "success");
+  assert.doesNotMatch(check.summary, /did not cover every changed file/);
+});
+
+test("a wasm asset dropped to fit the review budget does not fail the check", async () => {
+  const input: ReviewInput = {
+    repository: "acme/app", baseSha: "base", headSha: "head", title: "Ship wasm", description: "",
+    files: [
+      { path: "src/db/migration.sql", sha: "m", content: "DELETE FROM users;" },
+      { path: "public/module.wasm", sha: "w", content: "\0wasm" },
+    ],
+    diff: [
+      { path: "src/db/migration.sql", status: "modified", patch: "@@ -1 +1 @@\n+DELETE FROM users;" },
+      { path: "public/module.wasm", status: "modified", patch: "@@ -1 +1 @@\n+" + "x".repeat(320_000) },
+    ],
+    rules: [], mode: "standard", settings: { categories: ["correctness"] },
+  };
+  const result = await reviewChange(input, new CleanModel());
+  assert.ok(result.metadata.skippedFiles?.some((f) => f.path === "public/module.wasm" && /budget|Non-source asset/.test(f.reason)));
+  assert.equal(result.metadata.coverageIncomplete, false);
+  assert.equal(result.metadata.verdict, "ready");
+  assert.ok(!result.metadata.coverageLimits?.some((l) => l.includes("was unavailable") || l.includes("were not reviewed")));
+  const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: input.diff.length, posted: 0, verdict: result.metadata.verdict });
+  assert.equal(check.conclusion, "success");
+});
+
 test("a PR that adds a .gitignore entry hiding its own new .ts file stays incomplete", async () => {
   const input: ReviewInput = {
     repository: "acme/app", baseSha: "base", headSha: "head", title: "Hide payload", description: "",

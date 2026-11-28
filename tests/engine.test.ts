@@ -538,9 +538,11 @@ test("lockfiles are policy exclusions even when oversized; unfetched source is a
  assert.equal(sourceCoverageGap({path:"pnpm-lock.yaml",status:"removed"},new Set()),undefined);
 });
 test("only lockfiles and non-code assets are expected policy skips; gitignore, binary, vendored, and secrets stay incomplete",()=>{
- for (const path of ["logo.png","fonts/Inter.woff2","src/app.min.js","assets/manual.pdf","bundle.js.map","vendor.zip"]) {
+ for (const path of ["logo.png","fonts/Inter.woff2","src/app.min.js","assets/manual.pdf","bundle.js.map","vendor.zip","public/module.wasm"]) {
   assert.deepEqual(sourceCoverageGap({path,status:"added"},new Set()),{path,reason:"Non-source asset",policy:true},path);
  }
+ // Path-classified assets stay policy skips even when the blob is NUL-padded; source with a NUL is not.
+ assert.deepEqual(sourceCoverageGap({path:"public/module.wasm",status:"modified"},new Set(),{path:"public/module.wasm",sha:"w",content:"\0wasm"}),{path:"public/module.wasm",reason:"Non-source asset",policy:true});
  const gitignored = sourceCoverageGap({path:"hidden.ts",status:"added"},new Set(),{path:"hidden.ts",sha:"h",content:"export const x = 1;\n"},"hidden.ts");
  assert.deepEqual(gitignored,{path:"hidden.ts",reason:"Excluded by .gitignore",policy:false});
  const binary = sourceCoverageGap({path:"src/app.ts",status:"modified"},new Set(),{path:"src/app.ts",sha:"b",content:"export const x = 1;\0"});
