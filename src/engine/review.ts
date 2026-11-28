@@ -20,7 +20,7 @@ import {
 } from "./types";
 import { changedLines, fingerprint, overlaps } from "./diff";
 import { contractChecks } from "./contract-checks";
-import { indexRepository, redact, sourceCoverageGap } from "./indexer";
+import { exclusionReason, indexRepository, redact, sourceCoverageGap } from "./indexer";
 import { retrieve } from "./retrieval";
 import { classifyChanges, riskScore } from "./classify";
 import {reviewSummary} from "../review-summary";
@@ -493,9 +493,12 @@ export async function reviewChange(
   const policySkipped = sourceGaps.filter((g) => g.policy);
   const unavailable = sourceGaps.filter((g) => !g.policy);
   for (const gap of policySkipped) if (!listed.has(gap.path)) skippedFiles.push({ path: gap.path, reason: gap.reason });
-  // Ignored-path skips and policy skips (lockfiles, generated, gitignore) are expected. Other
-  // skippedFiles (omitted diffs, file/context budget) and unfetched real source are coverage gaps.
-  const expectedSkips = ignoredCount + policySkipped.length;
+  // Ignored-path skips and policy skips (lockfiles, generated, gitignore) are expected, including
+  // when a lockfile was dropped for the file or context budget. Other skippedFiles (omitted diffs,
+  // budget truncation of real source) and unfetched real source are coverage gaps.
+  const expectedSkip = (s: SkippedFile) =>
+    s.reason.startsWith("Excluded by ") || !!exclusionReason({ path: s.path, sha: "", content: "" }, gitignore);
+  const expectedSkips = skippedFiles.filter(expectedSkip).length;
   const coverageLimits = [
     ...(input.coverageLimits ?? []),
     ...(previous.some(f=>!resolvedFingerprints.includes(f.fingerprint))?["Some previously reported findings could not be confirmed resolved at the current revision"]:[]),

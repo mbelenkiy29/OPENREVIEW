@@ -160,6 +160,47 @@ test("(b) a real source file that could not be fetched still fails the check", a
   assert.equal(check.title, "Review incomplete");
 });
 
+test("a lockfile dropped to fit the review budget does not fail the check", async () => {
+  const input: ReviewInput = {
+    repository: "acme/app", baseSha: "base", headSha: "head", title: "Bump next", description: "",
+    files: [{ path: "package.json", sha: "p", content: '{\n  "dependencies": { "next": "16.4.6" }\n}' }],
+    diff: [
+      { path: "package.json", status: "modified", patch: "@@ -1 +1 @@\n-\"next\": \"16.4.3\"\n+\"next\": \"16.4.6\"" },
+      { path: "pnpm-lock.yaml", status: "modified", patch: "@@ -1 +1 @@\n+" + "x".repeat(320_000) },
+    ],
+    rules: [], mode: "standard", settings: { categories: ["correctness"] },
+  };
+  const result = await reviewChange(input, new CleanModel());
+  assert.ok(result.metadata.skippedFiles?.some((f) => f.path === "pnpm-lock.yaml" && /budget|Lockfile/.test(f.reason)));
+  assert.equal(result.metadata.coverageIncomplete, false);
+  assert.equal(result.metadata.verdict, "ready");
+  assert.ok(!result.metadata.coverageLimits?.some((l) => l.includes("was unavailable") || l.includes("were not reviewed")));
+  const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: input.diff.length, posted: 0, verdict: result.metadata.verdict });
+  assert.equal(check.conclusion, "success");
+});
+
+test("a real source file dropped to fit the review budget still fails the check", async () => {
+  const big = "+" + "x".repeat(200_000);
+  const input: ReviewInput = {
+    repository: "acme/app", baseSha: "base", headSha: "head", title: "Docs and migration", description: "",
+    files: [
+      { path: "src/db/migration.sql", sha: "m", content: "DELETE FROM users;" },
+      { path: "README.md", sha: "r", content: "docs" },
+    ],
+    diff: [
+      { path: "src/db/migration.sql", status: "modified", patch: "@@ -1 +1 @@\n+DELETE FROM users;" + big },
+      { path: "README.md", status: "modified", patch: "@@ -1 +1 @@\n" + big },
+    ],
+    rules: [], mode: "standard", settings: { categories: ["correctness"] },
+  };
+  const result = await reviewChange(input, new CleanModel());
+  assert.ok(result.metadata.skippedFiles?.some((f) => f.path === "README.md" && f.reason.includes("budget")));
+  assert.equal(result.metadata.coverageIncomplete, true);
+  assert.equal(result.metadata.verdict, "incomplete");
+  const check = checkOutcome({ findings: result.findings, score: result.metadata.reviewScore?.value, files: 2, posted: 0, verdict: result.metadata.verdict });
+  assert.equal(check.conclusion, "action_required");
+});
+
 test("(c) truncated agent guideline files do not fail the check", async () => {
   const input: ReviewInput = {
     repository: "acme/app", baseSha: "base", headSha: "head", title: "Bump node", description: "",
